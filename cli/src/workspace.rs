@@ -170,4 +170,23 @@ mod tests {
             "src/test/java/com/example/StringCalculatorSteps.java"
         );
     }
+
+    #[test]
+    fn a_partial_java_tree_is_not_a_layout() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("Foo.java"), "class Foo {}").unwrap();
+        assert!(scan_layout(dir.path()).is_none());
+    }
+
+    #[test]
+    fn detect_falls_back_to_the_workshop_layout_when_scan_finds_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("notes.txt");
+        fs::write(&file, "hello").unwrap();
+        let layout = detect_project_layout(&file);
+        assert_eq!(
+            layout.production_location,
+            workshop_layout().production_location
+        );
+    }
 }

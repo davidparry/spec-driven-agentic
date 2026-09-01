@@ -281,4 +281,26 @@ mod tests {
             .unwrap();
         assert_eq!(calls.borrow()[0].0, "You implement");
     }
+
+    #[test]
+    fn refresh_records_csproj_packages_when_dotnet_is_chosen() {
+        let inventory = FakeInventory {
+            files: [(
+                "App.csproj".into(),
+                r#"<PackageReference Include="Reqnroll" Version="2.2.1" />"#.into(),
+            )]
+            .into_iter()
+            .collect(),
+            tree: vec!["App.csproj".into()],
+        };
+        let store = FakeStore::default();
+        let service = MemoryService::new(store, inventory, FakeFiles::default());
+        let memory = service.refresh(Some(Language::DotNet)).unwrap();
+        assert_eq!(memory.language, ".NET");
+        assert!(
+            memory.libraries.iter().any(|l| l.name == "Reqnroll"),
+            "libraries: {:?}",
+            memory.libraries
+        );
+    }
 }

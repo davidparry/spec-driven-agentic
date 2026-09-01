@@ -75,7 +75,7 @@ impl ProjectMemory {
 }
 
 /// Manifest file contents the scanner already read.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Manifests {
     pub pom_xml: Option<String>,
     pub build_gradle: Option<String>,
@@ -625,5 +625,140 @@ cucumber = { version = "0.23", features = ["libtest"] }
         assert!(parse_package_json("not json").is_empty());
         assert!(parse_cargo_toml("[[[").is_empty());
         assert!(parse_pom_xml("<project/>").is_empty());
+    }
+
+    fn scan(language: Language, manifests: Manifests, tree: &[&str]) -> ProjectMemory {
+        let languages = [language];
+        let tree: Vec<String> = tree.iter().map(|s| (*s).to_string()).collect();
+        scan_memory(&ScanInput {
+            languages: &languages,
+            chosen: None,
+            manifests: &manifests,
+            tree: &tree,
+            now: "2026-08-21T01:00:00Z",
+        })
+    }
+
+    #[test]
+    fn gradle_is_the_java_build_tool_without_a_pom() {
+        let memory = scan(
+            Language::Java,
+            Manifests {
+                build_gradle: Some("implementation 'com.google.guava:guava:33.0'".into()),
+                ..Default::default()
+            },
+            &["build.gradle", "src/main/java/App.java"],
+        );
+        assert_eq!(memory.build_tool.as_deref(), Some("Gradle"));
+        assert_eq!(memory.libraries[0].name, "guava");
+    }
+
+    #[test]
+    fn gradle_kotlin_dsl_coordinates_are_collected() {
+        let memory = scan(
+            Language::Java,
+            Manifests {
+                build_gradle_kts: Some(
+                    "testImplementation(\"io.cucumber:cucumber-java:7.20.1\")".into(),
+                ),
+                ..Default::default()
+            },
+            &["build.gradle.kts"],
+        );
+        assert_eq!(memory.build_tool.as_deref(), Some("Gradle"));
+        assert_eq!(memory.libraries[0].name, "cucumber-java");
+    }
+
+    #[test]
+    fn npm_is_the_build_tool_for_javascript_and_typescript() {
+        let manifests = Manifests {
+            package_json: Some(r#"{"dependencies":{"left-pad":"1.3.0"}}"#.into()),
+            ..Default::default()
+        };
+        for language in [Language::JavaScript, Language::TypeScript] {
+            let memory = scan(language, manifests.clone(), &["package.json", "src/app.js"]);
+            assert_eq!(memory.build_tool.as_deref(), Some("npm"));
+            assert_eq!(memory.structure.production.as_deref(), Some("src"));
+        }
+    }
+
+    #[test]
+    fn cargo_and_dotnet_scans_fill_build_tool_and_layout() {
+        let rust = scan(
+            Language::Rust,
+            Manifests {
+                cargo_toml: Some("[dependencies]\nserde = \"1.0\"\n".into()),
+                ..Default::default()
+            },
+            &["Cargo.toml", "src/lib.rs", "tests/it.rs"],
+        );
+        assert_eq!(rust.build_tool.as_deref(), Some("Cargo"));
+        assert_eq!(rust.structure.production.as_deref(), Some("src"));
+        assert_eq!(rust.structure.tests.as_deref(), Some("tests"));
+
+        let dotnet = scan(
+            Language::DotNet,
+            Manifests {
+                csproj: vec![r#"<PackageReference Include="Reqnroll" Version="2.2.1" />"#.into()],
+                ..Default::default()
+            },
+            &["App.csproj"],
+        );
+        assert_eq!(dotnet.build_tool.as_deref(), Some("dotnet"));
+        assert!(dotnet.structure.production.is_none());
+        assert_eq!(dotnet.libraries[0].name, "Reqnroll");
+    }
+
+    #[test]
+    fn empty_artifact_names_are_dropped() {
+        assert!(parse_pom_xml("<dependency><artifactId>  </artifactId></dependency>").is_empty());
+        assert!(parse_gradle("implementation 'com.google::33.0'").is_empty());
+    }
+
+    #[test]
+    fn package_json_skips_a_non_object_dependency_map() {
+        let libs =
+            parse_package_json(r#"{"dependencies":"nope","devDependencies":{"left-pad":"1.0"}}"#);
+        assert_eq!(libs.len(), 1);
+        assert_eq!(libs[0].name, "left-pad");
+        assert_eq!(libs[0].scope.as_deref(), Some("dev"));
+    }
+
+    #[test]
+    fn cargo_toml_skips_missing_sections_and_records_non_string_deps_without_a_version() {
+        let libs = parse_cargo_toml("[dependencies]\nfoo = 1\nserde = \"1.0\"\n");
+        assert!(
+            libs.iter()
+                .any(|l| l.name == "serde" && l.version.as_deref() == Some("1.0"))
+        );
+        assert!(
+            libs.iter().any(|l| l.name == "foo" && l.version.is_none()),
+            "an integer cargo value is stored without a version: {libs:?}"
+        );
+        assert!(libs.iter().all(|l| l.scope.is_none()));
+    }
+
+    #[test]
+    fn a_library_without_a_version_is_named_plainly() {
+        let libs = parse_pom_xml("<dependency><artifactId>junit</artifactId></dependency>");
+        assert_eq!(libs[0].name, "junit");
+        assert!(libs[0].version.is_none());
+        assert_eq!(format_library(&libs[0]), "junit");
+    }
+
+    #[test]
+    fn layout_falls_back_to_the_outline_when_no_source_dirs_match() {
+        let memory = java_scan(Manifests::default(), &["README.md", "docs/guide.md"]);
+        let brief = memory.brief();
+        assert!(brief.contains("README.md") || brief.contains("docs/guide.md"));
+    }
+
+    #[test]
+    fn a_spec_json_anywhere_in_the_tree_is_recorded() {
+        let memory = java_scan(Manifests::default(), &["nested/deep/requirements.json"]);
+        assert_eq!(
+            memory.structure.spec.as_deref(),
+            Some("nested/deep/requirements.json")
+        );
     }
 }

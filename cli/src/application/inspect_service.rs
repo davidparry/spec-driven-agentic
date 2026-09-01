@@ -196,6 +196,37 @@ mod tests {
     }
 
     #[test]
+    fn a_java_project_with_maven_but_no_jdk_notes_the_missing_jdk() {
+        let service = InspectService::new(
+            FakeFiles(["pom.xml"].into(), HashSet::new()),
+            FakeProbe([("mvn", "Apache Maven 3.9.9")].into()),
+        );
+        let report = service.inspect();
+        assert_eq!(report.languages.len(), 1);
+        assert_eq!(report.languages[0].runtime, "mvn");
+        assert!(!report.languages[0].runtime_present);
+        assert_eq!(
+            report.languages[0].note.as_deref(),
+            Some(
+                "runtime_missing: a JDK (java) is not installed - Maven tests need \
+                 both mvn and a JDK. The CLI never installs runtimes."
+            )
+        );
+        assert!(report.next_step.starts_with("Some runtimes are missing"));
+    }
+
+    #[test]
+    fn a_gradle_java_project_uses_the_gradle_runtime() {
+        let service = InspectService::new(
+            FakeFiles(["build.gradle"].into(), HashSet::new()),
+            FakeProbe([("gradle", "Gradle 8.14"), ("java", "21")].into()),
+        );
+        let report = service.inspect();
+        assert_eq!(report.languages[0].runtime, "gradle");
+        assert!(report.languages[0].runtime_present);
+    }
+
+    #[test]
     fn a_missing_runtime_disables_execution_but_not_authoring() {
         let service = InspectService::new(
             FakeFiles(HashSet::new(), ["csproj"].into()),

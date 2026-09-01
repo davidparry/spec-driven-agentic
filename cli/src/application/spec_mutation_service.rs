@@ -2775,4 +2775,105 @@ mod tests {
         assert_eq!(relative_to("core", "other/b.json"), "../other/b.json");
         assert_eq!(relative_to("a/b", "a/c/d.json"), "../c/d.json");
     }
+
+    #[test]
+    fn reword_of_an_unknown_id_names_the_recovery_command() {
+        let service = service(Ok(spec()), green());
+        let error = service
+            .reword(&mut ScriptedPrompter::answering(&[]), "REQ-999")
+            .unwrap_err();
+        assert!(
+            error.0.contains("No requirement with id 'REQ-999'"),
+            "got: {}",
+            error.0
+        );
+    }
+
+    #[test]
+    fn reword_direct_of_an_unknown_id_names_the_recovery_command() {
+        let service = service(Ok(spec()), green());
+        let error = service
+            .reword_direct("REQ-999", None, None, vec![])
+            .unwrap_err();
+        assert!(
+            error.0.contains("No requirement with id 'REQ-999'"),
+            "got: {}",
+            error.0
+        );
+    }
+
+    #[test]
+    fn set_feature_of_an_unknown_id_names_the_recovery_command() {
+        let service = service(Ok(spec()), green());
+        let error = service
+            .set_feature("REQ-999", "features/x.feature")
+            .unwrap_err();
+        assert!(
+            error.0.contains("No requirement with id 'REQ-999'"),
+            "got: {}",
+            error.0
+        );
+    }
+
+    #[test]
+    fn draft_direct_refuses_structural_problems() {
+        let service = service(Ok(spec()), green());
+        let error = service
+            .draft_direct("", CLEAN_STORY, vec![CLEAN_CRITERION.into()])
+            .unwrap_err();
+        assert!(
+            error.0.contains("title is missing") || error.0.contains("must be phrased"),
+            "got: {}",
+            error.0
+        );
+    }
+
+    #[test]
+    fn draft_direct_reports_refine_findings_without_blocking() {
+        let service = service(Ok(spec()), green());
+        let report = service
+            .draft_direct(
+                "Comma sums",
+                "the calculator should add quickly",
+                vec![CLEAN_CRITERION.into(), EDGE_CRITERION.into()],
+            )
+            .unwrap();
+        assert!(report.staged);
+        assert!(
+            report.next_step.contains("refine findings") || report.next_step.contains("reword"),
+            "next step: {}",
+            report.next_step
+        );
+    }
+
+    #[test]
+    fn list_requirements_with_a_bare_spec_path_keeps_catalog_paths() {
+        let service = SpecMutationService::new(
+            InMemorySpecRepository(Ok(spec())),
+            FakeFeatureFiles::default(),
+            calculator_catalog(),
+            InMemoryChangeStore::default(),
+            green(),
+            "requirements.json".into(),
+        );
+        let listed = service.list_requirements().unwrap();
+        assert!(
+            listed.iter().any(|r| r.file == "requirements.json"),
+            "listed: {listed:?}"
+        );
+    }
+
+    #[test]
+    fn reword_keeps_a_clean_requirement_with_enter() {
+        let mut spec = spec();
+        spec.requirements[0].title = "Comma sums".into();
+        spec.requirements[0].story = CLEAN_STORY.into();
+        spec.requirements[0].acceptance_criteria =
+            vec![CLEAN_CRITERION.into(), EDGE_CRITERION.into()];
+        let service = service(Ok(spec), green());
+        let mut prompter = ScriptedPrompter::answering(&["", "", "", "", "", "y"]);
+        let report = service.reword(&mut prompter, "REQ-001").unwrap();
+        assert!(report.staged);
+        assert_eq!(report.id, "REQ-001");
+    }
 }

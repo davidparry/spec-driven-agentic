@@ -647,4 +647,16 @@ mod tests {
             "the model call failed - model crashed"
         );
     }
+
+    #[test]
+    fn an_empty_advice_reply_is_reported_as_invalid() {
+        let service = service(vec![], Some(FakeLlm::replying("   ")));
+        let readiness = service.readiness("REQ-001", "START", &[]).unwrap();
+        let error = service.advice("REQ-001", &readiness, &[]).unwrap_err();
+        assert!(
+            error.0.contains("empty") || error.0.contains("invalid"),
+            "got: {}",
+            error.0
+        );
+    }
 }

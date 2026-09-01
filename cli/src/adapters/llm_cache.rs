@@ -333,4 +333,31 @@ mod tests {
         assert!(!stale_path.exists(), "the expired entry was swept");
         assert!(cache.entry_path(&cache.key("m", "s", "u")).exists());
     }
+
+    #[test]
+    fn store_swallows_an_unwritable_cache_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let blocker = dir.path().join("not-a-dir");
+        fs::write(&blocker, "x").unwrap();
+        let cache = CachedGenerator::new(
+            CountingLlm::answering(vec![Ok("a".into()), Ok("b".into())]),
+            blocker.join("cache"),
+            DEFAULT_CACHE_TTL,
+            String::new(),
+        );
+        assert_eq!(cache.generate("m", "s", "u").unwrap(), "a");
+        assert_eq!(cache.generate("m", "s", "u").unwrap(), "b");
+        assert_eq!(cache.inner.calls.get(), 2);
+    }
+
+    #[test]
+    fn prune_skips_non_json_and_unreadable_entries() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = cached_in(&dir, vec![Ok("answer".into())]);
+        fs::create_dir_all(&cache.dir).unwrap();
+        fs::write(cache.dir.join("notes.txt"), "ignore me").unwrap();
+        fs::create_dir_all(cache.dir.join("nested.json")).unwrap();
+        cache.generate("m", "s", "u").unwrap();
+        assert!(cache.entry_path(&cache.key("m", "s", "u")).exists());
+    }
 }

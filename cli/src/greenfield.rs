@@ -793,4 +793,56 @@ mod tests {
         // An empty directory has no build markers, so detection refuses.
         assert!((orchestrator.runner_factory)(dir.path()).is_err());
     }
+
+    struct ScriptedPrompter {
+        answers: std::collections::VecDeque<String>,
+        warned: Vec<String>,
+    }
+
+    impl ScriptedPrompter {
+        fn answering(answers: &[&str]) -> Self {
+            Self {
+                answers: answers.iter().map(|a| a.to_string()).collect(),
+                warned: Vec::new(),
+            }
+        }
+    }
+
+    impl Prompter for ScriptedPrompter {
+        fn tell(&mut self, _message: &str) {}
+        fn warn(&mut self, message: &str) {
+            self.warned.push(message.to_string());
+        }
+        fn ask(&mut self, _question: &str) -> Result<String, PromptError> {
+            self.answers
+                .pop_front()
+                .ok_or_else(|| PromptError("exhausted".into()))
+        }
+        fn confirm(&mut self, _question: &str) -> Result<bool, PromptError> {
+            Ok(true)
+        }
+    }
+
+    #[test]
+    fn llm_attempts_are_at_least_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let _ = Greenfield::new(dir.path().to_path_buf(), None).with_llm_attempts(0);
+        let _ = Greenfield::new(dir.path().to_path_buf(), None).with_llm_attempts(5);
+    }
+
+    #[test]
+    fn an_invalid_pending_pick_is_warned_and_retried() {
+        let mut prompter = ScriptedPrompter::answering(&["nope", "1"]);
+        let pending = vec![("REQ-001".into(), "Title".into())];
+        let picked = pick_pending(&mut prompter, &pending).unwrap();
+        assert_eq!(picked.as_deref(), Some("REQ-001"));
+        assert!(!prompter.warned.is_empty());
+    }
+
+    #[test]
+    fn prompt_language_retries_until_a_supported_answer() {
+        let mut prompter = ScriptedPrompter::answering(&["cobol", "java"]);
+        assert_eq!(prompt_language(&mut prompter).unwrap(), Language::Java);
+        assert!(!prompter.warned.is_empty());
+    }
 }

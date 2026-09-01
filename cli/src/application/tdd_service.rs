@@ -480,6 +480,23 @@ mod tests {
     }
 
     #[test]
+    fn a_parent_pom_failure_names_the_pom_in_the_next_step() {
+        let service = TddService::new(fresh());
+        let runner = ScriptedRunner(Ok(TestRunSummary {
+            tests: 0,
+            errors: 1,
+            failure_details: vec!["Non-resolvable parent POM for com.example:kata".into()],
+            ..Default::default()
+        }));
+        let report = service.run_tests(&runner, &TestFilter::default()).unwrap();
+        assert!(
+            report.next_step.contains("Fix the POM named in the"),
+            "next step: {}",
+            report.next_step
+        );
+    }
+
+    #[test]
     fn a_failing_state_store_propagates() {
         let service = TddService::new(FixedStateStore::failing("state boom"));
         assert_eq!(

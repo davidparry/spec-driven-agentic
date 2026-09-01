@@ -1544,4 +1544,39 @@ io.cucumber.junit.platform.engine.UndefinedStepException: The step 'the result i
         assert_eq!(pascal_case("!!!"), "Step");
         assert_eq!(camel_case("the result"), "theResult");
     }
+
+    #[test]
+    fn an_unclosed_think_block_is_kept() {
+        assert_eq!(
+            strip_think_block("<think>still going"),
+            "<think>still going"
+        );
+        assert_eq!(strip_think_block("plain"), "plain");
+    }
+
+    #[test]
+    fn looks_like_unit_test_rejects_empty_and_unrecognizable_code() {
+        assert!(!looks_like_unit_test(Language::Java, "   "));
+        assert!(!looks_like_unit_test(Language::Java, "class X {}"));
+        assert!(looks_like_unit_test(Language::Java, "@Test void t() {}"));
+    }
+
+    #[test]
+    fn looks_like_unit_test_for_accepts_missing_type_and_non_java() {
+        assert!(looks_like_unit_test_for(
+            Language::Java,
+            "@Test void t() {}",
+            None
+        ));
+        assert!(looks_like_unit_test_for(
+            Language::Rust,
+            "#[test] fn t() {}",
+            Some("Foo")
+        ));
+        assert!(!looks_like_unit_test_for(
+            Language::Java,
+            "class X {}",
+            Some("Kata")
+        ));
+    }
 }

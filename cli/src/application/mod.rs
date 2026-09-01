@@ -237,4 +237,42 @@ mod tests {
         }
         assert_eq!(llm.prompts.borrow().len(), 1);
     }
+
+    #[test]
+    fn generate_logged_warns_on_an_empty_reply() {
+        let llm = QueueLlm {
+            replies: RefCell::new(vec![Ok("  ".into())]),
+            prompts: RefCell::new(Vec::new()),
+        };
+        assert_eq!(generate_logged(&llm, "m", &prompt()).unwrap(), "  ");
+    }
+
+    #[test]
+    fn generate_logged_records_a_non_empty_reply() {
+        let llm = QueueLlm {
+            replies: RefCell::new(vec![Ok("hello".into())]),
+            prompts: RefCell::new(Vec::new()),
+        };
+        assert_eq!(generate_logged(&llm, "m", &prompt()).unwrap(), "hello");
+    }
+
+    #[test]
+    fn an_exhausted_llm_script_is_a_call_error() {
+        let llm = QueueLlm {
+            replies: RefCell::new(vec![]),
+            prompts: RefCell::new(Vec::new()),
+        };
+        let error = generate_logged(&llm, "m", &prompt()).unwrap_err();
+        assert!(error.0.contains("exhausted"));
+    }
+
+    #[test]
+    fn zero_attempts_is_treated_as_one() {
+        let llm = QueueLlm {
+            replies: RefCell::new(vec![Ok("[ok]".into())]),
+            prompts: RefCell::new(Vec::new()),
+        };
+        let value = generate_valid(&llm, "m", &prompt(), 0, parse_ok, |_, _, _| {}).unwrap();
+        assert_eq!(value, "[ok]");
+    }
 }

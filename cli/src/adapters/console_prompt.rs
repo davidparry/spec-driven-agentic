@@ -275,6 +275,18 @@ mod tests {
             paint_narration("finding: vague wording"),
             "finding: vague wording"
         );
+        assert_eq!(
+            paint_narration("  x. Not a numbered pick"),
+            "  x. Not a numbered pick"
+        );
+    }
+
+    #[test]
+    fn an_unclosed_parenthetical_is_left_plain() {
+        assert_eq!(
+            highlight_suggestion("Language (java, javascript"),
+            "Language (java, javascript"
+        );
     }
 
     #[test]
