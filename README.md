@@ -12,6 +12,10 @@
 > Install `bdd`, download binaries, open the talk, and read the
 > [write-up](https://davidparry.com/blog/2026/08/07/spec-first-was-always-right-agents-just-made-it-fast/).
 
+> **Conference organizers:** the session abstract, formats, and stage
+> requirements are in [`speaking.md`](speaking.md) —
+> *Turn Off the Wi-Fi: Spec-Driven Development That Delivers on a Local Model.*
+
 > **Students: start here → [`student-follow-along.md`](student-follow-along.md)**
 > Your step-by-step companion for the hour — the exact commands, the exact
 > agent prompts, what you should see at every step, and a self-check that
@@ -68,6 +72,7 @@ presenter, not in the repo.)
 | `requirements/requirements.json` | The SDD spec: the requirements backlog, and the root of the **spec catalog** — it holds requirements of its own and may `include` child spec files (which may include further files, N levels deep); the tooling merges the tree into one backlog. Each requirement carries acceptance criteria (already phrased Given/When/Then) that agents turn into executable Gherkin scenarios and failing tests, plus a `featureFile` pointer to where its scenarios live. Full field-by-field reference: [The requirements format](https://davidparry.github.io/tdd-bdd-agentic/manual/spec-format.html). |
 | `slides/index.html` | The reveal.js slide deck for the 60-minute talk (self-contained, CDN-based). |
 | `student-follow-along.md` | The attendee's step-by-step companion: commands, prompts, expected output, self-check, homework. |
+| [`speaking.md`](speaking.md) | The conference session built on this repo — abstract, what attendees leave with, the *Where This Breaks* catalog of local-model failure modes, formats, and stage requirements. Published at [/speaking/](https://davidparry.github.io/tdd-bdd-agentic/speaking/). |
 | `scripts/` | `preflight.sh` (presenter readiness), `verify-workshop-run.sh` (fresh run branch + end-state check against `complete`), `check-workshop-start.sh` / `check-class-complete.sh` (the two CI branch guards). |
 | `.cursor/mcp.json` | Registers the server with Cursor so a real LLM agent can drive the loop. |
 

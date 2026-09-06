@@ -23,6 +23,7 @@ GITHUB = "https://github.com/davidparry/tdd-bdd-agentic/blob/trunk/"
 SITE_PATHS = {
     "student-follow-along.md": "../workshop/",
     "cli/README.md": "../cli/",
+    "speaking.md": "../speaking/",
     "student-follow-docs/setup-mcp.md": "../setup/",
     "student-follow-docs/greenfield-flow.md": "../greenfield/",
     "slides/index.html": "../talk/",
@@ -40,6 +41,12 @@ PAGES = [
         "dest": "cli/index.html",
         "title": "bdd CLI",
         "description": "Spec-driven BDD/TDD CLI with an embedded MCP server.",
+    },
+    {
+        "src": "speaking.md",
+        "dest": "speaking/index.html",
+        "title": "Speaking",
+        "description": "Turn Off the Wi-Fi: a conference session on spec-driven development that delivers on a local model.",
     },
     {
         "src": "student-follow-docs/setup-mcp.md",
