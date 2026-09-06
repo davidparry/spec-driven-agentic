@@ -109,6 +109,14 @@ Feature: TDD workflow MCP server
     And the result contains "Confirm it with the developer"
 
   @SRV-008
+  Scenario: A two-valued domain answers 'valid' as concretely as a sum answers 3
+    Given the spec on disk is rewritten with a validation verdict on "REQ-001"
+    When the agent calls refine_requirement for "REQ-001"
+    Then the call succeeds
+    And the wording is reported clean
+    And the result contains "Confirm it with the developer"
+
+  @SRV-008
   Scenario: Vague wording comes back as findings for the agent to reword
     Given the spec on disk is rewritten with vague wording on "REQ-001"
     When the agent calls refine_requirement for "REQ-001"

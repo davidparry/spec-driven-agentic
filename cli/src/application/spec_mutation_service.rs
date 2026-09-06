@@ -13,15 +13,18 @@ use crate::domain::proposal::{
     ProposedRequirement, parse_proposals_checked, parse_rewording_checked, proposal_prompt,
     rewording_prompt,
 };
-use crate::domain::refiner::{RequirementRefiner, suggestion_for};
+use crate::domain::refiner::{RequirementRefiner, finding_signature, suggestion_for};
 use crate::domain::spec_validator::SpecValidator;
 use crate::domain::tdd::TddPhase;
 use crate::ports::{
     ChangeStore, FeatureCatalog, FeatureFiles, LlmGenerator, Prompter, SpecRepository, StateStore,
 };
 
-/// A resolved model available to assist drafting: name + generator.
-type ModelAid<'a> = Option<(&'a str, &'a dyn LlmGenerator)>;
+/// A resolved model to call: name + generator.
+type Model<'a> = (&'a str, &'a dyn LlmGenerator);
+
+/// A resolved model available to assist drafting, when there is one.
+type ModelAid<'a> = Option<Model<'a>>;
 
 /// Where a drafted requirement lands: the resolved catalog and the
 /// document inside it that receives the wording.
@@ -35,8 +38,47 @@ pub struct DraftReport {
     pub id: String,
     pub title: String,
     pub staged: bool,
+    /// Wording findings that were still open when the requirement was
+    /// staged, empty when the review came back clean.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub findings: Vec<String>,
     #[serde(rename = "nextStep")]
     pub next_step: String,
+}
+
+/// How the developer wants to continue once rewording stops making
+/// progress.
+enum StalledChoice {
+    /// Ask the model for another rewording pass.
+    Reword,
+    /// Take over by hand for the remaining passes.
+    Manual,
+    /// The wording stands; stage it with its open findings.
+    Accept,
+}
+
+/// The findings a wording earns, split by who owns them. `structural`
+/// issues come from [`SpecValidator`] and must be fixed before staging -
+/// a spec that fails them is not usable. `advisory` findings come from
+/// [`RequirementRefiner`]: wording quality the developer may accept
+/// as-is.
+#[derive(Debug, Default)]
+struct Findings {
+    structural: Vec<String>,
+    advisory: Vec<String>,
+}
+
+impl Findings {
+    fn is_empty(&self) -> bool {
+        self.structural.is_empty() && self.advisory.is_empty()
+    }
+
+    /// Every finding, structural ones first - they gate staging.
+    fn all(&self) -> Vec<String> {
+        let mut all = self.structural.clone();
+        all.extend(self.advisory.iter().cloned());
+        all
+    }
 }
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
@@ -97,7 +139,12 @@ pub struct SpecMutationService<
     state: S,
     spec_path: String,
     llm_attempts: u32,
+    max_reword_passes: u32,
 }
+
+/// Rewording passes before the wizard stops looping on its own and asks
+/// the developer how to continue.
+pub const DEFAULT_MAX_REWORD_PASSES: u32 = 3;
 
 impl<R: SpecRepository, F: FeatureFiles, G: FeatureCatalog, C: ChangeStore, S: StateStore>
     SpecMutationService<R, F, G, C, S>
@@ -118,12 +165,20 @@ impl<R: SpecRepository, F: FeatureFiles, G: FeatureCatalog, C: ChangeStore, S: S
             state,
             spec_path,
             llm_attempts: DEFAULT_LLM_ATTEMPTS,
+            max_reword_passes: DEFAULT_MAX_REWORD_PASSES,
         }
     }
 
     /// How many times a model reply is tried when validation fails.
     pub fn with_llm_attempts(mut self, attempts: u32) -> Self {
         self.llm_attempts = attempts.max(1);
+        self
+    }
+
+    /// How many rewording passes the wizard takes before asking the
+    /// developer whether to keep going, take over, or accept the wording.
+    pub fn with_max_reword_passes(mut self, passes: u32) -> Self {
+        self.max_reword_passes = passes.max(1);
         self
     }
 
@@ -515,7 +570,7 @@ impl<R: SpecRepository, F: FeatureFiles, G: FeatureCatalog, C: ChangeStore, S: S
         let id = candidate.id.clone();
         let title = candidate.title.clone();
         let merged = catalog.merged();
-        let findings = self.findings_for(&merged, &candidate);
+        let findings = self.findings_for(&merged, &candidate).all();
         let structural: Vec<String> = findings
             .iter()
             .filter(|issue| {
@@ -567,6 +622,7 @@ impl<R: SpecRepository, F: FeatureFiles, G: FeatureCatalog, C: ChangeStore, S: S
             id,
             title,
             staged: true,
+            findings: refine,
             next_step,
         })
     }
@@ -727,13 +783,16 @@ impl<R: SpecRepository, F: FeatureFiles, G: FeatureCatalog, C: ChangeStore, S: S
     /// The wizard loop shared by manual and assisted drafting. `prior`
     /// pre-fills every prompt (a model proposal or the previous pass's
     /// answers); validate + refine findings drive rewording until clean.
+    /// A pass that changes nothing, or `max_reword_passes` passes without
+    /// a clean read, hands the decision back to the developer rather than
+    /// looping forever.
     fn draft_loop(
         &self,
         prompter: &mut dyn Prompter,
         target: DraftTarget,
         id: String,
         mut prior: Option<Requirement>,
-        llm: ModelAid,
+        mut llm: ModelAid,
         replace: bool,
     ) -> Result<DraftReport, ServiceError> {
         let DraftTarget { mut catalog, file } = target;
@@ -742,7 +801,12 @@ impl<R: SpecRepository, F: FeatureFiles, G: FeatureCatalog, C: ChangeStore, S: S
         // model's rewording brief carries them so it never circles back
         // to a wording the review already rejected.
         let mut tries: Vec<(Requirement, Vec<String>)> = Vec::new();
-        let (requirement, title) = loop {
+        // Passes since the developer last said how to continue, and what
+        // the previous pass earned: an unchanged list means the rewording
+        // is going nowhere.
+        let mut passes = 0;
+        let mut previous: Option<Vec<String>> = None;
+        let (requirement, title, unresolved) = loop {
             let title = self.ask_field(
                 prompter,
                 &id,
@@ -770,21 +834,38 @@ impl<R: SpecRepository, F: FeatureFiles, G: FeatureCatalog, C: ChangeStore, S: S
             };
             let findings = self.findings_for(&merged, &candidate);
             if findings.is_empty() {
-                break (candidate, title);
+                break (candidate, title, Vec::new());
             }
+            let listed = findings.all();
             prompter.tell("Findings to address:");
-            for finding in &findings {
+            for finding in &listed {
                 prompter.tell(&format!("  - {finding}"));
                 if let Some(suggestion) = suggestion_for(finding) {
                     prompter.tell(&format!("    try: {suggestion}"));
                 }
             }
+            passes += 1;
+            let stalled = previous.as_ref() == Some(&listed);
+            previous = Some(listed.clone());
+            // Only wording findings are the developer's to wave through -
+            // a structurally invalid requirement would not validate, so
+            // those keep the loop honest however long it takes.
+            if findings.structural.is_empty() && (stalled || passes >= self.max_reword_passes) {
+                match self.stalled_choice(prompter, passes, stalled, findings.advisory.len())? {
+                    StalledChoice::Accept => break (candidate, title, findings.advisory),
+                    StalledChoice::Manual => {
+                        llm = None;
+                        passes = 0;
+                    }
+                    StalledChoice::Reword => passes = 0,
+                }
+            }
             // With a model, the findings become its brief: the next pass's
             // prompts carry its reworded proposal instead of the raw prior.
-            let reworded = llm.and_then(|(model, llm)| {
-                self.rewording(prompter, model, llm, &candidate, &findings, &tries)
+            let reworded = llm.and_then(|aid| {
+                self.rewording(prompter, aid, &merged, &candidate, &listed, &tries)
             });
-            tries.push((candidate.clone(), findings));
+            tries.push((candidate.clone(), listed));
             prior = Some(match reworded {
                 Some(requirement) => requirement,
                 None => {
@@ -796,11 +877,20 @@ impl<R: SpecRepository, F: FeatureFiles, G: FeatureCatalog, C: ChangeStore, S: S
                 }
             });
         };
-        if !self.confirm(prompter, "The wording reads clean. Stage this requirement?")? {
+        let question = if unresolved.is_empty() {
+            "The wording reads clean. Stage this requirement?".to_string()
+        } else {
+            format!(
+                "{} wording finding(s) stay open. Stage this requirement anyway?",
+                unresolved.len()
+            )
+        };
+        if !self.confirm(prompter, &question)? {
             return Ok(DraftReport {
                 id,
                 title,
                 staged: false,
+                findings: unresolved,
                 next_step: "Nothing was staged. Run spec draft again when the wording \
                             is ready."
                     .into(),
@@ -818,15 +908,57 @@ impl<R: SpecRepository, F: FeatureFiles, G: FeatureCatalog, C: ChangeStore, S: S
             doc.requirements.push(requirement);
             self.stage_file(&catalog, &file, &format!("draft {id}: {title}"))?;
         }
+        let next_step = if unresolved.is_empty() {
+            format!(
+                "Review with changes show and apply with changes commit, then add \
+                 the @{id} scenario with scenario add."
+            )
+        } else {
+            format!(
+                "Staged {id} with {} wording finding(s) you accepted. Run spec reword \
+                 {id} to revisit them, or review with changes show and apply with \
+                 changes commit, then add the @{id} scenario with scenario add.",
+                unresolved.len()
+            )
+        };
         Ok(DraftReport {
             id: id.clone(),
             title,
             staged: true,
-            next_step: format!(
-                "Review with changes show and apply with changes commit, then add \
-                 the @{id} scenario with scenario add."
-            ),
+            findings: unresolved,
+            next_step,
         })
+    }
+
+    /// The way out when rewording stops making progress. Wording
+    /// findings are advice, not structure, so whether they stand is the
+    /// developer's decision - the wizard asks instead of looping.
+    fn stalled_choice(
+        &self,
+        prompter: &mut dyn Prompter,
+        passes: u32,
+        stalled: bool,
+        open: usize,
+    ) -> Result<StalledChoice, ServiceError> {
+        let reason = if stalled {
+            format!("{passes} pass(es) produced the same {open} finding(s)")
+        } else {
+            format!("{passes} pass(es) left {open} finding(s) open")
+        };
+        prompter.tell(&format!("The wording review is not converging - {reason}."));
+        loop {
+            let answer = self.ask(
+                prompter,
+                "Choose [r]eword again, [m]anual rewording without the model, \
+                 [a]ccept as-is and stage [r/m/a, Enter for r]:",
+            )?;
+            match answer.to_lowercase().as_str() {
+                "" | "r" => return Ok(StalledChoice::Reword),
+                "m" => return Ok(StalledChoice::Manual),
+                "a" => return Ok(StalledChoice::Accept),
+                _ => prompter.warn("Answer r, m, or a."),
+            }
+        }
     }
 
     /// Ask the model to reword the draft, one call per finding: each
@@ -839,12 +971,13 @@ impl<R: SpecRepository, F: FeatureFiles, G: FeatureCatalog, C: ChangeStore, S: S
     fn rewording(
         &self,
         prompter: &mut dyn Prompter,
-        model: &str,
-        llm: &dyn LlmGenerator,
+        aid: Model<'_>,
+        merged: &Spec,
         candidate: &Requirement,
         findings: &[String],
         history: &[(Requirement, Vec<String>)],
     ) -> Option<Requirement> {
+        let (model, llm) = aid;
         let mut current = candidate.clone();
         let mut applied = false;
         let total = findings.len();
@@ -854,12 +987,50 @@ impl<R: SpecRepository, F: FeatureFiles, G: FeatureCatalog, C: ChangeStore, S: S
                 n = index + 1
             ));
             let prompt = rewording_prompt(&current, finding, history);
+            // The review itself is the gate: a reply only counts when it
+            // leaves fewer findings of the targeted kind than the draft
+            // it was given. Anything else goes back to the model with
+            // the reason, so the brief stays deterministic.
+            let targeted = finding_signature(finding);
+            let before = self.matching_findings(merged, &current, targeted);
+            let check = |reply: &str| {
+                let proposal = parse_rewording_checked(reply)?;
+                let reworded = reworded_from(candidate, proposal.clone());
+                if reworded.acceptance_criteria.len() < current.acceptance_criteria.len() {
+                    return Err(format!(
+                        "the rewording dropped acceptance criteria ({} became {}) - keep \
+                         every criterion and address only the finding",
+                        current.acceptance_criteria.len(),
+                        reworded.acceptance_criteria.len()
+                    ));
+                }
+                // An earlier call in this chain may already have cleared
+                // this finding, and then there is nothing left to move.
+                if before > 0 {
+                    if reworded.title == current.title
+                        && reworded.story == current.story
+                        && reworded.acceptance_criteria == current.acceptance_criteria
+                    {
+                        return Err("the rewording is identical to the draft - change the \
+                                    wording the finding names"
+                            .to_string());
+                    }
+                    let after = self.matching_findings(merged, &reworded, targeted);
+                    if after >= before {
+                        return Err(format!(
+                            "the rewording did not clear the finding - {after} of the same \
+                             kind remain (the draft had {before}): {finding}"
+                        ));
+                    }
+                }
+                Ok(proposal)
+            };
             let outcome = generate_valid(
                 llm,
                 model,
                 &prompt,
                 self.llm_attempts,
-                parse_rewording_checked,
+                check,
                 |attempt, of, reason| {
                     prompter.warn(&format!(
                         "The model's rewording was invalid ({reason}) - asking again ({attempt} of {of})"
@@ -882,14 +1053,7 @@ impl<R: SpecRepository, F: FeatureFiles, G: FeatureCatalog, C: ChangeStore, S: S
                     continue;
                 }
             };
-            current = Requirement {
-                id: candidate.id.clone(),
-                title: proposal.title,
-                status: candidate.status.clone(),
-                story: proposal.story,
-                acceptance_criteria: proposal.acceptance_criteria,
-                feature_file: candidate.feature_file.clone(),
-            };
+            current = reworded_from(candidate, proposal);
             applied = true;
         }
         if !applied {
@@ -1003,7 +1167,17 @@ impl<R: SpecRepository, F: FeatureFiles, G: FeatureCatalog, C: ChangeStore, S: S
         }
     }
 
-    fn findings_for(&self, spec: &Spec, candidate: &Requirement) -> Vec<String> {
+    /// How many findings of one signature a wording earns - the measure
+    /// of whether a rewording moved the finding it was asked to fix.
+    fn matching_findings(&self, spec: &Spec, candidate: &Requirement, signature: &str) -> usize {
+        self.findings_for(spec, candidate)
+            .all()
+            .iter()
+            .filter(|finding| finding_signature(finding) == signature)
+            .count()
+    }
+
+    fn findings_for(&self, spec: &Spec, candidate: &Requirement) -> Findings {
         let mut with_candidate = spec.clone();
         if let Some(existing) = with_candidate
             .requirements
@@ -1015,13 +1189,14 @@ impl<R: SpecRepository, F: FeatureFiles, G: FeatureCatalog, C: ChangeStore, S: S
             with_candidate.requirements.push(candidate.clone());
         }
         let prefix = format!("{}:", candidate.id);
-        let mut findings: Vec<String> = SpecValidator::new(&self.feature_files)
-            .validate(&with_candidate)
-            .into_iter()
-            .filter(|issue| issue.starts_with(&prefix))
-            .collect();
-        findings.extend(RequirementRefiner.review(candidate));
-        findings
+        Findings {
+            structural: SpecValidator::new(&self.feature_files)
+                .validate(&with_candidate)
+                .into_iter()
+                .filter(|issue| issue.starts_with(&prefix))
+                .collect(),
+            advisory: RequirementRefiner.review(candidate),
+        }
     }
 
     /// Stage one catalog document at its project-relative path — the
@@ -1113,6 +1288,19 @@ impl<R: SpecRepository, F: FeatureFiles, G: FeatureCatalog, C: ChangeStore, S: S
 
     fn confirm(&self, prompter: &mut dyn Prompter, question: &str) -> Result<bool, ServiceError> {
         prompter.confirm(question).map_err(|e| ServiceError(e.0))
+    }
+}
+
+/// The requirement a rewording proposal stands for: the model owns the
+/// wording, the draft keeps its identity, status, and feature file.
+fn reworded_from(candidate: &Requirement, proposal: ProposedRequirement) -> Requirement {
+    Requirement {
+        id: candidate.id.clone(),
+        title: proposal.title,
+        status: candidate.status.clone(),
+        story: proposal.story,
+        acceptance_criteria: proposal.acceptance_criteria,
+        feature_file: candidate.feature_file.clone(),
     }
 }
 
@@ -1575,19 +1763,25 @@ mod tests {
         }
     }
 
-    /// A rewording that still only covers the happy path, so the review
-    /// rejects it again and a second rewording pass runs.
-    const FLAWED_REWORDING: &str = r#"{
+    /// A rewording that answers the coverage finding - it adds an edge
+    /// case - but words the new criterion vaguely, so the next pass has
+    /// a finding of its own and a second rewording pass runs.
+    const PARTIAL_REWORDING: &str = r#"{
         "title": "Comma separated numbers are summed",
         "story": "As a user, I want comma sums so that totals come from one input.",
-        "acceptanceCriteria": ["Given the input \"1,2\", when add is called, then the result is 3"]
+        "acceptanceCriteria": [
+            "Given the input \"1,2\", when add is called, then the result is 3",
+            "Given an empty string, when add is called, then it works"
+        ]
     }"#;
 
     #[test]
     fn a_second_rewording_pass_recounts_the_wording_the_review_already_rejected() {
-        let service = service(Ok(spec()), green());
+        // One attempt per call: the second pass's reply repeats the
+        // wording it was briefed with, which the review rejects.
+        let service = service(Ok(spec()), green()).with_llm_attempts(1);
         let llm = RecordingLlm {
-            reply: FLAWED_REWORDING.into(),
+            reply: PARTIAL_REWORDING.into(),
             prompts: std::cell::RefCell::new(Vec::new()),
         };
         let mut prompter = ScriptedPrompter::answering(&[
@@ -1596,14 +1790,15 @@ mod tests {
             CLEAN_STORY,     // pass 1: story
             CLEAN_CRITERION, // pass 1: only the happy path -> findings
             "",
+            "", // pass 2 accepts the model's reworded proposal
             "",
             "",
             "",
-            "", // pass 2 accepts the model's (still flawed) rewording
+            "",
             "",
             "",
             "",             // pass 3: keep title, story, criterion 1
-            EDGE_CRITERION, // pass 3: the human adds the edge case
+            EDGE_CRITERION, // pass 3: the human words the edge case
             "",
             "y",
         ]);

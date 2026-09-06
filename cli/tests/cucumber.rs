@@ -1138,6 +1138,37 @@ fn draft_not_staged(world: &mut BddWorld) {
     assert!(!report.staged, "report: {report:?}");
 }
 
+#[then(regex = r#"^the staged requirement "([^"]+)" has (\d+) criteria$"#)]
+fn staged_requirement_criteria_count(world: &mut BddWorld, id: String, count: usize) {
+    let staged = world.staged_spec();
+    let requirement = staged
+        .requirements
+        .iter()
+        .find(|r| r.id == id)
+        .unwrap_or_else(|| panic!("no staged requirement {id}"));
+    assert_eq!(
+        requirement.acceptance_criteria.len(),
+        count,
+        "criteria: {:#?}",
+        requirement.acceptance_criteria
+    );
+}
+
+#[then(regex = r"^the draft reports (\d+) open findings?$")]
+fn draft_reports_open_findings(world: &mut BddWorld, count: usize) {
+    let report = world.draft_report.as_ref().expect("a draft report");
+    assert_eq!(report.findings.len(), count, "report: {report:?}");
+}
+
+#[then(regex = r#"^a reported draft finding contains "(.+)"$"#)]
+fn reported_draft_finding_contains(world: &mut BddWorld, fragment: String) {
+    let report = world.draft_report.as_ref().expect("a draft report");
+    assert!(
+        report.findings.iter().any(|f| f.contains(&fragment)),
+        "report: {report:?}"
+    );
+}
+
 #[then(regex = r"^the staged spec has (\d+) requirements$")]
 fn staged_spec_requirement_count(world: &mut BddWorld, count: usize) {
     assert_eq!(world.staged_spec().requirements.len(), count);

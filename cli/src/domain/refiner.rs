@@ -25,8 +25,14 @@ static EDGE_CASE: LazyLock<Regex> = LazyLock::new(|| {
 /// like the one inside "strengthening".
 static THEN_WORD: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)\bthen\b").expect("valid regex"));
-static NUMBER_OR_QUOTE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"[0-9"]"#).expect("valid regex"));
+static NUMBER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[0-9]").expect("valid regex"));
+/// A matched pair of delimiters, never a lone apostrophe: a single quote
+/// only opens a literal when it does not sit against a letter or digit,
+/// so "doesn't" and "the user's result" are not read as quoted values.
+static QUOTED_LITERAL: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?:"[^"]*")|(?:^|[^A-Za-z0-9])(?:'[^']*'|`[^`]*`)(?:[^A-Za-z0-9]|$)"#)
+        .expect("valid regex")
+});
 static SENTINEL_OUTCOME: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)\b(nan|null|nil|none|undefined|true|false|empty|blank|zero)\b")
         .expect("valid regex")
@@ -36,6 +42,12 @@ static ERROR_OUTCOME: LazyLock<Regex> = LazyLock::new(|| {
         r"(?i)\b(errors?|exceptions?|invalid|rejected|refused|denied|fail(?:s|ed|ure)?|throws?|thrown|rais(?:es?|ed))\b",
     )
     .expect("valid regex")
+});
+/// The affirmative half of a two-valued domain: a validation predicate
+/// answers "valid" as exactly as a sum answers 3. The negative half is
+/// already covered by [`ERROR_OUTCOME`] (invalid, rejected, refused).
+static PREDICATE_OUTCOME: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\b(valid|accepted|allowed|permitted|matches|matched)\b").expect("valid regex")
 });
 /// Typed error names keep their casing: NumberFormatException, TypeError.
 static TYPED_ERROR: LazyLock<Regex> =
@@ -103,14 +115,17 @@ fn review_criterion(criterion: &str, findings: &mut Vec<String>) {
     }
 }
 
-/// A deterministic outcome: a number, a quoted literal, a sentinel
-/// value (NaN, null, true, ...), definite error wording (an error is
-/// raised, the input is rejected, ...), or a typed error name like
-/// NumberFormatException.
+/// A deterministic outcome: a number, a quoted literal in double, single
+/// or back quotes, a sentinel value (NaN, null, true, ...), definite
+/// error wording (an error is raised, the input is rejected, ...), a
+/// validation predicate (the number is valid), or a typed error name
+/// like NumberFormatException.
 fn outcome_is_concrete(outcome: &str) -> bool {
-    NUMBER_OR_QUOTE.is_match(outcome)
+    NUMBER.is_match(outcome)
+        || QUOTED_LITERAL.is_match(outcome)
         || SENTINEL_OUTCOME.is_match(outcome)
         || ERROR_OUTCOME.is_match(outcome)
+        || PREDICATE_OUTCOME.is_match(outcome)
         || TYPED_ERROR.is_match(outcome)
 }
 
@@ -147,7 +162,8 @@ pub fn suggestion_for(finding: &str) -> Option<&'static str> {
         "split it into two criteria, each with exactly one 'when'"
     } else if finding.contains("the outcome is not concrete") {
         "end with the exact expected value, e.g. '..., then the result is 3', a quoted \
-         literal, e.g. '..., then the calculator returns \"NaN\"', or a definite error, \
+         literal in double or single quotes, e.g. '..., then the calculator returns \
+         \"NaN\"', a verdict, e.g. '..., then the number is valid', or a definite error, \
          e.g. '..., then an error is raised'"
     } else if finding.contains("is ambiguous") {
         "replace the vague word with the exact observable behavior, e.g. 'the result is 3'"
@@ -159,6 +175,24 @@ pub fn suggestion_for(finding: &str) -> Option<&'static str> {
         return None;
     };
     Some(suggestion)
+}
+
+/// A finding minus the criterion it quotes, so the same complaint keeps
+/// one identity across rewordings: `criterion "Given a, when b, then it
+/// works": the outcome is not concrete - ...` and the same complaint
+/// about a reworded criterion share a signature. Findings that quote
+/// nothing are their own signature. Callers count signatures to tell
+/// whether a rewording actually moved a finding, since the raw string
+/// changes the moment the criterion does.
+pub fn finding_signature(finding: &str) -> &str {
+    if finding.starts_with("criterion \"") {
+        // The last separator, never one inside the quoted criterion:
+        // no finding kind contains `": `.
+        if let Some((_, kind)) = finding.rsplit_once("\": ") {
+            return kind;
+        }
+    }
+    finding
 }
 
 /// Distinct ambiguous words in first-seen order (the Java LinkedHashSet).
@@ -300,6 +334,119 @@ mod tests {
                 "criterion {criterion:?} was wrongly flagged: {findings:?}"
             );
         }
+    }
+
+    #[test]
+    fn single_and_back_quoted_literals_are_concrete() {
+        // Models quote as readily with ' or ` as with "; all three
+        // delimit an exact expected value.
+        let criteria = [
+            "Given the user enters '123-456-7890', when the number is checked, \
+             then the result is 'ok'",
+            "Given the user enters `123-456-7890`, when the number is checked, \
+             then the result is `ok`",
+        ];
+        for criterion in criteria {
+            let r = requirement(
+                "As a user, I want my phone number checked so that the form is submittable.",
+                vec![
+                    criterion,
+                    "Given an empty string \"\", when the number is \
+                     checked, then the result is 'no'",
+                ],
+            );
+            let findings = RequirementRefiner.review(&r);
+            assert!(
+                !findings
+                    .iter()
+                    .any(|f| f.contains("the outcome is not concrete")),
+                "criterion {criterion:?} was wrongly flagged: {findings:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_validation_wording_that_never_converged_is_clean() {
+        // The workshop's phone-number draft: a two-valued domain answers
+        // 'valid' as exactly as a sum answers 3.
+        let r = requirement(
+            "As a user, I want my phone number input validated so that only numbers \
+             in the format XXX-XXX-XXXX or XXXXXXXXXX are accepted",
+            vec![
+                "Given the user enters '123-456-7890', when the system validates it, \
+                 then the result is 'valid'",
+                "Given the user enters '123-45-6789', when the system validates it, \
+                 then the result is 'invalid'",
+            ],
+        );
+        assert!(
+            RequirementRefiner.review(&r).is_empty(),
+            "unexpected findings: {:?}",
+            RequirementRefiner.review(&r)
+        );
+    }
+
+    #[test]
+    fn a_validation_predicate_is_a_concrete_outcome() {
+        let criteria = [
+            "Given a well-formed number, when it is checked, then the number is valid",
+            "Given a well-formed number, when it is checked, then the entry is accepted",
+            "Given a listed prefix, when it is checked, then the prefix matches",
+        ];
+        for criterion in criteria {
+            let r = requirement(
+                "As a user, I want numbers checked so that bad entries are visible.",
+                vec![
+                    criterion,
+                    "Given a blank entry, when it is checked, then the \
+                     number is invalid",
+                ],
+            );
+            let findings = RequirementRefiner.review(&r);
+            assert!(
+                !findings
+                    .iter()
+                    .any(|f| f.contains("the outcome is not concrete")),
+                "criterion {criterion:?} was wrongly flagged: {findings:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn contractions_and_possessives_are_not_quoted_literals() {
+        // A lone apostrophe against a letter is punctuation, not a
+        // delimiter — treating it as one would pass vague outcomes.
+        let criteria = [
+            "Given a stored entry, when it is read, then the user's entry is unchanged",
+            "Given a stored entry, when it is read, then it doesn`t vary",
+        ];
+        for criterion in criteria {
+            let r = requirement(
+                "As a user, I want entries read back so that storage is trustworthy.",
+                vec![criterion],
+            );
+            let findings = RequirementRefiner.review(&r);
+            assert!(
+                findings
+                    .iter()
+                    .any(|f| f.contains("the outcome is not concrete")),
+                "criterion {criterion:?} should not be concrete: {findings:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unbalanced_quote_is_not_a_literal() {
+        let r = requirement(
+            "As a user, I want entries read back so that storage is trustworthy.",
+            vec!["Given a stored entry, when it is read, then it's what was written"],
+        );
+        assert!(
+            RequirementRefiner
+                .review(&r)
+                .iter()
+                .any(|f| f.contains("the outcome is not concrete"))
+        );
     }
 
     #[test]

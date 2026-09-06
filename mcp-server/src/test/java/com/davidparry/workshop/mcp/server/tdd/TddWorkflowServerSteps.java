@@ -162,6 +162,27 @@ public class TddWorkflowServerSteps {
                 """.formatted(id));
     }
 
+    @Given("the spec on disk is rewritten with a validation verdict on {string}")
+    public void specRewrittenWithVerdict(String id) throws IOException {
+        Files.writeString(specFile(), """
+                {
+                  "project": "Server Spec Kata",
+                  "requirements": [
+                    {
+                      "id": "%s",
+                      "title": "Phone number format",
+                      "status": "pending",
+                      "story": "As a user, I want my phone number input validated so that only numbers in the format XXX-XXX-XXXX or XXXXXXXXXX are accepted",
+                      "acceptanceCriteria": [
+                        "Given the user enters '123-456-7890', when the system validates it, then the result is 'valid'",
+                        "Given the user enters '123-45-6789', when the system validates it, then the result is 'invalid'"
+                      ]
+                    }
+                  ]
+                }
+                """.formatted(id));
+    }
+
     @Given("the spec on disk is rewritten with vague wording on {string}")
     public void specRewrittenVague(String id) throws IOException {
         Files.writeString(specFile(), """

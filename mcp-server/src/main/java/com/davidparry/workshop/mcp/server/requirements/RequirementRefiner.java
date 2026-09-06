@@ -29,12 +29,26 @@ public class RequirementRefiner {
      * the one inside "strengthening".
      */
     private static final Pattern THEN_WORD = Pattern.compile("\\bthen\\b", Pattern.CASE_INSENSITIVE);
-    private static final Pattern NUMBER_OR_QUOTE = Pattern.compile("[0-9\"]");
+    private static final Pattern NUMBER = Pattern.compile("[0-9]");
+    /**
+     * A matched pair of delimiters, never a lone apostrophe: a single quote
+     * only opens a literal when it does not sit against a letter or digit,
+     * so "doesn't" and "the user's result" are not read as quoted values.
+     */
+    private static final Pattern QUOTED_LITERAL = Pattern.compile(
+            "(?:\"[^\"]*\")|(?:^|[^A-Za-z0-9])(?:'[^']*'|`[^`]*`)(?:[^A-Za-z0-9]|$)");
     private static final Pattern SENTINEL_OUTCOME = Pattern.compile(
             "\\b(nan|null|nil|none|undefined|true|false|empty|blank|zero)\\b", Pattern.CASE_INSENSITIVE);
     private static final Pattern ERROR_OUTCOME = Pattern.compile(
             "\\b(errors?|exceptions?|invalid|rejected|refused|denied|fail(?:s|ed|ure)?|throws?|thrown|rais(?:es?|ed))\\b",
             Pattern.CASE_INSENSITIVE);
+    /**
+     * The affirmative half of a two-valued domain: a validation predicate
+     * answers "valid" as exactly as a sum answers 3. The negative half is
+     * already covered by {@link #ERROR_OUTCOME} (invalid, rejected, refused).
+     */
+    private static final Pattern PREDICATE_OUTCOME = Pattern.compile(
+            "\\b(valid|accepted|allowed|permitted|matches|matched)\\b", Pattern.CASE_INSENSITIVE);
     /** Typed error names keep their casing: NumberFormatException, TypeError. */
     private static final Pattern TYPED_ERROR = Pattern.compile("\\b[A-Z][A-Za-z]*(?:Exception|Error)\\b");
 
@@ -88,15 +102,18 @@ public class RequirementRefiner {
     }
 
     /**
-     * A deterministic outcome: a number, a quoted literal, a sentinel value
-     * (NaN, null, true, ...), definite error wording (an error is raised,
-     * the input is rejected, ...), or a typed error name like
-     * NumberFormatException.
+     * A deterministic outcome: a number, a quoted literal in double, single
+     * or back quotes, a sentinel value (NaN, null, true, ...), definite
+     * error wording (an error is raised, the input is rejected, ...), a
+     * validation predicate (the number is valid), or a typed error name
+     * like NumberFormatException.
      */
     private static boolean outcomeIsConcrete(String outcome) {
-        return NUMBER_OR_QUOTE.matcher(outcome).find()
+        return NUMBER.matcher(outcome).find()
+                || QUOTED_LITERAL.matcher(outcome).find()
                 || SENTINEL_OUTCOME.matcher(outcome).find()
                 || ERROR_OUTCOME.matcher(outcome).find()
+                || PREDICATE_OUTCOME.matcher(outcome).find()
                 || TYPED_ERROR.matcher(outcome).find();
     }
 

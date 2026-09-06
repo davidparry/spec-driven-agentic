@@ -112,6 +112,50 @@ class RequirementRefinerTest {
     }
 
     @Test
+    @DisplayName("single and back quoted literals count as concrete outcomes")
+    void singleAndBackQuotedOutcomesAreConcrete() {
+        Requirement r = requirement(
+                "As a user, I want my phone number checked so that the form is submittable.",
+                List.of(
+                        "Given the user enters '123-456-7890', when the number is checked, then the result is 'ok'",
+                        "Given an empty string \"\", when the number is checked, then the result is `no`"));
+        assertThat(refiner.review(r)).noneMatch(f -> f.contains("the outcome is not concrete"));
+    }
+
+    @Test
+    @DisplayName("a validation verdict counts as a concrete outcome")
+    void predicateOutcomesAreConcrete() {
+        Requirement r = requirement(
+                "As a user, I want my phone number input validated so that only numbers "
+                        + "in the format XXX-XXX-XXXX or XXXXXXXXXX are accepted",
+                List.of(
+                        "Given the user enters '123-456-7890', when the system validates it, then the result is 'valid'",
+                        "Given the user enters '123-45-6789', when the system validates it, then the result is 'invalid'"));
+        assertThat(refiner.review(r)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("an unquoted verdict counts as a concrete outcome")
+    void unquotedVerdictIsConcrete() {
+        Requirement r = requirement(
+                "As a clerk, I want postal codes checked so that mail reaches its destination.",
+                List.of(
+                        "Given a submitted form, when the postal code is checked, then the postal code is valid",
+                        "Given a form with a missing postal code, when the postal code is checked, "
+                                + "then an error is raised"));
+        assertThat(refiner.review(r)).noneMatch(f -> f.contains("the outcome is not concrete"));
+    }
+
+    @Test
+    @DisplayName("a lone apostrophe is punctuation, not a quoted literal")
+    void contractionsAreNotQuotedLiterals() {
+        Requirement r = requirement(
+                "As a user, I want entries read back so that storage is trustworthy.",
+                List.of("Given a stored entry, when it is read, then the user's entry is unchanged"));
+        assertThat(refiner.review(r)).anyMatch(f -> f.contains("the outcome is not concrete"));
+    }
+
+    @Test
     @DisplayName("the outcome starts at the word 'then', never at a substring")
     void thenIsWordBounded() {
         Requirement r = requirement(

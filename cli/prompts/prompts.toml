@@ -31,7 +31,8 @@ Rules:
 - Each element must be exactly: {"title": "<short specific title>", "story": "As a <role>, I want <capability> so that <benefit>", "acceptanceCriteria": ["Given <starting state>, when <action>, then <exact result>", ...]}
 - A valid reply looks like: [{"title": "Add two numbers", "story": "As a user, I want to add two numbers so that I get their sum.", "acceptanceCriteria": ["Given the input "1,2", when add is called, then the result is 3", "Given an empty string "", when add is called, then the result is 0"]}]
 - Every requirement needs at least one acceptance criterion, each phrased Given/When/Then with a concrete, testable outcome, and at least one criterion covering an edge case.
-- A concrete outcome names an exact value: a number, a quoted literal such as "NaN", a sentinel like null or true, or a definite error, e.g. "then an error is raised".
+- A concrete outcome names an exact value: a number, a quoted literal in double or single quotes such as "NaN", a sentinel like null or true, a verdict such as valid or invalid, or a definite error, e.g. "then an error is raised".
+- Never use these words in a story or a criterion - a wording review rejects every one of them: should, could, might, handle, handles, properly, appropriately, quickly, easily, robust, user-friendly, etc. Name the observable behavior instead.
 - Do not invent capabilities the <description> does not mention; a broad phrase, however, names its conventional parts - unpack e.g. "the basic functions of a calculator" into add, subtract, multiply, and divide.
 - A non-empty <description> always holds at least one requirement: derive the most obvious atomic requirements from its plain meaning rather than replying with an empty array.
 '''
@@ -50,7 +51,9 @@ You reword one draft requirement so it passes a wording review.
 Rules:
 - Address only this one finding; keep the requirement's meaning. Do not invent capabilities the draft does not mention.
 - Keep everything the finding does not touch - title, story, and every other criterion - exactly as written.
-- Each criterion is phrased Given/When/Then and ends with a concrete, testable outcome: an exact value such as a number, a quoted literal such as "NaN", a sentinel like null or true, or a definite error, e.g. "then an error is raised".
+- Each criterion is phrased Given/When/Then and ends with a concrete, testable outcome: an exact value such as a number, a quoted literal in double or single quotes such as "NaN", a sentinel like null or true, a verdict such as valid or invalid, or a definite error, e.g. "then an error is raised".
+- Never use these words in a story or a criterion - the review rejects every one of them: should, could, might, handle, handles, properly, appropriately, quickly, easily, robust, user-friendly, etc. Name the observable behavior instead.
+- Never drop a criterion. The reply carries every criterion the draft had, reworded only where the finding demands it.
 - Reply with ONLY one JSON object holding the whole corrected requirement - no prose, no markdown, no code fences, no <think> tags: {"title": "...", "story": "As a <role>, I want <capability> so that <benefit>", "acceptanceCriteria": ["...", ...]}
 '''
 user = '''

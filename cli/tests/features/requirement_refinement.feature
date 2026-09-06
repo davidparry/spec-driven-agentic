@@ -57,6 +57,21 @@ Feature: Requirement refinement
     Then the requirement is clean
     And the next step advises confirming the wording with the developer
 
+  Scenario: A validation verdict is as concrete as a number
+    Given a requirement "REQ-007" with story "As a user, I want my phone number input validated so that only numbers in the format XXX-XXX-XXXX or XXXXXXXXXX are accepted"
+    And the requirement has criterion "Given the user enters '123-456-7890', when the system validates it, then the result is 'valid'"
+    And the requirement has criterion "Given the user enters '123-45-6789', when the system validates it, then the result is 'invalid'"
+    When the requirement "REQ-007" is refined
+    Then the requirement is clean
+    And the next step advises confirming the wording with the developer
+
+  Scenario: A lone apostrophe is punctuation, not a quoted value
+    Given a requirement "REQ-007" with story "As a user, I want entries read back so that storage is trustworthy."
+    And the requirement has criterion "Given a stored entry, when it is read, then the user's entry is unchanged"
+    When the requirement "REQ-007" is refined
+    Then the requirement is not clean
+    And a finding is "criterion "Given a stored entry, when it is read, then the user's entry is unchanged": the outcome is not concrete - state the exact expected value after 'then'"
+
   Scenario: An outcome without a concrete value is flagged
     Given a requirement "REQ-007" with story "As a user, I want sums so that errors are visible."
     And the requirement has criterion "Given a calculator, when I add, then it works"
