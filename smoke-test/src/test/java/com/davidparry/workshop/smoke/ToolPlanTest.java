@@ -13,10 +13,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 class ToolPlanTest {
 
     @Test
-    @DisplayName("the plan names exactly 23 tools and no extras")
-    void planIsExactlyTwentyThree() {
-        assertThat(ToolPlan.size()).isEqualTo(23);
-        assertThat(ToolPlan.names()).hasSize(23);
+    @DisplayName("the plan names exactly 24 tools and no extras")
+    void planIsExactlyTwentyFour() {
+        assertThat(ToolPlan.size()).isEqualTo(24);
+        assertThat(ToolPlan.names()).hasSize(24);
         assertThat(ToolPlan.all()).extracting(ToolPlan.PlannedTool::name).doesNotHaveDuplicates();
         assertThat(ToolPlan.names()).contains(
                 "list_requirements",
@@ -44,7 +44,7 @@ class ToolSweepTest {
         ToolSweep.SweepReport report = new ToolSweep().run(client, null, false);
         assertThat(report.missing()).isEmpty();
         assertThat(report.unexpected()).isEmpty();
-        assertThat(report.discovered()).hasSize(23);
+        assertThat(report.discovered()).hasSize(24);
         assertThat(report.called()).contains("list_requirements", "validate_spec", "changes_show");
         assertThat(report.called()).doesNotContain("scenario_add", "command_run", "changes_commit");
         assertThat(report.failures()).isEmpty();
@@ -59,7 +59,7 @@ class ToolSweepTest {
         Narrator narrator = new Narrator(line -> {
         });
         ToolSweep.SweepReport report = new ToolSweep().run(client, narrator, true);
-        assertThat(report.called()).hasSize(23);
+        assertThat(report.called()).hasSize(24);
         assertThat(report.failures()).isEmpty();
     }
 

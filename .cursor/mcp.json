@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "tdd-workflow": {
+    "spec-driven-server": {
       "command": "bdd",
       "args": ["mcp", "serve", "--root", "${workspaceFolder}"],
       "protocolEra": "auto"

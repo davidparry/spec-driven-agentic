@@ -21,7 +21,7 @@ write the specification first, and make the tests the contract.
 
 This session walks through a working, open-source pipeline where a requirements
 catalog — not a chat transcript — is the source of truth. One MCP server
-(`bdd mcp serve`, 23 tools) exposes a deliberately locked-down set: no
+(`bdd mcp serve`, 24 tools) exposes a deliberately locked-down set: no
 "write this file," no open shell. Cursor sees every tool, including staging.
 The agent must validate a requirement's structure, survive a wording
 review that rejects ambiguity like *should*, *handles*, and *properly*, turn the
@@ -33,7 +33,7 @@ human reviews. `requirement_mark_implemented` is GREEN-gated.
 Here is the part worth your hour: once that discipline lives in the server
 instead of in a prompt, model capability stops being the variable that
 decides quality. We run the identical **contracts** twice — once with a
-frontier agent in Cursor (all 23 tools), once with
+frontier agent in Cursor (all 24 tools), once with
 `qwen3.8-flash-next:125b-mlx` on the laptop on stage through Ollama and the
 CLI's per-command profiles (3–7 tools) — and compare the diffs. Then we look at
 what makes the local model hold up: JSON-only response contracts,

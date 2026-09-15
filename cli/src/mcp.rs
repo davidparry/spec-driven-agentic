@@ -225,7 +225,7 @@ impl WorkflowServer {
     /// `run_tests` reply path is reachable without real runtimes.
     pub fn with_runner_factory(root: PathBuf, runner_factory: RunnerFactory) -> Self {
         Self {
-            root,
+            root: std::path::absolute(&root).unwrap_or(root),
             runner_factory,
             tool_router: Self::tool_router(),
         }
@@ -422,6 +422,18 @@ impl WorkflowServer {
     }
 
     // ---- additive typed tools ---------------------------------------------
+
+    #[tool(
+        description = "The absolute project root this server uses for every other tool \
+        (the --root this process was started with; default \".\")."
+    )]
+    async fn project_root(&self) -> Result<CallToolResult, McpError> {
+        let _span = tool_call("project_root");
+        Ok(json_result(&serde_json::json!({
+            "root": self.root.to_string_lossy(),
+            "nextStep": "Call list_requirements to see the backlog at this root.",
+        })))
+    }
 
     #[tool(
         description = "Detect the project's languages, BDD frameworks, runtimes, and \
@@ -908,5 +920,13 @@ mod tests {
             "expected the GREEN refusal, got: {}",
             outcome.text
         );
+    }
+
+    #[test]
+    fn the_server_stores_an_absolute_root() {
+        let server = WorkflowServer::new(std::path::PathBuf::from("."));
+        let expected = std::path::absolute(".").unwrap();
+        assert!(server.root.is_absolute());
+        assert_eq!(server.root, expected);
     }
 }

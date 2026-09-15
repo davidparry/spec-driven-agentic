@@ -8,7 +8,8 @@ them anywhere on the command line.
 The project root — the directory where `requirements/requirements.json`
 (the root of the [spec catalog](spec-format.md)) and `.bdd-mcp.toml`
 live, and the base for every relative path the CLI reads or writes.
-Defaults to the current directory.
+Defaults to the current directory. MCP clients that cannot see argv can
+call `project_root` to read the same directory as an absolute path.
 
 ```bash
 bdd --root ~/code/calculator spec list

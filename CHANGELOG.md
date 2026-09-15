@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- MCP `project_root` returns the absolute `--root` this `bdd mcp serve`
+  process uses for every other tool. The catalog is 24 tools.
+- Claude Code can use the workshop MCP server from the committed
+  `.mcp.json` (enabled in `.claude/settings.json`).
 - MCP server identity is `spec-driven-server` / `1.0.0`, title `Spec Driven`,
   description that the requirements spec is the source of truth, website
   `https://davidparry.github.io/tdd-bdd-agentic/`, and icon
@@ -10,7 +14,7 @@
   uses). It no longer looks under `cli/target`. If `bdd` is missing: install
   it (`cargo install --path cli`) or add its directory to `PATH`.
 - Default smoke walkthrough now calls the remaining read-only MCP tools
-  (`validate_spec`, `refine_requirement`, `project_inspect`, `feature_list`,
+  (`validate_spec`, `refine_requirement`, `project_root`, `project_inspect`, `feature_list`,
   `feature_read` of the workshop kata feature, `changes_show`,
   `changes_validate`, `step_definitions_find`). Mutating tools stay behind
   `--sweep --include-mutating`.
@@ -29,7 +33,8 @@
   deprecated).
 - The workshop MCP server stays stdio-only (`bdd mcp serve`) on rmcp 3.4.
 
-- One MCP server: `bdd mcp serve` (23 tools, including `changes_validate`
+- One MCP server: `bdd mcp serve` (24 tools, including `project_root`
+  and `changes_validate`
   for staged-wins spec+Gherkin checks). Workshop Cursor config and
   `smoke-test.jar` launch that binary; the Java `mcp-server/` module is gone.
   Frozen seven-tool reply shapes stay (`cli/tests/mcp_conformance.rs` +

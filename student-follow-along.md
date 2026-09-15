@@ -4,7 +4,7 @@ Your step-by-step companion for the 60-minute workshop. Everything the
 presenter does, you do — this page has the exact commands, the exact agent
 prompts, and what you should see at every step.
 
-**The big idea:** there is one MCP server — `bdd mcp serve` (23 tools).
+**The big idea:** there is one MCP server — `bdd mcp serve` (24 tools).
 Cursor and the bundled `smoke-test.jar` both talk to it. Your hour is the
 workflow it enables: draft a requirement *with* an agent, let the server
 critique it (structure first, wording second), then drive it
@@ -103,19 +103,19 @@ and the absolute repo paths in the log will differ on your machine.)
 
 **Expect:**
 
-- **STEP 1** — **23 tools** discovered. The frozen seven you already know
+- **STEP 1** — **24 tools** discovered. The frozen seven you already know
   (`list_requirements`, `get_requirement`, `validate_spec`,
   `refine_requirement`, `run_tests`, `get_tdd_state`, `start_refactor`) plus
   authoring/staging (`scenario_add`, `unit_test_create`, `changes_show`,
   `changes_commit`, `requirement_mark_implemented`, …) and inspect
-  (`project_inspect`, `command_run`). Exercise 1 uses the structure/wording
+  (`project_root`, `project_inspect`, `command_run`). Exercise 1 uses the structure/wording
   pair; Exercise 2 uses staging.
 - **STEP 4** — `run_tests` returns `"phase": "GREEN", "tests": 5`
   (2 JUnit tests + 3 Cucumber scenarios — one bar, two altitudes).
 - **STEP 5** — `get_requirement` for the first pending id (REQ-003 on
   `trunk`).
 - **STEP 6** — operational reads (no staging): `validate_spec`,
-  `refine_requirement` (REQ-001), `project_inspect`, `feature_list`,
+  `refine_requirement` (REQ-001), `project_root`, `project_inspect`, `feature_list`,
   `feature_read` of `kata/src/test/resources/features/string_calculator.feature`,
   `changes_show`, `changes_validate`, `step_definitions_find`. Mutating
   tools stay behind
@@ -130,7 +130,7 @@ To connect your own agent, the ready-to-run configuration lives at
 ```json
 {
   "mcpServers": {
-    "tdd-workflow": {
+    "spec-driven-server": {
       "command": "bdd",
       "args": ["mcp", "serve", "--root", "${workspaceFolder}"]
     }
@@ -150,7 +150,7 @@ Cursor users get this automatically — the repo ships `.cursor/mcp.json`
 The repo already registers the server for you in `.cursor/mcp.json`. Open
 Cursor's MCP settings (see
 [student-follow-docs/setup-mcp.md](student-follow-docs/setup-mcp.md) for
-where to find them) and confirm `tdd-workflow` shows **green**. If it's red:
+where to find them) and confirm `spec-driven-server` shows **green**. If it's red:
 `bdd` is not on PATH for GUI apps (launch Cursor from a terminal where
 `bdd --version` works, or put the absolute binary path in `command`), then
 toggle the server off/on in the settings.
@@ -159,7 +159,7 @@ A green light says the server *launched* — now prove the agent can actually
 *call* it. Paste this into your agent:
 
 ```text
-Call the get_tdd_state tool from the tdd-workflow server and show me the raw JSON result.
+Call the get_tdd_state tool from the spec-driven-server server and show me the raw JSON result.
 ```
 
 The tool returns exactly this on a freshly started server:
@@ -184,7 +184,7 @@ fine. `get_tdd_state` is read-only, so this check never disturbs your run.)
 
 **Expect:**
 
-- The agent invokes `get_tdd_state` on the `tdd-workflow` server — you'll
+- The agent invokes `get_tdd_state` on the `spec-driven-server` server — you'll
   see the tool call in the chat, no permission errors.
 - `"phase": "START"` with an all-zero `lastRun` — the server is up and
   nothing has touched the kata yet.
@@ -374,7 +374,7 @@ levels deep. The tools merge the whole tree into one backlog. To see it:
 Paste this into your agent, word for word:
 
 ```text
-Using the tdd-workflow tools: validate the spec first, then `get_requirement` for the next pending id. Add its Gherkin with `scenario_add` (tag the requirement id), add missing steps with `step_definition_create` if `step_definitions_find` reports any, add a unit test with `unit_test_create`. Show `changes_show` and ask me before `changes_commit`. Then `run_tests` (expect RED). Implement the simplest production code in `StringCalculator`. `run_tests` (GREEN). `start_refactor` if I agree. On GREEN, `requirement_mark_implemented`. Ask me before each phase change.
+Using the spec-driven-server tools: validate the spec first, then `get_requirement` for the next pending id. Add its Gherkin with `scenario_add` (tag the requirement id), add missing steps with `step_definition_create` if `step_definitions_find` reports any, add a unit test with `unit_test_create`. Show `changes_show` and ask me before `changes_commit`. Then `run_tests` (expect RED). Implement the simplest production code in `StringCalculator`. `run_tests` (GREEN). `start_refactor` if I agree. On GREEN, `requirement_mark_implemented`. Ask me before each phase change.
 ```
 
 **What you should see, in order** (tool replies are shown so you can spot

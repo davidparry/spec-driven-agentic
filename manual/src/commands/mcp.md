@@ -50,7 +50,7 @@ equivalent):
 ```json
 {
   "mcpServers": {
-    "tdd-workflow": {
+    "spec-driven-server": {
       "command": "bdd",
       "args": ["mcp", "serve", "--root", "${workspaceFolder}"]
     }
@@ -58,7 +58,7 @@ equivalent):
 }
 ```
 
-Cursor sees **all 23 tools**, including staging. CLI commands that
+Cursor sees **all 24 tools**, including staging. CLI commands that
 call a model attach a **narrower profile** (`bdd tools profiles`) —
 typically 3–7 tools — so a local model is not offered commit or
 mark-implemented.
@@ -90,7 +90,7 @@ bdd mcp call run_tests --stdio
 
 ## The tools served
 
-Twenty-three tools in three groups. There is no `spec_draft` or
+Twenty-four tools in three groups. There is no `spec_draft` or
 `implement` MCP tool: Cursor writes `requirements.json` and production
 Java; Gherkin, steps, unit-test scaffolds, mark-implemented, and
 staging go through tools. Generation over MCP is **template-only**
@@ -125,6 +125,7 @@ staging go through tools. Generation over MCP is **template-only**
 
 | MCP tool | CLI equivalent |
 | --- | --- |
+| `project_root` | `--root` (the absolute directory this process was started with) |
 | `project_inspect` | [`bdd inspect`](inspect.md) |
 | `command_run` | — (MCP and the `implement` profile; see below) |
 

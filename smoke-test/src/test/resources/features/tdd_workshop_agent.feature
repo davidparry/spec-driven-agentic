@@ -67,6 +67,7 @@ Feature: The workshop agent narrates one spec-to-green walkthrough
     And the narration contains "\"name\":\"validate_spec\""
     And the narration contains "\"name\":\"refine_requirement\""
     And the narration contains "\"id\":\"REQ-001\""
+    And the narration contains "\"name\":\"project_root\""
     And the narration contains "\"name\":\"project_inspect\""
     And the narration contains "\"name\":\"feature_list\""
     And the narration contains "\"name\":\"feature_read\""

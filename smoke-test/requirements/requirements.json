@@ -88,11 +88,11 @@
     },
     {
       "id": "CLI-009",
-      "title": "The tool plan names exactly the 23 served tools",
+      "title": "The tool plan names exactly the 24 served tools",
       "status": "implemented",
-      "story": "As a maintainer, I want a 24th MCP tool to fail the Java build until it is planned so that the smoke test cannot silently skip new surface area.",
+      "story": "As a maintainer, I want a 25th MCP tool to fail the Java build until it is planned so that the smoke test cannot silently skip new surface area.",
       "acceptanceCriteria": [
-        "Given the ToolPlan, when it is listed, then it names exactly 23 tools",
+        "Given the ToolPlan, when it is listed, then it names exactly 24 tools",
         "Given a discovered tool that is not in the plan, when the sweep runs, then that tool is reported as unexpected"
       ],
       "featureFile": "smoke-test/src/test/resources/features/tool_sweep.feature"
@@ -123,7 +123,7 @@
       "status": "implemented",
       "story": "As a workshop attendee, I want the default smoke walkthrough to call validate, inspect, Gherkin, and staging-area reads so that those tools are proven live without mutating the kata.",
       "acceptanceCriteria": [
-        "Given a walkthrough run, when the narration is read, then it includes validate_spec, refine_requirement for REQ-001, project_inspect, feature_list, feature_read of the workshop kata feature, changes_show, changes_validate, and step_definitions_find",
+        "Given a walkthrough run, when the narration is read, then it includes validate_spec, refine_requirement for REQ-001, project_root, project_inspect, feature_list, feature_read of the workshop kata feature, changes_show, changes_validate, and step_definitions_find",
         "Given a walkthrough run, when feature_read is called, then its path is the workshop kata feature and not the live-test seeded features/calc.feature"
       ],
       "featureFile": "smoke-test/src/test/resources/features/tdd_workshop_agent.feature"

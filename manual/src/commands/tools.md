@@ -22,9 +22,9 @@ Commands:
 bdd tools profiles
 # spec-draft          4  list_requirements, get_requirement, validate_spec, refine_requirement
 # implement           7  get_requirement, feature_read, …, command_run, changes_show
-# status              6  list_requirements, …, changes_show, changes_validate
+# status              7  project_root, list_requirements, …, changes_show, changes_validate
 
-bdd tools list --for status          # exactly those six
+bdd tools list --for status          # exactly those seven
 bdd tools list --offline             # built-ins only; never connects
 bdd tools enable self__validate_spec --for status
 bdd tools servers

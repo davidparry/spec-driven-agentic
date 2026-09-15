@@ -159,6 +159,7 @@ async fn the_server_identifies_as_the_workshop_server_and_lists_all_tools() {
         );
     }
     for additive in [
+        "project_root",
         "project_inspect",
         "feature_list",
         "feature_read",
@@ -181,7 +182,22 @@ async fn the_server_identifies_as_the_workshop_server_and_lists_all_tools() {
             "additive tool {additive} missing: {names:?}"
         );
     }
-    assert_eq!(tools.len(), 23, "tools: {names:?}");
+    assert_eq!(tools.len(), 24, "tools: {names:?}");
+
+    let root_body = call_json(&client, "project_root", json!({})).await;
+    let expected_root = std::path::absolute(dir.path()).unwrap();
+    assert_eq!(
+        root_body["root"].as_str().unwrap(),
+        expected_root.to_string_lossy().as_ref()
+    );
+    assert!(
+        Path::new(root_body["root"].as_str().unwrap()).is_absolute(),
+        "project_root must be absolute: {root_body}"
+    );
+    assert_eq!(
+        root_body["nextStep"],
+        "Call list_requirements to see the backlog at this root."
+    );
 
     let command_run = tools
         .iter()

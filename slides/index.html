@@ -57,7 +57,7 @@
       <h1>TDD &middot; BDD &middot; Spec-Driven</h1>
       <h3>Development in the Agentic Era — one MCP-powered workflow, hands on</h3>
       <p class="muted">60-minute workshop &nbsp;·&nbsp; bring your laptop &nbsp;·&nbsp; you drive an agent from exercise one</p>
-      <p class="muted">One server: <code>bdd mcp serve</code> (23 tools) &nbsp;·&nbsp; local model: <code>qwen3.8-flash-next:125b-mlx</code></p>
+      <p class="muted">One server: <code>bdd mcp serve</code> (24 tools) &nbsp;·&nbsp; local model: <code>qwen3.8-flash-next:125b-mlx</code></p>
       <p><span class="badge red">RED</span> <span class="badge green">GREEN</span> <span class="badge refactor">REFACTOR</span> — now with agents</p>
       <aside class="notes">Welcome. Promise of the hour: everyone here has watched an agent demo — nobody leaves having only watched one. The MCP server and client in the repo are finished infrastructure; the hour is spent on the workflow they enable: drafting a spec with an agent, validating it through a tool, and driving spec to green. Everything is in the repo you cloned. The local model on this machine is qwen3.8-flash-next:125b-mlx through Ollama — Wi-Fi off still works. Attendees on Cursor can stay on their IDE agent; the CLI path uses this same local model.</aside>
     </section>
@@ -67,7 +67,7 @@
       <ul>
         <li>A <strong>spec-authoring loop</strong>: you and an AI agent draft a requirement, <code>validate_spec</code> checks its structure, <code>refine_requirement</code> critiques its wording — and the agent iterates until both are clean</li>
         <li>A complete <strong>spec-to-green workflow</strong> you drove yourself: requirement → Gherkin → RED → GREEN → refactor</li>
-        <li>A working grasp of how <strong>MCP feeds your tools into any agent</strong> — Cursor (all 23 tools) or the CLI on <code>qwen3.8-flash-next:125b-mlx</code> (scoped profiles, same server)</li>
+        <li>A working grasp of how <strong>MCP feeds your tools into any agent</strong> — Cursor (all 24 tools) or the CLI on <code>qwen3.8-flash-next:125b-mlx</code> (scoped profiles, same server)</li>
         <li>A completed, fully tested <strong>MCP server in <code>bdd</code></strong> to point at your own project</li>
       </ul>
       <aside class="notes">Set expectations up front: the MCP server and client are already built — we use them, we don't build them. MCP gets about seven minutes as plumbing; the workflow gets the hour. ~35 of the 60 minutes are keyboard time.</aside>
@@ -241,14 +241,14 @@ requirements/
     <!-- ============ 13-20 min: THE PLUMBING (pre-built) ============ -->
     <section>
       <h2><span class="badge time">PLUMBING</span> The server — already built <span class="badge time">13–20 min</span></h2>
-      <p class="small">One binary: <code>bdd mcp serve --root ${workspaceFolder}</code>. Composition root <code>cli/src/mcp.rs</code> plus the CLI TDD services. Twenty-three tools in three groups:</p>
+      <p class="small">One binary: <code>bdd mcp serve --root ${workspaceFolder}</code>. Composition root <code>cli/src/mcp.rs</code> plus the CLI TDD services. Twenty-four tools in three groups:</p>
       <ul class="small">
         <li><strong>Frozen seven</strong> — <code>list_requirements</code>, <code>get_requirement</code>, <code>validate_spec</code>, <code>refine_requirement</code>, <code>run_tests</code>, <code>get_tdd_state</code>, <code>start_refactor</code></li>
         <li><strong>Authoring / staging</strong> — features, scenarios, <code>changes_*</code>, <code>requirement_mark_implemented</code>, template-only <code>step_definition_create</code> / <code>unit_test_create</code></li>
-        <li><strong>Inspect</strong> — <code>project_inspect</code>, <code>command_run</code> (allowlisted, RED-gated)</li>
+        <li><strong>Inspect</strong> — <code>project_root</code>, <code>project_inspect</code>, <code>command_run</code> (allowlisted, RED-gated)</li>
       </ul>
       <p class="small">A stdio server must <strong>never print to stdout</strong> — that corrupts the JSON-RPC stream. Diagnostics go to stderr. Wire identity is <code>spec-driven-server</code> / <code>1.0.0</code> (title <code>Spec Driven</code>).</p>
-      <aside class="notes">Do not linger — this is infrastructure, not the point of the hour. There is no spec_draft or implement MCP tool. Attendees see all 23 in Cursor. The CLI path later offers 3–7 per command.</aside>
+      <aside class="notes">Do not linger — this is infrastructure, not the point of the hour. There is no spec_draft or implement MCP tool. Attendees see all 24 in Cursor. The CLI path later offers 3–7 per command.</aside>
     </section>
 
     <section>
@@ -301,12 +301,12 @@ McpSyncClient client = McpClient.sync(transport)
     .clientInfo(new McpSchema.Implementation("tdd-workshop-agent", "1.0.0"))
     .build();
 client.initialize();                                 // the handshake
-var tools = client.listTools();                      // discovery — 23 tools
+var tools = client.listTools();                      // discovery — 24 tools
 var result = client.callTool(
     CallToolRequest.builder("run_tests").arguments(Map.of()).build());
       </code></pre>
       <p class="small">Run it: <code>java -jar smoke-test/target/smoke-test.jar</code> (needs <code>bdd</code> on PATH)</p>
-      <aside class="notes">Two minutes, one run: the jar is only a client. The child is bdd mcp serve. Discovery lists 23 tools, not seven. Then move on; the workflow is next.</aside>
+      <aside class="notes">Two minutes, one run: the jar is only a client. The child is bdd mcp serve. Discovery lists 24 tools, not seven. Then move on; the workflow is next.</aside>
     </section>
 
     <!-- ============ 20-32 min: EXERCISE 1 — DRAFT AND REFINE THE SPEC ============ -->
@@ -343,7 +343,7 @@ var result = client.callTool(
 // .cursor/mcp.json  (already in the repo)
 {
   "mcpServers": {
-    "tdd-workflow": {
+    "spec-driven-server": {
       "command": "bdd",
       "args": ["mcp", "serve", "--root", "${workspaceFolder}"]
     }
@@ -351,7 +351,7 @@ var result = client.callTool(
 }
       </code></pre>
       <p class="small">Then prompt the agent:</p>
-      <blockquote class="small">"Using the tdd-workflow tools: validate the spec first, then <code>get_requirement</code> for the next pending id. Add its Gherkin with <code>scenario_add</code> (tag the requirement id), add missing steps with <code>step_definition_create</code> if <code>step_definitions_find</code> reports any, add a unit test with <code>unit_test_create</code>. Show <code>changes_show</code> and ask me before <code>changes_commit</code>. Then <code>run_tests</code> (expect RED). Implement the simplest production code in <code>StringCalculator</code>. <code>run_tests</code> (GREEN). <code>start_refactor</code> if I agree. On GREEN, <code>requirement_mark_implemented</code>. Ask me before each phase change."</blockquote>
+      <blockquote class="small">"Using the spec-driven-server tools: validate the spec first, then <code>get_requirement</code> for the next pending id. Add its Gherkin with <code>scenario_add</code> (tag the requirement id), add missing steps with <code>step_definition_create</code> if <code>step_definitions_find</code> reports any, add a unit test with <code>unit_test_create</code>. Show <code>changes_show</code> and ask me before <code>changes_commit</code>. Then <code>run_tests</code> (expect RED). Implement the simplest production code in <code>StringCalculator</code>. <code>run_tests</code> (GREEN). <code>start_refactor</code> if I agree. On GREEN, <code>requirement_mark_implemented</code>. Ask me before each phase change."</blockquote>
       <aside class="notes">Everyone drives this at their own keyboard; you demo REQ-003 (comma-separated numbers) end to end. Show the agent calling validate_spec, then get_requirement (note the featureLocation and workflowHint fields), appending the scenario and the unit test, run_tests RED (8 tests, 3 failing — 2 Cucumber failures + 1 JUnit error), implementation, run_tests GREEN (8 tests), start_refactor, then marking REQ-003 implemented in the spec. Pause after the scenario is written: that's the spec review moment.</aside>
     </section>
 
@@ -378,7 +378,7 @@ var result = client.callTool(
         <li><strong>Ground truth</strong>: the agent doesn't guess whether code works — <code>run_tests</code> tells it</li>
         <li><strong>Guardrails in tools</strong>: refactor-on-red is impossible; the server refuses</li>
         <li><strong>Small steps</strong>: one requirement, one cycle — failures stay cheap</li>
-        <li><strong>Portable</strong>: same <code>bdd mcp serve</code> in Cursor (23 tools), the bundled client, MCP Inspector, and CLI profiles (3–7)</li>
+        <li><strong>Portable</strong>: same <code>bdd mcp serve</code> in Cursor (24 tools), the bundled client, MCP Inspector, and CLI profiles (3–7)</li>
       </ul>
       <aside class="notes">This is the difference between "LLM writes code" and an engineered workflow: feedback loops and enforced invariants.</aside>
     </section>
@@ -387,7 +387,7 @@ var result = client.callTool(
 
     <section>
       <h2>Same server, scoped profiles <span class="badge time">Wi-Fi off</span></h2>
-      <p class="small">Cursor saw 23 tools. The CLI offers 3–7 per command — not a second implementation.</p>
+      <p class="small">Cursor saw 24 tools. The CLI offers 3–7 per command — not a second implementation.</p>
       <pre><code class="language-bash" data-trim>
 bdd tools profiles
 bdd mcp call get_tdd_state
@@ -396,7 +396,7 @@ bdd implement REQ-003     # run_tests sees the working tree; command_run asks yo
 bdd ask "what is pending?"
       </code></pre>
       <ul class="small">
-        <li>Frontier: Cursor + all 23, including staging</li>
+        <li>Frontier: Cursor + all 24, including staging</li>
         <li>Local: <code>qwen3.8-flash-next:125b-mlx</code> + profiles; <code>[tool_rules]</code> if the model drifts</li>
         <li>Follow-along: <code>student-follow-docs/cli-path.md</code></li>
       </ul>
@@ -409,7 +409,7 @@ bdd ask "what is pending?"
       <ul>
         <li>Drafted a requirement <em>with</em> an agent and iterated it through two server feedback loops — <code>validate_spec</code> for structure, <code>refine_requirement</code> for wording — until valid and clean</li>
         <li>Drove a full spec-to-green cycle: requirement → Gherkin (Cucumber) → RED → GREEN → refactor</li>
-        <li>Saw how MCP feeds the same <code>bdd</code> server into any agent — Cursor (23 tools) or CLI profiles on <code>qwen3.8-flash-next:125b-mlx</code></li>
+        <li>Saw how MCP feeds the same <code>bdd</code> server into any agent — Cursor (24 tools) or CLI profiles on <code>qwen3.8-flash-next:125b-mlx</code></li>
         <li>Kept every engineering decision: the agent turned the crank, you steered</li>
       </ul>
       <h3 style="margin-top:0.8em">Keep building</h3>

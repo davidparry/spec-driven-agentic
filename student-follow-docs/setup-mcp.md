@@ -1,4 +1,4 @@
-# Setting up the `tdd-workflow` MCP server in your agent
+# Setting up the `spec-driven-server` MCP server in your agent
 
 The ready-to-run server entry lives in [config/mcp.json](../config/mcp.json).
 Put **`bdd` on PATH** first (`cargo install --path cli`, a GitHub release
@@ -14,7 +14,7 @@ bdd mcp serve --root /absolute/path/to/tdd-bdd-agentic
 ```
 
 Cursor and the bundled `smoke-test.jar` both speak to this process over
-stdio and see **all 23 tools**, including staging.
+stdio and see **all 24 tools**, including staging.
 
 ---
 
@@ -29,7 +29,7 @@ into that project's `.cursor/mcp.json` or merge it into `~/.cursor/mcp.json`
 To find the MCP settings: open **Cursor Settings** (gear icon in the top
 right, or `Cmd+Shift+J` on macOS / `Ctrl+Shift+J` on Windows/Linux), go to
 **Customize**, then the **MCP** tab. Each configured server is listed there
-with its status — `tdd-workflow` should show green, and toggling it off/on
+with its status — `spec-driven-server` should show green, and toggling it off/on
 restarts it.
 
 If it stays red, `bdd` is not on PATH for GUI apps. Launch Cursor from a
@@ -50,14 +50,17 @@ from `config/mcp.json` into `claude_desktop_config.json`, replacing
 
 ## Claude Code
 
-One command from the repo root registers the server for this project:
+This repo already ships [`.mcp.json`](../.mcp.json) (the project-scoped
+server list Claude Code reads) and [`.claude/settings.json`](../.claude/settings.json)
+(approves `spec-driven-server` after you trust the folder). `bdd` must be
+on PATH. In a Claude Code session, trust the workspace if prompted, then
+confirm with `/mcp`.
+
+To register the same server in another clone without those files:
 
 ```bash
-claude mcp add tdd-workflow -- bdd mcp serve --root "$PWD"
+claude mcp add spec-driven-server --scope project -- bdd mcp serve --root "${CLAUDE_PROJECT_DIR:-$PWD}"
 ```
-
-Or create `.mcp.json` in the project root with the `mcpServers` block from
-`config/mcp.json` (absolute paths). Verify with `/mcp` inside a session.
 
 - Docs: [Claude Code — MCP](https://code.claude.com/docs/en/mcp)
 
@@ -67,12 +70,12 @@ Codex uses TOML, not JSON. Add this to `~/.codex/config.toml` (or a trusted
 project's `.codex/config.toml`):
 
 ```toml
-[mcp_servers.tdd-workflow]
+[mcp_servers.spec-driven-server]
 command = "bdd"
 args = ["mcp", "serve", "--root", "/absolute/path/to/tdd-bdd-agentic"]
 ```
 
-Or use the CLI: `codex mcp add tdd-workflow -- bdd mcp serve --root "$PWD"`.
+Or use the CLI: `codex mcp add spec-driven-server -- bdd mcp serve --root "$PWD"`.
 
 - Docs: [Codex — Model Context Protocol](https://developers.openai.com/codex/mcp)
 
@@ -84,7 +87,7 @@ Create `.vscode/mcp.json` in the project. Note VS Code's top-level key is
 ```json
 {
   "servers": {
-    "tdd-workflow": {
+    "spec-driven-server": {
       "type": "stdio",
       "command": "bdd",
       "args": ["mcp", "serve", "--root", "${workspaceFolder}"]
@@ -103,7 +106,7 @@ config, with an absolute `--root`.
 ## Gemini CLI
 
 ```bash
-gemini mcp add tdd-workflow bdd -- mcp serve --root "$PWD"
+gemini mcp add spec-driven-server bdd -- mcp serve --root "$PWD"
 ```
 
 - Docs: [Gemini CLI — MCP servers](https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-server.md)

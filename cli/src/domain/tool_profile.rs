@@ -100,6 +100,7 @@ pub fn default_profile(caller: Caller) -> &'static [&'static str] {
             "changes_show",
         ],
         Caller::Status => &[
+            "project_root",
             "list_requirements",
             "get_requirement",
             "get_tdd_state",
@@ -108,6 +109,7 @@ pub fn default_profile(caller: Caller) -> &'static [&'static str] {
             "changes_validate",
         ],
         Caller::Ask => &[
+            "project_root",
             "list_requirements",
             "get_requirement",
             "validate_spec",
@@ -237,6 +239,7 @@ mod tests {
             "run_tests",
             "get_tdd_state",
             "start_refactor",
+            "project_root",
             "project_inspect",
             "feature_list",
             "feature_read",

@@ -52,7 +52,7 @@ PAGES = [
         "src": "student-follow-docs/setup-mcp.md",
         "dest": "setup/index.html",
         "title": "MCP setup",
-        "description": "Register the tdd-workflow MCP server with your agent.",
+        "description": "Register the spec-driven-server MCP server with your agent.",
     },
     {
         "src": "student-follow-docs/greenfield-flow.md",

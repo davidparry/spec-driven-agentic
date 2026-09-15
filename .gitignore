@@ -53,7 +53,9 @@ _site/
 
 # macOS Finder metadata
 .DS_Store
-/.claude/
+# Claude Code: keep shared project settings; ignore machine-local files
+.claude/*
+!.claude/settings.json
 /.bdd-memory.json
 /.bdd-state.json
 

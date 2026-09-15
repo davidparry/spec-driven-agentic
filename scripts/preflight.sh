@@ -121,5 +121,5 @@ if [ "$FAIL" -gt 0 ]; then
     exit 1
 fi
 echo "Ready. Remaining manual steps: open the slides once, confirm the"
-echo "tdd-workflow server shows green in Cursor's MCP settings, clear the agent chat."
+echo "spec-driven-server server shows green in Cursor's MCP settings, clear the agent chat."
 echo "Local-model / CLI demo: ollama list should include qwen3.8-flash-next:125b-mlx."

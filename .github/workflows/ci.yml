@@ -141,7 +141,7 @@ jobs:
           name: bdd-linux
           path: /tmp/bdd-bin
 
-      - name: Live sweep (23 tools against the real binary)
+      - name: Live sweep (24 tools against the real binary)
         run: |
           chmod +x /tmp/bdd-bin/bdd
           mvn -B -pl smoke-test test -Dbdd.binary=/tmp/bdd-bin/bdd

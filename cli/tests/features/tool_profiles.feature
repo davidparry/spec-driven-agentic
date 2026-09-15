@@ -15,8 +15,8 @@ Feature: Per-command tool profiles
       | unittest-generate  | project_inspect, get_requirement, feature_read, step_definitions_find                          |
       | implement-advice   | get_tdd_state, validate_spec, feature_list, changes_show, changes_validate                      |
       | implement          | get_requirement, feature_read, step_definitions_find, get_tdd_state, run_tests, command_run, changes_show |
-      | status             | list_requirements, get_requirement, get_tdd_state, validate_spec, changes_show, changes_validate |
-      | ask                | list_requirements, get_requirement, validate_spec, refine_requirement, get_tdd_state, project_inspect, feature_list, feature_read, step_definitions_find, changes_show, changes_validate |
+      | status             | project_root, list_requirements, get_requirement, get_tdd_state, validate_spec, changes_show, changes_validate |
+      | ask                | project_root, list_requirements, get_requirement, validate_spec, refine_requirement, get_tdd_state, project_inspect, feature_list, feature_read, step_definitions_find, changes_show, changes_validate |
 
   Scenario: No default profile offers a staging or commit tool
     When every default profile is inspected
@@ -42,7 +42,7 @@ Feature: Per-command tool profiles
       status = ["feature_list"]
       """
     When the tools for "status" are listed offline
-    Then the offered tools are "list_requirements, get_requirement, get_tdd_state, validate_spec, changes_show, changes_validate, feature_list"
+    Then the offered tools are "project_root, list_requirements, get_requirement, get_tdd_state, validate_spec, changes_show, changes_validate, feature_list"
 
   Scenario: A disabled table removes from a caller's set
     Given the config file contains:
@@ -51,7 +51,7 @@ Feature: Per-command tool profiles
       status = ["changes_show"]
       """
     When the tools for "status" are listed offline
-    Then the offered tools are "list_requirements, get_requirement, get_tdd_state, validate_spec, changes_validate"
+    Then the offered tools are "project_root, list_requirements, get_requirement, get_tdd_state, validate_spec, changes_validate"
 
   Scenario: Removal beats attachment
     Given the config file contains:

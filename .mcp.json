@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "spec-driven-server": {
+      "command": "bdd",
+      "args": [
+        "mcp",
+        "serve",
+        "--root",
+        "${CLAUDE_PROJECT_DIR:-.}"
+      ]
+    }
+  }
+}

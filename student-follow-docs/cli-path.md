@@ -1,10 +1,10 @@
 # Finish the String Calculator workshop with `bdd`
 
 The 60-minute hour in [student-follow-along.md](../student-follow-along.md)
-uses Cursor against **the same** `bdd mcp serve` (all 23 tools, including
+uses Cursor against **the same** `bdd mcp serve` (all 24 tools, including
 staging). This page is the same end state — every requirement
 `implemented`, including Exercise 1’s **REQ-007** — driven with `bdd`
-commands instead. Dual harness: **Cursor + all 23** vs **local model +
+commands instead. Dual harness: **Cursor + all 24** vs **local model +
 scoped profiles**. Not Java vs Rust.
 
 Do **not** work on `trunk`. `scripts/check-workshop-start.sh` must keep
@@ -42,7 +42,7 @@ bdd mcp call get_tdd_state          # bytes the model would read, no tokens
 bdd mcp tools                       # the 22 built-ins
 ```
 
-Cursor would have seen all 23. These commands offer 3–7. Default profiles
+Cursor would have seen all 24. These commands offer 3–7. Default profiles
 contain no staging or commit tools. The only mutation a CLI-side model may
 request is `command_run` on the `implement` profile, and that call still
 asks you to confirm (piped/CI stdin declines; it never hangs).

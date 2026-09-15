@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "searchindex-752a18c2.js";
+            window.path_to_searchindex_js = "searchindex-4a49ca55.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-d1ab0951.js"></script>
@@ -187,7 +187,8 @@ them anywhere on the command line.</p>
 <p>The project root — the directory where <code>requirements/requirements.json</code>
 (the root of the <a href="spec-format.html">spec catalog</a>) and <code>.bdd-mcp.toml</code>
 live, and the base for every relative path the CLI reads or writes.
-Defaults to the current directory.</p>
+Defaults to the current directory. MCP clients that cannot see argv can
+call <code>project_root</code> to read the same directory as an absolute path.</p>
 <pre><code class="language-bash">bdd --root ~/code/calculator spec list
 bdd spec list --root ~/code/calculator   # same thing
 </code></pre>

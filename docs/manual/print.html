@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "searchindex-752a18c2.js";
+            window.path_to_searchindex_js = "searchindex-4a49ca55.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-d1ab0951.js"></script>
@@ -322,7 +322,8 @@ them anywhere on the command line.</p>
 <p>The project root — the directory where <code>requirements/requirements.json</code>
 (the root of the <a href="#the-requirements-format">spec catalog</a>) and <code>.bdd-mcp.toml</code>
 live, and the base for every relative path the CLI reads or writes.
-Defaults to the current directory.</p>
+Defaults to the current directory. MCP clients that cannot see argv can
+call <code>project_root</code> to read the same directory as an absolute path.</p>
 <pre><code class="language-bash">bdd --root ~/code/calculator spec list
 bdd spec list --root ~/code/calculator   # same thing
 </code></pre>
@@ -2526,14 +2527,14 @@ normally never run it by hand.</p>
 equivalent):</p>
 <pre><code class="language-json">{
   "mcpServers": {
-    "tdd-workflow": {
+    "spec-driven-server": {
       "command": "bdd",
       "args": ["mcp", "serve", "--root", "${workspaceFolder}"]
     }
   }
 }
 </code></pre>
-<p>Cursor sees <strong>all 23 tools</strong>, including staging. CLI commands that
+<p>Cursor sees <strong>all 24 tools</strong>, including staging. CLI commands that
 call a model attach a <strong>narrower profile</strong> (<code>bdd tools profiles</code>) —
 typically 3–7 tools — so a local model is not offered commit or
 mark-implemented.</p>
@@ -2554,7 +2555,7 @@ bdd mcp call run_tests --stdio
 <p><code>--arg key=value</code> is always a string unless the value parses as JSON.
 <code>--args '{"id":"REQ-003"}'</code> merges a JSON object.</p>
 <h2 id="the-tools-served"><a class="header" href="#the-tools-served">The tools served</a></h2>
-<p>Twenty-three tools in three groups. There is no <code>spec_draft</code> or
+<p>Twenty-four tools in three groups. There is no <code>spec_draft</code> or
 <code>implement</code> MCP tool: Cursor writes <code>requirements.json</code> and production
 Java; Gherkin, steps, unit-test scaffolds, mark-implemented, and
 staging go through tools. Generation over MCP is <strong>template-only</strong>
@@ -2601,6 +2602,7 @@ staging go through tools. Generation over MCP is <strong>template-only</strong>
 <tr><th>MCP tool</th><th>CLI equivalent</th></tr>
 </thead>
 <tbody>
+<tr><td><code>project_root</code></td><td><code>--root</code> (the absolute directory this process was started with)</td></tr>
 <tr><td><code>project_inspect</code></td><td><a href="#bdd-inspect"><code>bdd inspect</code></a></td></tr>
 <tr><td><code>command_run</code></td><td>— (MCP and the <code>implement</code> profile; see below)</td></tr>
 </tbody>
@@ -2698,9 +2700,9 @@ Commands:
 <pre><code class="language-bash">bdd tools profiles
 # spec-draft          4  list_requirements, get_requirement, validate_spec, refine_requirement
 # implement           7  get_requirement, feature_read, …, command_run, changes_show
-# status              6  list_requirements, …, changes_show, changes_validate
+# status              7  project_root, list_requirements, …, changes_show, changes_validate
 
-bdd tools list --for status          # exactly those six
+bdd tools list --for status          # exactly those seven
 bdd tools list --offline             # built-ins only; never connects
 bdd tools enable self__validate_spec --for status
 bdd tools servers
