@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- The smoke jar launches the `bdd` on `PATH` (the same binary `bdd --version`
+  uses). It no longer looks under `cli/target`. If `bdd` is missing: install
+  it (`cargo install --path cli`) or add its directory to `PATH`.
 - Default smoke walkthrough now calls the remaining read-only MCP tools
   (`validate_spec`, `refine_requirement`, `project_inspect`, `feature_list`,
   `feature_read` of the workshop kata feature, `changes_show`,

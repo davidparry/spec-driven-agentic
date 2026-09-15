@@ -79,7 +79,7 @@ else
 fi
 
 # 6. End-to-end smoke: jar launches bdd mcp serve, drives the walkthrough
-if [ -n "$BDD" ] && java -Dbdd.binary="$BDD" -jar smoke-test/target/smoke-test.jar >/tmp/preflight-agent.log 2>&1; then
+if [ -n "$BDD" ] && PATH="$(dirname "$BDD"):$PATH" java -jar smoke-test/target/smoke-test.jar >/tmp/preflight-agent.log 2>&1; then
     if grep -q '"phase"' /tmp/preflight-agent.log && grep -qiE 'GREEN|RED' /tmp/preflight-agent.log; then
         ok "end-to-end agent run talks to bdd and reports a TDD phase"
     else

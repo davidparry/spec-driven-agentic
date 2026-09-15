@@ -1,6 +1,5 @@
 package com.davidparry.workshop.smoke;
 
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
 
@@ -18,8 +17,8 @@ import java.util.Arrays;
  * logic lives in {@link AgentWorkflow}; the 23-tool sweep lives in
  * {@link ToolSweep}. Both are covered at 100% against a scripted fake.
  *
- * <p>Run it from the repo root after the {@code bdd} binary is on PATH
- * (or {@code -Dbdd.binary=…}):
+ * <p>Run it from the repo root after {@code bdd} is installed and on
+ * {@code PATH} ({@code bdd --version} succeeds in the same shell):
  * <pre>{@code java -jar smoke-test/target/smoke-test.jar}</pre>
  */
 public final class TddAgent {
@@ -29,11 +28,11 @@ public final class TddAgent {
 
     public static void main(String[] args) {
         Path root = resolveWorkshopRoot();
-        Path bdd = resolveBddBinary(root);
-        if (bdd == null || !Files.isRegularFile(bdd)) {
-            System.out.println("bdd binary not found.");
+        Path bdd = BddBinary.onPath();
+        if (bdd == null) {
+            System.out.println("bdd was not found on PATH.");
             System.out.println("Install it: cargo install --path cli");
-            System.out.println("Or pass -Dbdd.binary=/path/to/bdd");
+            System.out.println("Or add the directory that contains bdd to PATH.");
             System.exit(1);
         }
 
@@ -70,21 +69,5 @@ public final class TddAgent {
                 ? Path.of(configured)
                 : Path.of("").toAbsolutePath();
         return root.toAbsolutePath().normalize();
-    }
-
-    static Path resolveBddBinary(Path root) {
-        String configured = System.getProperty("bdd.binary");
-        if (configured != null && !configured.isBlank()) {
-            return Path.of(configured);
-        }
-        Path release = root.resolve("cli/target/release/bdd");
-        if (Files.isRegularFile(release)) {
-            return release;
-        }
-        Path debug = root.resolve("cli/target/debug/bdd");
-        if (Files.isRegularFile(debug)) {
-            return debug;
-        }
-        return null;
     }
 }
