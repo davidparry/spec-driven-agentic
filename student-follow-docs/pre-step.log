@@ -151,67 +151,67 @@ Scenario: Refining an unknown requirement is a tool error, not a crash          
 
 @CLI-001
 Scenario: The handshake narration names the server and quotes its instructions          # features/tdd_workshop_agent.feature:12
-  Given a workflow server that identifies as "tdd-workflow-server" version "1.0.0"      # com.davidparry.workshop.mcp.client.TddWorkshopAgentSteps.serverIdentifiesAs(java.lang.String,java.lang.String)
-  Given the server provides the instructions "Drives a spec-driven TDD/BDD workflow."   # com.davidparry.workshop.mcp.client.TddWorkshopAgentSteps.serverProvidesInstructions(java.lang.String)
-  When the walkthrough runs                                                             # com.davidparry.workshop.mcp.client.TddWorkshopAgentSteps.walkthroughRuns()
-  Then the narration contains "Server identified itself as: tdd-workflow-server v1.0.0" # com.davidparry.workshop.mcp.client.TddWorkshopAgentSteps.narrationContains(java.lang.String)
-  And the narration contains "    Drives a spec-driven TDD/BDD workflow."               # com.davidparry.workshop.mcp.client.TddWorkshopAgentSteps.narrationContains(java.lang.String)
+  Given a workflow server that identifies as "tdd-workflow-server" version "1.0.0"      # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.serverIdentifiesAs(java.lang.String,java.lang.String)
+  Given the server provides the instructions "Drives a spec-driven TDD/BDD workflow."   # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.serverProvidesInstructions(java.lang.String)
+  When the walkthrough runs                                                             # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.walkthroughRuns()
+  Then the narration contains "Server identified itself as: tdd-workflow-server v1.0.0" # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.narrationContains(java.lang.String)
+  And the narration contains "    Drives a spec-driven TDD/BDD workflow."               # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.narrationContains(java.lang.String)
 
 @CLI-001
 Scenario: A server without instructions gets no instructions block                 # features/tdd_workshop_agent.feature:19
-  Given a workflow server that identifies as "tdd-workflow-server" version "1.0.0" # com.davidparry.workshop.mcp.client.TddWorkshopAgentSteps.serverIdentifiesAs(java.lang.String,java.lang.String)
-  When the walkthrough runs                                                        # com.davidparry.workshop.mcp.client.TddWorkshopAgentSteps.walkthroughRuns()
-  Then the narration does not contain "Server instructions for the agent"          # com.davidparry.workshop.mcp.client.TddWorkshopAgentSteps.narrationDoesNotContain(java.lang.String)
+  Given a workflow server that identifies as "tdd-workflow-server" version "1.0.0" # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.serverIdentifiesAs(java.lang.String,java.lang.String)
+  When the walkthrough runs                                                        # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.walkthroughRuns()
+  Then the narration does not contain "Server instructions for the agent"          # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.narrationDoesNotContain(java.lang.String)
 
 @CLI-002
 Scenario: Discovery narrates each tool with the first sentence of its description                            # features/tdd_workshop_agent.feature:24
-  Given a workflow server that identifies as "tdd-workflow-server" version "1.0.0"                           # com.davidparry.workshop.mcp.client.TddWorkshopAgentSteps.serverIdentifiesAs(java.lang.String,java.lang.String)
-  Given the server exposes a tool "run_tests" described as "Run the kata test suite. Updates the bar color." # com.davidparry.workshop.mcp.client.TddWorkshopAgentSteps.serverExposesTool(java.lang.String,java.lang.String)
-  And the server exposes a tool "get_tdd_state" described as "Get the current phase"                         # com.davidparry.workshop.mcp.client.TddWorkshopAgentSteps.serverExposesTool(java.lang.String,java.lang.String)
-  When the walkthrough runs                                                                                  # com.davidparry.workshop.mcp.client.TddWorkshopAgentSteps.walkthroughRuns()
-  Then the narration contains "- run_tests: Run the kata test suite."                                        # com.davidparry.workshop.mcp.client.TddWorkshopAgentSteps.narrationContains(java.lang.String)
-  And the narration contains "- get_tdd_state: Get the current phase"                                        # com.davidparry.workshop.mcp.client.TddWorkshopAgentSteps.narrationContains(java.lang.String)
+  Given a workflow server that identifies as "tdd-workflow-server" version "1.0.0"                           # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.serverIdentifiesAs(java.lang.String,java.lang.String)
+  Given the server exposes a tool "run_tests" described as "Run the kata test suite. Updates the bar color." # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.serverExposesTool(java.lang.String,java.lang.String)
+  And the server exposes a tool "get_tdd_state" described as "Get the current phase"                         # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.serverExposesTool(java.lang.String,java.lang.String)
+  When the walkthrough runs                                                                                  # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.walkthroughRuns()
+  Then the narration contains "- run_tests: Run the kata test suite."                                        # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.narrationContains(java.lang.String)
+  And the narration contains "- get_tdd_state: Get the current phase"                                        # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.narrationContains(java.lang.String)
 
 @CLI-003
 Scenario: The baseline test run announces the bar color                            # features/tdd_workshop_agent.feature:32
-  Given a workflow server that identifies as "tdd-workflow-server" version "1.0.0" # com.davidparry.workshop.mcp.client.TddWorkshopAgentSteps.serverIdentifiesAs(java.lang.String,java.lang.String)
-  Given the tool "run_tests" answers with phase "GREEN"                            # com.davidparry.workshop.mcp.client.TddWorkshopAgentSteps.toolAnswersWithPhase(java.lang.String,java.lang.String)
-  When the walkthrough runs                                                        # com.davidparry.workshop.mcp.client.TddWorkshopAgentSteps.walkthroughRuns()
-  Then the narration contains ">>> The bar is GREEN."                              # com.davidparry.workshop.mcp.client.TddWorkshopAgentSteps.narrationContains(java.lang.String)
+  Given a workflow server that identifies as "tdd-workflow-server" version "1.0.0" # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.serverIdentifiesAs(java.lang.String,java.lang.String)
+  Given the tool "run_tests" answers with phase "GREEN"                            # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.toolAnswersWithPhase(java.lang.String,java.lang.String)
+  When the walkthrough runs                                                        # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.walkthroughRuns()
+  Then the narration contains ">>> The bar is GREEN."                              # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.narrationContains(java.lang.String)
 
 @CLI-004
 Scenario: A pending requirement is fetched and named in the handoff                   # features/tdd_workshop_agent.feature:38
-  Given a workflow server that identifies as "tdd-workflow-server" version "1.0.0"    # com.davidparry.workshop.mcp.client.TddWorkshopAgentSteps.serverIdentifiesAs(java.lang.String,java.lang.String)
-  Given the backlog lists "REQ-001" as "implemented" and "REQ-003" as "pending"       # com.davidparry.workshop.mcp.client.TddWorkshopAgentSteps.backlogLists(java.lang.String,java.lang.String,java.lang.String,java.lang.String)
-  When the walkthrough runs                                                           # com.davidparry.workshop.mcp.client.TddWorkshopAgentSteps.walkthroughRuns()
-  Then the narration contains "STEP 6 — tools/call get_requirement (REQ-003)"         # com.davidparry.workshop.mcp.client.TddWorkshopAgentSteps.narrationContains(java.lang.String)
-  And the narration contains "write a Gherkin scenario for REQ-003 (tagged @REQ-003)" # com.davidparry.workshop.mcp.client.TddWorkshopAgentSteps.narrationContains(java.lang.String)
+  Given a workflow server that identifies as "tdd-workflow-server" version "1.0.0"    # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.serverIdentifiesAs(java.lang.String,java.lang.String)
+  Given the backlog lists "REQ-001" as "implemented" and "REQ-003" as "pending"       # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.backlogLists(java.lang.String,java.lang.String,java.lang.String,java.lang.String)
+  When the walkthrough runs                                                           # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.walkthroughRuns()
+  Then the narration contains "STEP 6 — tools/call get_requirement (REQ-003)"         # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.narrationContains(java.lang.String)
+  And the narration contains "write a Gherkin scenario for REQ-003 (tagged @REQ-003)" # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.narrationContains(java.lang.String)
 
 @CLI-004
 Scenario: No pending work skips the detail step and uses a placeholder                             # features/tdd_workshop_agent.feature:45
-  Given a workflow server that identifies as "tdd-workflow-server" version "1.0.0"                 # com.davidparry.workshop.mcp.client.TddWorkshopAgentSteps.serverIdentifiesAs(java.lang.String,java.lang.String)
-  Given the backlog lists "REQ-001" as "implemented" and "REQ-002" as "implemented"                # com.davidparry.workshop.mcp.client.TddWorkshopAgentSteps.backlogLists(java.lang.String,java.lang.String,java.lang.String,java.lang.String)
-  When the walkthrough runs                                                                        # com.davidparry.workshop.mcp.client.TddWorkshopAgentSteps.walkthroughRuns()
-  Then the narration does not contain "STEP 6"                                                     # com.davidparry.workshop.mcp.client.TddWorkshopAgentSteps.narrationDoesNotContain(java.lang.String)
-  And the narration contains "write a Gherkin scenario for the next requirement (tagged @REQ-XXX)" # com.davidparry.workshop.mcp.client.TddWorkshopAgentSteps.narrationContains(java.lang.String)
+  Given a workflow server that identifies as "tdd-workflow-server" version "1.0.0"                 # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.serverIdentifiesAs(java.lang.String,java.lang.String)
+  Given the backlog lists "REQ-001" as "implemented" and "REQ-002" as "implemented"                # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.backlogLists(java.lang.String,java.lang.String,java.lang.String,java.lang.String)
+  When the walkthrough runs                                                                        # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.walkthroughRuns()
+  Then the narration does not contain "STEP 6"                                                     # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.narrationDoesNotContain(java.lang.String)
+  And the narration contains "write a Gherkin scenario for the next requirement (tagged @REQ-XXX)" # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.narrationContains(java.lang.String)
 
 @CLI-005
 Scenario: An error result is flagged in the narration                              # features/tdd_workshop_agent.feature:52
-  Given a workflow server that identifies as "tdd-workflow-server" version "1.0.0" # com.davidparry.workshop.mcp.client.TddWorkshopAgentSteps.serverIdentifiesAs(java.lang.String,java.lang.String)
-  Given the tool "get_tdd_state" answers with an error "TDD state unavailable"     # com.davidparry.workshop.mcp.client.TddWorkshopAgentSteps.toolAnswersWithError(java.lang.String,java.lang.String)
-  When the walkthrough runs                                                        # com.davidparry.workshop.mcp.client.TddWorkshopAgentSteps.walkthroughRuns()
-  Then the narration contains "Result (isError=true):"                             # com.davidparry.workshop.mcp.client.TddWorkshopAgentSteps.narrationContains(java.lang.String)
-  And the narration contains "    TDD state unavailable"                           # com.davidparry.workshop.mcp.client.TddWorkshopAgentSteps.narrationContains(java.lang.String)
+  Given a workflow server that identifies as "tdd-workflow-server" version "1.0.0" # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.serverIdentifiesAs(java.lang.String,java.lang.String)
+  Given the tool "get_tdd_state" answers with an error "TDD state unavailable"     # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.toolAnswersWithError(java.lang.String,java.lang.String)
+  When the walkthrough runs                                                        # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.walkthroughRuns()
+  Then the narration contains "Result (isError=true):"                             # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.narrationContains(java.lang.String)
+  And the narration contains "    TDD state unavailable"                           # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.narrationContains(java.lang.String)
 
 @CLI-006
 Scenario: The connection is closed after a completed walkthrough                   # features/tdd_workshop_agent.feature:59
-  Given a workflow server that identifies as "tdd-workflow-server" version "1.0.0" # com.davidparry.workshop.mcp.client.TddWorkshopAgentSteps.serverIdentifiesAs(java.lang.String,java.lang.String)
-  When the walkthrough runs                                                        # com.davidparry.workshop.mcp.client.TddWorkshopAgentSteps.walkthroughRuns()
-  Then the server connection has been closed                                       # com.davidparry.workshop.mcp.client.TddWorkshopAgentSteps.connectionClosed()
+  Given a workflow server that identifies as "tdd-workflow-server" version "1.0.0" # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.serverIdentifiesAs(java.lang.String,java.lang.String)
+  When the walkthrough runs                                                        # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.walkthroughRuns()
+  Then the server connection has been closed                                       # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.connectionClosed()
 
 @CLI-006
 Scenario: The connection is closed even when a tool call blows up                  # features/tdd_workshop_agent.feature:64
-  Given a workflow server that identifies as "tdd-workflow-server" version "1.0.0" # com.davidparry.workshop.mcp.client.TddWorkshopAgentSteps.serverIdentifiesAs(java.lang.String,java.lang.String)
-  Given the tool "run_tests" fails catastrophically                                # com.davidparry.workshop.mcp.client.TddWorkshopAgentSteps.toolFailsCatastrophically(java.lang.String)
-  When the walkthrough runs and fails                                              # com.davidparry.workshop.mcp.client.TddWorkshopAgentSteps.walkthroughRunsAndFails()
-  Then the server connection has been closed                                       # com.davidparry.workshop.mcp.client.TddWorkshopAgentSteps.connectionClosed()
+  Given a workflow server that identifies as "tdd-workflow-server" version "1.0.0" # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.serverIdentifiesAs(java.lang.String,java.lang.String)
+  Given the tool "run_tests" fails catastrophically                                # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.toolFailsCatastrophically(java.lang.String)
+  When the walkthrough runs and fails                                              # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.walkthroughRunsAndFails()
+  Then the server connection has been closed                                       # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.connectionClosed()

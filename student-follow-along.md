@@ -5,7 +5,7 @@ presenter does, you do — this page has the exact commands, the exact agent
 prompts, and what you should see at every step.
 
 **The big idea:** there is one MCP server — `bdd mcp serve` (23 tools).
-Cursor and the bundled `tdd-agent.jar` both talk to it. Your hour is the
+Cursor and the bundled `smoke-test.jar` both talk to it. Your hour is the
 workflow it enables: draft a requirement *with* an agent, let the server
 critique it (structure first, wording second), then drive it
 spec → Gherkin → RED → GREEN → REFACTOR through **tools**, with you
@@ -35,7 +35,7 @@ Build once at home so the room's Wi-Fi never matters:
 
 ```bash
 bdd --version                     # must succeed
-mvn -q -pl mcp-client package     # narrated client jar
+mvn -q -pl smoke-test package     # MCP-server smoke-test jar
 mvn -q -f kata/pom.xml test       # kata JUnit + Cucumber baseline
 ```
 
@@ -67,7 +67,7 @@ repo root:
 ```bash
 git checkout -b workshop trunk
 bdd --version
-mvn -q -pl mcp-client package && mvn -q -f kata/pom.xml test
+mvn -q -pl smoke-test package && mvn -q -f kata/pom.xml test
 ```
 
 **Expect:** a green build with the exact same output as your at-home build —
@@ -81,13 +81,13 @@ don't fall behind debugging alone.
 
 ## Step 2 — Watch the machinery introduce itself (~minute 14)
 
-When the presenter reaches the client demo, run:
+When the presenter reaches the smoke-test demo, run:
 
 ```bash
-java -jar mcp-client/target/tdd-agent.jar
+java -jar smoke-test/target/smoke-test.jar
 ```
 
-The client narrates every step of the protocol exchange. It starts like this:
+The smoke test narrates every step of the protocol exchange. It starts like this:
 
 ```text
 ========================================================================
@@ -95,7 +95,7 @@ The client narrates every step of the protocol exchange. It starts like this:
 ========================================================================
 ```
 
-…and walks through the handshake, discovery, and tool calls. Compare yours
+…and walks through discovery and tool calls (no initialize handshake). Compare yours
 against the full captured run:
 [student-follow-docs/step2.log](student-follow-docs/step2.log). (The
 interleaved `INFO io.modelcontextprotocol...` lines are SDK logging — normal —
@@ -103,20 +103,26 @@ and the absolute repo paths in the log will differ on your machine.)
 
 **Expect:**
 
-- **STEP 1** — the server identifies as `tdd-workflow-server v1.0.0` and
-  hands the agent its workflow instructions ("validate the spec first...").
-- **STEP 2** — **23 tools** discovered. The frozen seven you already know
+- **STEP 1** — **23 tools** discovered. The frozen seven you already know
   (`list_requirements`, `get_requirement`, `validate_spec`,
   `refine_requirement`, `run_tests`, `get_tdd_state`, `start_refactor`) plus
   authoring/staging (`scenario_add`, `unit_test_create`, `changes_show`,
   `changes_commit`, `requirement_mark_implemented`, …) and inspect
   (`project_inspect`, `command_run`). Exercise 1 uses the structure/wording
   pair; Exercise 2 uses staging.
-- **STEP 5** — `run_tests` returns `"phase": "GREEN", "tests": 5`
+- **STEP 4** — `run_tests` returns `"phase": "GREEN", "tests": 5`
   (2 JUnit tests + 3 Cucumber scenarios — one bar, two altitudes).
+- **STEP 5** — `get_requirement` for the first pending id (REQ-003 on
+  `trunk`).
+- **STEP 6** — operational reads (no staging): `validate_spec`,
+  `refine_requirement` (REQ-001), `project_inspect`, `feature_list`,
+  `feature_read` of `kata/src/test/resources/features/string_calculator.feature`,
+  `changes_show`, `changes_validate`, `step_definitions_find`. Mutating
+  tools stay behind
+  `java -jar smoke-test/target/smoke-test.jar --sweep --include-mutating`.
 
-That client just did exactly what Cursor does: launch, handshake, discover,
-invoke. That's all the MCP you need today.
+That smoke test just did exactly what Cursor does: launch, discover, invoke.
+That's all the MCP you need today.
 
 To connect your own agent, the ready-to-run configuration lives at
 [config/mcp.json](config/mcp.json):

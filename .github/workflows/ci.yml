@@ -1,11 +1,11 @@
 # CI for the workshop repo.
 #
 # Jobs:
-#   - build-and-test: mcp-client verify (JaCoCo 100%, SpotBugs, PMD) and
+#   - build-and-test: smoke-test verify (JaCoCo 100%, SpotBugs, PMD) and
 #     `mvn -f kata/pom.xml test`. Does not require the bdd binary, so a
 #     missing Rust build cannot look like a JaCoCo failure.
 #   - cli: bdd tests, clippy, fmt, coverage, and the release binary.
-#   - mcp-client-live: needs cli; drives tdd-agent.jar against that binary.
+#   - smoke-test-live: needs cli; drives smoke-test.jar against that binary.
 #   - class-completeness / workshop-start: branch guards as before.
 name: CI
 
@@ -29,8 +29,8 @@ jobs:
           java-version: '21'
           cache: maven
 
-      - name: Verify MCP client (tests, JaCoCo 100%, SpotBugs, PMD)
-        run: mvn -B -pl mcp-client verify
+      - name: Verify smoke test (tests, JaCoCo 100%, SpotBugs, PMD)
+        run: mvn -B -pl smoke-test verify
 
       - name: Test standalone kata (JUnit + Cucumber)
         run: mvn -B -f kata/pom.xml test
@@ -122,8 +122,8 @@ jobs:
           git commit -m "cli coverage badge: ${PCT}% lines"
           git push --force origin badges
 
-  mcp-client-live:
-    name: mcp-client live against bdd
+  smoke-test-live:
+    name: smoke-test live against bdd
     needs: cli
     runs-on: ubuntu-latest
     steps:
@@ -144,7 +144,7 @@ jobs:
       - name: Live sweep (23 tools against the real binary)
         run: |
           chmod +x /tmp/bdd-bin/bdd
-          mvn -B -pl mcp-client test -Dbdd.binary=/tmp/bdd-bin/bdd
+          mvn -B -pl smoke-test test -Dbdd.binary=/tmp/bdd-bin/bdd
 
   class-completeness:
     name: Class completeness (complete branch only)

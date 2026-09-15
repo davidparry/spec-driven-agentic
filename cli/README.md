@@ -9,7 +9,7 @@ One native binary for the whole spec-driven loop (spec → Gherkin → RED →
 GREEN → REFACTOR) **and** the workshop MCP server: `bdd mcp serve` exposes
 23 tools (wire identity `tdd-workflow-server` / `1.0.0`). Frozen seven-tool
 reply shapes stay; the source of truth is `tests/mcp_conformance.rs` plus
-mcp-client `ToolPlan`.
+smoke-test `ToolPlan`.
 
 **Full command manual:** every command, subcommand, and flag with
 in-depth examples, searchable —
@@ -89,7 +89,7 @@ architecture and full test coverage throughout:
 - `bdd spec list | show | validate | refine` — the `list_requirements`,
   `get_requirement`, `validate_spec`, and `refine_requirement` behaviors.
   Frozen seven-tool reply shapes are gated by `tests/mcp_conformance.rs`
-  (and mcp-client `ToolPlan`).
+  (and smoke-test `ToolPlan`).
 - `bdd spec draft | mark-implemented` — interactive drafting where the
   human words the spec and validate/refine findings drive rewording
   until clean. With a resolved model, drafting starts from a plain-words
@@ -626,7 +626,7 @@ test-first:
    (`list_requirements`, `get_requirement`, `validate_spec`,
    `refine_requirement`, `run_tests`, `get_tdd_state`, `start_refactor`)
    must keep their reply shapes. The source of truth is
-   `tests/mcp_conformance.rs` plus mcp-client `ToolPlan` (exactly 23
+   `tests/mcp_conformance.rs` plus smoke-test `ToolPlan` (exactly 23
    names; a 24th tool fails that Java build). Backup Inspector:
    `npx @modelcontextprotocol/inspector bdd mcp serve --root $PWD`.
 4. **Never expose escape hatches.** No `write_file`, `run_shell`,

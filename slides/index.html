@@ -305,7 +305,7 @@ var tools = client.listTools();                      // discovery — 23 tools
 var result = client.callTool(
     CallToolRequest.builder("run_tests").arguments(Map.of()).build());
       </code></pre>
-      <p class="small">Run it: <code>java -jar mcp-client/target/tdd-agent.jar</code> (needs <code>bdd</code> on PATH)</p>
+      <p class="small">Run it: <code>java -jar smoke-test/target/smoke-test.jar</code> (needs <code>bdd</code> on PATH)</p>
       <aside class="notes">Two minutes, one run: the jar is only a client. The child is bdd mcp serve. Discovery lists 23 tools, not seven. Then move on; the workflow is next.</aside>
     </section>
 

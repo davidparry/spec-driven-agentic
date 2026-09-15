@@ -22,7 +22,7 @@
 > grades your run against the `complete` branch.
 
 A 60-minute hands-on workshop. There is **one MCP implementation**: `bdd mcp
-serve` (23 tools). Cursor and the bundled `tdd-agent.jar` both drive that
+serve` (23 tools). Cursor and the bundled `smoke-test.jar` both drive that
 binary over stdio. What you drive is a **spec-driven development workflow
 spanning SDD, BDD, and TDD**: you and an AI agent draft requirements together
 and iterate them through two server feedback loops — `validate_spec` for
@@ -69,7 +69,7 @@ presenter, not in the repo.)
 | --- | --- |
 | `kata/` | A **standalone** Maven project — the String Calculator kata. It has its own `pom.xml` (no parent). Two requirements are implemented; the rest are driven agentically during the workshop. Gherkin feature files (`src/test/resources/features/`) are the executable behavior spec, run by Cucumber alongside the JUnit tests. Copy the folder and it still builds: `mvn -f kata/pom.xml test`. |
 | [`cli/`](cli/README.md) | The `bdd` CLI **and** the workshop MCP server. `bdd mcp serve` exposes 23 tools over stdio (wire identity `tdd-workflow-server` / `1.0.0`). Frozen seven-tool reply shapes are gated by `cli/tests/mcp_conformance.rs`. The same binary automates the spec-driven loop with per-command tool profiles (3–7 tools) and a local Ollama model (`qwen3.8-flash-next:125b-mlx`). See [`cli/README.md`](cli/README.md) and the searchable [command manual](https://davidparry.github.io/tdd-bdd-agentic/manual/). |
-| `mcp-client/` | A narrated MCP **client** (`tdd-agent.jar`) plus an automated 22-tool sweep. It launches **only** `bdd mcp serve` as a child process — handshake, discovery, `get_tdd_state` / `list_requirements` / `run_tests`. Own spec (`mcp-client/requirements/client-requirements.json`), tagged Cucumber scenarios, `SpecCompletenessTest`, 100% instruction/branch coverage (JaCoCo-enforced; excludes `TddAgent` and `SdkToolClient` only), SpotBugs + PMD gating `mvn -pl mcp-client verify`. |
+| `smoke-test/` | A narrated **smoke test** of `bdd mcp serve` (`smoke-test.jar`) plus an automated 23-tool sweep. It launches **only** that server as a child process — discovery, baseline `run_tests`, then remaining read-only tools (`validate_spec`, `project_inspect`, `feature_list` / `feature_read`, `changes_show` / `changes_validate`, `step_definitions_find`; no `initialize` handshake). Mutating tools stay behind `--sweep --include-mutating`. Own spec (`smoke-test/requirements/requirements.json`), tagged Cucumber scenarios, `SpecCompletenessTest`, 100% instruction/branch coverage (JaCoCo-enforced; excludes `TddAgent` and `SdkToolClient` only), SpotBugs + PMD gating `mvn -pl smoke-test verify`. |
 | `requirements/requirements.json` | The SDD spec: the requirements backlog, and the root of the **spec catalog** — it holds requirements of its own and may `include` child spec files (which may include further files, N levels deep); the tooling merges the tree into one backlog. Each requirement carries acceptance criteria (already phrased Given/When/Then) that agents turn into executable Gherkin scenarios and failing tests, plus a `featureFile` pointer to where its scenarios live. Full field-by-field reference: [The requirements format](https://davidparry.github.io/tdd-bdd-agentic/manual/spec-format.html). |
 | `slides/index.html` | The reveal.js slide deck for the 60-minute talk (self-contained, CDN-based). |
 | `student-follow-along.md` | The attendee's step-by-step companion: commands, prompts, expected output, self-check, homework. |
@@ -86,9 +86,9 @@ presenter, not in the repo.)
 
 CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs on every push and pull request:
 
-- **build-and-test** — `mvn -pl mcp-client verify` (JUnit + Cucumber, JaCoCo 100%, SpotBugs, PMD) and `mvn -f kata/pom.xml test` for the standalone kata. This job does **not** require the `bdd` binary, so a missing Rust build cannot look like a JaCoCo failure.
+- **build-and-test** — `mvn -pl smoke-test verify` (JUnit + Cucumber, JaCoCo 100%, SpotBugs, PMD) and `mvn -f kata/pom.xml test` for the standalone kata. This job does **not** require the `bdd` binary, so a missing Rust build cannot look like a JaCoCo failure.
 - **cli** — `bdd` tests, clippy, fmt, coverage (≥ 97% library lines, `main.rs` ignored), and the release binary.
-- **mcp-client-live** — needs `cli`; drives `tdd-agent.jar` against that binary (`-Dbdd.binary=…`) so the child's process is proven to be real `bdd mcp serve`.
+- **smoke-test-live** — needs `cli`; drives `smoke-test.jar` against that binary (`-Dbdd.binary=…`) so the child's process is proven to be real `bdd mcp serve`.
 - **class-completeness** — runs [scripts/check-class-complete.sh](scripts/check-class-complete.sh), which asserts the class deliverables (REQ-003 implemented, REQ-007 in the spec). It **fails on `trunk` by design** — the red X is the reminder that trunk is the starting line — and passes on `complete`.
 - **workshop-start** — the inverse gate: runs [scripts/check-workshop-start.sh](scripts/check-workshop-start.sh), which asserts the starting state is intact (REQ-003–006 pending, no REQ-007, no scenarios beyond REQ-001/002, `StringCalculator` unimplemented past REQ-002). It **passes on `trunk`** and **fails on `complete` by design**, so completed work can never silently leak into the branch attendees clone.
 
@@ -97,7 +97,7 @@ CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs on every push and
 and `mvn -q -f kata/pom.xml test`) must pass before the class, and the RED bar is created *live*
 during Exercise 2 when the agent writes the `@REQ-003` scenario. Also note
 that `mvn clean validate` runs no tests at all — `validate` only checks the
-POMs. Use `mvn -pl mcp-client verify` and `mvn -f kata/pom.xml test`
+POMs. Use `mvn -pl smoke-test verify` and `mvn -f kata/pom.xml test`
 to actually run the Java suites, and the two guard scripts above to tell
 the branches apart.
 
@@ -126,7 +126,7 @@ everything that ships — the CLI, the command manual, and the site:
 
 One-time tools: `cargo install mdbook` and `pip install markdown`.
 
-If you touched the Java client, also run `mvn -pl mcp-client verify` and
+If you touched the Java smoke test, also run `mvn -pl smoke-test verify` and
 `mvn -f kata/pom.xml test` (the standalone kata). The multi-platform
 release binaries are built by the release workflow when a `v*` tag is
 pushed (`scripts/release.sh`), not locally.
@@ -136,7 +136,7 @@ pushed (`scripts/release.sh`), not locally.
 - **`bdd` on PATH** (GitHub release, `cargo install --path cli`, or `cli/target/release/bdd`)
 - Java 21+
 - Maven 3.9+
-- An MCP host for the exercises (Cursor, Claude Desktop, or the bundled `tdd-agent.jar`)
+- An MCP host for the exercises (Cursor, Claude Desktop, or the bundled `smoke-test.jar`)
 - Optional: Node.js for the MCP Inspector (`npx @modelcontextprotocol/inspector bdd mcp serve --root $PWD`)
 
 ## Setup (do this before the workshop)
@@ -144,7 +144,7 @@ pushed (`scripts/release.sh`), not locally.
 ```bash
 git clone <this repo> && cd tdd-bdd-agentic
 bdd --version                     # must succeed before Cursor will connect
-mvn -q -pl mcp-client package     # narrated client jar
+mvn -q -pl smoke-test package     # MCP-server smoke-test jar
 mvn -q -f kata/pom.xml test       # standalone kata: JUnit + Cucumber
 ```
 
@@ -167,7 +167,7 @@ scaffolds, mark-implemented, and staging go through tools. Generation over
 MCP is template-only.
 
 **Frozen seven** (reply shapes stay; conformance is `cli/tests/mcp_conformance.rs`
-plus mcp-client `ToolPlan`):
+plus smoke-test `ToolPlan`):
 
 | Tool | Purpose |
 | --- | --- |
@@ -191,11 +191,11 @@ RED-gated; the CLI `implement` profile also asks the human to confirm).
 The workflow rules live in `cli/src/domain/tdd.rs` (`TddStateMachine`) and
 the MCP handlers in `cli/src/mcp.rs`. They were built test-first.
 
-The Java **client** practices what it preaches: `mcp-client/requirements/client-requirements.json`
+The Java **smoke test** practices what it preaches: `smoke-test/requirements/requirements.json`
 with `@CLI-XXX` tags, tagged Gherkin scenarios, a `SpecCompletenessTest`, and
 100% instruction/branch coverage with SpotBugs and PMD gating
-`mvn -pl mcp-client verify`. The Rust server's frozen contracts are the
-conformance suite plus that client's `ToolPlan` (exactly 23 names; a 24th
+`mvn -pl smoke-test verify`. The Rust server's frozen contracts are the
+conformance suite plus that module's `ToolPlan` (exactly 23 names; a 24th
 tool fails the Java build).
 
 ## The workshop
@@ -205,20 +205,27 @@ tool fails the Java build).
 The server is `bdd mcp serve` — this segment is a quick tour, not an
 exercise. Composition root: `cli/src/mcp.rs` plus the CLI TDD services. A
 stdio server must never write to stdout — that corrupts the JSON-RPC stream.
-Prove the plumbing with the bundled **client**, which does exactly what an
-IDE does: launch `bdd mcp serve`, `initialize`, `tools/list` (23 tools),
-then `tools/call` — narrating each step.
+Prove the plumbing with the bundled **smoke test**, which does exactly what an
+IDE does: launch `bdd mcp serve`, `tools/list` (23 tools),
+then `tools/call` — narrating each step. No `initialize` handshake.
+Default smoke is read-only plus the baseline `run_tests`: after
+`get_requirement` it also calls `validate_spec`, `refine_requirement`,
+`project_inspect`, `feature_list`, `feature_read` (workshop kata path),
+`changes_show`, `changes_validate`, and `step_definitions_find`.
+Mutating tools stay behind `--sweep --include-mutating`.
 
 ```bash
 bdd --version
-mvn -q -pl mcp-client package && mvn -q -f kata/pom.xml test
-java -jar mcp-client/target/tdd-agent.jar
+mvn -q -pl smoke-test package && mvn -q -f kata/pom.xml test
+java -jar smoke-test/target/smoke-test.jar
+# optional: java -jar smoke-test/target/smoke-test.jar --sweep
+# optional: java -jar smoke-test/target/smoke-test.jar --sweep --include-mutating
 ```
 
 The quiet kata test run prints the String Calculator Cucumber narration —
 the full expected output is still captured in
 [student-follow-docs/pre-step.log](student-follow-docs/pre-step.log).
-The client then narrates the whole protocol exchange, starting like this:
+The smoke test then narrates the whole protocol exchange, starting like this:
 
 ```text
 ========================================================================
@@ -226,7 +233,7 @@ The client then narrates the whole protocol exchange, starting like this:
 ========================================================================
 ```
 
-…through handshake, discovery, and tool calls — the full expected output is
+…through discovery and tool calls — the full expected output is
 captured in [student-follow-docs/step2.log](student-follow-docs/step2.log).
 
 ### Exercise 1 — Draft and refine the spec with your agent (20–32 min)
@@ -287,10 +294,8 @@ bdd mcp serve --root $PWD
 ```
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"me","version":"0"}}}
-{"jsonrpc":"2.0","method":"notifications/initialized"}
-{"jsonrpc":"2.0","id":2,"method":"tools/list"}
-{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"run_tests","arguments":{}}}
+{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientInfo":{"name":"me","version":"0"},"io.modelcontextprotocol/clientCapabilities":{}}}}
+{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"run_tests","arguments":{},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientInfo":{"name":"me","version":"0"},"io.modelcontextprotocol/clientCapabilities":{}}}}
 ```
 
 ## Ideas to keep building

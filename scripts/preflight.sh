@@ -56,18 +56,18 @@ else
         "cargo install --path cli  (or download a release binary and put it on PATH)"
 fi
 
-# 4. MCP client jar + standalone kata
-if mvn -B -q -pl mcp-client package >/tmp/preflight-build.log 2>&1 \
+# 4. MCP-server smoke-test jar + standalone kata
+if mvn -B -q -pl smoke-test package >/tmp/preflight-build.log 2>&1 \
         && mvn -B -q -f kata/pom.xml test >>/tmp/preflight-build.log 2>&1; then
-    ok "mvn -pl mcp-client package and kata tests are green"
+    ok "mvn -pl smoke-test package and kata tests are green"
 else
     bad "build failed" "see /tmp/preflight-build.log"
 fi
 
-if [ -f mcp-client/target/tdd-agent.jar ]; then
-    ok "mcp-client/target/tdd-agent.jar present"
+if [ -f smoke-test/target/smoke-test.jar ]; then
+    ok "smoke-test/target/smoke-test.jar present"
 else
-    bad "tdd-agent.jar missing" "run: mvn -q -pl mcp-client package"
+    bad "smoke-test.jar missing" "run: mvn -q -pl smoke-test package"
 fi
 
 # 5. Cucumber suite ran (BDD layer alive)
@@ -78,8 +78,8 @@ else
         "check kata/src/test/java/.../RunCucumberTest.java and the cucumber dependencies"
 fi
 
-# 6. End-to-end smoke: client launches bdd mcp serve, drives the walkthrough
-if [ -n "$BDD" ] && java -Dbdd.binary="$BDD" -jar mcp-client/target/tdd-agent.jar >/tmp/preflight-agent.log 2>&1; then
+# 6. End-to-end smoke: jar launches bdd mcp serve, drives the walkthrough
+if [ -n "$BDD" ] && java -Dbdd.binary="$BDD" -jar smoke-test/target/smoke-test.jar >/tmp/preflight-agent.log 2>&1; then
     if grep -q '"phase"' /tmp/preflight-agent.log && grep -qiE 'GREEN|RED' /tmp/preflight-agent.log; then
         ok "end-to-end agent run talks to bdd and reports a TDD phase"
     else
@@ -102,7 +102,7 @@ else
 fi
 if grep -q '@REQ-003' kata/src/test/resources/features/string_calculator.feature; then
     bad "feature file already contains an @REQ-003 scenario (rehearsal leftover)" \
-        "reset: git checkout -- kata requirements && mvn -q -pl mcp-client package"
+        "reset: git checkout -- kata requirements && mvn -q -pl smoke-test package"
 else
     ok "feature file has no REQ-003 scenario yet"
 fi

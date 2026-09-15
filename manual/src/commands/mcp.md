@@ -2,7 +2,7 @@
 
 The workshop MCP server. This is the same workflow the CLI offers a
 human, exposed to AI agents as typed tools over the Model Context
-Protocol. Cursor, Claude, the bundled `tdd-agent.jar`, and `bdd mcp
+Protocol. Cursor, Claude, the bundled `smoke-test.jar`, and `bdd mcp
 call` all talk to this process.
 
 ```text
@@ -16,13 +16,16 @@ Commands:
 
 Keep the wire identity `tdd-workflow-server` / `1.0.0` so existing
 clients stay stable. Frozen seven-tool **reply shapes** are owned by
-`cli/tests/mcp_conformance.rs` and mcp-client's `ToolPlan` — not by a
+`cli/tests/mcp_conformance.rs` and smoke-test's `ToolPlan` — not by a
 separate Java server.
 
 The server is stdio only: JSON-RPC on stdin/stdout. Cursor, Claude,
-Inspector, and `tdd-agent.jar` launch it as a child process. rmcp 3.3
-still speaks the initialize handshake on this transport so those hosts
-keep working.
+Inspector, and `smoke-test.jar` launch it as a child process. It prefers
+protocol `2026-07-28`: no `initialize` handshake. `bdd mcp call` and
+`bdd mcp tools` open a session with `server/discover` and per-request
+`_meta`. The Java smoke walkthrough starts at `tools/list` (it does not
+call `initialize`). A host that still sends `initialize` is answered by
+rmcp for compatibility; this project's own Rust clients do not.
 
 ---
 
@@ -30,7 +33,7 @@ keep working.
 
 Serve the MCP tools over stdio. The process reads JSON-RPC on stdin
 and writes replies on stdout, so an MCP client (Cursor, Claude
-Desktop, `tdd-agent.jar`) launches it as a child process — you
+Desktop, `smoke-test.jar`) launches it as a child process — you
 normally never run it by hand.
 
 ```bash

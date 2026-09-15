@@ -9,10 +9,10 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use rmcp::ServiceExt as _;
-use rmcp::model::{CallToolRequestParams, CallToolResult, Tool};
+use rmcp::model::{CallToolRequestParams, CallToolResult, ProtocolVersion, Tool};
 use rmcp::service::{Peer, RoleClient, RoleServer, RunningService};
 use rmcp::transport::child_process::{ConfigureCommandExt, TokioChildProcess};
+use rmcp::{ClientLifecycleMode, ClientServiceExt, ServiceExt as _};
 use tokio::process::Command;
 use tokio::sync::oneshot;
 
@@ -155,7 +155,10 @@ where
                         fail.unwrap_or_else(|_| "server task dropped".into())
                     )))
                 }
-                result = tokio::time::timeout(timeout, ().serve(client_transport)) => {
+                result = tokio::time::timeout(
+                    timeout,
+                    ().serve_with_lifecycle(client_transport, discover_lifecycle()),
+                ) => {
                     result
                         .map_err(|_| ToolError("timed out connecting to built-in tools".into()))?
                         .map_err(|error| ToolError(error.to_string()))
@@ -173,11 +176,20 @@ where
         self.runtime.block_on(async move {
             let transport = TokioChildProcess::new(command)
                 .map_err(|error| ToolError(format!("failed to start MCP server: {error}")))?;
-            tokio::time::timeout(timeout, ().serve(transport))
-                .await
-                .map_err(|_| ToolError("timed out connecting to MCP server".into()))?
-                .map_err(|error| ToolError(error.to_string()))
+            tokio::time::timeout(
+                timeout,
+                ().serve_with_lifecycle(transport, discover_lifecycle()),
+            )
+            .await
+            .map_err(|_| ToolError("timed out connecting to MCP server".into()))?
+            .map_err(|error| ToolError(error.to_string()))
         })
+    }
+}
+
+fn discover_lifecycle() -> ClientLifecycleMode {
+    ClientLifecycleMode::Discover {
+        preferred_versions: vec![ProtocolVersion::V_2026_07_28],
     }
 }
 

@@ -39,7 +39,7 @@ Use the search icon (or press <kbd>S</kbd>) to search the whole manual.
   to do next — the same guidance an AI agent receives over MCP.
 - Names in parentheses in help text, like `(run_tests)`, are the
   matching MCP tool names — frozen contracts kept by
-  `cli/tests/mcp_conformance.rs` and mcp-client `ToolPlan`.
+  `cli/tests/mcp_conformance.rs` and smoke-test `ToolPlan`.
 
 ## Supported languages
 

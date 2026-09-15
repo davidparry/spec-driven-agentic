@@ -183,7 +183,7 @@
                         <h1 id="bdd-mcp"><a class="header" href="#bdd-mcp">bdd mcp</a></h1>
 <p>The workshop MCP server. This is the same workflow the CLI offers a
 human, exposed to AI agents as typed tools over the Model Context
-Protocol. Cursor, Claude, the bundled <code>tdd-agent.jar</code>, and <code>bdd mcp call</code> all talk to this process.</p>
+Protocol. Cursor, Claude, the bundled <code>smoke-test.jar</code>, and <code>bdd mcp call</code> all talk to this process.</p>
 <pre><code class="language-text">Usage: bdd mcp [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
@@ -193,17 +193,17 @@ Commands:
 </code></pre>
 <p>Keep the wire identity <code>tdd-workflow-server</code> / <code>1.0.0</code> so existing
 clients stay stable. Frozen seven-tool <strong>reply shapes</strong> are owned by
-<code>cli/tests/mcp_conformance.rs</code> and mcp-client’s <code>ToolPlan</code> — not by a
+<code>cli/tests/mcp_conformance.rs</code> and smoke-test’s <code>ToolPlan</code> — not by a
 separate Java server.</p>
 <p>The server is stdio only: JSON-RPC on stdin/stdout. Cursor, Claude,
-Inspector, and <code>tdd-agent.jar</code> launch it as a child process. rmcp 3.3
+Inspector, and <code>smoke-test.jar</code> launch it as a child process. rmcp 3.3
 still speaks the initialize handshake on this transport so those hosts
 keep working.</p>
 <hr>
 <h2 id="bdd-mcp-serve"><a class="header" href="#bdd-mcp-serve">bdd mcp serve</a></h2>
 <p>Serve the MCP tools over stdio. The process reads JSON-RPC on stdin
 and writes replies on stdout, so an MCP client (Cursor, Claude
-Desktop, <code>tdd-agent.jar</code>) launches it as a child process — you
+Desktop, <code>smoke-test.jar</code>) launches it as a child process — you
 normally never run it by hand.</p>
 <pre><code class="language-bash">bdd mcp serve --root /path/to/project
 </code></pre>

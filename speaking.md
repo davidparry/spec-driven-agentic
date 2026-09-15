@@ -103,7 +103,7 @@ or LLM experience required; comfort with JUnit and Cucumber is assumed.
 - **No conference network needed.** The entire demo runs locally against
   Ollama, which is the thesis rather than a convenience.
 - Stack on stage: Java 21, Maven, the `bdd` binary (`bdd mcp serve`), Cucumber-JVM 7, JUnit 5,
-  Ollama running `qwen3.8-flash-next:125b-mlx`. The bundled `tdd-agent.jar` is an MCP **client**.
+  Ollama running `qwen3.8-flash-next:125b-mlx`. The bundled `smoke-test.jar` is an MCP-server **smoke test**.
 - For the workshop format: attendees need **`bdd` on PATH**, Java 21, Maven, git, Cursor (or
   Claude), and — to run fully offline — Ollama with `qwen3.8-flash-next:125b-mlx` pulled ahead of
   time. The [CLI path](student-follow-docs/cli-path.md) is the Wi-Fi-off alternative.

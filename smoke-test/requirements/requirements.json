@@ -1,0 +1,132 @@
+{
+  "project": "MCP server smoke test",
+  "description": "The spec for the workshop's Java smoke test of bdd mcp serve. The module practices what the workshop teaches: these requirements are the source of truth, the tagged Cucumber scenarios are their executable form, and SpecCompletenessTest fails the build if the two drift apart.",
+  "requirements": [
+    {
+      "id": "CLI-001",
+      "title": "The agent starts the walkthrough at tools/list",
+      "status": "implemented",
+      "story": "As a workshop attendee, I want the smoke walkthrough to start with tool discovery rather than the initialize handshake so that I see the 2026-07-28 protocol the server actually speaks.",
+      "acceptanceCriteria": [
+        "Given a server exposing tools, when the walkthrough runs, then the first narrated step is tools/list",
+        "Given a walkthrough run, when the narration is read, then it does not mention initialize or handshake"
+      ],
+      "featureFile": "smoke-test/src/test/resources/features/tdd_workshop_agent.feature"
+    },
+    {
+      "id": "CLI-002",
+      "title": "The agent discovers and narrates the server's tools",
+      "status": "implemented",
+      "story": "As a workshop attendee, I want the agent to list every discovered tool with a one-line summary so that I can see discovery replace hardcoding.",
+      "acceptanceCriteria": [
+        "Given a server exposing tools, when the walkthrough runs, then each tool is narrated with its name and the first sentence of its description",
+        "Given a tool whose description has no sentence break, when the walkthrough runs, then the full description is narrated unchanged"
+      ],
+      "featureFile": "smoke-test/src/test/resources/features/tdd_workshop_agent.feature"
+    },
+    {
+      "id": "CLI-003",
+      "title": "The agent establishes the baseline bar color",
+      "status": "implemented",
+      "story": "As a workshop attendee, I want the agent to run the kata suite through run_tests and announce the bar color so that the feedback loop is visible before any work starts.",
+      "acceptanceCriteria": [
+        "Given a baseline run_tests result with phase GREEN, when the walkthrough runs, then the narration reports the bar is GREEN"
+      ],
+      "featureFile": "smoke-test/src/test/resources/features/tdd_workshop_agent.feature"
+    },
+    {
+      "id": "CLI-004",
+      "title": "The agent picks the next pending requirement from the spec",
+      "status": "implemented",
+      "story": "As a workshop attendee, I want the agent to select the first pending requirement and fetch its detail so that the handoff names concrete next work.",
+      "acceptanceCriteria": [
+        "Given a backlog with a pending requirement, when the walkthrough runs, then the agent fetches that requirement's detail and names it in the handoff",
+        "Given a backlog with no pending requirements, when the walkthrough runs, then the detail step is skipped and the handoff uses a placeholder"
+      ],
+      "featureFile": "smoke-test/src/test/resources/features/tdd_workshop_agent.feature"
+    },
+    {
+      "id": "CLI-005",
+      "title": "The agent surfaces tool errors instead of hiding them",
+      "status": "implemented",
+      "story": "As a workshop attendee, I want error results flagged in the narration so that I can see agents read failures and recover from them.",
+      "acceptanceCriteria": [
+        "Given a tool call whose result has isError true, when the walkthrough narrates it, then the narration flags the result with isError=true"
+      ],
+      "featureFile": "smoke-test/src/test/resources/features/tdd_workshop_agent.feature"
+    },
+    {
+      "id": "CLI-006",
+      "title": "The agent always closes the server connection",
+      "status": "implemented",
+      "story": "As a workshop attendee, I want the smoke-test connection closed when the walkthrough finishes or fails so that no orphaned server process is left behind.",
+      "acceptanceCriteria": [
+        "Given a walkthrough that completes, when the run returns, then the connection has been closed",
+        "Given a walkthrough that fails mid-run with an error, when the failure propagates, then the connection has still been closed"
+      ],
+      "featureFile": "smoke-test/src/test/resources/features/tdd_workshop_agent.feature"
+    },
+    {
+      "id": "CLI-007",
+      "title": "The smoke test launches the bdd binary as the MCP server",
+      "status": "implemented",
+      "story": "As a workshop attendee, I want the Java smoke test to start bdd mcp serve so that the walkthrough talks to the same server Cursor uses.",
+      "acceptanceCriteria": [
+        "Given a workshop root and a bdd binary, when ServerLaunch.bdd is built, then the program is that binary and the args are mcp serve --root <root>"
+      ],
+      "featureFile": "smoke-test/src/test/resources/features/tool_sweep.feature"
+    },
+    {
+      "id": "CLI-008",
+      "title": "Discovery carries each tool's input schema and required arguments",
+      "status": "implemented",
+      "story": "As a workshop attendee, I want discovered tools to keep their JSON Schema so that a client can call tools it did not hard-code.",
+      "acceptanceCriteria": [
+        "Given a tool whose schema requires id, when required arguments are read, then id is listed"
+      ],
+      "featureFile": "smoke-test/src/test/resources/features/tool_sweep.feature"
+    },
+    {
+      "id": "CLI-009",
+      "title": "The tool plan names exactly the 23 served tools",
+      "status": "implemented",
+      "story": "As a maintainer, I want a 24th MCP tool to fail the Java build until it is planned so that the smoke test cannot silently skip new surface area.",
+      "acceptanceCriteria": [
+        "Given the ToolPlan, when it is listed, then it names exactly 23 tools",
+        "Given a discovered tool that is not in the plan, when the sweep runs, then that tool is reported as unexpected"
+      ],
+      "featureFile": "smoke-test/src/test/resources/features/tool_sweep.feature"
+    },
+    {
+      "id": "CLI-010",
+      "title": "A read-only sweep calls every planned read tool and skips mutations",
+      "status": "implemented",
+      "story": "As a workshop attendee, I want a default sweep that does not stage files so that I can prove discovery without mutating the kata.",
+      "acceptanceCriteria": [
+        "Given a server that exposes every planned tool, when a read-only sweep runs, then staging and gated tools are not called"
+      ],
+      "featureFile": "smoke-test/src/test/resources/features/tool_sweep.feature"
+    },
+    {
+      "id": "CLI-011",
+      "title": "Gated tool refusals are expected, not sweep failures",
+      "status": "implemented",
+      "story": "As a workshop attendee, I want start_refactor off GREEN to count as a successful gated call so that the sweep can exercise refusals.",
+      "acceptanceCriteria": [
+        "Given a gated tool that answers with isError, when a mutating sweep runs, then the call is recorded and is not a failure"
+      ],
+      "featureFile": "smoke-test/src/test/resources/features/tool_sweep.feature"
+    },
+    {
+      "id": "CLI-012",
+      "title": "The walkthrough calls remaining read-only tools without staging",
+      "status": "implemented",
+      "story": "As a workshop attendee, I want the default smoke walkthrough to call validate, inspect, Gherkin, and staging-area reads so that those tools are proven live without mutating the kata.",
+      "acceptanceCriteria": [
+        "Given a walkthrough run, when the narration is read, then it includes validate_spec, refine_requirement for REQ-001, project_inspect, feature_list, feature_read of the workshop kata feature, changes_show, changes_validate, and step_definitions_find",
+        "Given a walkthrough run, when feature_read is called, then its path is the workshop kata feature and not the live-test seeded features/calc.feature"
+      ],
+      "featureFile": "smoke-test/src/test/resources/features/tdd_workshop_agent.feature"
+    }
+  ]
+}

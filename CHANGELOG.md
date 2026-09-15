@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Default smoke walkthrough now calls the remaining read-only MCP tools
+  (`validate_spec`, `refine_requirement`, `project_inspect`, `feature_list`,
+  `feature_read` of the workshop kata feature, `changes_show`,
+  `changes_validate`, `step_definitions_find`). Mutating tools stay behind
+  `--sweep --include-mutating`.
+- Renamed the Java module from `mcp-client` to `smoke-test`
+  (`smoke-test.jar`, package `com.davidparry.workshop.smoke`). It is a
+  smoke test of `bdd mcp serve`, not a general MCP client product.
+- MCP sessions from `bdd mcp call` / `bdd mcp tools` use the 2026-07-28
+  discover lifecycle: they do not send `initialize`. Conformance asserts
+  `tools/list` succeeds as the first stdio request, with per-request
+  `_meta`. The Java smoke walkthrough no longer calls `initialize`; STEP 1
+  is `tools/list`.
 - MCP `scenario_update` (and other optional tool fields) emit portable
   `anyOf` schemas instead of `type: ["string","null"]` arrays that some
   MCP clients drop or reject.
@@ -9,9 +22,9 @@
 
 - One MCP server: `bdd mcp serve` (23 tools, including `changes_validate`
   for staged-wins spec+Gherkin checks). Workshop Cursor config and
-  `tdd-agent.jar` launch that binary; the Java `mcp-server/` module is gone.
+  `smoke-test.jar` launch that binary; the Java `mcp-server/` module is gone.
   Frozen seven-tool reply shapes stay (`cli/tests/mcp_conformance.rs` +
-  mcp-client `ToolPlan`). CLI LLM calls use Ollama `/api/chat` with
+  smoke-test `ToolPlan`). CLI LLM calls use Ollama `/api/chat` with
   per-command tool profiles (`bdd tools`, `bdd mcp call`, `bdd ask`).
 - Switch the recommended Ollama model this CLI, talk, and workshop run
   against to `qwen3.8-flash-next:125b-mlx`.

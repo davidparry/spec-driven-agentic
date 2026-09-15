@@ -1,17 +1,18 @@
 //! MCP conformance: drive the embedded server exactly as an external MCP
-//! host would — initialize, tools/list, tools/call — and assert the seven
-//! frozen tools carry the workshop server's names and reply shapes. Most
-//! tests use an in-memory duplex transport around [`WorkflowServer`]; the
-//! final test speaks raw newline-delimited JSON-RPC to the real `bdd mcp
-//! serve` child process over stdio.
+//! host would — `server/discover` / `tools/list` / `tools/call`, no
+//! `initialize` handshake — and assert the seven frozen tools carry the
+//! workshop server's names and reply shapes. Most tests use an in-memory
+//! duplex transport around [`WorkflowServer`]; the final test speaks raw
+//! newline-delimited JSON-RPC to the real `bdd mcp serve` child process
+//! over stdio.
 
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 
-use rmcp::ServiceExt as _;
-use rmcp::model::CallToolRequestParams;
+use rmcp::model::{CallToolRequestParams, ProtocolVersion};
 use rmcp::service::{RoleClient, RunningService};
+use rmcp::{ClientLifecycleMode, ClientServiceExt, ServiceExt as _};
 use serde_json::{Value, json};
 
 use bdd_cli::domain::model::TestRunSummary;
@@ -60,9 +61,14 @@ async fn connect(server: WorkflowServer) -> RunningService<RoleClient, ()> {
             .expect("server should start");
         let _ = service.waiting().await;
     });
-    ().serve(client_transport)
-        .await
-        .expect("client should connect and initialize")
+    ().serve_with_lifecycle(
+        client_transport,
+        ClientLifecycleMode::Discover {
+            preferred_versions: vec![ProtocolVersion::V_2026_07_28],
+        },
+    )
+    .await
+    .expect("client should connect via server/discover")
 }
 
 async fn connect_default(root: &Path) -> RunningService<RoleClient, ()> {
@@ -877,10 +883,22 @@ async fn builtin_tool_definitions_match_the_wire_list() {
     client.cancel().await.unwrap();
 }
 
-/// The real binary over real stdio: initialize -> tools/list -> tools/call,
-/// newline-delimited JSON-RPC, exactly like an external MCP host.
+fn request_meta() -> Value {
+    json!({
+        "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+        "io.modelcontextprotocol/clientInfo": {
+            "name": "conformance-test",
+            "version": "0"
+        },
+        "io.modelcontextprotocol/clientCapabilities": {}
+    })
+}
+
+/// The real binary over real stdio: tools/list then tools/call, no
+/// `initialize` handshake. Newline-delimited JSON-RPC with per-request
+/// `_meta`, the 2026-07-28 lifecycle.
 #[test]
-fn the_bdd_binary_serves_mcp_over_child_process_stdio() {
+fn the_bdd_binary_serves_mcp_over_child_process_stdio_without_initialize() {
     use std::io::{BufRead, BufReader, Write};
     use std::process::{Command, Stdio};
 
@@ -909,24 +927,16 @@ fn the_bdd_binary_serves_mcp_over_child_process_stdio() {
     };
 
     send(json!({
-        "jsonrpc": "2.0", "id": 1, "method": "initialize",
-        "params": {
-            "protocolVersion": "2024-11-05",
-            "capabilities": {},
-            "clientInfo": {"name": "conformance-test", "version": "0"},
-        },
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/list",
+        "params": { "_meta": request_meta() },
     }));
-    let initialize = receive();
-    assert_eq!(
-        initialize["result"]["serverInfo"]["name"],
-        "tdd-workflow-server"
-    );
-    assert_eq!(initialize["result"]["protocolVersion"], "2024-11-05");
-
-    send(json!({"jsonrpc": "2.0", "method": "notifications/initialized"}));
-
-    send(json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}));
     let tools = receive();
+    assert!(
+        tools.get("error").is_none(),
+        "tools/list without initialize should succeed: {tools}"
+    );
     let names: Vec<&str> = tools["result"]["tools"]
         .as_array()
         .unwrap()
@@ -936,8 +946,14 @@ fn the_bdd_binary_serves_mcp_over_child_process_stdio() {
     assert!(names.contains(&"list_requirements"), "tools: {names:?}");
 
     send(json!({
-        "jsonrpc": "2.0", "id": 3, "method": "tools/call",
-        "params": {"name": "list_requirements", "arguments": {}},
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/call",
+        "params": {
+            "name": "list_requirements",
+            "arguments": {},
+            "_meta": request_meta(),
+        },
     }));
     let reply = receive();
     let text = reply["result"]["content"][0]["text"].as_str().unwrap();

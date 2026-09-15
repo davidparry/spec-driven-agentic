@@ -59,7 +59,7 @@ flowchart TD
 
 **Phase 0 — scaffolding (once, before any behavior exists):**
 
-1. `pom.xml` (MCP **client** reactor) and `kata/pom.xml` (a
+1. `pom.xml` (smoke-test reactor) and `kata/pom.xml` (a
    **standalone** Maven project — no parent — with JUnit 5, Cucumber,
    AssertJ). The kata compiles and runs on its own: `mvn -f kata/pom.xml test`.
    The workshop server is the `bdd` binary, not a Maven module.

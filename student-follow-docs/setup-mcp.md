@@ -13,7 +13,7 @@ The server itself is always the same command, whatever the client:
 bdd mcp serve --root /absolute/path/to/tdd-bdd-agentic
 ```
 
-Cursor and the bundled `tdd-agent.jar` both speak to this process over
+Cursor and the bundled `smoke-test.jar` both speak to this process over
 stdio and see **all 23 tools**, including staging.
 
 ---

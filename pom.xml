@@ -13,12 +13,12 @@
     <description>
         A 60-minute hands-on workshop: drive a spec-driven development
         workflow spanning SDD, BDD, and TDD. The MCP server is `bdd mcp serve`;
-        this reactor is the narrated Java client (`tdd-agent.jar`) plus the
+        this reactor is the Java MCP-server smoke test (`smoke-test.jar`) plus the
         standalone kata.
     </description>
 
     <modules>
-        <module>mcp-client</module>
+        <module>smoke-test</module>
     </modules>
 
     <properties>
