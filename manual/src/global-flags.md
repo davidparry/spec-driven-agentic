@@ -6,7 +6,7 @@ them anywhere on the command line.
 ## `--root <ROOT>`
 
 The project root — the directory where `requirements/requirements.json`
-(the root of the [spec catalog](spec-format.md)) and `.bdd-mcp.toml`
+(the root of the [spec catalog](spec-format.md)) and `.bdd.toml`
 live, and the base for every relative path the CLI reads or writes.
 Defaults to the current directory. MCP clients that cannot see argv can
 call `project_root` to read the same directory as an absolute path.
@@ -34,7 +34,7 @@ Model resolution order (see [bdd model](commands/model.md) for the
 full story):
 
 1. `--model` flag — this invocation only.
-2. `model` in `.bdd-mcp.toml` — the persisted project choice.
+2. `model` in `.bdd.toml` — the persisted project choice.
 3. Discovery — the first installed Ollama model, session-only.
 
 ## `--debug`
@@ -75,15 +75,17 @@ bdd --retry 5 greenfield
 bdd spec draft --retry 1   # one attempt, then the usual fallback
 ```
 
-`--retry` wins over `retry` under `[llm]` in `.bdd-mcp.toml`. A missing
+`--retry` wins over `retry` under `[llm]` in `.bdd.toml`. A missing
 or zero config value uses the default of 3. In the interactive shell,
 commands inherit the shell's `--retry` unless a line supplies its own.
 
 ## `--tools <NAMES>`
 
 Replace this command's tool profile for one run with a comma-separated
-list of catalog names. Default profiles live in code and in
-`.bdd-mcp.toml`; see [`bdd tools`](commands/tools.md).
+list of catalog names (`validate_spec`, `playwright:browser_navigate`,
+`builtin:run_tests`). Default profiles live in code and in
+`.bdd.toml`; see [`bdd tools`](commands/tools.md). [`bdd config`](commands/config.md)
+prints the resolved keys and their source.
 
 ```bash
 bdd --tools list_requirements,get_requirement status

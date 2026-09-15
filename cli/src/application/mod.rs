@@ -20,13 +20,14 @@ pub mod tdd_service;
 pub mod tool_call_service;
 pub mod tool_service;
 
+use crate::domain::config_report::DEFAULT_LLM_RETRY;
 use crate::domain::tools::{ChatMessage, ChatTurn, ToolDefinition};
 use crate::ports::{LlmConversation, LlmError};
 
 /// How many times a model call is tried when the reply fails
 /// validation. Overridden by `--retry` or `[llm] retry` in
-/// `.bdd-mcp.toml`.
-pub const DEFAULT_LLM_ATTEMPTS: u32 = 3;
+/// `.bdd.toml`.
+pub const DEFAULT_LLM_ATTEMPTS: u32 = DEFAULT_LLM_RETRY as u32;
 
 /// A model round trip that either never reached a reply, or whose
 /// reply failed validation after every attempt.

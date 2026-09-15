@@ -10,11 +10,12 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tracing::debug;
 
+use crate::domain::config_report::DEFAULT_LLM_CACHE_TTL_SECONDS;
 use crate::domain::tools::{ChatMessage, ChatTurn, ToolDefinition};
 use crate::ports::{LlmConversation, LlmError};
 
 pub const SCHEMA_VERSION: &str = "ollama-chat:v1";
-pub const DEFAULT_CACHE_TTL: Duration = Duration::from_secs(600);
+pub const DEFAULT_CACHE_TTL: Duration = Duration::from_secs(DEFAULT_LLM_CACHE_TTL_SECONDS);
 
 #[derive(Serialize, Deserialize)]
 struct CacheEntry {

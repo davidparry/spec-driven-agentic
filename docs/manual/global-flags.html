@@ -35,10 +35,10 @@
             const path_to_root = "";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "searchindex-4a49ca55.js";
+            window.path_to_searchindex_js = "searchindex-1df5a76f.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-d1ab0951.js"></script>
+        <script src="toc-9d4e1520.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -185,7 +185,7 @@
 them anywhere on the command line.</p>
 <h2 id="--root-root"><a class="header" href="#--root-root"><code>--root &lt;ROOT&gt;</code></a></h2>
 <p>The project root — the directory where <code>requirements/requirements.json</code>
-(the root of the <a href="spec-format.html">spec catalog</a>) and <code>.bdd-mcp.toml</code>
+(the root of the <a href="spec-format.html">spec catalog</a>) and <code>.bdd.toml</code>
 live, and the base for every relative path the CLI reads or writes.
 Defaults to the current directory. MCP clients that cannot see argv can
 call <code>project_root</code> to read the same directory as an absolute path.</p>
@@ -205,7 +205,7 @@ bdd --model llama3:8b greenfield   # another model; mileage will vary
 full story):</p>
 <ol>
 <li><code>--model</code> flag — this invocation only.</li>
-<li><code>model</code> in <code>.bdd-mcp.toml</code> — the persisted project choice.</li>
+<li><code>model</code> in <code>.bdd.toml</code> — the persisted project choice.</li>
 <li>Discovery — the first installed Ollama model, session-only.</li>
 </ol>
 <h2 id="--debug"><a class="header" href="#--debug"><code>--debug</code></a></h2>
@@ -236,13 +236,15 @@ plus the reason, so the model can correct itself. Transport failures
 <pre><code class="language-bash">bdd --retry 5 greenfield
 bdd spec draft --retry 1   # one attempt, then the usual fallback
 </code></pre>
-<p><code>--retry</code> wins over <code>retry</code> under <code>[llm]</code> in <code>.bdd-mcp.toml</code>. A missing
+<p><code>--retry</code> wins over <code>retry</code> under <code>[llm]</code> in <code>.bdd.toml</code>. A missing
 or zero config value uses the default of 3. In the interactive shell,
 commands inherit the shell’s <code>--retry</code> unless a line supplies its own.</p>
 <h2 id="--tools-names"><a class="header" href="#--tools-names"><code>--tools &lt;NAMES&gt;</code></a></h2>
 <p>Replace this command’s tool profile for one run with a comma-separated
-list of catalog names. Default profiles live in code and in
-<code>.bdd-mcp.toml</code>; see <a href="commands/tools.html"><code>bdd tools</code></a>.</p>
+list of catalog names (<code>validate_spec</code>, <code>playwright:browser_navigate</code>,
+<code>builtin:run_tests</code>). Default profiles live in code and in
+<code>.bdd.toml</code>; see <a href="commands/tools.html"><code>bdd tools</code></a>. <a href="commands/config.html"><code>bdd config</code></a>
+prints the resolved keys and their source.</p>
 <pre><code class="language-bash">bdd --tools list_requirements,get_requirement status
 </code></pre>
 <h2 id="--max-rounds-n"><a class="header" href="#--max-rounds-n"><code>--max-rounds &lt;N&gt;</code></a></h2>

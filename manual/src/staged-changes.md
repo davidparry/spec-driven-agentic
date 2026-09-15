@@ -41,7 +41,7 @@ bdd changes discard   # drop everything staged, tree untouched
 | Writes to the stage | Writes directly |
 | --- | --- |
 | `feature create` | `init` (scaffolding a fresh project) |
-| `scenario add` / `update` / `delete` | `model use` (writes `.bdd-mcp.toml`) |
+| `scenario add` / `update` / `delete` | `model use` (writes `.bdd.toml`) |
 | `steps generate` | `test` / `refactor` (phase state file) |
 | `unittest generate` | |
 | `spec draft` | |

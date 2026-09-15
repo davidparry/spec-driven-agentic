@@ -161,11 +161,16 @@ architecture and full test coverage throughout:
   orchestrated loop from an empty directory with exactly two human
   gates (see [Greenfield mode flow](#greenfield-mode-flow)).
 - `bdd model list | current | use` — Ollama model discovery and
-  selection: `--model` flag > `.bdd-mcp.toml` configuration > discovery.
+  selection: `--model` flag > `.bdd.toml` configuration > discovery.
   With no configured model, discovery uses the first installed model as
   a session-only default (nothing is written until you run
   `bdd model use <name>`), and reports `llm_unavailable` when Ollama is
   down or empty — never installs anything.
+- `bdd config` — every LLM and tools key, marked `(default)` or with the
+  path of the `.bdd.toml` it was read from (`--json` for the same as an
+  object). With no configured `llm.model`, it shows the model discovery
+  would use, marked `(discovered)`. The file is read from `--root`
+  (default `.`) only.
 - `bdd inspect` — detects the project's ecosystems from marker files and
   probes each runtime. A missing runtime disables test execution with a
   structured `runtime_missing` note — authoring and validation keep
@@ -211,7 +216,7 @@ Model calls are cached in two complementary layers:
   corrupt entries are swept on the next write.
 
 The TTL defaults to 10 minutes and is configured under `[llm]` in
-`.bdd-mcp.toml`:
+`.bdd.toml`:
 
 ```toml
 [llm]
@@ -655,7 +660,7 @@ committed.
 ```mermaid
 flowchart TD
     subgraph auto0 [CLI automated - phase 0]
-        scaffold["Scaffold: build files, Cucumber runner,<br/>empty spec, .bdd-mcp.toml config"]
+        scaffold["Scaffold: build files, Cucumber runner,<br/>empty spec, .bdd.toml config"]
     end
     subgraph human1 [Human input - phase 1: the driving spec]
         describe["Human describes what to build in plain words"]

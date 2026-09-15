@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use cucumber::gherkin::Step;
 use cucumber::{World, given, then, when};
 
-use bdd_cli::adapters::config::TomlToolStore;
+use bdd_cli::adapters::config::{TomlToolStore, inspect_config};
 use bdd_cli::adapters::fs_project::FsProjectFiles;
 use bdd_cli::adapters::fs_scaffold::FsScaffoldWriter;
 use bdd_cli::adapters::fs_sources::FsSourceFiles;
@@ -52,6 +52,7 @@ use bdd_cli::application::tdd_service::{
 };
 use bdd_cli::application::tool_call_service::ToolCallService;
 use bdd_cli::application::tool_service::{self, ToolService};
+use bdd_cli::domain::CONFIG_FILE;
 use bdd_cli::domain::feature::{FeatureDoc, FeatureSummary};
 use bdd_cli::domain::language::detect_languages;
 use bdd_cli::domain::mcp_registry::{RegistryLoad, ServerSpec, parse_registry};
@@ -161,6 +162,7 @@ struct BddWorld {
     session_opened: bool,
     merged_args: Option<serde_json::Value>,
     listed_mcp_tools: Vec<String>,
+    listed_config: Option<bdd_cli::domain::config_report::ConfigReport>,
     agent_tools: Vec<String>,
     agent_queue: Vec<QueuedTurn>,
     agent_broker: HashMap<String, Result<(String, bool), String>>,
@@ -2907,7 +2909,7 @@ impl BddWorld {
         let root = self.project_root();
         let connects = Arc::new(Mutex::new(0usize));
         let service = ToolService::new(
-            TomlToolStore::new(root.join(".bdd-mcp.toml")),
+            TomlToolStore::new(root.join(CONFIG_FILE)),
             CountingDiscovery {
                 connects: Arc::clone(&connects),
                 fail: fail_discovery.then(|| "failed to start".into()),
@@ -2922,7 +2924,7 @@ impl BddWorld {
         // Reconstruct so later calls share counting... the connects already happened.
         // Return a fresh service with the same counter for subsequent use.
         ToolService::new(
-            TomlToolStore::new(self.project_root().join(".bdd-mcp.toml")),
+            TomlToolStore::new(self.project_root().join(CONFIG_FILE)),
             CountingDiscovery {
                 connects,
                 fail: fail_discovery.then(|| "failed to start".into()),
@@ -2985,7 +2987,7 @@ fn the_tool_profiles_are_listed(world: &mut BddWorld) {
 fn the_tools_are_listed_offline(world: &mut BddWorld) {
     let connects = Arc::new(Mutex::new(0usize));
     let service = ToolService::new(
-        TomlToolStore::new(world.project_root().join(".bdd-mcp.toml")),
+        TomlToolStore::new(world.project_root().join(CONFIG_FILE)),
         CountingDiscovery {
             connects: Arc::clone(&connects),
             fail: None,
@@ -3039,10 +3041,74 @@ fn the_tool_catalog_is_refreshed(world: &mut BddWorld) {
 fn the_config_file_contains(world: &mut BddWorld, step: &Step) {
     let content = step.docstring.clone().expect("a docstring");
     std::fs::write(
-        world.project_root().join(".bdd-mcp.toml"),
+        world.project_root().join(CONFIG_FILE),
         content.trim_start_matches('\n'),
     )
     .unwrap();
+}
+
+#[when("the configuration is listed")]
+fn the_configuration_is_listed(world: &mut BddWorld) {
+    let path = bdd_cli::adapters::config::config_path(&world.project_root());
+    world.listed_config = Some(inspect_config(&path));
+}
+
+fn listed_config(world: &BddWorld) -> &bdd_cli::domain::config_report::ConfigReport {
+    world
+        .listed_config
+        .as_ref()
+        .expect("the configuration was listed")
+}
+
+#[then(regex = r#"^the config file status is "([^"]+)"$"#)]
+fn config_file_status_is(world: &mut BddWorld, expected: String) {
+    assert_eq!(listed_config(world).file.display(), expected);
+}
+
+#[then(regex = r#"^the config file status contains "([^"]+)"$"#)]
+fn config_file_status_contains(world: &mut BddWorld, fragment: String) {
+    let display = listed_config(world).file.display();
+    assert!(display.contains(&fragment), "{display}");
+}
+
+#[then(regex = r#"^the config value "([^"]+)" is "([^"]+)" from default$"#)]
+fn config_value_from_default(world: &mut BddWorld, key: String, value: String) {
+    let setting = listed_config(world)
+        .setting(&key)
+        .unwrap_or_else(|| panic!("missing {key}"));
+    assert_eq!(setting.value, value, "{key}");
+    assert_eq!(
+        setting.source,
+        bdd_cli::domain::config_report::ConfigSource::Default
+    );
+}
+
+#[then(regex = r#"^the config value "([^"]+)" is "([^"]+)" from the config file$"#)]
+fn config_value_from_file(world: &mut BddWorld, key: String, value: String) {
+    let setting = listed_config(world)
+        .setting(&key)
+        .unwrap_or_else(|| panic!("missing {key}"));
+    assert_eq!(setting.value, value, "{key}");
+    assert!(
+        matches!(
+            setting.source,
+            bdd_cli::domain::config_report::ConfigSource::File(_)
+        ),
+        "{key} {:?}",
+        setting.source
+    );
+}
+
+#[then(regex = r#"^the config value "([^"]+)" is from default$"#)]
+fn config_key_is_from_default(world: &mut BddWorld, key: String) {
+    let setting = listed_config(world)
+        .setting(&key)
+        .unwrap_or_else(|| panic!("missing {key}"));
+    assert_eq!(
+        setting.source,
+        bdd_cli::domain::config_report::ConfigSource::Default,
+        "{key}"
+    );
 }
 
 #[when(regex = r#"^"([^"]+)" is enabled for "([^"]+)"$"#)]
@@ -3136,7 +3202,7 @@ fn a_tool_warning_contains(world: &mut BddWorld, fragment: String) {
 
 #[then(regex = r#"^the config file contains "([^"]+)"$"#)]
 fn config_file_contains(world: &mut BddWorld, fragment: String) {
-    let text = std::fs::read_to_string(world.project_root().join(".bdd-mcp.toml")).unwrap();
+    let text = std::fs::read_to_string(world.project_root().join(CONFIG_FILE)).unwrap();
     assert!(text.contains(&fragment), "{text}");
 }
 

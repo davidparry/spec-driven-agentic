@@ -25,7 +25,10 @@ Every language gets the two spec-driven anchors:
   the root of the [spec catalog](../spec-format.md): split the backlog
   into included files later with
   [`bdd spec include add`](spec.md#bdd-spec-include).
-- `.bdd-mcp.toml` — the CLI/MCP configuration.
+- `.bdd.toml` — the CLI configuration (LLM, timeouts, per-command
+  tool profiles). `bdd init` writes `[tools.profiles]` with the tools
+  each LLM-backed command offers the model (the code defaults, listed
+  for reference). Other keys are commented with their defaults.
 
 After scaffolding, `init` scans the new files into `.bdd-memory.json`
 (language, BDD framework, libraries, layout). That file is committed
@@ -58,7 +61,7 @@ bdd init --language rust --name "String Calculator"
   "framework": "cucumber-rs",
   "created": [
     "requirements/requirements.json",
-    ".bdd-mcp.toml",
+    ".bdd.toml",
     "Cargo.toml",
     "src/lib.rs",
     "tests/cucumber.rs",
@@ -82,7 +85,7 @@ bdd init --language rust
   "created": [],
   "skipped": [
     "requirements/requirements.json",
-    ".bdd-mcp.toml",
+    ".bdd.toml",
     "Cargo.toml",
     "src/lib.rs",
     "tests/cucumber.rs",

@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- `bdd config` prints every LLM and tools key with `(default)` or the
+  path of the `.bdd.toml` it was read from. With no `llm.model` in the
+  file, Ollama is asked which model a run would use and it prints as
+  `(discovered)`. The file is read from `--root` only; parent
+  directories are never searched.
+
+- Project configuration is `.bdd.toml` only. `bdd init` writes
+  `[tools.profiles]` with the tools each LLM-backed command offers the
+  model (the code defaults, listed for reference). Other keys stay
+  commented. A listed command replaces that caller's built-in tools.
+  MCP tools from `mcp.json` are `server:tool` (or `server__tool`);
+  `builtin:name` pins the CLI tool when short names collide.
+
 - MCP `project_root` returns the absolute `--root` this `bdd mcp serve`
   process uses for every other tool. The catalog is 24 tools.
 - Claude Code can use the workshop MCP server from the committed

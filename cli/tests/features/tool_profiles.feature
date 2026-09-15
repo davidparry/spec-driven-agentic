@@ -35,6 +35,15 @@ Feature: Per-command tool profiles
     When the tools for "status" are listed offline
     Then the offered tools are "get_tdd_state"
 
+  Scenario: A profiles list of builtin-qualified names replaces the default
+    Given the config file contains:
+      """
+      [tools.profiles]
+      status = ["builtin:get_tdd_state"]
+      """
+    When the tools for "status" are listed offline
+    Then the offered tools are "get_tdd_state"
+
   Scenario: An enabled table adds to a caller's set
     Given the config file contains:
       """

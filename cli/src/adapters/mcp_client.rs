@@ -16,14 +16,17 @@ use rmcp::{ClientLifecycleMode, ClientServiceExt, ServiceExt as _};
 use tokio::process::Command;
 use tokio::sync::oneshot;
 
+use crate::domain::config_report::{
+    DEFAULT_TOOLS_CALL_TIMEOUT_SECONDS, DEFAULT_TOOLS_DISCOVERY_TIMEOUT_SECONDS,
+};
 use crate::domain::mcp_registry::ServerSpec;
 use crate::domain::tools::{
     NAMESPACE_SEPARATOR, ToolDefinition, ToolOrigin, ToolOutcome, namespaced, server_of,
 };
 use crate::ports::{ToolBroker, ToolDiscovery, ToolError};
 
-const DEFAULT_CONNECT: Duration = Duration::from_secs(10);
-const DEFAULT_CALL: Duration = Duration::from_secs(300);
+const DEFAULT_CONNECT: Duration = Duration::from_secs(DEFAULT_TOOLS_DISCOVERY_TIMEOUT_SECONDS);
+const DEFAULT_CALL: Duration = Duration::from_secs(DEFAULT_TOOLS_CALL_TIMEOUT_SECONDS);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum SessionKey {

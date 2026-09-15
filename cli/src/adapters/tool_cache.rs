@@ -9,12 +9,13 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tracing::debug;
 
+use crate::domain::config_report::DEFAULT_TOOLS_CACHE_TTL_SECONDS;
 use crate::domain::mcp_registry::ServerSpec;
 use crate::domain::tools::ToolDefinition;
 use crate::ports::{ToolDiscovery, ToolError};
 
 pub const SCHEMA_VERSION: &str = "mcp-tools:v1";
-pub const DEFAULT_TTL: Duration = Duration::from_secs(86_400);
+pub const DEFAULT_TTL: Duration = Duration::from_secs(DEFAULT_TOOLS_CACHE_TTL_SECONDS);
 
 #[derive(Serialize, Deserialize)]
 struct CacheEntry {

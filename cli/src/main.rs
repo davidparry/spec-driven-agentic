@@ -8,7 +8,9 @@ use std::path::{Path, PathBuf};
 use clap::{Args, Parser, Subcommand};
 
 use bdd_cli::adapters::chat_cache::{CachedConversation, DEFAULT_CACHE_TTL};
-use bdd_cli::adapters::config::{TomlModelStore, TomlToolStore, tools_settings};
+use bdd_cli::adapters::config::{
+    TomlModelStore, TomlToolStore, config_path, inspect_config, tools_settings,
+};
 use bdd_cli::adapters::console_prompt::ConsolePrompter;
 use bdd_cli::adapters::fs_project::FsProjectFiles;
 use bdd_cli::adapters::fs_scaffold::FsScaffoldWriter;
@@ -40,6 +42,7 @@ use bdd_cli::application::tdd_service::TddError;
 use bdd_cli::application::tool_call_service::ToolCallService;
 use bdd_cli::application::tool_service::ToolService;
 use bdd_cli::domain::RECOMMENDED_MODEL;
+use bdd_cli::domain::config_report::{ConfigSource, LLM_MODEL_KEY};
 use bdd_cli::domain::language::Language;
 use bdd_cli::domain::mcp_registry::ServerSpec;
 use bdd_cli::domain::prompts::ask_prompt;
@@ -67,7 +70,7 @@ struct Cli {
     #[arg(long, global = true)]
     model: Option<String>,
 
-    /// Project root (where requirements/ and .bdd-mcp.toml live)
+    /// Project root (where requirements/ and .bdd.toml live)
     #[arg(long, global = true, default_value = ".")]
     root: PathBuf,
 
@@ -133,6 +136,12 @@ enum Command {
     /// LLM model discovery and selection (Ollama)
     #[command(subcommand)]
     Model(ModelCommand),
+    /// Print resolved configuration and where each value came from
+    Config {
+        /// Print JSON instead of the tab-separated table
+        #[arg(long)]
+        json: bool,
+    },
     /// MCP server
     #[command(subcommand)]
     Mcp(McpCommand),
@@ -512,6 +521,15 @@ fn execute(
     match command {
         Command::Spec(command) => run_spec(root, model, attempts, tools, max_rounds, command),
         Command::Model(command) => run_model(root, model, command),
+        Command::Config { json } => {
+            let report = config_report(root);
+            if *json {
+                print_json(&report)
+            } else {
+                print!("{report}");
+                Ok(())
+            }
+        }
         Command::Inspect => {
             let service =
                 InspectService::new(FsProjectFiles::new(root.to_path_buf()), ProcessRuntimeProbe);
@@ -1241,7 +1259,24 @@ fn run_spec(
 }
 
 fn config_file(root: &Path) -> PathBuf {
-    root.join(".bdd-mcp.toml")
+    config_path(root)
+}
+
+/// The configuration dump. When the file names no model, Ollama is
+/// asked which one a run would actually use, so `llm.model` shows that
+/// instead of `(unset)`. A configured model skips the call entirely;
+/// an unreachable or empty provider leaves the key unset.
+fn config_report(root: &Path) -> bdd_cli::domain::config_report::ConfigReport {
+    let mut report = inspect_config(&config_file(root));
+    let configured = report
+        .setting(LLM_MODEL_KEY)
+        .is_some_and(|setting| setting.source != ConfigSource::Default);
+    if !configured
+        && let SessionModel::Ready { model, .. } = model_service(root).session_model(None)
+    {
+        report.apply_discovered_model(&model);
+    }
+    report
 }
 
 fn run_feature(root: &Path, command: &FeatureCommand) -> anyhow::Result<()> {

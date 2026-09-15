@@ -5,7 +5,11 @@
 /// against. Named in pull hints and the `bdd init` scaffold.
 pub const RECOMMENDED_MODEL: &str = "qwen3.8-flash-next:125b-mlx";
 
+/// Project configuration written by `bdd init` and `bdd model use`.
+pub const CONFIG_FILE: &str = ".bdd.toml";
+
 pub mod command_policy;
+pub mod config_report;
 pub mod feature;
 pub mod generation;
 pub mod language;

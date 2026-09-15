@@ -4,6 +4,9 @@
 use sha2::{Digest, Sha256};
 
 pub const NAMESPACE_SEPARATOR: &str = "__";
+const ORIGIN_SEPARATOR: char = ':';
+/// Reserved origin for the CLI's own tools. An mcp.json server must not rely on this name.
+pub const BUILTIN_ORIGIN: &str = "builtin";
 pub const MAX_TOOL_NAME: usize = 64;
 pub const TOOL_REPLY_CAP: usize = 16_384;
 
@@ -133,23 +136,61 @@ pub fn server_of(name: &str) -> Option<&str> {
         .map(|(server, _)| server)
 }
 
+/// Split `origin:tool` as written in `.bdd.toml`. The namespaced catalog
+/// form `server__tool` is not a qualified reference.
+fn qualified_parts(name: &str) -> Option<(&str, &str)> {
+    let (origin, tool) = name.split_once(ORIGIN_SEPARATOR)?;
+    if origin.is_empty() || tool.is_empty() {
+        None
+    } else {
+        Some((origin, tool))
+    }
+}
+
 pub fn find<'a>(catalog: &'a [ToolDefinition], name: &str) -> Result<&'a ToolDefinition, String> {
+    if let Some((origin, tool)) = qualified_parts(name) {
+        return pick(
+            catalog,
+            name,
+            catalog
+                .iter()
+                .filter(|definition| matches_qualified(definition, origin, tool))
+                .collect(),
+        );
+    }
     if let Some(found) = catalog.iter().find(|tool| tool.name == name) {
         return Ok(found);
     }
     let suffix = format!("{NAMESPACE_SEPARATOR}{name}");
-    let matches: Vec<_> = catalog
-        .iter()
-        .filter(|tool| tool.name.ends_with(&suffix) || tool.name == name)
-        .collect();
+    pick(
+        catalog,
+        name,
+        catalog
+            .iter()
+            .filter(|tool| tool.name.ends_with(&suffix))
+            .collect(),
+    )
+}
+
+fn matches_qualified(definition: &ToolDefinition, origin: &str, tool: &str) -> bool {
+    match &definition.origin {
+        ToolOrigin::Builtin => origin == BUILTIN_ORIGIN && definition.name == tool,
+        ToolOrigin::Server(server) => {
+            origin == server && definition.name == namespaced(server, tool)
+        }
+    }
+}
+
+fn pick<'a>(
+    catalog: &'a [ToolDefinition],
+    name: &str,
+    matches: Vec<&'a ToolDefinition>,
+) -> Result<&'a ToolDefinition, String> {
     match matches.as_slice() {
         [one] => Ok(one),
         [] => {
-            let offered: Vec<_> = catalog.iter().map(|t| t.name.as_str()).collect();
-            Err(unknown_tool_reply(
-                name,
-                &offered.iter().map(|s| (*s).to_string()).collect::<Vec<_>>(),
-            ))
+            let offered: Vec<_> = catalog.iter().map(|t| t.name.clone()).collect();
+            Err(unknown_tool_reply(name, &offered))
         }
         many => {
             let names: Vec<_> = many.iter().map(|t| t.name.as_str()).take(5).collect();
@@ -285,6 +326,15 @@ mod tests {
         }
     }
 
+    fn server_def(server: &str, tool: &str) -> ToolDefinition {
+        ToolDefinition {
+            name: namespaced(server, tool),
+            description: String::new(),
+            schema: serde_json::json!({"type": "object"}),
+            origin: ToolOrigin::Server(server.into()),
+        }
+    }
+
     #[test]
     fn namespacing_joins_with_a_double_underscore() {
         assert_eq!(
@@ -333,6 +383,37 @@ mod tests {
         assert!(error.contains("ambiguous"), "{error}");
         let miss = find(&catalog, "nope").unwrap_err();
         assert!(miss.contains("unknown tool"), "{miss}");
+    }
+
+    #[test]
+    fn a_bare_name_is_the_builtin_when_an_mcp_tool_shares_the_short_name() {
+        let catalog = vec![def("validate_spec"), server_def("self", "validate_spec")];
+        assert_eq!(
+            find(&catalog, "validate_spec").unwrap().origin,
+            ToolOrigin::Builtin
+        );
+        assert_eq!(
+            find(&catalog, "builtin:validate_spec").unwrap().origin,
+            ToolOrigin::Builtin
+        );
+        let mcp = find(&catalog, "self:validate_spec").unwrap();
+        assert_eq!(mcp.name, "self__validate_spec");
+        assert_eq!(mcp.origin, ToolOrigin::Server("self".into()));
+        assert_eq!(
+            find(&catalog, "self__validate_spec").unwrap().name,
+            "self__validate_spec"
+        );
+    }
+
+    #[test]
+    fn builtin_qualifier_does_not_fall_through_to_an_mcp_tool() {
+        let catalog = vec![server_def("self", "validate_spec")];
+        let error = find(&catalog, "builtin:validate_spec").unwrap_err();
+        assert!(error.contains("unknown tool"), "{error}");
+        assert_eq!(
+            find(&catalog, "self:validate_spec").unwrap().name,
+            "self__validate_spec"
+        );
     }
 
     #[test]

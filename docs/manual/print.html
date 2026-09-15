@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "searchindex-4a49ca55.js";
+            window.path_to_searchindex_js = "searchindex-1df5a76f.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-d1ab0951.js"></script>
+        <script src="toc-9d4e1520.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -320,7 +320,7 @@ bdd --root ~/code/my-kata spec validate
 them anywhere on the command line.</p>
 <h2 id="--root-root"><a class="header" href="#--root-root"><code>--root &lt;ROOT&gt;</code></a></h2>
 <p>The project root — the directory where <code>requirements/requirements.json</code>
-(the root of the <a href="#the-requirements-format">spec catalog</a>) and <code>.bdd-mcp.toml</code>
+(the root of the <a href="#the-requirements-format">spec catalog</a>) and <code>.bdd.toml</code>
 live, and the base for every relative path the CLI reads or writes.
 Defaults to the current directory. MCP clients that cannot see argv can
 call <code>project_root</code> to read the same directory as an absolute path.</p>
@@ -340,7 +340,7 @@ bdd --model llama3:8b greenfield   # another model; mileage will vary
 full story):</p>
 <ol>
 <li><code>--model</code> flag — this invocation only.</li>
-<li><code>model</code> in <code>.bdd-mcp.toml</code> — the persisted project choice.</li>
+<li><code>model</code> in <code>.bdd.toml</code> — the persisted project choice.</li>
 <li>Discovery — the first installed Ollama model, session-only.</li>
 </ol>
 <h2 id="--debug"><a class="header" href="#--debug"><code>--debug</code></a></h2>
@@ -371,13 +371,15 @@ plus the reason, so the model can correct itself. Transport failures
 <pre><code class="language-bash">bdd --retry 5 greenfield
 bdd spec draft --retry 1   # one attempt, then the usual fallback
 </code></pre>
-<p><code>--retry</code> wins over <code>retry</code> under <code>[llm]</code> in <code>.bdd-mcp.toml</code>. A missing
+<p><code>--retry</code> wins over <code>retry</code> under <code>[llm]</code> in <code>.bdd.toml</code>. A missing
 or zero config value uses the default of 3. In the interactive shell,
 commands inherit the shell’s <code>--retry</code> unless a line supplies its own.</p>
 <h2 id="--tools-names"><a class="header" href="#--tools-names"><code>--tools &lt;NAMES&gt;</code></a></h2>
 <p>Replace this command’s tool profile for one run with a comma-separated
-list of catalog names. Default profiles live in code and in
-<code>.bdd-mcp.toml</code>; see <a href="#bdd-tools"><code>bdd tools</code></a>.</p>
+list of catalog names (<code>validate_spec</code>, <code>playwright:browser_navigate</code>,
+<code>builtin:run_tests</code>). Default profiles live in code and in
+<code>.bdd.toml</code>; see <a href="#bdd-tools"><code>bdd tools</code></a>. <a href="#bdd-config"><code>bdd config</code></a>
+prints the resolved keys and their source.</p>
 <pre><code class="language-bash">bdd --tools list_requirements,get_requirement status
 </code></pre>
 <h2 id="--max-rounds-n"><a class="header" href="#--max-rounds-n"><code>--max-rounds &lt;N&gt;</code></a></h2>
@@ -457,7 +459,7 @@ model, especially one trained for work other than development. See
 <tr><th>Situation</th><th>Announcement</th></tr>
 </thead>
 <tbody>
-<tr><td>Configured in <code>.bdd-mcp.toml</code></td><td><code>Model set: qwen3.8-flash-next:125b-mlx (from configuration).</code></td></tr>
+<tr><td>Configured in <code>.bdd.toml</code></td><td><code>Model set: qwen3.8-flash-next:125b-mlx (from configuration).</code></td></tr>
 <tr><td>No config, models installed</td><td><code>Model set for this session: qwen3.8-flash-next:125b-mlx (not saved - keep it with: bdd model use qwen3.8-flash-next:125b-mlx).</code></td></tr>
 <tr><td>Ollama up, no models</td><td><code>Ollama is running but has no models - generation will use deterministic templates. For optimal results pull a coding model, e.g.: ollama pull qwen3.8-flash-next:125b-mlx (mileage varies with models not trained for development)</code></td></tr>
 <tr><td>Ollama unreachable</td><td><code>Ollama is not reachable - generation will use deterministic templates. Install it from https://ollama.com, start it, and pull a coding model, e.g.: ollama pull qwen3.8-flash-next:125b-mlx (mileage varies with models not trained for development)</code></td></tr>
@@ -739,7 +741,7 @@ bdd changes discard   # drop everything staged, tree untouched
 </thead>
 <tbody>
 <tr><td><code>feature create</code></td><td><code>init</code> (scaffolding a fresh project)</td></tr>
-<tr><td><code>scenario add</code> / <code>update</code> / <code>delete</code></td><td><code>model use</code> (writes <code>.bdd-mcp.toml</code>)</td></tr>
+<tr><td><code>scenario add</code> / <code>update</code> / <code>delete</code></td><td><code>model use</code> (writes <code>.bdd.toml</code>)</td></tr>
 <tr><td><code>steps generate</code></td><td><code>test</code> / <code>refactor</code> (phase state file)</td></tr>
 <tr><td><code>unittest generate</code></td><td></td></tr>
 <tr><td><code>spec draft</code></td><td></td></tr>
@@ -777,7 +779,10 @@ never overwritten — they are reported as skipped.</p>
 the root of the <a href="#the-requirements-format">spec catalog</a>: split the backlog
 into included files later with
 <a href="#bdd-spec-include"><code>bdd spec include add</code></a>.</li>
-<li><code>.bdd-mcp.toml</code> — the CLI/MCP configuration.</li>
+<li><code>.bdd.toml</code> — the CLI configuration (LLM, timeouts, per-command
+tool profiles). <code>bdd init</code> writes <code>[tools.profiles]</code> with the tools
+each LLM-backed command offers the model (the code defaults, listed
+for reference). Other keys are commented with their defaults.</li>
 </ul>
 <p>After scaffolding, <code>init</code> scans the new files into <code>.bdd-memory.json</code>
 (language, BDD framework, libraries, layout). That file is committed
@@ -809,7 +814,7 @@ bdd init --language rust --name "String Calculator"
   "framework": "cucumber-rs",
   "created": [
     "requirements/requirements.json",
-    ".bdd-mcp.toml",
+    ".bdd.toml",
     "Cargo.toml",
     "src/lib.rs",
     "tests/cucumber.rs",
@@ -828,7 +833,7 @@ bdd init --language rust --name "String Calculator"
   "created": [],
   "skipped": [
     "requirements/requirements.json",
-    ".bdd-mcp.toml",
+    ".bdd.toml",
     "Cargo.toml",
     "src/lib.rs",
     "tests/cucumber.rs",
@@ -1891,7 +1896,7 @@ is staged, and you implement by hand instead.</p>
 <p>The implementation prompt is the largest call the CLI makes, so a
 local model can need minutes to answer. The generation timeout
 defaults to 300 seconds; if you see <code>no reply within ...s</code>, raise
-<code>timeout_seconds</code> under <code>[llm]</code> in <code>.bdd-mcp.toml</code> (see
+<code>timeout_seconds</code> under <code>[llm]</code> in <code>.bdd.toml</code> (see
 <a href="#the-llm-configuration-block"><code>bdd model</code></a>).</p>
 <h2 id="where-it-fits-1"><a class="header" href="#where-it-fits-1">Where it fits</a></h2>
 <p>This is the standalone form of the <a href="#bdd-greenfield">greenfield</a>
@@ -2409,7 +2414,7 @@ Commands: list, current, use
 <p>Highest priority first:</p>
 <ol>
 <li><strong><code>--model</code> flag</strong> — this invocation only, never persisted.</li>
-<li><strong>Configuration</strong> — the <code>model</code> key in <code>.bdd-mcp.toml</code> under the
+<li><strong>Configuration</strong> — the <code>model</code> key in <code>.bdd.toml</code> under the
 project root, written by <code>bdd model use</code>.</li>
 <li><strong>Discovery</strong> — the first model installed in Ollama, as a
 session-only default. Nothing is written to disk.</li>
@@ -2451,16 +2456,18 @@ session default and the output tells you it is not saved:</p>
 <pre><code class="language-bash">bdd model use qwen3.8-flash-next:125b-mlx
 </code></pre>
 <pre><code class="language-text">Configured model: qwen3.8-flash-next:125b-mlx
-Written to /Users/you/code/calculator/.bdd-mcp.toml
+Written to /Users/you/code/calculator/.bdd.toml
 </code></pre>
 <p>The choice is validated against Ollama’s installed models — a name
 Ollama does not have is rejected rather than silently saved.</p>
 <h2 id="the-llm-configuration-block"><a class="header" href="#the-llm-configuration-block">The [llm] configuration block</a></h2>
-<p>Everything model-related lives under <code>[llm]</code> in <code>.bdd-mcp.toml</code>:</p>
+<p>Everything model-related lives under <code>[llm]</code> in <code>.bdd.toml</code>:</p>
 <pre><code class="language-toml">[llm]
 model = "qwen3.8-flash-next:125b-mlx"     # persisted by bdd model use
 endpoint = "http://localhost:11434"   # the Ollama endpoint
 timeout_seconds = 300                 # generation timeout (default 300)
+cache_ttl_seconds = 600               # response cache TTL; 0 disables
+retry = 3                             # invalid-reply attempts (`--retry` wins)
 </code></pre>
 <p><code>timeout_seconds</code> bounds how long one generation call may take. Large
 prompts — an implementation attempt carries the requirement, the
@@ -2485,8 +2492,78 @@ it explicitly (<code>no reply within 300s ... set timeout_seconds under [llm]</c
 <h2 id="see-also-15"><a class="header" href="#see-also-15">See also</a></h2>
 <ul>
 <li><a href="#global-flags">Global flags</a> — the <code>--model</code> override.</li>
+<li><a href="#bdd-config"><code>bdd config</code></a> — dump every key and where it came from.</li>
 <li><a href="#source-template-or-llm"><code>bdd steps generate</code></a> — how LLM
 output is validated before it can stage.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="bdd-config"><a class="header" href="#bdd-config">bdd config</a></h1>
+<p>Print every configuration key the CLI uses and whether the value is a
+code <strong>default</strong> or was read from the project file (<code>.bdd.toml</code>).</p>
+<pre><code class="language-text">Usage: bdd config [OPTIONS]
+</code></pre>
+<h2 id="flags-7"><a class="header" href="#flags-7">Flags</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Flag</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>--json</code></td><td>Machine-readable object: <code>file</code> plus <code>settings</code> (<code>key</code>, <code>value</code>, <code>source</code>).</td></tr>
+<tr><td><code>--root &lt;ROOT&gt;</code></td><td>Project root that owns the config file. Defaults to <code>.</code>.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="output"><a class="header" href="#output">Output</a></h2>
+<p>Tab-separated columns: <code>key</code>, effective <code>value</code>, then the source:
+<code>(default)</code>, <code>(discovered)</code>, or the absolute path of the file that
+supplied it. The first line is <code>file</code> and the path that was opened,
+<code>(none)</code> when no file exists, or the path plus <code>(invalid TOML)</code> /
+<code>(unreadable)</code> when the file could not be used.</p>
+<p>When the file names no <code>llm.model</code>, Ollama is asked which model a run
+would actually use — the same order <a href="#bdd-model"><code>bdd model current</code></a>
+follows — and that name is shown as <code>(discovered)</code>. Nothing is
+written; persist it with <code>bdd model use &lt;name&gt;</code>. A configured model
+skips the provider call, and an unreachable or empty Ollama leaves the
+key <code>(unset)</code>.</p>
+<p>The file is read from <code>--root</code> only; there is no search of parent
+directories. Run <code>bdd config</code> from the project root, or point
+<code>--root</code> at it, or <code>file</code> reads <code>(none)</code> and every key is a default.</p>
+<pre><code class="language-bash">bdd config
+</code></pre>
+<pre><code class="language-text">file	/Users/you/code/calculator/.bdd.toml
+llm.model	qwen3.8-flash-next:125b-mlx	/Users/you/code/calculator/.bdd.toml
+llm.endpoint	http://localhost:11434	(default)
+llm.timeout_seconds	900	/Users/you/code/calculator/.bdd.toml
+llm.cache_ttl_seconds	600	/Users/you/code/calculator/.bdd.toml
+llm.retry	3	(default)
+tools.max_rounds	12	(default)
+tools.confirm	command_run	(default)
+tools.discovery_timeout_seconds	10	(default)
+tools.call_timeout_seconds	300	(default)
+tools.cache_ttl_seconds	86400	(default)
+tools.mcp_config	(unset)	(default)
+tools.profiles.spec-draft	list_requirements, get_requirement, validate_spec, refine_requirement	(default)
+tools.profiles.implement	get_requirement, feature_read, …	(default)
+</code></pre>
+<p>In a project that has never run <code>bdd model use</code>, the first row is the
+name Ollama supplied:</p>
+<pre><code class="language-text">llm.model	qwen3:8b	(discovered)
+</code></pre>
+<p>A <code>[tools.profiles]</code> list for a caller <strong>replaces</strong> that command’s
+built-in tools and is attributed to the file. <code>bdd init</code> writes every
+caller’s default list so those rows show as from the file. Callers not
+listed keep the code default. <code>[tools.enabled]</code> / <code>[tools.disabled]</code>
+rows appear only when those tables are set.</p>
+<p>Optional keys with nothing to show print <code>(unset)</code> with source
+<code>(default)</code>: <code>tools.mcp_config</code>, and <code>llm.model</code> when Ollama is down
+or has no models pulled.</p>
+<h2 id="see-also-16"><a class="header" href="#see-also-16">See also</a></h2>
+<ul>
+<li><a href="#bdd-model"><code>bdd model</code></a> — persist <code>llm.model</code>.</li>
+<li><a href="#bdd-tools"><code>bdd tools</code></a> — per-command profiles and <code>mcp.json</code> tools.</li>
+<li><a href="#global-flags">Global flags</a> — <code>--model</code>, <code>--retry</code>, <code>--tools</code>
+override a value for one run and are not written to the file.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="bdd-mcp"><a class="header" href="#bdd-mcp">bdd mcp</a></h1>
@@ -2659,7 +2736,7 @@ scenario.</li>
 reconnecting agent (or a human taking over in the CLI) continues
 from the same place.</li>
 </ul>
-<h2 id="flags-7"><a class="header" href="#flags-7">Flags</a></h2>
+<h2 id="flags-8"><a class="header" href="#flags-8">Flags</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -2715,6 +2792,44 @@ a CLI-side model may request is <code>command_run</code> on the <code>implement<
 profile, and that call still asks the human to confirm.</p>
 <p>External tools are namespaced <code>server__tool</code>. A name in config that is
 not in the catalog is a warning, not a hard failure.</p>
+<h2 id="bddtoml-per-command-mapping"><a class="header" href="#bddtoml-per-command-mapping"><code>.bdd.toml</code> per-command mapping</a></h2>
+<p>Built-in defaults live in code and are also written into
+<code>[tools.profiles]</code> by <code>bdd init</code> so you can see what each command
+offers the model. If that table names a caller with a list, that list
+<strong>replaces</strong> the default for that command. Omitted callers keep the
+code defaults. <code>[tools.enabled]</code> adds names;
+<code>[tools.disabled]</code> removes them. <code>bdd tools enable</code> / <code>disable</code> write
+those last two tables.</p>
+<p>After you add a server to <code>mcp.json</code>, run <code>bdd tools refresh</code> and put
+the tool on the command that should use it:</p>
+<pre><code class="language-toml">[tools.profiles]
+implement = ["get_requirement", "feature_read", "playwright:browser_navigate"]
+
+[tools.enabled]
+status = ["playwright:browser_navigate"]
+</code></pre>
+<h3 id="name-collisions"><a class="header" href="#name-collisions">Name collisions</a></h3>
+<p>Built-in tools keep their catalog names (<code>validate_spec</code>). Tools from
+<code>mcp.json</code> are catalogued as <code>server__tool</code> so they never overwrite a
+built-in. When both exist, the <strong>bare</strong> name is the built-in. Pin the
+origin when you need to be explicit:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Written in <code>.bdd.toml</code></th><th>Resolves to</th></tr>
+</thead>
+<tbody>
+<tr><td><code>validate_spec</code></td><td>built-in</td></tr>
+<tr><td><code>builtin:validate_spec</code></td><td>built-in, even if an MCP tool shares the short name</td></tr>
+<tr><td><code>self:validate_spec</code></td><td>mcp.json server <code>self</code></td></tr>
+<tr><td><code>self__validate_spec</code></td><td>same MCP tool (catalog name)</td></tr>
+</tbody>
+</table>
+</div>
+<p><code>builtin</code> is reserved for the CLI’s own tools. <code>bdd init</code> writes
+<code>.bdd.toml</code> with every key and a live <code>[tools.profiles]</code> list for each
+caller. <a href="#bdd-config"><code>bdd config</code></a> prints the resolved set and whether
+each value is a default or came from the file.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="bdd-ask"><a class="header" href="#bdd-ask">bdd ask</a></h1>
 <p>Ask the local model a question with the <strong>ask</strong> tool profile: the ten

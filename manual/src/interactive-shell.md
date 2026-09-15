@@ -63,7 +63,7 @@ model, especially one trained for work other than development. See
 
 | Situation | Announcement |
 | --- | --- |
-| Configured in `.bdd-mcp.toml` | `Model set: qwen3.8-flash-next:125b-mlx (from configuration).` |
+| Configured in `.bdd.toml` | `Model set: qwen3.8-flash-next:125b-mlx (from configuration).` |
 | No config, models installed | `Model set for this session: qwen3.8-flash-next:125b-mlx (not saved - keep it with: bdd model use qwen3.8-flash-next:125b-mlx).` |
 | Ollama up, no models | `Ollama is running but has no models - generation will use deterministic templates. For optimal results pull a coding model, e.g.: ollama pull qwen3.8-flash-next:125b-mlx (mileage varies with models not trained for development)` |
 | Ollama unreachable | `Ollama is not reachable - generation will use deterministic templates. Install it from https://ollama.com, start it, and pull a coding model, e.g.: ollama pull qwen3.8-flash-next:125b-mlx (mileage varies with models not trained for development)` |

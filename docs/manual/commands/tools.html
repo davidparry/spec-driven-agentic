@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-4a49ca55.js";
+            window.path_to_searchindex_js = "../searchindex-1df5a76f.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-d1ab0951.js"></script>
+        <script src="../toc-9d4e1520.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -214,6 +214,44 @@ a CLI-side model may request is <code>command_run</code> on the <code>implement<
 profile, and that call still asks the human to confirm.</p>
 <p>External tools are namespaced <code>server__tool</code>. A name in config that is
 not in the catalog is a warning, not a hard failure.</p>
+<h2 id="bddtoml-per-command-mapping"><a class="header" href="#bddtoml-per-command-mapping"><code>.bdd.toml</code> per-command mapping</a></h2>
+<p>Built-in defaults live in code and are also written into
+<code>[tools.profiles]</code> by <code>bdd init</code> so you can see what each command
+offers the model. If that table names a caller with a list, that list
+<strong>replaces</strong> the default for that command. Omitted callers keep the
+code defaults. <code>[tools.enabled]</code> adds names;
+<code>[tools.disabled]</code> removes them. <code>bdd tools enable</code> / <code>disable</code> write
+those last two tables.</p>
+<p>After you add a server to <code>mcp.json</code>, run <code>bdd tools refresh</code> and put
+the tool on the command that should use it:</p>
+<pre><code class="language-toml">[tools.profiles]
+implement = ["get_requirement", "feature_read", "playwright:browser_navigate"]
+
+[tools.enabled]
+status = ["playwright:browser_navigate"]
+</code></pre>
+<h3 id="name-collisions"><a class="header" href="#name-collisions">Name collisions</a></h3>
+<p>Built-in tools keep their catalog names (<code>validate_spec</code>). Tools from
+<code>mcp.json</code> are catalogued as <code>server__tool</code> so they never overwrite a
+built-in. When both exist, the <strong>bare</strong> name is the built-in. Pin the
+origin when you need to be explicit:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Written in <code>.bdd.toml</code></th><th>Resolves to</th></tr>
+</thead>
+<tbody>
+<tr><td><code>validate_spec</code></td><td>built-in</td></tr>
+<tr><td><code>builtin:validate_spec</code></td><td>built-in, even if an MCP tool shares the short name</td></tr>
+<tr><td><code>self:validate_spec</code></td><td>mcp.json server <code>self</code></td></tr>
+<tr><td><code>self__validate_spec</code></td><td>same MCP tool (catalog name)</td></tr>
+</tbody>
+</table>
+</div>
+<p><code>builtin</code> is reserved for the CLI’s own tools. <code>bdd init</code> writes
+<code>.bdd.toml</code> with every key and a live <code>[tools.profiles]</code> list for each
+caller. <a href="config.html"><code>bdd config</code></a> prints the resolved set and whether
+each value is a default or came from the file.</p>
 
                     </main>
 

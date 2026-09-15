@@ -9,13 +9,14 @@ use std::time::Duration;
 use serde::Deserialize;
 use tracing::{debug, warn};
 
+use crate::domain::config_report::{DEFAULT_LLM_ENDPOINT, DEFAULT_LLM_TIMEOUT_SECONDS};
 use crate::ports::{LlmError, ModelCatalog, ModelInfo};
 
-pub const DEFAULT_ENDPOINT: &str = "http://localhost:11434";
+pub const DEFAULT_ENDPOINT: &str = DEFAULT_LLM_ENDPOINT;
 
 /// Local models chew on large prompts (an implementation attempt
 /// carries the whole project) for minutes, not seconds.
-pub const DEFAULT_GENERATION_TIMEOUT: Duration = Duration::from_secs(300);
+pub const DEFAULT_GENERATION_TIMEOUT: Duration = Duration::from_secs(DEFAULT_LLM_TIMEOUT_SECONDS);
 
 /// How long Ollama keeps the model resident after a request. A loaded
 /// model skips the multi-second startup cost on the next call.
@@ -35,7 +36,7 @@ pub(crate) fn describe(error: &reqwest::Error, timeout: Duration) -> String {
         return format!(
             "no reply within {}s - large prompts can outlast the timeout while \
              the model is still generating; set timeout_seconds under [llm] in \
-             .bdd-mcp.toml to wait longer",
+             .bdd.toml to wait longer",
             timeout.as_secs()
         );
     }

@@ -150,7 +150,7 @@ is staged, and you implement by hand instead.
 The implementation prompt is the largest call the CLI makes, so a
 local model can need minutes to answer. The generation timeout
 defaults to 300 seconds; if you see `no reply within ...s`, raise
-`timeout_seconds` under `[llm]` in `.bdd-mcp.toml` (see
+`timeout_seconds` under `[llm]` in `.bdd.toml` (see
 [`bdd model`](model.md#the-llm-configuration-block)).
 
 ## Where it fits

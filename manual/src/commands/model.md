@@ -28,7 +28,7 @@ Commands: list, current, use
 Highest priority first:
 
 1. **`--model` flag** — this invocation only, never persisted.
-2. **Configuration** — the `model` key in `.bdd-mcp.toml` under the
+2. **Configuration** — the `model` key in `.bdd.toml` under the
    project root, written by `bdd model use`.
 3. **Discovery** — the first model installed in Ollama, as a
    session-only default. Nothing is written to disk.
@@ -98,7 +98,7 @@ bdd model use qwen3.8-flash-next:125b-mlx
 
 ```text
 Configured model: qwen3.8-flash-next:125b-mlx
-Written to /Users/you/code/calculator/.bdd-mcp.toml
+Written to /Users/you/code/calculator/.bdd.toml
 ```
 
 The choice is validated against Ollama's installed models — a name
@@ -106,13 +106,15 @@ Ollama does not have is rejected rather than silently saved.
 
 ## The [llm] configuration block
 
-Everything model-related lives under `[llm]` in `.bdd-mcp.toml`:
+Everything model-related lives under `[llm]` in `.bdd.toml`:
 
 ```toml
 [llm]
 model = "qwen3.8-flash-next:125b-mlx"     # persisted by bdd model use
 endpoint = "http://localhost:11434"   # the Ollama endpoint
 timeout_seconds = 300                 # generation timeout (default 300)
+cache_ttl_seconds = 600               # response cache TTL; 0 disables
+retry = 3                             # invalid-reply attempts (`--retry` wins)
 ```
 
 `timeout_seconds` bounds how long one generation call may take. Large
@@ -135,5 +137,6 @@ it explicitly (`no reply within 300s ... set timeout_seconds under
 ## See also
 
 - [Global flags](../global-flags.md) — the `--model` override.
+- [`bdd config`](config.md) — dump every key and where it came from.
 - [`bdd steps generate`](steps.md#source-template-or-llm) — how LLM
   output is validated before it can stage.

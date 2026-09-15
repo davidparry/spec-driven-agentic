@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-4a49ca55.js";
+            window.path_to_searchindex_js = "../searchindex-1df5a76f.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-d1ab0951.js"></script>
+        <script src="../toc-9d4e1520.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -204,7 +204,7 @@ Commands: list, current, use
 <p>Highest priority first:</p>
 <ol>
 <li><strong><code>--model</code> flag</strong> — this invocation only, never persisted.</li>
-<li><strong>Configuration</strong> — the <code>model</code> key in <code>.bdd-mcp.toml</code> under the
+<li><strong>Configuration</strong> — the <code>model</code> key in <code>.bdd.toml</code> under the
 project root, written by <code>bdd model use</code>.</li>
 <li><strong>Discovery</strong> — the first model installed in Ollama, as a
 session-only default. Nothing is written to disk.</li>
@@ -246,16 +246,18 @@ session default and the output tells you it is not saved:</p>
 <pre><code class="language-bash">bdd model use qwen3.8-flash-next:125b-mlx
 </code></pre>
 <pre><code class="language-text">Configured model: qwen3.8-flash-next:125b-mlx
-Written to /Users/you/code/calculator/.bdd-mcp.toml
+Written to /Users/you/code/calculator/.bdd.toml
 </code></pre>
 <p>The choice is validated against Ollama’s installed models — a name
 Ollama does not have is rejected rather than silently saved.</p>
 <h2 id="the-llm-configuration-block"><a class="header" href="#the-llm-configuration-block">The [llm] configuration block</a></h2>
-<p>Everything model-related lives under <code>[llm]</code> in <code>.bdd-mcp.toml</code>:</p>
+<p>Everything model-related lives under <code>[llm]</code> in <code>.bdd.toml</code>:</p>
 <pre><code class="language-toml">[llm]
 model = "qwen3.8-flash-next:125b-mlx"     # persisted by bdd model use
 endpoint = "http://localhost:11434"   # the Ollama endpoint
 timeout_seconds = 300                 # generation timeout (default 300)
+cache_ttl_seconds = 600               # response cache TTL; 0 disables
+retry = 3                             # invalid-reply attempts (`--retry` wins)
 </code></pre>
 <p><code>timeout_seconds</code> bounds how long one generation call may take. Large
 prompts — an implementation attempt carries the requirement, the
@@ -280,6 +282,7 @@ it explicitly (<code>no reply within 300s ... set timeout_seconds under [llm]</c
 <h2 id="see-also"><a class="header" href="#see-also">See also</a></h2>
 <ul>
 <li><a href="../global-flags.html">Global flags</a> — the <code>--model</code> override.</li>
+<li><a href="config.html"><code>bdd config</code></a> — dump every key and where it came from.</li>
 <li><a href="steps.html#source-template-or-llm"><code>bdd steps generate</code></a> — how LLM
 output is validated before it can stage.</li>
 </ul>
@@ -292,7 +295,7 @@ output is validated before it can stage.</li>
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="../commands/mcp.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../commands/config.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -306,7 +309,7 @@ output is validated before it can stage.</li>
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="../commands/mcp.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../commands/config.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>

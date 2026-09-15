@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use crate::domain::tools::{ToolDefinition, find};
 
 /// Every model call the CLI makes, as a profile key. The kebab-case
-/// name is what `.bdd-mcp.toml` and `--for` use.
+/// name is what `.bdd.toml` and `--for` use.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Caller {
     SpecDraft,
@@ -41,6 +41,20 @@ impl Caller {
             Caller::Implement => "implement",
             Caller::Status => "status",
             Caller::Ask => "ask",
+        }
+    }
+
+    /// The CLI command whose LLM call offers this profile.
+    pub fn cli_command(self) -> &'static str {
+        match self {
+            Caller::SpecDraft => "bdd spec draft",
+            Caller::SpecReword => "bdd spec reword",
+            Caller::StepsGenerate => "bdd steps generate",
+            Caller::UnittestGenerate => "bdd unittest generate",
+            Caller::ImplementAdvice => "bdd implement (preflight advice)",
+            Caller::Implement => "bdd implement",
+            Caller::Status => "bdd status",
+            Caller::Ask => "bdd ask",
         }
     }
 
@@ -268,6 +282,16 @@ mod tests {
     }
 
     #[test]
+    fn every_caller_names_the_cli_command_that_loads_its_tools() {
+        let mut seen = std::collections::BTreeSet::new();
+        for caller in Caller::ALL {
+            let command = caller.cli_command();
+            assert!(command.starts_with("bdd "), "{}: {command}", caller.key());
+            assert!(seen.insert(command), "duplicate cli_command {command}");
+        }
+    }
+
+    #[test]
     fn every_default_profile_is_non_empty_and_names_only_real_tools() {
         let known = all_builtin_names();
         for caller in Caller::ALL {
@@ -320,5 +344,32 @@ mod tests {
             .insert("implement".into(), vec!["command_run".into()]);
         let resolved = resolve(Caller::Implement, &overrides, &catalog);
         assert!(!resolved.tools.iter().any(|t| t.name == "command_run"));
+    }
+
+    #[test]
+    fn a_profiles_list_with_qualified_names_picks_builtin_over_mcp() {
+        let mut catalog = catalog(&["validate_spec", "get_tdd_state"]);
+        catalog.push(ToolDefinition {
+            name: crate::domain::tools::namespaced("self", "validate_spec"),
+            description: String::new(),
+            schema: serde_json::json!({"type": "object"}),
+            origin: ToolOrigin::Server("self".into()),
+        });
+        let mut overrides = ProfileOverrides::default();
+        overrides.replace.insert(
+            "status".into(),
+            vec![
+                "builtin:validate_spec".into(),
+                "self:validate_spec".into(),
+                "get_tdd_state".into(),
+            ],
+        );
+        let resolved = resolve(Caller::Status, &overrides, &catalog);
+        let names: Vec<_> = resolved.tools.iter().map(|t| t.name.as_str()).collect();
+        assert_eq!(
+            names,
+            vec!["validate_spec", "get_tdd_state", "self__validate_spec"]
+        );
+        assert!(resolved.unknown.is_empty());
     }
 }
