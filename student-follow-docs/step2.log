@@ -2,8 +2,8 @@
 ========================================================================
   STEP 0 — Launch the server
 ========================================================================
-The client starts the MCP server as a child process and talks JSON-RPC 2.0 over stdin/stdout.
-Command: java -Dworkshop.root=/Users/davidparry/code/github/tdd-bdd-agentic -jar mcp-server/target/tdd-mcp-server.jar
+The client starts bdd mcp serve as a child process and talks JSON-RPC 2.0 over stdin/stdout.
+Command: /Users/davidparry/code/github/tdd-bdd-agentic/cli/target/release/bdd mcp serve --root /Users/davidparry/code/github/tdd-bdd-agentic
 
 ========================================================================
   STEP 1 — initialize (the MCP handshake)
@@ -11,47 +11,37 @@ Command: java -Dworkshop.root=/Users/davidparry/code/github/tdd-bdd-agentic -jar
 JSON-RPC request: method="initialize" — protocol version + capability negotiation.
 [boundedElastic-1] INFO io.modelcontextprotocol.client.transport.StdioClientTransport - MCP server starting.
 [boundedElastic-1] INFO io.modelcontextprotocol.client.transport.StdioClientTransport - MCP server started
-[pool-4-thread-1] INFO io.modelcontextprotocol.client.transport.StdioClientTransport - STDERR Message received: [tdd-mcp-server] Started. Workshop root: /Users/davidparry/code/github/tdd-bdd-agentic
-[pool-4-thread-1] INFO io.modelcontextprotocol.client.transport.StdioClientTransport - STDERR Message received: [tdd-mcp-server] Waiting for an MCP client on stdio...
-[pool-4-thread-1] INFO io.modelcontextprotocol.client.transport.StdioClientTransport - STDERR Message received: [pool-1-thread-1] INFO io.modelcontextprotocol.server.McpAsyncServer - Client initialize request - Protocol: 2025-11-25, Capabilities: ClientCapabilities[experimental=null, roots=null, sampling=null, elicitation=null], Info: Implementation[name=tdd-workshop-agent, title=null, version=1.0.0, description=null, icons=null, websiteUrl=null]
-[pool-1-thread-1] INFO io.modelcontextprotocol.client.LifecycleInitializer - Server response with Protocol: 2025-11-25, Capabilities: ServerCapabilities[completions=null, experimental=null, logging=LoggingCapabilities[], prompts=null, resources=null, tools=ToolCapabilities[listChanged=true]], Info: Implementation[name=tdd-workflow-server, title=null, version=1.0.0, description=null, icons=null, websiteUrl=null] and Instructions Drives a spec-driven TDD/BDD workflow for the String Calculator kata.
-The requirements spec is the source of truth and the entry point. Spec
-iteration loop: draft or edit a requirement in the requirements file ->
-validate_spec until the spec is valid -> refine_requirement on the new or
-changed requirement and reword from its findings until there are none ->
-have the developer approve the wording. From an approved spec:
-list_requirements -> get_requirement (pick a pending one) -> write a
-Gherkin scenario from its acceptance criteria in the feature file (BDD
-level), add step definitions if needed, and/or a failing JUnit test (unit
-level) -> run_tests (expect RED) -> implement -> run_tests (expect GREEN)
--> start_refactor -> run_tests. The human developer stays in control of
-every engineering decision.
+[pool-1-thread-1] INFO io.modelcontextprotocol.client.LifecycleInitializer - Server response with Protocol: 2025-11-25, Capabilities: ServerCapabilities[completions=null, experimental=null, logging=null, prompts=null, resources=null, tools=ToolCapabilities[listChanged=null]], Info: Implementation[name=tdd-workflow-server, title=null, version=1.0.0, description=null, icons=null, websiteUrl=null] and Instructions Drives a spec-driven TDD/BDD workflow. The requirements spec is the source of truth and the entry point. Spec iteration loop: draft or edit a requirement in the requirements file -> validate_spec until the spec is valid -> refine_requirement on the new or changed requirement and reword from its findings until there are none -> have the developer approve the wording. From an approved spec: list_requirements -> get_requirement (pick a pending one) -> write a Gherkin scenario from its acceptance criteria in the feature file (BDD level), add step definitions if needed, and/or a failing unit test -> run_tests (expect RED) -> implement (command_run can build or install what the failing tests need; it only works on a RED bar) -> run_tests (expect GREEN) -> start_refactor -> run_tests. The human developer stays in control of every engineering decision.
 Server identified itself as: tdd-workflow-server v1.0.0
 Server instructions for the agent:
-    Drives a spec-driven TDD/BDD workflow for the String Calculator kata.
-    The requirements spec is the source of truth and the entry point. Spec
-    iteration loop: draft or edit a requirement in the requirements file ->
-    validate_spec until the spec is valid -> refine_requirement on the new or
-    changed requirement and reword from its findings until there are none ->
-    have the developer approve the wording. From an approved spec:
-    list_requirements -> get_requirement (pick a pending one) -> write a
-    Gherkin scenario from its acceptance criteria in the feature file (BDD
-    level), add step definitions if needed, and/or a failing JUnit test (unit
-    level) -> run_tests (expect RED) -> implement -> run_tests (expect GREEN)
-    -> start_refactor -> run_tests. The human developer stays in control of
-    every engineering decision.
+    Drives a spec-driven TDD/BDD workflow. The requirements spec is the source of truth and the entry point. Spec iteration loop: draft or edit a requirement in the requirements file -> validate_spec until the spec is valid -> refine_requirement on the new or changed requirement and reword from its findings until there are none -> have the developer approve the wording. From an approved spec: list_requirements -> get_requirement (pick a pending one) -> write a Gherkin scenario from its acceptance criteria in the feature file (BDD level), add step definitions if needed, and/or a failing unit test -> run_tests (expect RED) -> implement (command_run can build or install what the failing tests need; it only works on a RED bar) -> run_tests (expect GREEN) -> start_refactor -> run_tests. The human developer stays in control of every engineering decision.
 
 ========================================================================
   STEP 2 — tools/list (discovery)
 ========================================================================
 JSON-RPC request: method="tools/list" — the agent asks what it is allowed to do.
-- list_requirements: List every requirement of the kata with its id, title, and implementation status.
+- changes_commit: Apply every staged change to the working tree and clear the area.
+- changes_discard: Drop every staged change without applying it.
+- changes_show: Show every staged change waiting for review.
+- command_run: Run one allowlisted dev-tool command (cargo, mvn, npm, npx, node, dotnet, java, javac, tsc) inside the project root during the implementation phase — the bar must be RED.
+- feature_create: Create an empty feature file (staged; apply with changes_commit).
+- feature_list: List every Gherkin feature file with its name and scenario count.
+- feature_read: Read one parsed feature file: tags, scenarios, and steps.
 - get_requirement: Get the user story and acceptance criteria for one requirement.
-- validate_spec: Validate the requirements spec on disk.
+- get_tdd_state: Get the current phase of the Red/Green/Refactor cycle, the last test run summary, interpretation instructions, at most the three latest dated state entries, and a suggested next step.
+- list_requirements: List every requirement of the kata with its id, title, and implementation status.
+- project_inspect: Detect the project's languages, BDD frameworks, runtimes, and whether test execution is possible.
 - refine_requirement: Review one requirement's wording for quality: ambiguous language, a story missing its actor or rationale, outcomes that are not measurable, criteria covering more than one action, and missing edge cases.
-- run_tests: Run the kata test suite with Maven and report the outcome.
-- get_tdd_state: Get the current phase of the Red/Green/Refactor cycle, the last test run summary, and a suggested next step.
+- requirement_mark_implemented: Flip a requirement's status to implemented (staged).
+- run_tests: Run the project test suite and report the outcome.
+- scenario_add: Append a scenario tagged @REQ-...
+- scenario_delete: Remove a scenario from a feature file (staged; apply with changes_commit).
+- scenario_update: Replace a scenario's steps and/or requirement tag (staged; apply with changes_commit).
 - start_refactor: Begin a refactor step.
+- step_definition_create: Stage pending step definitions for every undefined step (template only over MCP; apply with changes_commit).
+- step_definitions_find: List Gherkin steps that have no matching step definition.
+- unit_test_create: Stage a failing unit test for one requirement (template only over MCP; apply with changes_commit).
+- validate_spec: Validate the requirements spec on disk.
 
 ========================================================================
   STEP 3 — tools/call get_tdd_state (where are we?)
@@ -59,15 +49,17 @@ JSON-RPC request: method="tools/list" — the agent asks what it is allowed to d
 JSON-RPC request: method="tools/call" params={"name":"get_tdd_state","arguments":{}}
 Result:
     {
-      "phase" : "START",
-      "lastRun" : {
-        "failures" : 0,
-        "tests" : 0,
-        "skipped" : 0,
-        "errors" : 0
+      "instructions": "This file is the TDD phase log. `instructions` is this guide, not workflow state. `entries` is chronological, oldest first; each entry is the machine at `timestamp` (UTC RFC 3339). `phase` is START, RED, GREEN, or REFACTOR. Never refactor on RED; never mark a requirement implemented off GREEN. `lastRun` is test counts at that moment; failure details live on the test-run reply. `refactorLog` is every bdd refactor --note, in order. `attemptLog` is model implementation attempts for the requirement in flight; a GREEN run clears it. Each attempt records what it wrote (`targets`), the failures it was briefed with (`failures`), and the output of the first run after it (`outcome`; empty means no run verified it). When briefing a model, include only the three most recent entries. Older entries stay on disk for humans.",
+      "phase": "START",
+      "lastRun": {
+        "tests": 0,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
       },
-      "refactorLog" : [ ],
-      "nextStep" : "No tests have been run yet. Call run_tests to establish a baseline."
+      "refactorLog": [],
+      "entries": [],
+      "nextStep": "No tests have been run yet. Call run_tests to establish a baseline."
     }
 
 ========================================================================
@@ -76,32 +68,39 @@ Result:
 JSON-RPC request: method="tools/call" params={"name":"list_requirements","arguments":{}}
 Result:
     {
-      "project" : "String Calculator Kata",
-      "requirements" : [ {
-        "id" : "REQ-001",
-        "title" : "Empty string returns zero",
-        "status" : "implemented"
-      }, {
-        "id" : "REQ-002",
-        "title" : "Single number returns its value",
-        "status" : "implemented"
-      }, {
-        "id" : "REQ-003",
-        "title" : "Two numbers separated by a comma are summed",
-        "status" : "pending"
-      }, {
-        "id" : "REQ-004",
-        "title" : "Any amount of numbers is supported",
-        "status" : "pending"
-      }, {
-        "id" : "REQ-005",
-        "title" : "Newlines may be used as delimiters",
-        "status" : "pending"
-      }, {
-        "id" : "REQ-006",
-        "title" : "Negative numbers are rejected",
-        "status" : "pending"
-      } ]
+      "project": "String Calculator Kata",
+      "requirements": [
+        {
+          "id": "REQ-001",
+          "title": "Empty string returns zero",
+          "status": "implemented"
+        },
+        {
+          "id": "REQ-002",
+          "title": "Single number returns its value",
+          "status": "implemented"
+        },
+        {
+          "id": "REQ-003",
+          "title": "Two numbers separated by a comma are summed",
+          "status": "pending"
+        },
+        {
+          "id": "REQ-004",
+          "title": "Any amount of numbers is supported",
+          "status": "pending"
+        },
+        {
+          "id": "REQ-005",
+          "title": "Newlines may be used as delimiters",
+          "status": "pending"
+        },
+        {
+          "id": "REQ-006",
+          "title": "Negative numbers are rejected",
+          "status": "pending"
+        }
+      ]
     }
 
 ========================================================================
@@ -111,13 +110,13 @@ This runs `mvn -f kata/pom.xml test` inside the server and parses the Surefire r
 JSON-RPC request: method="tools/call" params={"name":"run_tests","arguments":{}}
 Result:
     {
-      "phase" : "GREEN",
-      "tests" : 5,
-      "failures" : 0,
-      "errors" : 0,
-      "skipped" : 0,
-      "failureDetails" : [ ],
-      "nextStep" : "All tests pass. Either call start_refactor to clean up, or call get_requirement for the next pending requirement and write a failing test for it."
+      "phase": "GREEN",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "failureDetails": [],
+      "nextStep": "All tests pass. Either call start_refactor to clean up, or call get_requirement for the next pending requirement and write a failing test for it."
     }
 >>> The bar is GREEN.
 
@@ -130,30 +129,34 @@ plus failing unit tests (TDD) — the spec (SDD) stays the source of truth.
 JSON-RPC request: method="tools/call" params={"name":"get_requirement","arguments":{"id":"REQ-003"}}
 Result:
     {
-      "id" : "REQ-003",
-      "title" : "Two numbers separated by a comma are summed",
-      "status" : "pending",
-      "story" : "As a user, I want comma-separated numbers to be summed so that I can add multiple values at once.",
-      "acceptanceCriteria" : [ "Given \"1,2\", when add is called, then the result is 3", "Given \"10,20\", when add is called, then the result is 30" ],
-      "featureLocation" : "kata/src/test/resources/features/string_calculator.feature",
-      "stepDefinitions" : "kata/src/test/java/com/davidparry/workshop/kata/StringCalculatorSteps.java",
-      "testLocation" : "kata/src/test/java/com/davidparry/workshop/kata/StringCalculatorTest.java",
-      "productionLocation" : "kata/src/main/java/com/davidparry/workshop/kata/StringCalculator.java",
-      "workflowHint" : "Write the Gherkin scenario for this requirement in the feature file first (tag it @REQ-003), reuse or add step definitions, then run_tests to see RED."
+      "id": "REQ-003",
+      "title": "Two numbers separated by a comma are summed",
+      "status": "pending",
+      "story": "As a user, I want comma-separated numbers to be summed so that I can add multiple values at once.",
+      "acceptanceCriteria": [
+        "Given \"1,2\", when add is called, then the result is 3",
+        "Given \"10,20\", when add is called, then the result is 30"
+      ],
+      "featureLocation": "kata/src/test/resources/features/string_calculator.feature",
+      "stepDefinitions": "kata/src/test/java/com/davidparry/workshop/kata/StringCalculatorSteps.java",
+      "testLocation": "kata/src/test/java/com/davidparry/workshop/kata/StringCalculatorTest.java",
+      "productionLocation": "kata/src/main/java/com/davidparry/workshop/kata/StringCalculator.java",
+      "workflowHint": "Write the Gherkin scenario for this requirement in the feature file first (tag it @REQ-003), reuse or add step definitions, then run_tests to see RED."
     }
 
 ========================================================================
   What happens next (your turn)
 ========================================================================
-1. Ask your agent to write a Gherkin scenario for REQ-003 (tagged @REQ-003) in
-   kata/src/test/resources/features/string_calculator.feature,
-   plus any unit tests in StringCalculatorTest.java
-2. Review the scenario       -> this is the spec review, you steer
+1. Using the tdd-workflow tools, add a Gherkin scenario for REQ-003
+   with scenario_add (tag @REQ-003), add missing steps with
+   step_definition_create, and a unit test with unit_test_create.
+2. Review the staged files with changes_show, then changes_commit.
 3. Call run_tests            -> expect RED
 4. Implement the behavior in StringCalculator.add
 5. Call run_tests            -> expect GREEN
-6. Call start_refactor, clean up, call run_tests again
+6. Call start_refactor if you agree, then requirement_mark_implemented
 7. Repeat for the next pending requirement.
 
 Connect this same server to Cursor or Claude Desktop using .cursor/mcp.json and drive the loop with a real LLM agent.
+[ForkJoinPool.commonPool-worker-1] INFO io.modelcontextprotocol.client.transport.StdioClientTransport - MCP server completed successfully with code 143
 [ForkJoinPool.commonPool-worker-1] INFO io.modelcontextprotocol.client.transport.StdioClientTransport - MCP server completed successfully with code 143

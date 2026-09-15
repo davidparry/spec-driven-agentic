@@ -21,11 +21,11 @@ The shell installer places the binary in `$CARGO_HOME/bin` (usually
 
 LLM-backed generation uses a local [Ollama](https://ollama.com)
 instance. The model this CLI is developed and run against is
-`qwen3-coder-next:latest`:
+`qwen3.8-flash-next:125b-mlx`:
 
 ```bash
-ollama pull qwen3-coder-next:latest
-bdd model use qwen3-coder-next:latest
+ollama pull qwen3.8-flash-next:125b-mlx
+bdd model use qwen3.8-flash-next:125b-mlx
 ```
 
 Your mileage will vary with a different model. A stronger coding model
@@ -50,7 +50,7 @@ $ bdd
   ▲                                  │
   ╰──────────────────────────────────╯
 
-Model set for this session: qwen3-coder-next:latest (not saved - keep it with: bdd model use qwen3-coder-next:latest).
+Model set for this session: qwen3.8-flash-next:125b-mlx (not saved - keep it with: bdd model use qwen3.8-flash-next:125b-mlx).
 Interactive shell - type commands without the bdd prefix (e.g. spec list).
 bdd>
 ```

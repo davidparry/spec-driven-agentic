@@ -39,14 +39,14 @@ Feature: The workshop agent narrates one spec-to-green walkthrough
     Given the backlog lists "REQ-001" as "implemented" and "REQ-003" as "pending"
     When the walkthrough runs
     Then the narration contains "STEP 6 — tools/call get_requirement (REQ-003)"
-    And the narration contains "write a Gherkin scenario for REQ-003 (tagged @REQ-003)"
+    And the narration contains "add a Gherkin scenario for REQ-003"
 
   @CLI-004
   Scenario: No pending work skips the detail step and uses a placeholder
     Given the backlog lists "REQ-001" as "implemented" and "REQ-002" as "implemented"
     When the walkthrough runs
     Then the narration does not contain "STEP 6"
-    And the narration contains "write a Gherkin scenario for the next requirement (tagged @REQ-XXX)"
+    And the narration contains "add a Gherkin scenario for the next requirement"
 
   @CLI-005
   Scenario: An error result is flagged in the narration

@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-e8590d4e.js";
+            window.path_to_searchindex_js = "../searchindex-42bba400.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-521911c0.js"></script>
+        <script src="../toc-d1ab0951.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -187,9 +187,9 @@ the model only to <em>polish</em> deterministic templates in the generation
 commands. Everything works without a model; generation just stays at
 template quality.</p>
 <p>The model this CLI is developed and run against is
-<code>qwen3-coder-next:latest</code>. Pull it with
-<code>ollama pull qwen3-coder-next:latest</code>, then persist the choice with
-<code>bdd model use qwen3-coder-next:latest</code>. Your mileage will vary with
+<code>qwen3.8-flash-next:125b-mlx</code>. Pull it with
+<code>ollama pull qwen3.8-flash-next:125b-mlx</code>, then persist the choice with
+<code>bdd model use qwen3.8-flash-next:125b-mlx</code>. Your mileage will vary with
 other models: a stronger coding model may improve drafts and
 implementations; a model trained for chat, general knowledge, or work
 other than development will typically produce weaker specs, steps,
@@ -218,7 +218,7 @@ currently be used.</p>
 <pre><code class="language-bash">bdd model list
 </code></pre>
 <pre><code class="language-text">Models available in Ollama:
-* qwen3-coder-next:latest   (configured)
+* qwen3.8-flash-next:125b-mlx   (configured)
   qwen3:8b
   llama3:8b
 </code></pre>
@@ -230,11 +230,11 @@ says the provider is unreachable.</p>
 <p>Show the resolved model and where it came from.</p>
 <pre><code class="language-bash">bdd model current
 </code></pre>
-<pre><code class="language-text">Configured model: qwen3-coder-next:latest
+<pre><code class="language-text">Configured model: qwen3.8-flash-next:125b-mlx
 </code></pre>
 <p>With nothing configured but models installed, the first one is the
 session default and the output tells you it is not saved:</p>
-<pre><code class="language-text">Model set for this session: qwen3-coder-next:latest (not saved - keep it with: bdd model use qwen3-coder-next:latest).
+<pre><code class="language-text">Model set for this session: qwen3.8-flash-next:125b-mlx (not saved - keep it with: bdd model use qwen3.8-flash-next:125b-mlx).
 </code></pre>
 <p>The same announcement appears when the
 <a href="../interactive-shell.html">interactive shell</a> starts.</p>
@@ -243,9 +243,9 @@ session default and the output tells you it is not saved:</p>
 <p>Persist a model choice in the project’s configuration.</p>
 <pre><code class="language-text">Usage: bdd model use [OPTIONS] &lt;MODEL_NAME&gt;
 </code></pre>
-<pre><code class="language-bash">bdd model use qwen3-coder-next:latest
+<pre><code class="language-bash">bdd model use qwen3.8-flash-next:125b-mlx
 </code></pre>
-<pre><code class="language-text">Configured model: qwen3-coder-next:latest
+<pre><code class="language-text">Configured model: qwen3.8-flash-next:125b-mlx
 Written to /Users/you/code/calculator/.bdd-mcp.toml
 </code></pre>
 <p>The choice is validated against Ollama’s installed models — a name
@@ -253,7 +253,7 @@ Ollama does not have is rejected rather than silently saved.</p>
 <h2 id="the-llm-configuration-block"><a class="header" href="#the-llm-configuration-block">The [llm] configuration block</a></h2>
 <p>Everything model-related lives under <code>[llm]</code> in <code>.bdd-mcp.toml</code>:</p>
 <pre><code class="language-toml">[llm]
-model = "qwen3-coder-next:latest"     # persisted by bdd model use
+model = "qwen3.8-flash-next:125b-mlx"     # persisted by bdd model use
 endpoint = "http://localhost:11434"   # the Ollama endpoint
 timeout_seconds = 300                 # generation timeout (default 300)
 </code></pre>

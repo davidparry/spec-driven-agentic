@@ -2,6 +2,7 @@
 //! order the plan documents. The provider (Ollama by default) is behind
 //! the [`ModelCatalog`] port; the persisted choice behind [`ModelStore`].
 
+use crate::domain::RECOMMENDED_MODEL;
 use crate::ports::{LlmError, ModelCatalog, ModelInfo, ModelStore};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -84,11 +85,10 @@ impl<C: ModelCatalog, S: ModelStore> ModelService<C, S> {
     pub fn resolve(&self, flag: Option<&str>) -> ModelResolution {
         match self.session_model(flag) {
             SessionModel::Ready { model, source } => ModelResolution::Resolved { model, source },
-            SessionModel::NoModels => ModelResolution::Unavailable(
+            SessionModel::NoModels => ModelResolution::Unavailable(format!(
                 "llm_unavailable: no models installed - pull one first \
-                 (e.g. `ollama pull qwen3-coder-next:latest`)"
-                    .to_string(),
-            ),
+                 (e.g. `ollama pull {RECOMMENDED_MODEL}`)"
+            )),
             SessionModel::ProviderDown(e) => ModelResolution::Unavailable(format!(
                 "llm_unavailable: cannot reach the model provider - {e}"
             )),
@@ -228,7 +228,8 @@ mod tests {
         let resolution = service.resolve(None);
         assert!(
             matches!(&resolution, ModelResolution::Unavailable(m)
-                if m.starts_with("llm_unavailable: no models installed")),
+                if m.starts_with("llm_unavailable: no models installed")
+                    && m.contains(crate::domain::RECOMMENDED_MODEL)),
             "got {resolution:?}"
         );
     }

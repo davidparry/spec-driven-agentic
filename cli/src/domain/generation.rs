@@ -546,7 +546,7 @@ pub fn strip_code_fences(response: &str) -> String {
         .to_string()
 }
 
-fn strip_think_block(text: &str) -> String {
+pub fn strip_think_block(text: &str) -> String {
     let trimmed = text.trim();
     let Some(rest) = trimmed.strip_prefix("<think>") else {
         return trimmed.to_string();

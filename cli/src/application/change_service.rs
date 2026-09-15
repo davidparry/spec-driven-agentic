@@ -41,7 +41,7 @@ impl<C: ChangeStore, R: SpecRepository, F: FeatureFiles> ChangeService<C, R, F> 
     }
 
     pub fn show(&self) -> Result<ChangesReport, ServiceError> {
-        let changes = self.store.changes().map_err(|e| ServiceError(e.0))?;
+        let changes = self.store.changes()?;
         let next_step = if changes.is_empty() {
             "Nothing is staged. Authoring commands (spec draft, scenario add, \
              feature create) stage their edits here."
@@ -60,7 +60,7 @@ impl<C: ChangeStore, R: SpecRepository, F: FeatureFiles> ChangeService<C, R, F> 
     /// issues ride along as a warning - the commit already happened, but
     /// an invalid spec never lands silently.
     pub fn commit(&self) -> Result<ChangesReport, ServiceError> {
-        let changes = self.store.commit().map_err(|e| ServiceError(e.0))?;
+        let changes = self.store.commit()?;
         if changes.is_empty() {
             return Ok(ChangesReport {
                 changes,
@@ -92,7 +92,7 @@ impl<C: ChangeStore, R: SpecRepository, F: FeatureFiles> ChangeService<C, R, F> 
     }
 
     pub fn discard(&self) -> Result<ChangesReport, ServiceError> {
-        let changes = self.store.discard().map_err(|e| ServiceError(e.0))?;
+        let changes = self.store.discard()?;
         let next_step = if changes.is_empty() {
             "Nothing was staged, so nothing was dropped."
         } else {
@@ -107,12 +107,11 @@ impl<C: ChangeStore, R: SpecRepository, F: FeatureFiles> ChangeService<C, R, F> 
 
     pub fn validate(&self) -> Result<ValidationReport, ServiceError> {
         let mut issues = Vec::new();
-        let changes = self.store.changes().map_err(|e| ServiceError(e.0))?;
+        let changes = self.store.changes()?;
         for change in changes.iter().filter(|c| c.path.ends_with(".feature")) {
             let content = self
                 .store
-                .content(&change.path)
-                .map_err(|e| ServiceError(e.0))?
+                .content(&change.path)?
                 .expect("listed changes always have content");
             if let Err(error) = feature::parse(&change.path, &content) {
                 issues.push(error);
@@ -155,16 +154,27 @@ struct OverlayFeatures<'a> {
 
 impl FeatureFiles for OverlayFeatures<'_> {
     fn exists(&self, path: &str) -> bool {
-        matches!(self.store.content(path), Ok(Some(_))) || self.fallback.exists(path)
+        match self.store.content(path) {
+            Ok(Some(_)) => true,
+            Ok(None) => self.fallback.exists(path),
+            Err(error) => {
+                tracing::error!(error = %error, path, "staging unreadable while checking a feature path");
+                false
+            }
+        }
     }
 
     fn has_tag(&self, path: &str, tag: &str) -> bool {
-        if let Ok(Some(content)) = self.store.content(path) {
-            return feature::parse(path, &content)
+        match self.store.content(path) {
+            Ok(Some(content)) => feature::parse(path, &content)
                 .map(|doc| doc.all_tags().iter().any(|t| t == tag))
-                .unwrap_or(false);
+                .unwrap_or(false),
+            Ok(None) => self.fallback.has_tag(path, tag),
+            Err(error) => {
+                tracing::error!(error = %error, path, "staging unreadable while checking a feature tag");
+                false
+            }
         }
-        self.fallback.has_tag(path, tag)
     }
 }
 

@@ -73,14 +73,14 @@ public class AgentWorkflow {
     private void handOff(String nextId) {
         out.banner("What happens next (your turn)");
         out.say("""
-                1. Ask your agent to write a Gherkin scenario for {req} (tagged @{tag}) in
-                   kata/src/test/resources/features/string_calculator.feature,
-                   plus any unit tests in StringCalculatorTest.java
-                2. Review the scenario       -> this is the spec review, you steer
+                1. Using the tdd-workflow tools, add a Gherkin scenario for {req}
+                   with scenario_add (tag @{tag}), add missing steps with
+                   step_definition_create, and a unit test with unit_test_create.
+                2. Review the staged files with changes_show, then changes_commit.
                 3. Call run_tests            -> expect RED
                 4. Implement the behavior in StringCalculator.add
                 5. Call run_tests            -> expect GREEN
-                6. Call start_refactor, clean up, call run_tests again
+                6. Call start_refactor if you agree, then requirement_mark_implemented
                 7. Repeat for the next pending requirement.
                 """
                 .replace("{req}", nextId == null ? "the next requirement" : nextId)

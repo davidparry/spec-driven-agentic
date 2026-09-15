@@ -7,14 +7,16 @@
 
 use serde::Serialize;
 
+use crate::application::LlmReplyError;
 use crate::application::assets::{asset_survey, load_effective_spec};
 use crate::application::generation_service::ResolvedLlm;
 use crate::application::spec_service::ServiceError;
-use crate::application::{LlmReplyError, generate_valid};
 use crate::domain::generation::strip_code_fences;
 use crate::domain::language::Language;
 use crate::domain::workflow::next_step_prompt;
-use crate::ports::{ChangeStore, FeatureCatalog, LlmGenerator, SourceFiles, SpecRepository};
+use crate::ports::{
+    ChangeStore, FeatureCatalog, LlmConversation, Prompter, SourceFiles, SpecRepository, ToolBroker,
+};
 
 /// One requirement's position on the road to implemented: its status
 /// and the asset gaps still open (empty once only the GREEN-gated
@@ -41,29 +43,31 @@ pub struct StatusReport {
     pub next_step: String,
 }
 
-pub struct StatusService<F, S, C, R, L>
+pub struct StatusService<F, S, C, R, L, B = crate::application::agent_service::NullBroker>
 where
     F: FeatureCatalog,
     S: SourceFiles,
     C: ChangeStore,
     R: SpecRepository,
-    L: LlmGenerator,
+    L: LlmConversation,
+    B: ToolBroker,
 {
     features: F,
     sources: S,
     store: C,
     spec: R,
     language: Language,
-    llm: Option<ResolvedLlm<L>>,
+    llm: Option<ResolvedLlm<L, B>>,
 }
 
-impl<F, S, C, R, L> StatusService<F, S, C, R, L>
+impl<F, S, C, R, L, B> StatusService<F, S, C, R, L, B>
 where
     F: FeatureCatalog,
     S: SourceFiles,
     C: ChangeStore,
     R: SpecRepository,
-    L: LlmGenerator,
+    L: LlmConversation,
+    B: ToolBroker,
 {
     pub fn new(
         features: F,
@@ -71,7 +75,7 @@ where
         store: C,
         spec: R,
         language: Language,
-        llm: Option<ResolvedLlm<L>>,
+        llm: Option<ResolvedLlm<L, B>>,
     ) -> Self {
         Self {
             features,
@@ -102,7 +106,7 @@ where
             .load()
             .map(|s| s.requirements.into_iter().map(|r| r.id).collect())
             .unwrap_or_default();
-        let staged = self.store.changes().map_err(|e| ServiceError(e.0))?;
+        let staged = self.store.changes()?;
         let mut requirements = Vec::new();
         let mut in_flight: Option<String> = None;
         let mut first_gap: Option<String> = None;
@@ -168,6 +172,7 @@ where
     /// advice call. `None` without a model.
     pub fn advice(
         &self,
+        prompter: &mut dyn Prompter,
         report: &StatusReport,
         last_run: impl Serialize,
     ) -> Result<Option<String>, ServiceError> {
@@ -180,11 +185,9 @@ where
             &report.staged,
             &report.requirements,
         );
-        let reply = match generate_valid(
-            &llm.generator,
-            &llm.model,
+        let reply = match llm.ask(
+            prompter,
             &prompt,
-            llm.attempts,
             |text| {
                 let body = strip_code_fences(text);
                 if body.trim().is_empty() {
@@ -210,6 +213,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::application::agent_service::NullPrompter;
     use crate::domain::model::{Requirement, Spec, TestRunSummary};
     use crate::ports::SourceFile;
     use crate::test_support::{
@@ -356,7 +360,9 @@ mod tests {
         assert!(!service.has_model());
         let report = service.status("START").unwrap();
         assert_eq!(
-            service.advice(&report, TestRunSummary::default()).unwrap(),
+            service
+                .advice(&mut NullPrompter, &report, TestRunSummary::default())
+                .unwrap(),
             None
         );
     }
@@ -377,6 +383,7 @@ mod tests {
         let report = service.status("RED").unwrap();
         let advice = service
             .advice(
+                &mut NullPrompter,
                 &report,
                 TestRunSummary {
                     tests: 6,
@@ -387,7 +394,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(advice, "Run bdd steps generate, then bdd changes commit.");
-        let prompts = service.llm.as_ref().unwrap().generator.prompts.borrow();
+        let prompts = service.llm.as_ref().unwrap().chat().prompts.borrow();
         assert!(
             prompts[0].contains("THE LOOP FOR ONE REQUIREMENT"),
             "the workflow process briefs the model"
@@ -405,7 +412,7 @@ mod tests {
         let report = service.status("RED").unwrap();
         assert_eq!(
             service
-                .advice(&report, TestRunSummary::default())
+                .advice(&mut NullPrompter, &report, TestRunSummary::default())
                 .unwrap_err()
                 .0,
             "the model call failed - model crashed"
@@ -417,7 +424,7 @@ mod tests {
         let service = service_with_llm(vec![], Some(FakeLlm::replying("   ")));
         let report = service.status("RED").unwrap();
         let error = service
-            .advice(&report, TestRunSummary::default())
+            .advice(&mut NullPrompter, &report, TestRunSummary::default())
             .unwrap_err();
         assert!(
             error.0.contains("empty") || error.0.contains("invalid"),

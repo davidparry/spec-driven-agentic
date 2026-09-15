@@ -34,11 +34,7 @@ impl<W: ScaffoldWriter> InitService<W> {
         let mut created = Vec::new();
         let mut skipped = Vec::new();
         for file in scaffold(language, project_name) {
-            if self
-                .writer
-                .write_new(&file.path, &file.content)
-                .map_err(|e| ServiceError(e.0))?
-            {
+            if self.writer.write_new(&file.path, &file.content)? {
                 created.push(file.path);
             } else {
                 skipped.push(file.path);

@@ -5,7 +5,7 @@ An evidence-bound inventory of every prompt the CLI application sends to an LLM:
 - **Application**: the Rust CLI in `cli/` (package `bdd-cli`, binary `bdd`).
 - **Model provider**: Ollama only, over local HTTP (`cli/src/adapters/ollama.rs:1-6`, default endpoint `http://localhost:11434` at `cli/src/adapters/ollama.rs:15`). No OpenAI, Anthropic, or other provider client exists in the CLI.
 - **Prompt storage**: every word of every LLM prompt lives in one embedded catalog, `cli/prompts/prompts.toml`, plus one embedded process document, `cli/prompts/workflow.md`. The catalog's own header states the design rule: *"The file is embedded into the binary at compile time (see src/domain/prompts.rs); the Rust source holds no prompt wording"* (`cli/prompts/prompts.toml:1-5`).
-- **Out of scope, verified empty**: nothing outside `cli/` is loaded as LLM prompt text. `config/mcp.json` points at the separate Java `mcp-server`, and `mcp-server/`, `mcp-client/`, and `scripts/` are a distinct Java workshop stack the Rust CLI never reads prompts from. The only `include_str!` prompt assets in the crate are `cli/prompts/prompts.toml` (`cli/src/domain/prompts.rs:12`) and `cli/prompts/workflow.md` (`cli/src/domain/workflow.rs:12`).
+- **Out of scope, verified empty**: nothing outside `cli/` is loaded as LLM prompt text. `config/mcp.json` / `.cursor/mcp.json` launch `bdd mcp serve`; `mcp-client/` is a Java MCP *client* that does not embed CLI prompts; `scripts/` never reads them. The only `include_str!` prompt assets in the crate are `cli/prompts/prompts.toml` (`cli/src/domain/prompts.rs:12`) and `cli/prompts/workflow.md` (`cli/src/domain/workflow.rs:12`).
 
 ---
 
@@ -13,36 +13,37 @@ An evidence-bound inventory of every prompt the CLI application sends to an LLM:
 
 ```mermaid
 flowchart LR
-    catalog["cli/prompts/prompts.toml<br/>6 sections, system + user templates"] -->|"include_str! (prompts.rs:12)"| env["MiniJinja Environment<br/>prompts.rs:41-60"]
+    catalog["cli/prompts/prompts.toml<br/>7 sections, system + user templates"] -->|"include_str! (prompts.rs:12)"| env["MiniJinja Environment<br/>prompts.rs"]
     workflowDoc["cli/prompts/workflow.md"] -->|"include_str! (workflow.rs:12)"| builders
-    env -->|"render(section, context)<br/>prompts.rs:63-69"| builders["Domain prompt builders<br/>proposal.rs / generation.rs / workflow.rs"]
-    builders -->|RenderedPrompt| services["Application services<br/>spec_mutation / generation / implement / status"]
-    services -->|"LlmGenerator::generate(model, system, user)<br/>ports.rs:75-77"| cache["CachedGenerator<br/>llm_cache.rs:147-163"]
-    cache -->|on miss| ollamaGen["OllamaGenerator<br/>ollama.rs:142-177"]
-    ollamaGen -->|"POST /api/generate<br/>ollama.rs:156-162"| ollamaSrv["Ollama server"]
+    env -->|"render(section, context)"| builders["Domain prompt builders"]
+    builders -->|RenderedPrompt| services["Application services"]
+    services -->|"Agent::ask / ResolvedLlm::ask"| cache["CachedConversation"]
+    cache -->|on miss| ollamaChat["OllamaChat"]
+    ollamaChat -->|"POST /api/chat + tools array"| ollamaSrv["Ollama server"]
 ```
 
 ### 1.1 The catalog and its loader
 
-- `cli/prompts/prompts.toml` holds exactly six TOML tables, one per LLM call, each with a `system` template (the model's role and rules) and a `user` template (the call's data), written as MiniJinja templates (`cli/prompts/prompts.toml:1-5`).
+- `cli/prompts/prompts.toml` holds TOML tables, one per LLM call, each with a `system` template and a `user` template, written as MiniJinja templates (`cli/prompts/prompts.toml:1-5`).
 - The catalog is embedded at compile time: `const PROMPTS_TOML: &str = include_str!("../../prompts/prompts.toml");` (`cli/src/domain/prompts.rs:12`).
-- The six required section names are pinned in code: `SECTIONS = ["proposal", "rewording", "polish", "implementation", "advice", "next_step"]` (`cli/src/domain/prompts.rs:15-22`).
+- Required section names are pinned in code: `SECTIONS = ["proposal", "rewording", "polish", "implementation", "advice", "next_step", "ask"]` (`cli/src/domain/prompts.rs:15-22`).
 - A lazily initialized MiniJinja `Environment` parses the TOML and registers each template as `<section>.system` / `<section>.user`; a missing section or non-compiling template panics because the catalog is a compile-time asset (`cli/src/domain/prompts.rs:41-60`).
 - `render(section, context)` renders both templates of a section with the same context and returns a `RenderedPrompt { system, user }` (`cli/src/domain/prompts.rs:26-30` and `63-69`).
 - Unit tests pin this behavior: every section registers both roles (`cli/src/domain/prompts.rs:85-96`), and rendering fills context into both prompts (`cli/src/domain/prompts.rs:98-106`).
 
 ### 1.2 The port and the wire
 
-- The single LLM abstraction is the `LlmGenerator` trait: `fn generate(&self, model, system, user) -> Result<String, LlmError>`. Its doc comment states that both prompts are "rendered from the prompt catalog in `prompts/prompts.toml`" (`cli/src/ports.rs:71-77`).
-- The live implementation is `OllamaGenerator` (`cli/src/adapters/ollama.rs:125-178`). Its `generate` posts JSON `{model, system, prompt, stream: false, keep_alive: "30m"}` to `POST {endpoint}/api/generate` (`cli/src/adapters/ollama.rs:143-162`). The system prompt travels in the `system` field and the user prompt in the `prompt` field (`cli/src/adapters/ollama.rs:158-159`; asserted by the test at `cli/src/adapters/ollama.rs:286-293`).
-- Generation timeout defaults to 300 s (`cli/src/adapters/ollama.rs:19`); `keep_alive` is `"30m"` (`cli/src/adapters/ollama.rs:28`). Temperature is deliberately left at the model default so retries vary — greedy decoding was observed to regenerate the same broken step definition 24 attempts in a row (`cli/src/adapters/ollama.rs:24-27`; asserted at `cli/src/adapters/ollama.rs:298-301`).
-- Every live generator is wrapped in a disk-backed response cache, `CachedGenerator`, keyed by SHA-256 over schema version, endpoint context, model, system, and user prompt (`cli/src/adapters/llm_cache.rs:57-68`); its `generate` answers identical requests from `.bdd-cache/` within the TTL (default 600 s, `cli/src/adapters/llm_cache.rs:23`) and otherwise delegates to the inner generator (`cli/src/adapters/llm_cache.rs:147-163`).
+- The single LLM abstraction is the `LlmConversation` trait: `fn chat(&self, model, messages, tools) -> Result<ChatTurn, LlmError>` (`cli/src/ports.rs`). Every production model call goes through `Agent::ask` over Ollama `/api/chat` with a `tools` array. There is no Anthropic or OpenAI client, and no `/api/generate` path.
+- The live implementation is `OllamaChat` (`cli/src/adapters/ollama_chat.rs`). Timeout and `keep_alive` still come from `cli/src/adapters/ollama.rs`. Temperature is left at the model default so retries vary.
+- Every live conversation is wrapped in a disk-backed cache, `CachedConversation` (`cli/src/adapters/chat_cache.rs`). Tool-catalog JSON lives under `.bdd-cache/tools/` so `prune_expired` does not delete it.
 
 ### 1.3 Composition root
 
-- The session-wide generator type is `type Llm = CachedGenerator<OllamaGenerator>` (`cli/src/main.rs:1032-1034`).
-- `resolved_ollama(root, model_flag)` is "the one place a model flag becomes a live Ollama generator" (`cli/src/main.rs:1036-1040`); it builds the `CachedGenerator` around an `OllamaGenerator` with the configured endpoint, timeout, and TTL (`cli/src/main.rs:1057-1060`). Model, endpoint, `timeout_seconds`, and `cache_ttl_seconds` come from `[llm]` in `.bdd-mcp.toml` — configuration, not prompt text (`cli/src/adapters/ollama.rs:135-136`, `cli/src/adapters/llm_cache.rs:22`).
-- The greenfield orchestrator receives the same generator behind a trait object, `DynLlm(Arc<dyn LlmGenerator + Send + Sync>)` (`cli/src/greenfield.rs:47-53`), wired at `cli/src/main.rs:1147-1151`.
+- Session types in `cli/src/main.rs`: `CachedConversation<OllamaChat>` and `MemoryAwareConversation<CachedConversation<OllamaChat>>`, wrapped as `ResolvedLlm` (the Agent wrapper).
+- `connected_llm` is the one place a model flag becomes a live chat + MCP tool broker.
+- The greenfield orchestrator receives `DynLlm(Arc<dyn LlmConversation + Send + Sync>)`.
+
+Send-site tables below may still say `llm.generate(...)` from an earlier audit. Production code calls `Agent::ask` / `ResolvedLlm::ask`. Prompt **text** in `prompts.toml` is still the source of wording.
 
 ---
 
@@ -185,7 +186,7 @@ These are not standalone LLM calls; they are constant texts spliced into the cat
 
 ## 4. MCP host-facing instructions (LLM-bound, but not Ollama calls)
 
-When the CLI runs as an MCP server (`bdd mcp serve`, dispatched at `cli/src/main.rs:372-375` to `serve_stdio` at `cli/src/mcp.rs:538-544`), it hands instruction text to an external LLM host (Cursor, Claude, etc.). These strings are prompts *for the host's model*, delivered over the MCP protocol rather than through `LlmGenerator`.
+When the CLI runs as an MCP server (`bdd mcp serve`), it hands instruction text to an external LLM host (Cursor, Claude, etc.). These strings are prompts *for the host's model*, delivered over the MCP protocol rather than through `LlmConversation`.
 
 ### 4.1 Server instructions
 
@@ -226,7 +227,7 @@ These strings are never assembled into an Ollama `system`/`prompt` payload; thei
 
 Bounding the audit — the following contain the word "prompt" or advice-like text but are never sent to a model by the CLI:
 
-- **Human UI prompts**: the `Prompter` trait (`cli/src/ports.rs:144-166`) and its console/readline adapters ask the *developer* questions (e.g. the drafting wizard's "Describe what to build in plain words..." at `cli/src/application/spec_mutation_service.rs:122-126`). These flow to stdout/stdin, not to `LlmGenerator`.
+- **Human UI prompts**: the `Prompter` trait (`cli/src/ports.rs`) and its console/readline adapters ask the *developer* questions (e.g. the drafting wizard). These flow to stdout/stdin, not to `LlmConversation`.
 - **Shell prompt**: `pub const SHELL_PROMPT: &str = "bdd> ";` (`cli/src/repl.rs:9`) is the interactive shell's readline prefix.
 - **TDD suggestions**: `TddStateMachine::suggestion()` (`cli/src/domain/tdd.rs:303-311`) returns canned next-step strings ("No tests have been run yet. Call run_tests...") in state replies and MCP responses; it is never passed to `generate`.
 - **Deterministic scaffolds**: the template-generated step-definition and unit-test files in `cli/src/domain/generation.rs` are code, not prompts; they only become LLM input when embedded as `{{ file }}` in `[polish]` (`cli/prompts/prompts.toml:85-87`) or as project files in `[implementation]` (`cli/prompts/prompts.toml:154-158`).
@@ -251,4 +252,4 @@ Bounding the audit — the following contain the word "prompt" or advice-like te
 | 11 | MCP server instructions | `cli/src/mcp.rs:518-532` | MCP `get_info` (`cli/src/mcp.rs:511-535`) | host LLM via MCP, not Ollama | `bdd mcp serve` |
 | 12 | MCP tool descriptions | `cli/src/mcp.rs` (see section 4.2 table) | rmcp tool schema | host LLM via MCP, not Ollama | `bdd mcp serve` |
 
-Single wire to the model for rows 1–10: `OllamaGenerator::generate` posting `system` + `prompt` to `POST /api/generate` (`cli/src/adapters/ollama.rs:142-177`, JSON body at `156-162`), behind the response cache (`cli/src/adapters/llm_cache.rs:147-163`).
+Single wire to the model for rows 1–10: `OllamaChat::chat` posting messages + tools to `POST /api/chat`, behind `CachedConversation`. Rows 11–12 are MCP instruction text for the host model, not Ollama.

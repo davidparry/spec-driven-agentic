@@ -35,10 +35,10 @@
             const path_to_root = "";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "searchindex-e8590d4e.js";
+            window.path_to_searchindex_js = "searchindex-42bba400.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-521911c0.js"></script>
+        <script src="toc-d1ab0951.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -197,7 +197,7 @@ shell’s <code>--root</code> unless a line supplies its own.</p>
 <p>Override the LLM model for this invocation only. This wins over the
 configured model and over discovery, and is never written to
 configuration:</p>
-<pre><code class="language-bash">bdd --model qwen3-coder-next:latest steps generate
+<pre><code class="language-bash">bdd --model qwen3.8-flash-next:125b-mlx steps generate
 bdd --model llama3:8b greenfield   # another model; mileage will vary
 </code></pre>
 <p>Model resolution order (see <a href="commands/model.html">bdd model</a> for the
@@ -238,6 +238,15 @@ bdd spec draft --retry 1   # one attempt, then the usual fallback
 <p><code>--retry</code> wins over <code>retry</code> under <code>[llm]</code> in <code>.bdd-mcp.toml</code>. A missing
 or zero config value uses the default of 3. In the interactive shell,
 commands inherit the shell’s <code>--retry</code> unless a line supplies its own.</p>
+<h2 id="--tools-names"><a class="header" href="#--tools-names"><code>--tools &lt;NAMES&gt;</code></a></h2>
+<p>Replace this command’s tool profile for one run with a comma-separated
+list of catalog names. Default profiles live in code and in
+<code>.bdd-mcp.toml</code>; see <a href="commands/tools.html"><code>bdd tools</code></a>.</p>
+<pre><code class="language-bash">bdd --tools list_requirements,get_requirement status
+</code></pre>
+<h2 id="--max-rounds-n"><a class="header" href="#--max-rounds-n"><code>--max-rounds &lt;N&gt;</code></a></h2>
+<p>Override <code>[tools] max_rounds</code> for one run: how many tool-call rounds
+<code>Agent::ask</code> may take before it must return a parsed reply.</p>
 <h2 id="-v---version"><a class="header" href="#-v---version"><code>-V</code>, <code>--version</code></a></h2>
 <p>Prints the version compiled into the binary (from <code>Cargo.toml</code> at
 build time).</p>

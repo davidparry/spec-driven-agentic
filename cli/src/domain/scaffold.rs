@@ -2,6 +2,7 @@
 //! a build file, a Cucumber runner, an empty requirements spec, and the
 //! CLI configuration. Pure text; writing is the adapter's job.
 
+use crate::domain::RECOMMENDED_MODEL;
 use crate::domain::language::Language;
 
 /// One file the scaffold wants on disk.
@@ -23,17 +24,23 @@ pub fn scaffold(language: Language, project_name: &str) -> Vec<ScaffoldFile> {
         },
         ScaffoldFile {
             path: ".bdd-mcp.toml".into(),
-            content: "[llm]\n# model = \"qwen3-coder-next:latest\"\n\
-                      endpoint = \"http://localhost:11434\"\n\
-                      # Generation timeout; large prompts on local models can need more.\n\
-                      # timeout_seconds = 300\n\
-                      # Identical requests reuse the cached response in .bdd-cache/\n\
-                      # for this many seconds; 0 disables the cache.\n\
-                      # cache_ttl_seconds = 600\n\
-                      # How many times to try a model call when the reply fails\n\
-                      # validation; each retry includes the invalid reply.\n\
-                      # retry = 3\n"
-                .into(),
+            content: format!(
+                "[llm]\n# model = \"{RECOMMENDED_MODEL}\"\n\
+                 endpoint = \"http://localhost:11434\"\n\
+                 # Generation timeout; large prompts on local models can need more.\n\
+                 # timeout_seconds = 300\n\
+                 # Identical requests reuse the cached response in .bdd-cache/\n\
+                 # for this many seconds; 0 disables the cache.\n\
+                 # cache_ttl_seconds = 600\n\
+                 # How many times to try a model call when the reply fails\n\
+                 # validation; each retry includes the invalid reply.\n\
+                 # retry = 3\n\n\
+                 # Per-command tool profiles for model calls. Built-in defaults\n\
+                 # apply until you attach or disable a tool.\n\
+                 # [tools]\n\
+                 # max_rounds = 12\n\
+                 # confirm = [\"command_run\"]\n"
+            ),
         },
         ScaffoldFile {
             path: ".gitignore".into(),
@@ -332,7 +339,7 @@ mod tests {
             assert!(spec.contains("\"requirements\": []"));
             let toml = files.iter().find(|f| f.path == ".bdd-mcp.toml").unwrap();
             assert!(
-                toml.content.contains("qwen3-coder-next:latest"),
+                toml.content.contains(crate::domain::RECOMMENDED_MODEL),
                 "{language:?}: recommended Ollama model missing from scaffold"
             );
             assert!(

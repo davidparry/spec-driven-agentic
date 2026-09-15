@@ -1,6 +1,6 @@
 {
   "project": "TDD Workshop Agent (MCP client)",
-  "description": "The spec for the workshop's own agent harness. The client practices what the workshop teaches: these requirements are the source of truth, the tagged Cucumber scenarios in tdd_workshop_agent.feature are their executable form, and SpecCompletenessTest fails the build if the two drift apart.",
+  "description": "The spec for the workshop's own agent harness. The client practices what the workshop teaches: these requirements are the source of truth, the tagged Cucumber scenarios are their executable form, and SpecCompletenessTest fails the build if the two drift apart.",
   "requirements": [
     {
       "id": "CLI-001",
@@ -66,6 +66,57 @@
         "Given a walkthrough that fails mid-run with an error, when the failure propagates, then the connection has still been closed"
       ],
       "featureFile": "mcp-client/src/test/resources/features/tdd_workshop_agent.feature"
+    },
+    {
+      "id": "CLI-007",
+      "title": "The client launches the bdd binary as the MCP server",
+      "status": "implemented",
+      "story": "As a workshop attendee, I want the Java client to start bdd mcp serve so that the walkthrough talks to the same server Cursor uses.",
+      "acceptanceCriteria": [
+        "Given a workshop root and a bdd binary, when ServerLaunch.bdd is built, then the program is that binary and the args are mcp serve --root <root>"
+      ],
+      "featureFile": "mcp-client/src/test/resources/features/tool_sweep.feature"
+    },
+    {
+      "id": "CLI-008",
+      "title": "Discovery carries each tool's input schema and required arguments",
+      "status": "implemented",
+      "story": "As a workshop attendee, I want discovered tools to keep their JSON Schema so that a client can call tools it did not hard-code.",
+      "acceptanceCriteria": [
+        "Given a tool whose schema requires id, when required arguments are read, then id is listed"
+      ],
+      "featureFile": "mcp-client/src/test/resources/features/tool_sweep.feature"
+    },
+    {
+      "id": "CLI-009",
+      "title": "The tool plan names exactly the 23 served tools",
+      "status": "implemented",
+      "story": "As a maintainer, I want a 24th MCP tool to fail the Java build until it is planned so that the client cannot silently skip new surface area.",
+      "acceptanceCriteria": [
+        "Given the ToolPlan, when it is listed, then it names exactly 23 tools",
+        "Given a discovered tool that is not in the plan, when the sweep runs, then that tool is reported as unexpected"
+      ],
+      "featureFile": "mcp-client/src/test/resources/features/tool_sweep.feature"
+    },
+    {
+      "id": "CLI-010",
+      "title": "A read-only sweep calls every planned read tool and skips mutations",
+      "status": "implemented",
+      "story": "As a workshop attendee, I want a default sweep that does not stage files so that I can prove discovery without mutating the kata.",
+      "acceptanceCriteria": [
+        "Given a server that exposes every planned tool, when a read-only sweep runs, then staging and gated tools are not called"
+      ],
+      "featureFile": "mcp-client/src/test/resources/features/tool_sweep.feature"
+    },
+    {
+      "id": "CLI-011",
+      "title": "Gated tool refusals are expected, not sweep failures",
+      "status": "implemented",
+      "story": "As a workshop attendee, I want start_refactor off GREEN to count as a successful gated call so that the sweep can exercise refusals.",
+      "acceptanceCriteria": [
+        "Given a gated tool that answers with isError, when a mutating sweep runs, then the call is recorded and is not a failure"
+      ],
+      "featureFile": "mcp-client/src/test/resources/features/tool_sweep.feature"
     }
   ]
 }

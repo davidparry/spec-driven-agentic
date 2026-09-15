@@ -22,7 +22,7 @@ bdd> exit
   `--model`, and `--retry` unless the line supplies its own:
 
 ```bash
-bdd --root ~/code/calculator --model qwen3-coder-next:latest --retry 5
+bdd --root ~/code/calculator --model qwen3.8-flash-next:125b-mlx --retry 5
 # every command in this shell now targets that root and model,
 # and retries invalid model replies up to 5 times
 ```
@@ -56,17 +56,17 @@ history cannot be saved, the shell says so and exits normally.
 
 The first prompt is preceded by one line describing the session's
 model. This CLI is developed and run against
-`qwen3-coder-next:latest`; your mileage will vary with a different
+`qwen3.8-flash-next:125b-mlx`; your mileage will vary with a different
 model, especially one trained for work other than development. See
 [Getting started](getting-started.md#local-llm-ollama) and
 [`bdd model`](commands/model.md).
 
 | Situation | Announcement |
 | --- | --- |
-| Configured in `.bdd-mcp.toml` | `Model set: qwen3-coder-next:latest (from configuration).` |
-| No config, models installed | `Model set for this session: qwen3-coder-next:latest (not saved - keep it with: bdd model use qwen3-coder-next:latest).` |
-| Ollama up, no models | `Ollama is running but has no models - generation will use deterministic templates. For optimal results pull a coding model, e.g.: ollama pull qwen3-coder-next:latest (mileage varies with models not trained for development)` |
-| Ollama unreachable | `Ollama is not reachable - generation will use deterministic templates. Install it from https://ollama.com, start it, and pull a coding model, e.g.: ollama pull qwen3-coder-next:latest (mileage varies with models not trained for development)` |
+| Configured in `.bdd-mcp.toml` | `Model set: qwen3.8-flash-next:125b-mlx (from configuration).` |
+| No config, models installed | `Model set for this session: qwen3.8-flash-next:125b-mlx (not saved - keep it with: bdd model use qwen3.8-flash-next:125b-mlx).` |
+| Ollama up, no models | `Ollama is running but has no models - generation will use deterministic templates. For optimal results pull a coding model, e.g.: ollama pull qwen3.8-flash-next:125b-mlx (mileage varies with models not trained for development)` |
+| Ollama unreachable | `Ollama is not reachable - generation will use deterministic templates. Install it from https://ollama.com, start it, and pull a coding model, e.g.: ollama pull qwen3.8-flash-next:125b-mlx (mileage varies with models not trained for development)` |
 
 ## The greenfield nudge
 

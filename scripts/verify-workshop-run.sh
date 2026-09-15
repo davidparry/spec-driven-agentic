@@ -38,7 +38,7 @@ cmd_start() {
     git checkout -b "$branch" "$BASE_BRANCH"
     echo
     echo "On new branch '$branch' (cut from ${BASE_BRANCH})."
-    echo "Next: mvn -q package && scripts/preflight.sh, then run the exercises."
+    echo "Next: bdd --version && scripts/preflight.sh, then run the exercises."
     echo "When done: scripts/verify-workshop-run.sh check"
 }
 

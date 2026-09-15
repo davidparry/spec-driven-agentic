@@ -1,8 +1,7 @@
 //! Filesystem implementation of the [`StateStore`] port: the TDD state
 //! machine persisted as `.bdd-state.json` in the project root. The file
 //! is a chronological log of timestamped entries plus interpretation
-//! instructions, so separate CLI invocations share one machine the way
-//! the long-running Java server does.
+//! instructions, so separate CLI invocations share one machine.
 
 use std::fs;
 use std::path::PathBuf;

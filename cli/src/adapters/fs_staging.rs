@@ -25,8 +25,10 @@ impl FsChangeStore {
         self.staged_dir().join("manifest.json")
     }
 
-    fn staged_file(&self, path: &str) -> PathBuf {
-        self.staged_dir().join("files").join(path)
+    fn staged_file(&self, path: &str) -> Result<PathBuf, StageError> {
+        let relative =
+            crate::domain::paths::confine(path).map_err(|e| StageError(e.to_string()))?;
+        Ok(self.staged_dir().join("files").join(relative))
     }
 
     fn manifest(&self) -> Result<Vec<StagedChange>, StageError> {
@@ -64,18 +66,19 @@ fn ensure_parent(path: &Path) -> Result<(), StageError> {
 
 impl ChangeStore for FsChangeStore {
     fn stage(&self, path: &str, content: &str, summary: &str) -> Result<StagedChange, StageError> {
+        let path = crate::domain::paths::confine(path).map_err(|e| StageError(e.to_string()))?;
         let mut changes = self.manifest()?;
-        let target = self.staged_file(path);
+        let target = self.staged_file(&path)?;
         ensure_parent(&target)?;
         fs::write(&target, content)
             .map_err(|e| StageError(format!("{path}: staged file not writable - {e}")))?;
-        let action = if self.root.join(path).exists() {
+        let action = if self.root.join(&path).exists() {
             "modify"
         } else {
             "create"
         };
         let change = StagedChange {
-            path: path.to_string(),
+            path: path.clone(),
             action: action.to_string(),
             summary: summary.to_string(),
         };
@@ -93,7 +96,7 @@ impl ChangeStore for FsChangeStore {
         if !self.manifest()?.iter().any(|c| c.path == path) {
             return Ok(None);
         }
-        fs::read_to_string(self.staged_file(path))
+        fs::read_to_string(self.staged_file(path)?)
             .map(Some)
             .map_err(|e| StageError(format!("{path}: staged file not readable - {e}")))
     }
@@ -101,9 +104,11 @@ impl ChangeStore for FsChangeStore {
     fn commit(&self) -> Result<Vec<StagedChange>, StageError> {
         let changes = self.manifest()?;
         for change in &changes {
-            let target = self.root.join(&change.path);
+            let relative = crate::domain::paths::confine(&change.path)
+                .map_err(|e| StageError(format!("{}: {e}", change.path)))?;
+            let target = self.root.join(&relative);
             ensure_parent(&target)?;
-            fs::copy(self.staged_file(&change.path), &target).map_err(|e| {
+            fs::copy(self.staged_file(&relative)?, &target).map_err(|e| {
                 StageError(format!(
                     "{}: could not apply staged file - {e}",
                     change.path
@@ -251,6 +256,41 @@ mod tests {
             commit.0.contains("could not apply staged file"),
             "got: {}",
             commit.0
+        );
+    }
+
+    #[test]
+    fn absolute_and_escaping_paths_are_refused() {
+        let (dir, store) = store();
+        for path in [
+            "/etc/passwd",
+            "../outside.txt",
+            r"C:\Windows\win.ini",
+            "~/x",
+        ] {
+            let error = store.stage(path, "x", "s").unwrap_err();
+            assert!(
+                error.0.contains("absolute")
+                    || error.0.contains("..")
+                    || error.0.contains("home-directory"),
+                "{path}: {}",
+                error.0
+            );
+        }
+        assert!(store.changes().unwrap().is_empty());
+        assert!(!dir.path().join("etc").exists());
+    }
+
+    #[test]
+    fn a_dotdot_that_stays_inside_the_root_is_normalized() {
+        let (dir, store) = store();
+        let change = store.stage("features/../notes.txt", "ok", "norm").unwrap();
+        assert_eq!(change.path, "notes.txt");
+        assert_eq!(store.content("notes.txt").unwrap().as_deref(), Some("ok"));
+        store.commit().unwrap();
+        assert_eq!(
+            fs::read_to_string(dir.path().join("notes.txt")).unwrap(),
+            "ok"
         );
     }
 }

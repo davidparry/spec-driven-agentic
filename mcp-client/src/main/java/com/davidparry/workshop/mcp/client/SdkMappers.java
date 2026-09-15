@@ -28,7 +28,7 @@ public final class SdkMappers {
 
     public static List<DiscoveredTool> toTools(ListToolsResult result) {
         return result.tools().stream()
-                .map(tool -> new DiscoveredTool(tool.name(), tool.description()))
+                .map(tool -> new DiscoveredTool(tool.name(), tool.description(), tool.inputSchema()))
                 .toList();
     }
 

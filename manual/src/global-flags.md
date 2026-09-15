@@ -25,7 +25,7 @@ configured model and over discovery, and is never written to
 configuration:
 
 ```bash
-bdd --model qwen3-coder-next:latest steps generate
+bdd --model qwen3.8-flash-next:125b-mlx steps generate
 bdd --model llama3:8b greenfield   # another model; mileage will vary
 ```
 
@@ -77,6 +77,21 @@ bdd spec draft --retry 1   # one attempt, then the usual fallback
 `--retry` wins over `retry` under `[llm]` in `.bdd-mcp.toml`. A missing
 or zero config value uses the default of 3. In the interactive shell,
 commands inherit the shell's `--retry` unless a line supplies its own.
+
+## `--tools <NAMES>`
+
+Replace this command's tool profile for one run with a comma-separated
+list of catalog names. Default profiles live in code and in
+`.bdd-mcp.toml`; see [`bdd tools`](commands/tools.md).
+
+```bash
+bdd --tools list_requirements,get_requirement status
+```
+
+## `--max-rounds <N>`
+
+Override `[tools] max_rounds` for one run: how many tool-call rounds
+`Agent::ask` may take before it must return a parsed reply.
 
 ## `-V`, `--version`
 

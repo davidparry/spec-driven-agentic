@@ -4,11 +4,12 @@ Your step-by-step companion for the 60-minute workshop. Everything the
 presenter does, you do — this page has the exact commands, the exact agent
 prompts, and what you should see at every step.
 
-**The big idea:** the MCP server and client in this repo are *finished
-infrastructure* — you use them, you don't build them. Your hour is the
-workflow they enable: draft a requirement *with* an agent, let the server
+**The big idea:** there is one MCP server — `bdd mcp serve` (23 tools).
+Cursor and the bundled `tdd-agent.jar` both talk to it. Your hour is the
+workflow it enables: draft a requirement *with* an agent, let the server
 critique it (structure first, wording second), then drive it
-spec → Gherkin → RED → GREEN → REFACTOR.
+spec → Gherkin → RED → GREEN → REFACTOR through **tools**, with you
+reviewing staged changes before they land.
 
 Curious what order all these files would be created in if you started from
 zero? See the greenfield build order, first file to last:
@@ -20,15 +21,21 @@ zero? See the greenfield build order, first file to last:
 
 You need:
 
+- **`bdd` on PATH** (`bdd --version`) — GitHub release, `cargo install --path cli`, or `cli/target/release/bdd`. Cursor will not connect without it.
 - **Java 21+** (`java -version`)
 - **Maven 3.9+** (`mvn -version`)
 - **Cursor** (or any MCP-capable agent — Claude Desktop works with the same JSON)
 - This repo cloned
+- **Optional (CLI / fully offline):** [Ollama](https://ollama.com) with
+  `qwen3.8-flash-next:125b-mlx` pulled. Prefer the terminal to an IDE?
+  Follow the [CLI path](student-follow-docs/cli-path.md) — **same server**,
+  narrower tools per `bdd` command, Wi-Fi off.
 
 Build once at home so the room's Wi-Fi never matters:
 
 ```bash
-mvn -q package                    # MCP server + client jars
+bdd --version                     # must succeed
+mvn -q -pl mcp-client package     # narrated client jar
 mvn -q -f kata/pom.xml test       # kata JUnit + Cucumber baseline
 ```
 
@@ -59,7 +66,8 @@ repo root:
 
 ```bash
 git checkout -b workshop trunk
-mvn -q package && mvn -q -f kata/pom.xml test
+bdd --version
+mvn -q -pl mcp-client package && mvn -q -f kata/pom.xml test
 ```
 
 **Expect:** a green build with the exact same output as your at-home build —
@@ -97,9 +105,13 @@ and the absolute repo paths in the log will differ on your machine.)
 
 - **STEP 1** — the server identifies as `tdd-workflow-server v1.0.0` and
   hands the agent its workflow instructions ("validate the spec first...").
-- **STEP 2** — seven tools discovered: `list_requirements`,
-  `get_requirement`, `validate_spec`, `refine_requirement`, `run_tests`,
-  `get_tdd_state`, `start_refactor`. The middle two are your next exercise.
+- **STEP 2** — **23 tools** discovered. The frozen seven you already know
+  (`list_requirements`, `get_requirement`, `validate_spec`,
+  `refine_requirement`, `run_tests`, `get_tdd_state`, `start_refactor`) plus
+  authoring/staging (`scenario_add`, `unit_test_create`, `changes_show`,
+  `changes_commit`, `requirement_mark_implemented`, …) and inspect
+  (`project_inspect`, `command_run`). Exercise 1 uses the structure/wording
+  pair; Exercise 2 uses staging.
 - **STEP 5** — `run_tests` returns `"phase": "GREEN", "tests": 5`
   (2 JUnit tests + 3 Cucumber scenarios — one bar, two altitudes).
 
@@ -113,21 +125,16 @@ To connect your own agent, the ready-to-run configuration lives at
 {
   "mcpServers": {
     "tdd-workflow": {
-      "command": "java",
-      "args": [
-        "-Dworkshop.root=${workspaceFolder}",
-        "-jar",
-        "${workspaceFolder}/mcp-server/target/tdd-mcp-server.jar"
-      ]
+      "command": "bdd",
+      "args": ["mcp", "serve", "--root", "${workspaceFolder}"]
     }
   }
 }
 ```
 
-Cursor users get this automatically — the repo ships the same entry in
-`.cursor/mcp.json`. For every other client (Claude Desktop, Claude Code,
-Codex, VS Code, Windsurf, Gemini CLI), see the step-by-step guide with links
-to each client's official docs:
+Cursor users get this automatically — the repo ships `.cursor/mcp.json`
+(same as [`config/mcp.json`](config/mcp.json)). For every other client
+(Claude Desktop, Claude Code, Codex, VS Code, Windsurf, Gemini CLI), see
 [student-follow-docs/setup-mcp.md](student-follow-docs/setup-mcp.md).
 
 ---
@@ -138,7 +145,9 @@ The repo already registers the server for you in `.cursor/mcp.json`. Open
 Cursor's MCP settings (see
 [student-follow-docs/setup-mcp.md](student-follow-docs/setup-mcp.md) for
 where to find them) and confirm `tdd-workflow` shows **green**. If it's red:
-`mvn -q package`, then toggle the server off/on in the settings.
+`bdd` is not on PATH for GUI apps (launch Cursor from a terminal where
+`bdd --version` works, or put the absolute binary path in `command`), then
+toggle the server off/on in the settings.
 
 A green light says the server *launched* — now prove the agent can actually
 *call* it. Paste this into your agent:
@@ -177,8 +186,8 @@ fine. `get_tdd_state` is read-only, so this check never disturbs your run.)
   agent through the workflow, which is the whole trick of Exercises 1 and 2.
 
 If the agent says it can't find the tool, the connection is the problem, not
-the agent: re-check the green light, rebuild with `mvn -q package`, and
-toggle the server off/on.
+the agent: re-check the green light, confirm `bdd --version` in a terminal,
+and toggle the server off/on.
 
 ---
 
@@ -359,7 +368,7 @@ levels deep. The tools merge the whole tree into one backlog. To see it:
 Paste this into your agent, word for word:
 
 ```text
-Using the tdd-workflow tools: validate the spec first, then find the next pending requirement, add a Gherkin scenario for its acceptance criteria to the feature file (tag it with the requirement id), reuse or add step definitions, add a matching JUnit unit test, run the tests to show RED, then implement the simplest code to reach GREEN, then refactor, then mark the requirement implemented in requirements/requirements.json. Ask me before each phase change.
+Using the tdd-workflow tools: validate the spec first, then `get_requirement` for the next pending id. Add its Gherkin with `scenario_add` (tag the requirement id), add missing steps with `step_definition_create` if `step_definitions_find` reports any, add a unit test with `unit_test_create`. Show `changes_show` and ask me before `changes_commit`. Then `run_tests` (expect RED). Implement the simplest production code in `StringCalculator`. `run_tests` (GREEN). `start_refactor` if I agree. On GREEN, `requirement_mark_implemented`. Ask me before each phase change.
 ```
 
 **What you should see, in order** (tool replies are shown so you can spot
@@ -390,11 +399,11 @@ their edits differently):
    }
    ```
 
-2. The agent appends two `@REQ-003` scenarios to
-   `kata/src/test/resources/features/string_calculator.feature` and a
-   REQ-003 unit test to `StringCalculatorTest.java`.
-   **Your checkpoint 1:** read the scenario. This is the spec review — is
-   this the behavior you want?
+2. The agent stages two `@REQ-003` scenarios with `scenario_add` (and a
+   unit test with `unit_test_create`). **Your checkpoint 1:** call
+   `changes_show` (or have the agent show it) and read the staged Gherkin
+   before you allow `changes_commit`. This is the spec review — is this the
+   behavior you want?
 3. `run_tests` → **RED** — 8 tests, 3 failing (2 Cucumber failures +
    1 JUnit error). The agent sees the same bar you do. The reply is similar
    to this (`failureDetails` stack traces trimmed here; the exact messages
@@ -412,7 +421,9 @@ their edits differently):
    }
    ```
 
-4. The agent implements the simplest `StringCalculator.add` that passes.
+4. The agent implements the simplest `StringCalculator.add` that passes
+   (**a file edit** — there is no `implement` MCP tool). **Your checkpoint:**
+   review the production diff.
 5. `run_tests` → **GREEN** — 8 tests, 0 failures:
 
    ```json
@@ -439,14 +450,13 @@ their edits differently):
 
    (Try asking for `start_refactor` while RED sometime — the server
    refuses: "Never refactor on a red bar." Discipline lives in the tool.)
-7. The agent flips REQ-003 to `"status": "implemented"` in the spec.
-   Agents vary here: some ask permission first, some stop after the
-   refactor and forget this step entirely. If REQ-003 still says
-   `"status": "pending"`, that's not a tool failure — just tell the agent:
-   *finish the last step of the prompt — mark REQ-003 implemented in
-   requirements/requirements.json.*
+7. On GREEN, `requirement_mark_implemented` flips REQ-003 to
+   `"status": "implemented"`. The tool **refuses** off GREEN or without a
+   tagged `@REQ-003` scenario — premature completion is a live refusal, not
+   a prompt hope. If the agent edits the JSON by hand instead, send it back
+   to the tool.
    **Your checkpoint 2:** approve the final diff. Two checkpoints, both
-   yours — the scenario and the code.
+   yours — the staged scenario and the production code.
 
 ---
 
@@ -503,9 +513,10 @@ git checkout trunk && git branch -D workshop && git checkout -b workshop trunk
 
 - **Build red:** pair with a neighbor first; the presenter won't debug from
   stage.
-- **Cursor MCP connection red:** `mvn -q package`, then toggle the server
-  off/on in Cursor's MCP settings. Note: a server restart resets the TDD
-  phase — have the agent call `run_tests` once before any `start_refactor`,
-  or the server will refuse.
+- **Cursor MCP connection red:** `bdd --version` must work. Launch Cursor
+  from that terminal or put the absolute path to `bdd` in `command`, then
+  toggle the server off/on in Cursor's MCP settings. Note: a server restart
+  resets the TDD phase — have the agent call `run_tests` once before any
+  `start_refactor`, or the server will refuse.
 - **Agent goes sideways:** it happens. Undo its edits, clear the chat, and
   re-paste the prompt — or follow the presenter's fallback on screen.

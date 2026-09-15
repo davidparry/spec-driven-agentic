@@ -1,14 +1,28 @@
 # bdd mcp
 
-The embedded MCP server. This is the same workflow the CLI offers a
+The workshop MCP server. This is the same workflow the CLI offers a
 human, exposed to AI agents as typed tools over the Model Context
-Protocol.
+Protocol. Cursor, Claude, the bundled `tdd-agent.jar`, and `bdd mcp
+call` all talk to this process.
 
 ```text
 Usage: bdd mcp [OPTIONS] <COMMAND>
 
-Commands: serve
+Commands:
+  serve  Serve the MCP tools over stdio
+  tools  List tools over one throwaway session
+  call   Call one tool over one throwaway session
 ```
+
+Keep the wire identity `tdd-workflow-server` / `1.0.0` so existing
+clients stay stable. Frozen seven-tool **reply shapes** are owned by
+`cli/tests/mcp_conformance.rs` and mcp-client's `ToolPlan` — not by a
+separate Java server.
+
+The server is stdio only: JSON-RPC on stdin/stdout. Cursor, Claude,
+Inspector, and `tdd-agent.jar` launch it as a child process. rmcp 3.3
+still speaks the initialize handshake on this transport so those hosts
+keep working.
 
 ---
 
@@ -16,7 +30,7 @@ Commands: serve
 
 Serve the MCP tools over stdio. The process reads JSON-RPC on stdin
 and writes replies on stdout, so an MCP client (Cursor, Claude
-Desktop, any MCP-capable agent) launches it as a child process — you
+Desktop, `tdd-agent.jar`) launches it as a child process — you
 normally never run it by hand.
 
 ```bash
@@ -29,19 +43,53 @@ equivalent):
 ```json
 {
   "mcpServers": {
-    "bdd-workflow": {
+    "tdd-workflow": {
       "command": "bdd",
-      "args": ["mcp", "serve", "--root", "/path/to/project"]
+      "args": ["mcp", "serve", "--root", "${workspaceFolder}"]
     }
   }
 }
 ```
 
+Cursor sees **all 23 tools**, including staging. CLI commands that
+call a model attach a **narrower profile** (`bdd tools profiles`) —
+typically 3–7 tools — so a local model is not offered commit or
+mark-implemented.
+
+## bdd mcp tools
+
+List the built-in tools over one throwaway session. Default is an
+in-process loopback; `--stdio` spawns `bdd mcp serve` as a child
+(the same bytes Cursor would read).
+
+```bash
+bdd mcp tools
+bdd mcp tools --stdio --json
+```
+
+## bdd mcp call
+
+Invoke one tool, print the result, exit. No narration, no tokens.
+
+```bash
+bdd mcp call get_tdd_state
+bdd mcp call get_requirement --arg id=REQ-003
+bdd mcp call list_requirements --json
+bdd mcp call run_tests --stdio
+```
+
+`--arg key=value` is always a string unless the value parses as JSON.
+`--args '{"id":"REQ-003"}'` merges a JSON object.
+
 ## The tools served
 
-The tool names and reply shapes are byte-compatible with the
-workshop's Java `tdd-workflow-server`, so existing clients work
-unchanged:
+Twenty-three tools in three groups. There is no `spec_draft` or
+`implement` MCP tool: Cursor writes `requirements.json` and production
+Java; Gherkin, steps, unit-test scaffolds, mark-implemented, and
+staging go through tools. Generation over MCP is **template-only**
+(`source: "template"`).
+
+### Frozen seven (reply shapes stay)
 
 | MCP tool | CLI equivalent |
 | --- | --- |
@@ -49,14 +97,29 @@ unchanged:
 | `get_requirement` | [`bdd spec show`](spec.md#bdd-spec-show) |
 | `validate_spec` | [`bdd spec validate`](spec.md#bdd-spec-validate) |
 | `refine_requirement` | [`bdd spec refine`](spec.md#bdd-spec-refine) |
-| `requirement_mark_implemented` | [`bdd spec mark-implemented`](spec.md#bdd-spec-mark-implemented) |
-| `step_definitions_find` | [`bdd steps missing`](steps.md#bdd-steps-missing) |
-| `step_definition_create` | [`bdd steps generate`](steps.md#bdd-steps-generate) |
-| `unit_test_create` | [`bdd unittest generate`](unittest.md) |
 | `run_tests` | [`bdd test`](test.md) |
 | `get_tdd_state` | [`bdd state`](state.md) |
 | `start_refactor` | [`bdd refactor`](refactor.md) |
-| `command_run` | — (MCP only, see below) |
+
+### Authoring and staging
+
+| MCP tool | CLI equivalent |
+| --- | --- |
+| `feature_list` / `feature_read` / `feature_create` | [`bdd feature`](feature.md) |
+| `scenario_add` / `scenario_update` / `scenario_delete` | [`bdd scenario`](scenario.md) |
+| `changes_show` / `changes_commit` / `changes_discard` | [`bdd changes`](changes.md) |
+| `changes_validate` | [`bdd validate`](validate.md) (staged-wins; frozen `validate_spec` stays on disk) |
+| `requirement_mark_implemented` | [`bdd spec mark-implemented`](spec.md#bdd-spec-mark-implemented) |
+| `step_definitions_find` | [`bdd steps missing`](steps.md#bdd-steps-missing) |
+| `step_definition_create` | [`bdd steps generate`](steps.md#bdd-steps-generate) (template only) |
+| `unit_test_create` | [`bdd unittest generate`](unittest.md) (template only; arg is `req_id`) |
+
+### Inspect
+
+| MCP tool | CLI equivalent |
+| --- | --- |
+| `project_inspect` | [`bdd inspect`](inspect.md) |
+| `command_run` | — (MCP and the `implement` profile; see below) |
 
 ## command_run: the guarded command line
 
@@ -81,6 +144,9 @@ guardrails, checked before anything spawns:
   `..` — the command cannot name anything outside the root.
 - **RED bar only.** Commands run only during the implementation
   phase. Off a RED bar the tool refuses and points at `run_tests`.
+- **Human confirm on the CLI.** When `bdd implement` offers
+  `command_run`, the CLI asks before spawning. Piped/CI stdin
+  declines; it never hangs.
 - **Timeout and output cap.** A hard timeout (default and maximum
   300 seconds) kills a hung process; each output stream is truncated
   to its last 200 lines.
@@ -89,6 +155,10 @@ This is policy-level guardrailing, not an OS sandbox: an allowed
 build tool can still run build scripts. What the policy makes
 unexpressible is running destructive binaries and reaching outside
 the project root.
+
+`run_tests` during `bdd implement` sees the **working tree**, not an
+unstaged patch. Commit (or apply staged files) before you trust the
+bar.
 
 ## Why serve tools instead of letting the agent edit files?
 
@@ -99,6 +169,8 @@ the project root.
 - **The discipline is in the server.** An agent cannot skip RED,
   refactor while failing, or invent requirements: the tools refuse,
   with a `nextStep` that teaches the correct move.
+  `requirement_mark_implemented` is GREEN-gated and needs a tagged
+  scenario.
 - **State survives.** The phase machine lives on disk, so a
   reconnecting agent (or a human taking over in the CLI) continues
   from the same place.
@@ -108,7 +180,7 @@ the project root.
 | Flag | Description |
 | --- | --- |
 | `--root <ROOT>` | Project root the served tools operate on. Defaults to the process's working directory. |
-| `--model <MODEL>` | Model override for the serving session's generation tools. |
+| `--model <MODEL>` | Model override for the serving session. MCP generation tools do not call Ollama; they stage templates. |
 
 ## Notes
 
@@ -116,8 +188,5 @@ the project root.
   is the wire). Diagnostics go to stderr.
 - One server serves one project root. Point different projects at
   different server entries.
-- Generation tools use the same local Ollama resolution as the rest
-  of the CLI. This CLI is developed and run against
-  `qwen3-coder-next:latest`; your mileage will vary with other
-  models, especially those not trained for development work. See
-  [`bdd model`](model.md).
+- Backup Inspector: `npx @modelcontextprotocol/inspector bdd mcp serve --root $PWD`.
+- See also [`bdd tools`](tools.md) and [`bdd ask`](ask.md).

@@ -30,7 +30,8 @@ target/
 .idea/
 *.iml
 .vscode/
-.cursor/
+.cursor/*
+!.cursor/mcp.json
 .qodo/
 
 # Copy produced at the repo root by `dist build` (extra-artifacts)
@@ -53,3 +54,6 @@ _site/
 # macOS Finder metadata
 .DS_Store
 /.claude/
+/.bdd-memory.json
+/.bdd-state.json
+

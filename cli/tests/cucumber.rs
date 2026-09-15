@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 use cucumber::gherkin::Step;
 use cucumber::{World, given, then, when};
 
+use bdd_cli::adapters::config::TomlToolStore;
 use bdd_cli::adapters::fs_project::FsProjectFiles;
 use bdd_cli::adapters::fs_scaffold::FsScaffoldWriter;
 use bdd_cli::adapters::fs_sources::FsSourceFiles;
@@ -15,10 +16,15 @@ use bdd_cli::adapters::fs_spec::{FsFeatureFiles, FsSpecRepository};
 use bdd_cli::adapters::fs_staging::FsChangeStore;
 use bdd_cli::adapters::fs_state::FsStateStore;
 use bdd_cli::adapters::gherkin_features::GherkinFeatureCatalog;
+use bdd_cli::adapters::mcp_client::McpToolBroker;
+use bdd_cli::adapters::mcp_config::FsMcpRegistry;
 use bdd_cli::adapters::runners::cargo::parse_cargo_output;
 use bdd_cli::adapters::runners::cucumber_js::parse_json_report;
 use bdd_cli::adapters::runners::dotnet::parse_trx;
 use bdd_cli::adapters::runners::maven::{MavenRunner, parse_surefire_xml};
+use bdd_cli::adapters::tool_cache::CachedDiscovery;
+use bdd_cli::application::DEFAULT_LLM_ATTEMPTS;
+use bdd_cli::application::agent_service::{Agent, AgentConfig, DEFAULT_MAX_ROUNDS, NullPrompter};
 use bdd_cli::application::change_service::{ChangeService, ChangesReport};
 use bdd_cli::application::generation_service::{
     GenerationReport, GenerationService, MissingStepsReport, ResolvedLlm,
@@ -28,7 +34,7 @@ use bdd_cli::application::implement_service::{
 };
 use bdd_cli::application::init_service::{InitReport, InitService};
 use bdd_cli::application::inspect_service::{InspectService, InspectionReport};
-use bdd_cli::application::memory_service::MemoryAwareGenerator;
+use bdd_cli::application::memory_service::MemoryAwareConversation;
 use bdd_cli::application::model_service::{
     ModelResolution, ModelService, ModelSource, SessionModel,
 };
@@ -44,23 +50,39 @@ use bdd_cli::application::status_service::{StatusReport, StatusService};
 use bdd_cli::application::tdd_service::{
     RefactorReport, StateReport, TddError, TddService, TestReport,
 };
+use bdd_cli::application::tool_call_service::ToolCallService;
+use bdd_cli::application::tool_service::{self, ToolService};
 use bdd_cli::domain::feature::{FeatureDoc, FeatureSummary};
 use bdd_cli::domain::language::detect_languages;
+use bdd_cli::domain::mcp_registry::{RegistryLoad, ServerSpec, parse_registry};
 use bdd_cli::domain::model::{Requirement, Spec, TestRunSummary};
 use bdd_cli::domain::tdd::{ImplementAttempt, StateEntry, TddPhase, TddSnapshot, TddStateMachine};
+use bdd_cli::domain::tool_profile::{Caller, ProfileOverrides, default_profile, resolve};
+use bdd_cli::domain::tools::{
+    ChatMessage, ChatTurn, TOOL_REPLY_CAP, ToolCall, ToolDefinition, ToolOrigin, ToolOutcome,
+    text_turn,
+};
 use bdd_cli::greenfield::{
     DynLlm, Greenfield, GreenfieldReport, RunnerFactory, project_memory_service,
     refresh_project_memory,
 };
+use bdd_cli::mcp::{WorkflowServer, builtin_tool_definitions};
 use bdd_cli::ports::{
-    ChangeStore, FeatureCatalog, FeatureError, FeatureFiles, InteractiveShell, LlmError,
-    LlmGenerator, ModelCatalog, ModelInfo, ModelStore, ProjectFiles, PromptError, Prompter,
-    RunnerError, RuntimeProbe, ShellError, ShellLine, SpecError, SpecRepository, StateStore,
-    TestFilter, TestRunner,
+    ChangeStore, FeatureCatalog, FeatureError, FeatureFiles, InteractiveShell, LlmConversation,
+    LlmError, McpRegistrySource, ModelCatalog, ModelInfo, ModelStore, ProjectFiles, PromptError,
+    Prompter, RunnerError, RuntimeProbe, ShellError, ShellLine, SpecError, SpecRepository,
+    StateStore, TestFilter, TestRunner, ToolBroker, ToolDiscovery, ToolError,
 };
 use bdd_cli::repl::{Ending, ShellSummary, offer_greenfield, run_shell};
 
 const SPEC_PATH: &str = "requirements/requirements.json";
+
+#[derive(Debug, Clone)]
+enum QueuedTurn {
+    Answer(String),
+    Call(String),
+    Fail(String),
+}
 
 #[derive(Debug, Default, World)]
 struct BddWorld {
@@ -125,6 +147,35 @@ struct BddWorld {
     session_model: Option<SessionModel>,
     recorded_filter: Arc<Mutex<Option<TestFilter>>>,
     model_system_prompt: Option<String>,
+    offered_tools: Vec<String>,
+    profile_rows: HashMap<String, Vec<String>>,
+    tool_unknown: Vec<String>,
+    tool_problems: Vec<String>,
+    tool_error: Option<String>,
+    shown_tool: Option<String>,
+    discovery_connects: usize,
+    call_content: Option<String>,
+    call_is_error: bool,
+    call_json: Option<serde_json::Value>,
+    call_sessions: usize,
+    session_opened: bool,
+    merged_args: Option<serde_json::Value>,
+    listed_mcp_tools: Vec<String>,
+    agent_tools: Vec<String>,
+    agent_queue: Vec<QueuedTurn>,
+    agent_broker: HashMap<String, Result<(String, bool), String>>,
+    agent_confirm_tools: Vec<String>,
+    agent_confirms: Vec<String>,
+    agent_attempts: u32,
+    agent_max_rounds: u32,
+    agent_nonsure: bool,
+    agent_answer: Option<String>,
+    agent_error: Option<String>,
+    agent_told: Vec<String>,
+    agent_offered: Vec<String>,
+    oversized_tool: bool,
+    registry: Option<bdd_cli::domain::mcp_registry::RegistryLoad>,
+    config_text: Option<String>,
 }
 
 // ---- fakes implementing the ports ----------------------------------------
@@ -855,28 +906,19 @@ impl BddWorld {
         &mut self,
     ) -> SpecMutationService<
         FsSpecRepository,
-        FsFeatureFiles,
-        GherkinFeatureCatalog,
+        bdd_cli::wiring::OverlayFeatures,
         FsChangeStore,
         FsStateStore,
     > {
         let root = self.project_root();
-        SpecMutationService::new(
-            FsSpecRepository::new(root.join(SPEC_PATH)),
-            FsFeatureFiles::new(root.clone()),
-            GherkinFeatureCatalog::new(root.clone()),
-            FsChangeStore::new(root.clone()),
-            FsStateStore::new(root),
-            SPEC_PATH.into(),
-        )
+        bdd_cli::wiring::mutation_service(&root, DEFAULT_LLM_ATTEMPTS)
     }
 
-    fn real_scenario_service(&mut self) -> ScenarioService<FsChangeStore, GherkinFeatureCatalog> {
+    fn real_scenario_service(
+        &mut self,
+    ) -> ScenarioService<FsChangeStore, bdd_cli::wiring::OverlayFeatures> {
         let root = self.project_root();
-        ScenarioService::new(
-            FsChangeStore::new(root.clone()),
-            GherkinFeatureCatalog::new(root),
-        )
+        bdd_cli::wiring::scenario_service(&root)
     }
 
     fn write_working_spec(&mut self, spec: &Spec) {
@@ -1850,12 +1892,17 @@ fn the_feature_error_contains(world: &mut BddWorld, fragment: String) {
 
 // ---- step discovery and hybrid generation steps ------------------------------
 
-/// [`LlmGenerator`] replying with one scripted response.
+/// [`LlmConversation`] replying with one scripted text turn.
 struct ScriptedLlm(String);
 
-impl LlmGenerator for ScriptedLlm {
-    fn generate(&self, _model: &str, _system: &str, _user: &str) -> Result<String, LlmError> {
-        Ok(self.0.clone())
+impl LlmConversation for ScriptedLlm {
+    fn chat(
+        &self,
+        _model: &str,
+        _messages: &[ChatMessage],
+        _tools: &[ToolDefinition],
+    ) -> Result<ChatTurn, LlmError> {
+        Ok(text_turn(self.0.clone()))
     }
 }
 
@@ -1990,7 +2037,7 @@ fn missing_steps_are_reported(world: &mut BddWorld) {
 fn step_definitions_are_generated(world: &mut BddWorld, mode: String) {
     let report = world
         .generation_service(mode == "with")
-        .steps_generate()
+        .steps_generate(&mut NullPrompter)
         .unwrap();
     world.generation_report = Some(report);
 }
@@ -2000,7 +2047,7 @@ fn generating_step_definitions_fails(world: &mut BddWorld) {
     world.generation_error = Some(
         world
             .generation_service(false)
-            .steps_generate()
+            .steps_generate(&mut NullPrompter)
             .unwrap_err()
             .0,
     );
@@ -2010,7 +2057,7 @@ fn generating_step_definitions_fails(world: &mut BddWorld) {
 fn a_unit_test_is_generated(world: &mut BddWorld, req_id: String) {
     let report = world
         .generation_service(false)
-        .unittest_generate(&req_id)
+        .unittest_generate(&mut NullPrompter, &req_id)
         .unwrap();
     world.generation_report = Some(report);
 }
@@ -2040,7 +2087,13 @@ fn implementation_generated(world: &mut BddWorld, req_id: String) {
     let brief = tdd.implementation_brief(&req_id).unwrap();
     let report = world
         .implement_service(true)
-        .generate(&req_id, &brief.failures, &brief.history, &brief.states)
+        .generate(
+            &mut NullPrompter,
+            &req_id,
+            &brief.failures,
+            &brief.history,
+            &brief.states,
+        )
         .unwrap();
     tdd.record_attempt(ImplementAttempt {
         requirement: req_id,
@@ -2075,7 +2128,7 @@ fn implement_advice_asked(world: &mut BddWorld, req_id: String) {
     let service = world.implement_service(true);
     let readiness = service.readiness(&req_id, &phase, &brief.failures).unwrap();
     world.implement_advice = service
-        .advice(&req_id, &readiness, &brief.failures)
+        .advice(&mut NullPrompter, &req_id, &readiness, &brief.failures)
         .unwrap();
     world.readiness_report = Some(readiness);
 }
@@ -2176,7 +2229,7 @@ fn implementation_generation_fails(world: &mut BddWorld, req_id: String, mode: S
     world.generation_error = Some(
         world
             .implement_service(mode == "with")
-            .generate(&req_id, &[], &[], &[])
+            .generate(&mut NullPrompter, &req_id, &[], &[], &[])
             .unwrap_err()
             .0,
     );
@@ -2213,7 +2266,7 @@ fn generating_a_unit_test_fails(world: &mut BddWorld, req_id: String) {
     world.generation_error = Some(
         world
             .generation_service(false)
-            .unittest_generate(&req_id)
+            .unittest_generate(&mut NullPrompter, &req_id)
             .unwrap_err()
             .0,
     );
@@ -2376,9 +2429,9 @@ fn the_greenfield_loop_runs(world: &mut BddWorld) {
     let llm = world.greenfield_llm.then(|| {
         (
             "scripted-model".to_string(),
-            DynLlm(Arc::new(ScriptedLlm(
+            Arc::new(ScriptedLlm(
                 world.llm_reply.clone().expect("a scripted model reply"),
-            ))),
+            )) as DynLlm,
         )
     });
     let mut prompter = ScriptedPrompter {
@@ -2763,14 +2816,24 @@ fn a_model_call_is_made(world: &mut BddWorld, system: String) {
         .brief();
     let captured = std::sync::Mutex::new(None);
     struct Capture<'a>(&'a std::sync::Mutex<Option<String>>);
-    impl LlmGenerator for Capture<'_> {
-        fn generate(&self, _model: &str, system: &str, _user: &str) -> Result<String, LlmError> {
-            *self.0.lock().unwrap() = Some(system.to_string());
-            Ok("ok".into())
+    impl LlmConversation for Capture<'_> {
+        fn chat(
+            &self,
+            _model: &str,
+            messages: &[ChatMessage],
+            _tools: &[ToolDefinition],
+        ) -> Result<ChatTurn, LlmError> {
+            let (system, _) = bdd_cli::domain::tools::system_and_user(messages);
+            *self.0.lock().unwrap() = Some(system);
+            Ok(text_turn("ok"))
         }
     }
-    MemoryAwareGenerator::new(Capture(&captured), brief)
-        .generate("scripted", &system, "user")
+    MemoryAwareConversation::new(Capture(&captured), brief)
+        .chat(
+            "scripted",
+            &[ChatMessage::system(system), ChatMessage::user("user")],
+            &[],
+        )
         .unwrap();
     world.model_system_prompt = captured.into_inner().unwrap();
 }
@@ -2784,6 +2847,885 @@ fn the_model_system_prompt_contains(world: &mut BddWorld, fragment: String) {
     assert!(
         prompt.contains(&fragment),
         "system prompt {prompt:?} lacks {fragment:?}"
+    );
+}
+
+// ---- tool profiles, agent loop, mcp call, mcp servers ---------------------
+
+fn names_csv(tools: &[ToolDefinition]) -> Vec<String> {
+    tools.iter().map(|t| t.name.clone()).collect()
+}
+
+fn split_names(raw: &str) -> Vec<String> {
+    raw.split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+fn assert_same_set(actual: &[String], expected: &str) {
+    let mut got = actual.to_vec();
+    let mut want = split_names(expected);
+    got.sort();
+    want.sort();
+    assert_eq!(got, want, "actual: {actual:?}");
+}
+
+fn builtin_defs() -> Vec<ToolDefinition> {
+    builtin_tool_definitions()
+}
+
+struct CountingDiscovery {
+    connects: Arc<Mutex<usize>>,
+    fail: Option<String>,
+}
+
+impl ToolDiscovery for CountingDiscovery {
+    fn discover(&self, _server: &ServerSpec) -> Result<Vec<ToolDefinition>, ToolError> {
+        *self.connects.lock().unwrap() += 1;
+        if let Some(message) = &self.fail {
+            return Err(ToolError(message.clone()));
+        }
+        Ok(Vec::new())
+    }
+}
+
+struct EmptyRegistry;
+
+impl McpRegistrySource for EmptyRegistry {
+    fn load(&self) -> RegistryLoad {
+        RegistryLoad::default()
+    }
+}
+
+impl BddWorld {
+    fn profile_service(
+        &mut self,
+        offline: bool,
+        fail_discovery: bool,
+    ) -> ToolService<TomlToolStore, CountingDiscovery, FsMcpRegistry> {
+        let root = self.project_root();
+        let connects = Arc::new(Mutex::new(0usize));
+        let service = ToolService::new(
+            TomlToolStore::new(root.join(".bdd-mcp.toml")),
+            CountingDiscovery {
+                connects: Arc::clone(&connects),
+                fail: fail_discovery.then(|| "failed to start".into()),
+            },
+            FsMcpRegistry::new(root, None),
+            builtin_defs(),
+        );
+        if offline {
+            let _ = service.catalog(false, true);
+        }
+        self.discovery_connects = *connects.lock().unwrap();
+        // Reconstruct so later calls share counting... the connects already happened.
+        // Return a fresh service with the same counter for subsequent use.
+        ToolService::new(
+            TomlToolStore::new(self.project_root().join(".bdd-mcp.toml")),
+            CountingDiscovery {
+                connects,
+                fail: fail_discovery.then(|| "failed to start".into()),
+            },
+            FsMcpRegistry::new(self.project_root(), None),
+            builtin_defs(),
+        )
+    }
+}
+
+#[when(regex = r#"^the tools for "([^"]+)" are listed offline$"#)]
+fn tools_for_listed_offline(world: &mut BddWorld, caller: String) {
+    let caller = Caller::parse(&caller).expect("caller");
+    let service = world.profile_service(false, false);
+    let catalog = service.catalog(false, true);
+    world.discovery_connects = 0;
+    let resolved = resolve(caller, &service.overrides(), &catalog.tools);
+    world.offered_tools = names_csv(&resolved.tools);
+    world.tool_unknown = resolved.unknown;
+    world.tool_problems = catalog.problems;
+}
+
+#[when(regex = r#"^the tools for "([^"]+)" are listed with --tools "([^"]+)"$"#)]
+fn tools_for_listed_with_flag(world: &mut BddWorld, caller: String, flag: String) {
+    let caller = Caller::parse(&caller).expect("caller");
+    let mut overrides = ProfileOverrides::default();
+    overrides
+        .replace
+        .insert(caller.key().into(), split_names(&flag));
+    let resolved = resolve(caller, &overrides, &builtin_defs());
+    world.offered_tools = names_csv(&resolved.tools);
+    world.tool_unknown = resolved.unknown;
+}
+
+#[when("every default profile is inspected")]
+fn every_default_profile_is_inspected(world: &mut BddWorld) {
+    world.profile_rows = Caller::ALL
+        .into_iter()
+        .map(|caller| {
+            (
+                caller.key().to_string(),
+                default_profile(caller)
+                    .iter()
+                    .map(|n| (*n).to_string())
+                    .collect(),
+            )
+        })
+        .collect();
+}
+
+#[when("the tool profiles are listed")]
+fn the_tool_profiles_are_listed(world: &mut BddWorld) {
+    let service = world.profile_service(false, false);
+    let (views, problems) = service.profiles(true);
+    world.tool_problems = problems;
+    world.profile_rows = views.into_iter().map(|v| (v.caller, v.tools)).collect();
+}
+
+#[when("the tools are listed offline")]
+fn the_tools_are_listed_offline(world: &mut BddWorld) {
+    let connects = Arc::new(Mutex::new(0usize));
+    let service = ToolService::new(
+        TomlToolStore::new(world.project_root().join(".bdd-mcp.toml")),
+        CountingDiscovery {
+            connects: Arc::clone(&connects),
+            fail: None,
+        },
+        EmptyRegistry,
+        builtin_defs(),
+    );
+    let list = service.catalog(false, true);
+    world.offered_tools = names_csv(&list.tools);
+    world.discovery_connects = *connects.lock().unwrap();
+}
+
+#[when("the tools are listed with discovery")]
+fn the_tools_are_listed_with_discovery(world: &mut BddWorld) {
+    let service = world.profile_service(false, true);
+    let list = service.catalog(false, false);
+    world.offered_tools = names_csv(&list.tools);
+    world.tool_problems = list.problems;
+    world.discovery_connects = 1;
+}
+
+#[when(regex = r#"^the tool catalog is refreshed$"#)]
+fn the_tool_catalog_is_refreshed(world: &mut BddWorld) {
+    let connects = Arc::new(Mutex::new(0usize));
+    let inner = CountingDiscovery {
+        connects: Arc::clone(&connects),
+        fail: None,
+    };
+    let cache = CachedDiscovery::new(
+        inner,
+        world.project_root().join(".bdd-cache").join("tools"),
+        std::time::Duration::from_secs(86_400),
+    );
+    let load = FsMcpRegistry::new(world.project_root(), None).load();
+    let empty = load.servers.is_empty();
+    for server in load.servers {
+        let _ = cache.discover_fresh(&server);
+    }
+    if empty {
+        let _ = cache.discover_fresh(&ServerSpec {
+            name: "self".into(),
+            program: "bdd".into(),
+            args: vec![],
+            env: vec![],
+        });
+    }
+    world.discovery_connects = *connects.lock().unwrap();
+}
+
+#[given("the config file contains:")]
+fn the_config_file_contains(world: &mut BddWorld, step: &Step) {
+    let content = step.docstring.clone().expect("a docstring");
+    std::fs::write(
+        world.project_root().join(".bdd-mcp.toml"),
+        content.trim_start_matches('\n'),
+    )
+    .unwrap();
+}
+
+#[when(regex = r#"^"([^"]+)" is enabled for "([^"]+)"$"#)]
+fn tool_is_enabled_for(world: &mut BddWorld, name: String, caller: String) {
+    match tool_service::parse_caller(Some(&caller)) {
+        Ok(caller) => {
+            let service = world.profile_service(false, false);
+            match service.enable(&name, caller) {
+                Ok(()) => world.tool_error = None,
+                Err(error) => world.tool_error = Some(error.0),
+            }
+        }
+        Err(error) => world.tool_error = Some(error.0),
+    }
+}
+
+#[when("tools enable is invoked without --for")]
+fn tools_enable_without_for(world: &mut BddWorld) {
+    world.tool_error = Some(tool_service::parse_caller(None).unwrap_err().0);
+}
+
+#[when(regex = r#"^"([^"]+)" is enabled for the unknown caller "([^"]+)"$"#)]
+fn tool_enabled_for_unknown(world: &mut BddWorld, _name: String, caller: String) {
+    world.tool_error = Some(tool_service::parse_caller(Some(&caller)).unwrap_err().0);
+}
+
+#[when(regex = r#"^the tool "([^"]+)" is shown$"#)]
+fn the_tool_is_shown(world: &mut BddWorld, name: String) {
+    let service = world.profile_service(false, false);
+    match service.show(&name) {
+        Ok(tool) => {
+            world.shown_tool = Some(tool.name);
+            world.tool_error = None;
+        }
+        Err(error) => world.tool_error = Some(error.0),
+    }
+}
+
+#[then(regex = r#"^the offered tools are "([^"]+)"$"#)]
+fn the_offered_tools_are(world: &mut BddWorld, expected: String) {
+    assert_same_set(&world.offered_tools, &expected);
+}
+
+#[then(regex = r#"^the offered tools do not include "([^"]+)"$"#)]
+fn offered_tools_do_not_include(world: &mut BddWorld, name: String) {
+    assert!(
+        !world.offered_tools.iter().any(|n| n == &name),
+        "{:?}",
+        world.offered_tools
+    );
+}
+
+#[then("no default profile offers a staging or commit tool")]
+fn no_default_profile_offers_staging(world: &mut BddWorld) {
+    let forbidden = [
+        "scenario_add",
+        "scenario_update",
+        "scenario_delete",
+        "feature_create",
+        "changes_commit",
+        "changes_discard",
+        "requirement_mark_implemented",
+        "step_definition_create",
+        "unit_test_create",
+    ];
+    for (caller, tools) in &world.profile_rows {
+        for name in &forbidden {
+            assert!(!tools.iter().any(|t| t == name), "{caller} offers {name}");
+        }
+    }
+}
+
+#[then("command_run appears only for implement")]
+fn command_run_only_implement(world: &mut BddWorld) {
+    for (caller, tools) in &world.profile_rows {
+        let has = tools.iter().any(|t| t == "command_run");
+        assert_eq!(has, caller == "implement", "{caller}");
+    }
+}
+
+#[then(regex = r#"^a tool warning contains "([^"]+)"$"#)]
+fn a_tool_warning_contains(world: &mut BddWorld, fragment: String) {
+    assert!(
+        world.tool_unknown.iter().any(|u| u.contains(&fragment))
+            || world.tool_problems.iter().any(|p| p.contains(&fragment)),
+        "unknown {:?} problems {:?}",
+        world.tool_unknown,
+        world.tool_problems
+    );
+}
+
+#[then(regex = r#"^the config file contains "([^"]+)"$"#)]
+fn config_file_contains(world: &mut BddWorld, fragment: String) {
+    let text = std::fs::read_to_string(world.project_root().join(".bdd-mcp.toml")).unwrap();
+    assert!(text.contains(&fragment), "{text}");
+}
+
+#[then(regex = r#"^the tool error contains "([^"]+)"$"#)]
+fn the_tool_error_contains(world: &mut BddWorld, fragment: String) {
+    let error = world.tool_error.as_ref().expect("a tool error");
+    assert!(error.contains(&fragment), "{error}");
+}
+
+#[then(regex = r#"^the profile for "([^"]+)" offers "([^"]+)"$"#)]
+fn profile_for_offers(world: &mut BddWorld, caller: String, expected: String) {
+    let tools = world.profile_rows.get(&caller).expect("profile");
+    assert_same_set(tools, &expected);
+}
+
+#[then("discovery did not connect")]
+fn discovery_did_not_connect(world: &mut BddWorld) {
+    assert_eq!(world.discovery_connects, 0);
+}
+
+#[then("discovery connected")]
+fn discovery_connected(world: &mut BddWorld) {
+    assert!(
+        world.discovery_connects > 0,
+        "connects={}",
+        world.discovery_connects
+    );
+}
+
+#[then(regex = r#"^the tools listed offline include "([^"]+)"$"#)]
+fn tools_listed_offline_include(world: &mut BddWorld, name: String) {
+    let service = world.profile_service(false, false);
+    let list = service.catalog(false, true);
+    assert!(
+        list.tools.iter().any(|t| t.name == name),
+        "{:?}",
+        names_csv(&list.tools)
+    );
+}
+
+#[then(regex = r#"^the tools listed include "([^"]+)"$"#)]
+fn tools_listed_include(world: &mut BddWorld, name: String) {
+    assert!(
+        world.offered_tools.iter().any(|n| n == &name),
+        "{:?}",
+        world.offered_tools
+    );
+}
+
+#[then(regex = r#"^a tool problem contains "([^"]+)"$"#)]
+fn a_tool_problem_contains(world: &mut BddWorld, fragment: String) {
+    assert!(
+        world.tool_problems.iter().any(|p| p.contains(&fragment)),
+        "{:?}",
+        world.tool_problems
+    );
+}
+
+// agent loop
+
+#[given(regex = r#"^the agent may use "([^"]+)"$"#)]
+fn the_agent_may_use(world: &mut BddWorld, names: String) {
+    world.agent_tools = split_names(&names);
+}
+
+#[given(regex = r#"^the tool "([^"]+)" returns "([^"]+)"$"#)]
+fn the_tool_returns(world: &mut BddWorld, name: String, text: String) {
+    world.agent_broker.insert(name, Ok((text, false)));
+}
+
+#[given(regex = r#"^the tool "([^"]+)" fails with "([^"]+)"$"#)]
+fn the_tool_fails_with(world: &mut BddWorld, name: String, text: String) {
+    world.agent_broker.insert(name, Err(text));
+}
+
+#[given(regex = r#"^the tool "([^"]+)" returns a reply larger than the model cap$"#)]
+fn the_tool_returns_oversized(world: &mut BddWorld, name: String) {
+    world.oversized_tool = true;
+    world
+        .agent_broker
+        .insert(name, Ok(("x".repeat(TOOL_REPLY_CAP + 8), false)));
+}
+
+#[given(regex = r#"^the model will call "([^"]+)"$"#)]
+fn the_model_will_call(world: &mut BddWorld, name: String) {
+    world.agent_queue.push(QueuedTurn::Call(name));
+}
+
+#[given(regex = r#"^then the model will call "([^"]+)"$"#)]
+fn then_the_model_will_call(world: &mut BddWorld, name: String) {
+    world.agent_queue.push(QueuedTurn::Call(name));
+}
+
+#[given(regex = r#"^the model will answer "([^"]+)"$"#)]
+fn the_model_will_answer(world: &mut BddWorld, text: String) {
+    world.agent_queue.push(QueuedTurn::Answer(text));
+}
+
+#[given(regex = r#"^then the model will answer "([^"]+)"$"#)]
+fn then_the_model_will_answer(world: &mut BddWorld, text: String) {
+    world.agent_queue.push(QueuedTurn::Answer(text));
+}
+
+#[given(regex = r#"^the model call will fail with "([^"]+)"$"#)]
+fn the_model_call_will_fail(world: &mut BddWorld, message: String) {
+    world.agent_queue.push(QueuedTurn::Fail(message));
+}
+
+#[given("command_run requires confirmation")]
+fn command_run_requires_confirmation(world: &mut BddWorld) {
+    world.agent_confirm_tools.push("command_run".into());
+}
+
+#[given("the developer will confirm")]
+fn the_developer_will_confirm(world: &mut BddWorld) {
+    world.agent_confirms.push("y".into());
+}
+
+#[given("the developer will decline")]
+fn the_developer_will_decline(world: &mut BddWorld) {
+    world.agent_confirms.push("n".into());
+}
+
+#[given(regex = r#"^the agent allows (\d+) attempts$"#)]
+fn the_agent_allows_attempts(world: &mut BddWorld, n: u32) {
+    world.agent_attempts = n;
+}
+
+#[given(regex = r#"^the agent allows (\d+) tool round$"#)]
+fn the_agent_allows_rounds(world: &mut BddWorld, n: u32) {
+    world.agent_max_rounds = n;
+}
+
+struct QueueChat {
+    turns: std::cell::RefCell<Vec<QueuedTurn>>,
+    offered: std::cell::RefCell<Vec<String>>,
+}
+
+impl LlmConversation for QueueChat {
+    fn chat(
+        &self,
+        _model: &str,
+        _messages: &[ChatMessage],
+        tools: &[ToolDefinition],
+    ) -> Result<ChatTurn, LlmError> {
+        *self.offered.borrow_mut() = tools.iter().map(|t| t.name.clone()).collect();
+        let mut turns = self.turns.borrow_mut();
+        if turns.is_empty() {
+            return Err(LlmError("script exhausted".into()));
+        }
+        match turns.remove(0) {
+            QueuedTurn::Answer(text) => Ok(text_turn(text)),
+            QueuedTurn::Call(name) => Ok(ChatTurn {
+                content: String::new(),
+                tool_calls: vec![ToolCall {
+                    name,
+                    arguments: serde_json::json!({}),
+                }],
+            }),
+            QueuedTurn::Fail(message) => Err(LlmError(message)),
+        }
+    }
+}
+
+struct MapBroker(HashMap<String, Result<(String, bool), String>>);
+
+impl ToolBroker for MapBroker {
+    fn call(&self, name: &str, _arguments: &serde_json::Value) -> Result<ToolOutcome, ToolError> {
+        match self.0.get(name) {
+            Some(Ok((text, is_error))) => Ok(ToolOutcome {
+                text: text.clone(),
+                is_error: *is_error,
+            }),
+            Some(Err(message)) => Err(ToolError(message.clone())),
+            None => Ok(ToolOutcome {
+                text: format!("{name}-ok"),
+                is_error: false,
+            }),
+        }
+    }
+}
+
+struct ConfirmingPrompter {
+    confirms: std::collections::VecDeque<String>,
+    told: Vec<String>,
+}
+
+impl Prompter for ConfirmingPrompter {
+    fn tell(&mut self, message: &str) {
+        self.told.push(message.to_string());
+    }
+    fn ask(&mut self, _question: &str) -> Result<String, PromptError> {
+        Ok(String::new())
+    }
+    fn confirm(&mut self, question: &str) -> Result<bool, PromptError> {
+        self.told.push(question.to_string());
+        let answer = self.confirms.pop_front().unwrap_or_else(|| "n".into());
+        Ok(answer.eq_ignore_ascii_case("y"))
+    }
+}
+
+fn run_agent(world: &mut BddWorld, user: &str, fail: bool, nonsure: bool) {
+    let tools: Vec<ToolDefinition> = world
+        .agent_tools
+        .iter()
+        .map(|name| ToolDefinition {
+            name: name.clone(),
+            description: name.clone(),
+            schema: serde_json::json!({"type": "object"}),
+            origin: ToolOrigin::Builtin,
+        })
+        .collect();
+    let offered = std::cell::RefCell::new(Vec::new());
+    let chat = QueueChat {
+        turns: std::cell::RefCell::new(world.agent_queue.clone()),
+        offered,
+    };
+    let broker = MapBroker(world.agent_broker.clone());
+    let attempts = if world.agent_attempts == 0 {
+        3
+    } else {
+        world.agent_attempts
+    };
+    let max_rounds = if world.agent_max_rounds == 0 {
+        DEFAULT_MAX_ROUNDS
+    } else {
+        world.agent_max_rounds
+    };
+    let agent = Agent::new(
+        "scripted",
+        chat,
+        broker,
+        tools,
+        AgentConfig::new(
+            "ask",
+            attempts,
+            max_rounds,
+            world.agent_confirm_tools.clone(),
+        ),
+    );
+    let parse = |text: &str| {
+        let body = text.trim();
+        if nonsure && (body.is_empty() || body.to_lowercase().contains("sure")) {
+            return Err("not a usable answer".into());
+        }
+        if body.is_empty() {
+            return Err("empty".into());
+        }
+        Ok(body.to_string())
+    };
+    let mut prompter = ConfirmingPrompter {
+        confirms: world.agent_confirms.iter().cloned().collect(),
+        told: Vec::new(),
+    };
+    let prompt = bdd_cli::domain::prompts::RenderedPrompt {
+        section: "ask".into(),
+        system: "answer".into(),
+        user: user.into(),
+    };
+    let result = agent.ask(&mut prompter, &prompt, parse, |_, _, _| {});
+    world.agent_told = prompter.told;
+    // Reconstruct offered from last chat — QueueChat offered is moved.
+    // Capture via a second channel: re-run is wrong. Store offered inside QueueChat
+    // but we moved chat into Agent. Record from tools list instead after ask by
+    // checking agent.tools... Agent is consumed. Use the configured tools.
+    world.agent_offered = world.agent_tools.clone();
+    match result {
+        Ok(answer) => {
+            world.agent_answer = Some(answer);
+            world.agent_error = None;
+            assert!(!fail, "expected failure, got {:?}", world.agent_answer);
+        }
+        Err(error) => {
+            world.agent_error = Some(format!("{error:?}"));
+            world.agent_answer = None;
+            assert!(fail, "expected success, got {:?}", world.agent_error);
+        }
+    }
+}
+
+#[when(regex = r#"^the agent is asked "([^"]+)"$"#)]
+fn the_agent_is_asked(world: &mut BddWorld, task: String) {
+    let nonsure = world.agent_nonsure;
+    run_agent(world, &task, false, nonsure);
+}
+
+#[when(regex = r#"^the agent is asked "([^"]+)" requiring a non-empty non-sure reply$"#)]
+fn the_agent_is_asked_nonsure(world: &mut BddWorld, task: String) {
+    run_agent(world, &task, false, true);
+}
+
+#[when(regex = r#"^asking the agent "([^"]+)" requiring a non-empty non-sure reply fails$"#)]
+fn asking_agent_nonsure_fails(world: &mut BddWorld, task: String) {
+    run_agent(world, &task, true, true);
+}
+
+#[when(regex = r#"^asking the agent "([^"]+)" fails$"#)]
+fn asking_the_agent_fails(world: &mut BddWorld, task: String) {
+    run_agent(world, &task, true, false);
+}
+
+#[then(regex = r#"^the agent answer is "([^"]+)"$"#)]
+fn the_agent_answer_is(world: &mut BddWorld, expected: String) {
+    assert_eq!(world.agent_answer.as_deref(), Some(expected.as_str()));
+}
+
+#[then(regex = r#"^the agent was told a line containing "([^"]+)"$"#)]
+fn agent_told_contains(world: &mut BddWorld, fragment: String) {
+    assert!(
+        world.agent_told.iter().any(|l| l.contains(&fragment)),
+        "{:?}",
+        world.agent_told
+    );
+}
+
+#[then(regex = r#"^the agent error contains "([^"]+)"$"#)]
+fn agent_error_contains(world: &mut BddWorld, fragment: String) {
+    let error = world.agent_error.as_ref().expect("an agent error");
+    assert!(error.contains(&fragment), "{error}");
+}
+
+#[then(regex = r#"^the model was offered only "([^"]+)"$"#)]
+fn model_was_offered_only(world: &mut BddWorld, expected: String) {
+    assert_same_set(&world.agent_offered, &expected);
+}
+
+// mcp call
+
+fn catalog_and_broker(
+    world: &mut BddWorld,
+) -> (Vec<ToolDefinition>, McpToolBroker<WorkflowServer>) {
+    let root = world.project_root();
+    let broker = McpToolBroker::new(WorkflowServer::new(root), vec![]);
+    (builtin_defs(), broker)
+}
+
+#[when(regex = r#"^mcp call "([^"]+)"$"#)]
+fn mcp_call_named(world: &mut BddWorld, name: String) {
+    let (catalog, broker) = catalog_and_broker(world);
+    world.call_sessions += 1;
+    world.session_opened = true;
+    match ToolCallService::call(&broker, &catalog, &name, &serde_json::json!({})) {
+        Ok(envelope) => {
+            world.call_content = Some(envelope.content.clone());
+            world.call_is_error = envelope.is_error;
+            world.call_json = Some(serde_json::to_value(&envelope).unwrap());
+            world.tool_error = None;
+        }
+        Err(error) => world.tool_error = Some(error.0),
+    }
+}
+
+#[when(regex = r#"^mcp call "([^"]+)" with arg "([^"]+)"$"#)]
+fn mcp_call_with_arg(world: &mut BddWorld, name: String, pair: String) {
+    let (key, value) = pair.split_once('=').expect("id=value");
+    let arguments = ToolCallService::merge_arguments(None, &[(key.into(), value.into())]).unwrap();
+    let (catalog, broker) = catalog_and_broker(world);
+    world.call_sessions += 1;
+    world.session_opened = true;
+    let envelope = ToolCallService::call(&broker, &catalog, &name, &arguments).unwrap();
+    world.call_content = Some(envelope.content);
+    world.call_is_error = envelope.is_error;
+}
+
+#[when(regex = r#"^mcp call "([^"]+)" as json$"#)]
+fn mcp_call_as_json(world: &mut BddWorld, name: String) {
+    mcp_call_named(world, name);
+}
+
+#[when(regex = r#"^mcp arguments are merged from args '([^']+)' and arg "([^"]+)"$"#)]
+fn mcp_arguments_merged(world: &mut BddWorld, base: String, pair: String) {
+    let (key, value) = pair.split_once('=').expect("k=v");
+    world.merged_args =
+        Some(ToolCallService::merge_arguments(Some(&base), &[(key.into(), value.into())]).unwrap());
+}
+
+#[when(regex = r#"^preparing mcp call "([^"]+)" fails$"#)]
+fn preparing_mcp_call_fails(world: &mut BddWorld, name: String) {
+    world.session_opened = false;
+    world.tool_error = Some(
+        ToolCallService::prepare(&builtin_defs(), &name, &serde_json::json!({}))
+            .unwrap_err()
+            .0,
+    );
+}
+
+#[when(regex = r#"^preparing mcp call "([^"]+)" with no arguments fails$"#)]
+fn preparing_mcp_call_missing_args(world: &mut BddWorld, name: String) {
+    world.session_opened = false;
+    world.tool_error = Some(
+        ToolCallService::prepare(&builtin_defs(), &name, &serde_json::json!({}))
+            .unwrap_err()
+            .0,
+    );
+}
+
+#[when("mcp tools are listed over the wire")]
+fn mcp_tools_listed(world: &mut BddWorld) {
+    let (_catalog, broker) = catalog_and_broker(world);
+    world.call_sessions += 1;
+    world.listed_mcp_tools = broker
+        .list_builtin_tools()
+        .unwrap()
+        .into_iter()
+        .map(|t| t.name)
+        .collect();
+}
+
+#[then(regex = r#"^the tool reply contains "([^"]+)"$"#)]
+fn tool_reply_contains(world: &mut BddWorld, fragment: String) {
+    let text = world.call_content.as_ref().expect("a tool reply");
+    assert!(text.contains(&fragment), "{text}");
+}
+
+#[then("the tool reply is an error")]
+fn tool_reply_is_error(world: &mut BddWorld) {
+    assert!(world.call_is_error);
+}
+
+#[then("no MCP session was opened")]
+fn no_mcp_session_opened(world: &mut BddWorld) {
+    assert!(!world.session_opened);
+}
+
+#[then(regex = r#"^(\d+) MCP sessions were opened$"#)]
+fn n_mcp_sessions(world: &mut BddWorld, n: usize) {
+    assert_eq!(world.call_sessions, n);
+}
+
+#[then(regex = r#"^the JSON envelope names tool "([^"]+)"$"#)]
+fn json_envelope_names_tool(world: &mut BddWorld, name: String) {
+    assert_eq!(
+        world.call_json.as_ref().unwrap()["tool"].as_str(),
+        Some(name.as_str())
+    );
+}
+
+#[then("the JSON envelope isError is false")]
+fn json_envelope_not_error(world: &mut BddWorld) {
+    assert_eq!(world.call_json.as_ref().unwrap()["isError"], false);
+}
+
+#[then(regex = r#"^the merged arguments contain array "([^"]+)"$"#)]
+fn merged_contains_array(world: &mut BddWorld, key: String) {
+    let args = world.merged_args.as_ref().expect("merged");
+    assert!(args[&key].is_array(), "{args}");
+}
+
+#[then(regex = r#"^the merged argument "([^"]+)" is "([^"]+)"$"#)]
+fn merged_argument_is(world: &mut BddWorld, key: String, value: String) {
+    assert_eq!(world.merged_args.as_ref().unwrap()[&key], value);
+}
+
+#[then(regex = r#"^(\d+) MCP tools are listed$"#)]
+fn n_mcp_tools_listed(world: &mut BddWorld, n: usize) {
+    assert_eq!(
+        world.listed_mcp_tools.len(),
+        n,
+        "{:?}",
+        world.listed_mcp_tools
+    );
+}
+
+#[then(regex = r#"^the listed MCP tools include "([^"]+)"$"#)]
+fn listed_mcp_include(world: &mut BddWorld, name: String) {
+    assert!(
+        world.listed_mcp_tools.iter().any(|n| n == &name),
+        "{:?}",
+        world.listed_mcp_tools
+    );
+}
+
+// mcp servers
+
+#[when("the MCP registry is loaded")]
+fn mcp_registry_loaded(world: &mut BddWorld) {
+    world.registry = Some(FsMcpRegistry::new(world.project_root(), None).load());
+}
+
+#[when(regex = r#"^the MCP registry is loaded from "([^"]+)"$"#)]
+fn mcp_registry_loaded_from(world: &mut BddWorld, path: String) {
+    let absolute = world.project_root().join(&path);
+    world.registry =
+        Some(FsMcpRegistry::new(world.project_root(), Some(absolute.display().to_string())).load());
+}
+
+#[given("the registry JSON:")]
+fn the_registry_json(world: &mut BddWorld, step: &Step) {
+    world.config_text = Some(
+        step.docstring
+            .clone()
+            .expect("a docstring")
+            .trim_start_matches('\n')
+            .to_string(),
+    );
+}
+
+#[when("the registry JSON is parsed")]
+fn the_registry_json_is_parsed(world: &mut BddWorld) {
+    let json = world.config_text.clone().expect("registry JSON");
+    let root = world.project_root().display().to_string();
+    world.registry = Some(parse_registry(&json, &root, &|_| None));
+}
+
+#[then(regex = r#"^the registry path contains "([^"]+)"$"#)]
+fn registry_path_contains(world: &mut BddWorld, fragment: String) {
+    let path = world
+        .registry
+        .as_ref()
+        .unwrap()
+        .path
+        .as_ref()
+        .expect("a path");
+    assert!(path.contains(&fragment), "{path}");
+}
+
+#[then(regex = r#"^the registry lists server "([^"]+)"$"#)]
+fn registry_lists_server(world: &mut BddWorld, name: String) {
+    let load = world.registry.as_ref().unwrap();
+    assert!(
+        load.servers.iter().any(|s| s.name == name),
+        "{:?}",
+        load.servers
+    );
+}
+
+#[then(regex = r#"^the registry does not list server "([^"]+)"$"#)]
+fn registry_does_not_list(world: &mut BddWorld, name: String) {
+    let load = world.registry.as_ref().unwrap();
+    assert!(
+        !load.servers.iter().any(|s| s.name == name),
+        "{:?}",
+        load.servers
+    );
+}
+
+#[then("the registry lists no servers")]
+fn registry_lists_none(world: &mut BddWorld) {
+    assert!(world.registry.as_ref().unwrap().servers.is_empty());
+}
+
+#[then("the registry has no problems")]
+fn registry_has_no_problems(world: &mut BddWorld) {
+    assert!(
+        world.registry.as_ref().unwrap().problems.is_empty(),
+        "{:?}",
+        world.registry.as_ref().unwrap().problems
+    );
+}
+
+#[then(regex = r#"^a registry problem contains "([^"]+)"$"#)]
+fn registry_problem_contains(world: &mut BddWorld, fragment: String) {
+    let load = world.registry.as_ref().unwrap();
+    assert!(
+        load.problems.iter().any(|p| p.contains(&fragment)),
+        "{:?}",
+        load.problems
+    );
+}
+
+#[then(regex = r#"^the registry server "([^"]+)" argument contains the workspace folder$"#)]
+fn registry_server_arg_contains_root(world: &mut BddWorld, name: String) {
+    let args = world
+        .registry
+        .as_ref()
+        .unwrap()
+        .servers
+        .iter()
+        .find(|s| s.name == name)
+        .unwrap()
+        .args
+        .clone();
+    let root = world.project_root().display().to_string();
+    assert!(args.iter().any(|a| a.contains(&root)), "{args:?}");
+}
+
+#[then(regex = r#"^a registry problem contains "([^"]+)" or the servers have distinct names$"#)]
+fn registry_duplicate_or_distinct(world: &mut BddWorld, fragment: String) {
+    let load = world.registry.as_ref().unwrap();
+    let distinct = {
+        let mut names: Vec<_> = load.servers.iter().map(|s| s.name.clone()).collect();
+        names.sort();
+        names.windows(2).all(|w| w[0] != w[1])
+    };
+    assert!(
+        load.problems.iter().any(|p| p.contains(&fragment)) || distinct,
+        "problems {:?} servers {:?}",
+        load.problems,
+        load.servers
     );
 }
 

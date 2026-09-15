@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "searchindex-e8590d4e.js";
+            window.path_to_searchindex_js = "searchindex-42bba400.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-521911c0.js"></script>
+        <script src="toc-d1ab0951.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -212,8 +212,8 @@ optional.</li>
 interactive. Every reply carries a <code>nextStep</code> field that says what
 to do next — the same guidance an AI agent receives over MCP.</li>
 <li>Names in parentheses in help text, like <code>(run_tests)</code>, are the
-matching MCP tool names — frozen contracts kept byte-identical to
-the workshop’s Java <code>tdd-workflow-server</code>.</li>
+matching MCP tool names — frozen contracts kept by
+<code>cli/tests/mcp_conformance.rs</code> and mcp-client <code>ToolPlan</code>.</li>
 </ul>
 <h2 id="supported-languages"><a class="header" href="#supported-languages">Supported languages</a></h2>
 <div class="table-wrapper">
@@ -235,7 +235,7 @@ it reports a structured <code>runtime_missing</code> refusal otherwise and never
 installs anything.</p>
 <p>LLM-backed generation uses local <a href="https://ollama.com">Ollama</a>. The
 model this CLI is developed and run against is
-<code>qwen3-coder-next:latest</code> — see <a href="#getting-started">Getting started</a>
+<code>qwen3.8-flash-next:125b-mlx</code> — see <a href="#getting-started">Getting started</a>
 and <a href="#bdd-model"><code>bdd model</code></a>. Your mileage will vary with
 other models, especially those not trained for development work.</p>
 <div style="break-before: page; page-break-before: always;"></div>
@@ -255,9 +255,9 @@ cargo build --release
 <h2 id="local-llm-ollama"><a class="header" href="#local-llm-ollama">Local LLM (Ollama)</a></h2>
 <p>LLM-backed generation uses a local <a href="https://ollama.com">Ollama</a>
 instance. The model this CLI is developed and run against is
-<code>qwen3-coder-next:latest</code>:</p>
-<pre><code class="language-bash">ollama pull qwen3-coder-next:latest
-bdd model use qwen3-coder-next:latest
+<code>qwen3.8-flash-next:125b-mlx</code>:</p>
+<pre><code class="language-bash">ollama pull qwen3.8-flash-next:125b-mlx
+bdd model use qwen3.8-flash-next:125b-mlx
 </code></pre>
 <p>Your mileage will vary with a different model. A stronger coding model
 may draft, generate, and implement better; a model trained for chat,
@@ -277,7 +277,7 @@ version, the model status, and an interactive prompt:</p>
   ▲                                  │
   ╰──────────────────────────────────╯
 
-Model set for this session: qwen3-coder-next:latest (not saved - keep it with: bdd model use qwen3-coder-next:latest).
+Model set for this session: qwen3.8-flash-next:125b-mlx (not saved - keep it with: bdd model use qwen3.8-flash-next:125b-mlx).
 Interactive shell - type commands without the bdd prefix (e.g. spec list).
 bdd&gt;
 </code></pre>
@@ -332,7 +332,7 @@ shell’s <code>--root</code> unless a line supplies its own.</p>
 <p>Override the LLM model for this invocation only. This wins over the
 configured model and over discovery, and is never written to
 configuration:</p>
-<pre><code class="language-bash">bdd --model qwen3-coder-next:latest steps generate
+<pre><code class="language-bash">bdd --model qwen3.8-flash-next:125b-mlx steps generate
 bdd --model llama3:8b greenfield   # another model; mileage will vary
 </code></pre>
 <p>Model resolution order (see <a href="#bdd-model">bdd model</a> for the
@@ -373,6 +373,15 @@ bdd spec draft --retry 1   # one attempt, then the usual fallback
 <p><code>--retry</code> wins over <code>retry</code> under <code>[llm]</code> in <code>.bdd-mcp.toml</code>. A missing
 or zero config value uses the default of 3. In the interactive shell,
 commands inherit the shell’s <code>--retry</code> unless a line supplies its own.</p>
+<h2 id="--tools-names"><a class="header" href="#--tools-names"><code>--tools &lt;NAMES&gt;</code></a></h2>
+<p>Replace this command’s tool profile for one run with a comma-separated
+list of catalog names. Default profiles live in code and in
+<code>.bdd-mcp.toml</code>; see <a href="#bdd-tools"><code>bdd tools</code></a>.</p>
+<pre><code class="language-bash">bdd --tools list_requirements,get_requirement status
+</code></pre>
+<h2 id="--max-rounds-n"><a class="header" href="#--max-rounds-n"><code>--max-rounds &lt;N&gt;</code></a></h2>
+<p>Override <code>[tools] max_rounds</code> for one run: how many tool-call rounds
+<code>Agent::ask</code> may take before it must return a parsed reply.</p>
 <h2 id="-v---version"><a class="header" href="#-v---version"><code>-V</code>, <code>--version</code></a></h2>
 <p>Prints the version compiled into the binary (from <code>Cargo.toml</code> at
 build time).</p>
@@ -407,7 +416,7 @@ leading <code>bdd</code> is forgiven if you type it anyway.</li>
 <li><strong>Inherited flags.</strong> Commands inherit the shell’s <code>--root</code>,
 <code>--model</code>, and <code>--retry</code> unless the line supplies its own:</li>
 </ul>
-<pre><code class="language-bash">bdd --root ~/code/calculator --model qwen3-coder-next:latest --retry 5
+<pre><code class="language-bash">bdd --root ~/code/calculator --model qwen3.8-flash-next:125b-mlx --retry 5
 # every command in this shell now targets that root and model,
 # and retries invalid model replies up to 5 times
 </code></pre>
@@ -437,7 +446,7 @@ history cannot be saved, the shell says so and exits normally.</p>
 <h2 id="model-announcement-at-startup"><a class="header" href="#model-announcement-at-startup">Model announcement at startup</a></h2>
 <p>The first prompt is preceded by one line describing the session’s
 model. This CLI is developed and run against
-<code>qwen3-coder-next:latest</code>; your mileage will vary with a different
+<code>qwen3.8-flash-next:125b-mlx</code>; your mileage will vary with a different
 model, especially one trained for work other than development. See
 <a href="#local-llm-ollama">Getting started</a> and
 <a href="#bdd-model"><code>bdd model</code></a>.</p>
@@ -447,10 +456,10 @@ model, especially one trained for work other than development. See
 <tr><th>Situation</th><th>Announcement</th></tr>
 </thead>
 <tbody>
-<tr><td>Configured in <code>.bdd-mcp.toml</code></td><td><code>Model set: qwen3-coder-next:latest (from configuration).</code></td></tr>
-<tr><td>No config, models installed</td><td><code>Model set for this session: qwen3-coder-next:latest (not saved - keep it with: bdd model use qwen3-coder-next:latest).</code></td></tr>
-<tr><td>Ollama up, no models</td><td><code>Ollama is running but has no models - generation will use deterministic templates. For optimal results pull a coding model, e.g.: ollama pull qwen3-coder-next:latest (mileage varies with models not trained for development)</code></td></tr>
-<tr><td>Ollama unreachable</td><td><code>Ollama is not reachable - generation will use deterministic templates. Install it from https://ollama.com, start it, and pull a coding model, e.g.: ollama pull qwen3-coder-next:latest (mileage varies with models not trained for development)</code></td></tr>
+<tr><td>Configured in <code>.bdd-mcp.toml</code></td><td><code>Model set: qwen3.8-flash-next:125b-mlx (from configuration).</code></td></tr>
+<tr><td>No config, models installed</td><td><code>Model set for this session: qwen3.8-flash-next:125b-mlx (not saved - keep it with: bdd model use qwen3.8-flash-next:125b-mlx).</code></td></tr>
+<tr><td>Ollama up, no models</td><td><code>Ollama is running but has no models - generation will use deterministic templates. For optimal results pull a coding model, e.g.: ollama pull qwen3.8-flash-next:125b-mlx (mileage varies with models not trained for development)</code></td></tr>
+<tr><td>Ollama unreachable</td><td><code>Ollama is not reachable - generation will use deterministic templates. Install it from https://ollama.com, start it, and pull a coding model, e.g.: ollama pull qwen3.8-flash-next:125b-mlx (mileage varies with models not trained for development)</code></td></tr>
 </tbody>
 </table>
 </div>
@@ -895,7 +904,7 @@ generation, test execution, phase tracking — is automated.</p>
 instead of a blank title prompt:</p>
 <pre><code class="language-text">Describe what to build in plain words (one or several requirements). Enter drafts manually instead:
 sum numbers from a comma separated string, empty input means zero
-Splitting the description into requirements with qwen3-coder-next:latest - working ...
+Splitting the description into requirements with qwen3.8-flash-next:125b-mlx - working ...
 Accept all these requirements to refine, or enter comma-separated numbers of the ones to accept.
 The description holds 2 requirement(s):
   1. Comma separated numbers are summed
@@ -992,7 +1001,7 @@ proposal — <kbd>Enter</kbd> accepts each fix. If the review rejects a
 wording again, the next model call also recounts every earlier wording
 and the findings each one produced, so the model never circles back to
 a wording the review already rejected:</p>
-<pre><code class="language-text">Asking qwen3-coder-next:latest to address finding 1 of 1 - working ...
+<pre><code class="language-text">Asking qwen3.8-flash-next:125b-mlx to address finding 1 of 1 - working ...
 The model reworded the draft. Each prompt shows its proposal - Enter accepts it, or type your own wording.
 </code></pre>
 <p>With several findings, each one is its own model call — call 2 is
@@ -1057,7 +1066,7 @@ continue.</p>
 <li>An LLM is optional: with no reachable Ollama model the generation
 steps fall back to deterministic templates you edit yourself. The
 model this CLI is developed and run against is
-<code>qwen3-coder-next:latest</code> (<code>ollama pull qwen3-coder-next:latest</code>).
+<code>qwen3.8-flash-next:125b-mlx</code> (<code>ollama pull qwen3.8-flash-next:125b-mlx</code>).
 Your mileage will vary with other models, especially those not
 trained for development work.</li>
 </ul>
@@ -1196,7 +1205,7 @@ includes the edge-case criterion it added):</p>
 <pre><code class="language-text">Findings to address:
   - criteria: only happy paths - add at least one edge case (empty, invalid, or error input)
     try: add an edge case, e.g. Given an empty string "", when add is called, then the result is 0
-Asking qwen3-coder-next:latest to address finding 1 of 1 - working ...
+Asking qwen3.8-flash-next:125b-mlx to address finding 1 of 1 - working ...
 The model reworded the draft. Each prompt shows its proposal - Enter accepts it, or type your own wording.
 REQ-004 title [Newlines act as delimiters] (Enter keeps it):
 REQ-004 criterion 2 [Given an empty string "", when add is called, then the result is 0] (Enter keeps it, '-' drops it):
@@ -1770,7 +1779,7 @@ tree, and the next test run is the real validator.</p>
 <a href="#bdd-model-use"><code>bdd model use</code></a>, passed with <code>--model</code>, or
 the session default when Ollama has installed models). Without one the
 command is refused — implementing stays in your hands. The model this
-CLI is developed and run against is <code>qwen3-coder-next:latest</code>; your
+CLI is developed and run against is <code>qwen3.8-flash-next:125b-mlx</code>; your
 mileage will vary with a different model, especially one trained for
 work other than development.</p>
 <pre><code class="language-bash">bdd test                 # a fresh RED bar records the failure details
@@ -1915,17 +1924,24 @@ stays on disk for humans; it is not sent to the model.</p>
 <p>The attempt log is scoped to the requirement and cleared the moment a
 test run goes GREEN — a closed loop leaves no history for the next
 requirement to inherit.</p>
+<p><code>run_tests</code> during this command sees the <strong>working tree</strong>, not the
+unstaged patch sitting in <code>.bdd-staged/</code>. Commit (or apply) before you
+trust the bar. If the model requests <code>command_run</code>, the CLI asks you to
+confirm first; piped or CI stdin declines and never hangs.</p>
 <h2 id="see-also-8"><a class="header" href="#see-also-8">See also</a></h2>
 <ul>
 <li><a href="#bdd-greenfield"><code>bdd greenfield</code></a> — the orchestrated loop with the same attempt built in.</li>
 <li><a href="#bdd-changes"><code>bdd changes</code></a> — review and apply the staged files.</li>
 <li><a href="#bdd-test"><code>bdd test</code></a> — the run that decides.</li>
+<li><a href="#bdd-tools"><code>bdd tools</code></a> — the implement profile (includes <code>command_run</code>).</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="bdd-validate"><a class="header" href="#bdd-validate">bdd validate</a></h1>
 <p>Validate all Gherkin in the project — committed feature files <strong>and</strong>
 staged ones — so a broken scenario never reaches a test run. This is
-the cheap gate to run before <code>bdd changes commit</code>.</p>
+the cheap gate to run before <code>bdd changes commit</code>. MCP clients call the
+same check as <code>changes_validate</code> (<code>validate_spec</code> remains the on-disk
+frozen tool).</p>
 <pre><code class="language-text">Usage: bdd validate [OPTIONS]
 </code></pre>
 <h2 id="flags-3"><a class="header" href="#flags-3">Flags</a></h2>
@@ -2375,9 +2391,9 @@ the model only to <em>polish</em> deterministic templates in the generation
 commands. Everything works without a model; generation just stays at
 template quality.</p>
 <p>The model this CLI is developed and run against is
-<code>qwen3-coder-next:latest</code>. Pull it with
-<code>ollama pull qwen3-coder-next:latest</code>, then persist the choice with
-<code>bdd model use qwen3-coder-next:latest</code>. Your mileage will vary with
+<code>qwen3.8-flash-next:125b-mlx</code>. Pull it with
+<code>ollama pull qwen3.8-flash-next:125b-mlx</code>, then persist the choice with
+<code>bdd model use qwen3.8-flash-next:125b-mlx</code>. Your mileage will vary with
 other models: a stronger coding model may improve drafts and
 implementations; a model trained for chat, general knowledge, or work
 other than development will typically produce weaker specs, steps,
@@ -2406,7 +2422,7 @@ currently be used.</p>
 <pre><code class="language-bash">bdd model list
 </code></pre>
 <pre><code class="language-text">Models available in Ollama:
-* qwen3-coder-next:latest   (configured)
+* qwen3.8-flash-next:125b-mlx   (configured)
   qwen3:8b
   llama3:8b
 </code></pre>
@@ -2418,11 +2434,11 @@ says the provider is unreachable.</p>
 <p>Show the resolved model and where it came from.</p>
 <pre><code class="language-bash">bdd model current
 </code></pre>
-<pre><code class="language-text">Configured model: qwen3-coder-next:latest
+<pre><code class="language-text">Configured model: qwen3.8-flash-next:125b-mlx
 </code></pre>
 <p>With nothing configured but models installed, the first one is the
 session default and the output tells you it is not saved:</p>
-<pre><code class="language-text">Model set for this session: qwen3-coder-next:latest (not saved - keep it with: bdd model use qwen3-coder-next:latest).
+<pre><code class="language-text">Model set for this session: qwen3.8-flash-next:125b-mlx (not saved - keep it with: bdd model use qwen3.8-flash-next:125b-mlx).
 </code></pre>
 <p>The same announcement appears when the
 <a href="#the-interactive-shell">interactive shell</a> starts.</p>
@@ -2431,9 +2447,9 @@ session default and the output tells you it is not saved:</p>
 <p>Persist a model choice in the project’s configuration.</p>
 <pre><code class="language-text">Usage: bdd model use [OPTIONS] &lt;MODEL_NAME&gt;
 </code></pre>
-<pre><code class="language-bash">bdd model use qwen3-coder-next:latest
+<pre><code class="language-bash">bdd model use qwen3.8-flash-next:125b-mlx
 </code></pre>
-<pre><code class="language-text">Configured model: qwen3-coder-next:latest
+<pre><code class="language-text">Configured model: qwen3.8-flash-next:125b-mlx
 Written to /Users/you/code/calculator/.bdd-mcp.toml
 </code></pre>
 <p>The choice is validated against Ollama’s installed models — a name
@@ -2441,7 +2457,7 @@ Ollama does not have is rejected rather than silently saved.</p>
 <h2 id="the-llm-configuration-block"><a class="header" href="#the-llm-configuration-block">The [llm] configuration block</a></h2>
 <p>Everything model-related lives under <code>[llm]</code> in <code>.bdd-mcp.toml</code>:</p>
 <pre><code class="language-toml">[llm]
-model = "qwen3-coder-next:latest"     # persisted by bdd model use
+model = "qwen3.8-flash-next:125b-mlx"     # persisted by bdd model use
 endpoint = "http://localhost:11434"   # the Ollama endpoint
 timeout_seconds = 300                 # generation timeout (default 300)
 </code></pre>
@@ -2473,18 +2489,29 @@ output is validated before it can stage.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="bdd-mcp"><a class="header" href="#bdd-mcp">bdd mcp</a></h1>
-<p>The embedded MCP server. This is the same workflow the CLI offers a
+<p>The workshop MCP server. This is the same workflow the CLI offers a
 human, exposed to AI agents as typed tools over the Model Context
-Protocol.</p>
+Protocol. Cursor, Claude, the bundled <code>tdd-agent.jar</code>, and <code>bdd mcp call</code> all talk to this process.</p>
 <pre><code class="language-text">Usage: bdd mcp [OPTIONS] &lt;COMMAND&gt;
 
-Commands: serve
+Commands:
+  serve  Serve the MCP tools over stdio
+  tools  List tools over one throwaway session
+  call   Call one tool over one throwaway session
 </code></pre>
+<p>Keep the wire identity <code>tdd-workflow-server</code> / <code>1.0.0</code> so existing
+clients stay stable. Frozen seven-tool <strong>reply shapes</strong> are owned by
+<code>cli/tests/mcp_conformance.rs</code> and mcp-client’s <code>ToolPlan</code> — not by a
+separate Java server.</p>
+<p>The server is stdio only: JSON-RPC on stdin/stdout. Cursor, Claude,
+Inspector, and <code>tdd-agent.jar</code> launch it as a child process. rmcp 3.3
+still speaks the initialize handshake on this transport so those hosts
+keep working.</p>
 <hr>
 <h2 id="bdd-mcp-serve"><a class="header" href="#bdd-mcp-serve">bdd mcp serve</a></h2>
 <p>Serve the MCP tools over stdio. The process reads JSON-RPC on stdin
 and writes replies on stdout, so an MCP client (Cursor, Claude
-Desktop, any MCP-capable agent) launches it as a child process — you
+Desktop, <code>tdd-agent.jar</code>) launches it as a child process — you
 normally never run it by hand.</p>
 <pre><code class="language-bash">bdd mcp serve --root /path/to/project
 </code></pre>
@@ -2492,17 +2519,40 @@ normally never run it by hand.</p>
 equivalent):</p>
 <pre><code class="language-json">{
   "mcpServers": {
-    "bdd-workflow": {
+    "tdd-workflow": {
       "command": "bdd",
-      "args": ["mcp", "serve", "--root", "/path/to/project"]
+      "args": ["mcp", "serve", "--root", "${workspaceFolder}"]
     }
   }
 }
 </code></pre>
+<p>Cursor sees <strong>all 23 tools</strong>, including staging. CLI commands that
+call a model attach a <strong>narrower profile</strong> (<code>bdd tools profiles</code>) —
+typically 3–7 tools — so a local model is not offered commit or
+mark-implemented.</p>
+<h2 id="bdd-mcp-tools"><a class="header" href="#bdd-mcp-tools">bdd mcp tools</a></h2>
+<p>List the built-in tools over one throwaway session. Default is an
+in-process loopback; <code>--stdio</code> spawns <code>bdd mcp serve</code> as a child
+(the same bytes Cursor would read).</p>
+<pre><code class="language-bash">bdd mcp tools
+bdd mcp tools --stdio --json
+</code></pre>
+<h2 id="bdd-mcp-call"><a class="header" href="#bdd-mcp-call">bdd mcp call</a></h2>
+<p>Invoke one tool, print the result, exit. No narration, no tokens.</p>
+<pre><code class="language-bash">bdd mcp call get_tdd_state
+bdd mcp call get_requirement --arg id=REQ-003
+bdd mcp call list_requirements --json
+bdd mcp call run_tests --stdio
+</code></pre>
+<p><code>--arg key=value</code> is always a string unless the value parses as JSON.
+<code>--args '{"id":"REQ-003"}'</code> merges a JSON object.</p>
 <h2 id="the-tools-served"><a class="header" href="#the-tools-served">The tools served</a></h2>
-<p>The tool names and reply shapes are byte-compatible with the
-workshop’s Java <code>tdd-workflow-server</code>, so existing clients work
-unchanged:</p>
+<p>Twenty-three tools in three groups. There is no <code>spec_draft</code> or
+<code>implement</code> MCP tool: Cursor writes <code>requirements.json</code> and production
+Java; Gherkin, steps, unit-test scaffolds, mark-implemented, and
+staging go through tools. Generation over MCP is <strong>template-only</strong>
+(<code>source: "template"</code>).</p>
+<h3 id="frozen-seven-reply-shapes-stay"><a class="header" href="#frozen-seven-reply-shapes-stay">Frozen seven (reply shapes stay)</a></h3>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -2513,14 +2563,39 @@ unchanged:</p>
 <tr><td><code>get_requirement</code></td><td><a href="#bdd-spec-show"><code>bdd spec show</code></a></td></tr>
 <tr><td><code>validate_spec</code></td><td><a href="#bdd-spec-validate"><code>bdd spec validate</code></a></td></tr>
 <tr><td><code>refine_requirement</code></td><td><a href="#bdd-spec-refine"><code>bdd spec refine</code></a></td></tr>
-<tr><td><code>requirement_mark_implemented</code></td><td><a href="#bdd-spec-mark-implemented"><code>bdd spec mark-implemented</code></a></td></tr>
-<tr><td><code>step_definitions_find</code></td><td><a href="#bdd-steps-missing"><code>bdd steps missing</code></a></td></tr>
-<tr><td><code>step_definition_create</code></td><td><a href="#bdd-steps-generate"><code>bdd steps generate</code></a></td></tr>
-<tr><td><code>unit_test_create</code></td><td><a href="#bdd-unittest"><code>bdd unittest generate</code></a></td></tr>
 <tr><td><code>run_tests</code></td><td><a href="#bdd-test"><code>bdd test</code></a></td></tr>
 <tr><td><code>get_tdd_state</code></td><td><a href="#bdd-state"><code>bdd state</code></a></td></tr>
 <tr><td><code>start_refactor</code></td><td><a href="#bdd-refactor"><code>bdd refactor</code></a></td></tr>
-<tr><td><code>command_run</code></td><td>— (MCP only, see below)</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="authoring-and-staging"><a class="header" href="#authoring-and-staging">Authoring and staging</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>MCP tool</th><th>CLI equivalent</th></tr>
+</thead>
+<tbody>
+<tr><td><code>feature_list</code> / <code>feature_read</code> / <code>feature_create</code></td><td><a href="#bdd-feature"><code>bdd feature</code></a></td></tr>
+<tr><td><code>scenario_add</code> / <code>scenario_update</code> / <code>scenario_delete</code></td><td><a href="#bdd-scenario"><code>bdd scenario</code></a></td></tr>
+<tr><td><code>changes_show</code> / <code>changes_commit</code> / <code>changes_discard</code></td><td><a href="#bdd-changes"><code>bdd changes</code></a></td></tr>
+<tr><td><code>changes_validate</code></td><td><a href="#bdd-validate"><code>bdd validate</code></a> (staged-wins; frozen <code>validate_spec</code> stays on disk)</td></tr>
+<tr><td><code>requirement_mark_implemented</code></td><td><a href="#bdd-spec-mark-implemented"><code>bdd spec mark-implemented</code></a></td></tr>
+<tr><td><code>step_definitions_find</code></td><td><a href="#bdd-steps-missing"><code>bdd steps missing</code></a></td></tr>
+<tr><td><code>step_definition_create</code></td><td><a href="#bdd-steps-generate"><code>bdd steps generate</code></a> (template only)</td></tr>
+<tr><td><code>unit_test_create</code></td><td><a href="#bdd-unittest"><code>bdd unittest generate</code></a> (template only; arg is <code>req_id</code>)</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="inspect"><a class="header" href="#inspect">Inspect</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>MCP tool</th><th>CLI equivalent</th></tr>
+</thead>
+<tbody>
+<tr><td><code>project_inspect</code></td><td><a href="#bdd-inspect"><code>bdd inspect</code></a></td></tr>
+<tr><td><code>command_run</code></td><td>— (MCP and the <code>implement</code> profile; see below)</td></tr>
 </tbody>
 </table>
 </div>
@@ -2546,6 +2621,9 @@ directory, and no argument may be an absolute path or contain
 <code>..</code> — the command cannot name anything outside the root.</li>
 <li><strong>RED bar only.</strong> Commands run only during the implementation
 phase. Off a RED bar the tool refuses and points at <code>run_tests</code>.</li>
+<li><strong>Human confirm on the CLI.</strong> When <code>bdd implement</code> offers
+<code>command_run</code>, the CLI asks before spawning. Piped/CI stdin
+declines; it never hangs.</li>
 <li><strong>Timeout and output cap.</strong> A hard timeout (default and maximum
 300 seconds) kills a hung process; each output stream is truncated
 to its last 200 lines.</li>
@@ -2554,6 +2632,9 @@ to its last 200 lines.</li>
 build tool can still run build scripts. What the policy makes
 unexpressible is running destructive binaries and reaching outside
 the project root.</p>
+<p><code>run_tests</code> during <code>bdd implement</code> sees the <strong>working tree</strong>, not an
+unstaged patch. Commit (or apply staged files) before you trust the
+bar.</p>
 <h2 id="why-serve-tools-instead-of-letting-the-agent-edit-files"><a class="header" href="#why-serve-tools-instead-of-letting-the-agent-edit-files">Why serve tools instead of letting the agent edit files?</a></h2>
 <ul>
 <li><strong>No escape hatches.</strong> The agent gets exactly these tools — no
@@ -2562,7 +2643,9 @@ allowlisted, jailed to the root, and phase-gated; mutations go
 through the <a href="#staged-changes">staging area</a> for human review.</li>
 <li><strong>The discipline is in the server.</strong> An agent cannot skip RED,
 refactor while failing, or invent requirements: the tools refuse,
-with a <code>nextStep</code> that teaches the correct move.</li>
+with a <code>nextStep</code> that teaches the correct move.
+<code>requirement_mark_implemented</code> is GREEN-gated and needs a tagged
+scenario.</li>
 <li><strong>State survives.</strong> The phase machine lives on disk, so a
 reconnecting agent (or a human taking over in the CLI) continues
 from the same place.</li>
@@ -2575,7 +2658,7 @@ from the same place.</li>
 </thead>
 <tbody>
 <tr><td><code>--root &lt;ROOT&gt;</code></td><td>Project root the served tools operate on. Defaults to the process’s working directory.</td></tr>
-<tr><td><code>--model &lt;MODEL&gt;</code></td><td>Model override for the serving session’s generation tools.</td></tr>
+<tr><td><code>--model &lt;MODEL&gt;</code></td><td>Model override for the serving session. MCP generation tools do not call Ollama; they stage templates.</td></tr>
 </tbody>
 </table>
 </div>
@@ -2585,12 +2668,62 @@ from the same place.</li>
 is the wire). Diagnostics go to stderr.</li>
 <li>One server serves one project root. Point different projects at
 different server entries.</li>
-<li>Generation tools use the same local Ollama resolution as the rest
-of the CLI. This CLI is developed and run against
-<code>qwen3-coder-next:latest</code>; your mileage will vary with other
-models, especially those not trained for development work. See
-<a href="#bdd-model"><code>bdd model</code></a>.</li>
+<li>Backup Inspector: <code>npx @modelcontextprotocol/inspector bdd mcp serve --root $PWD</code>.</li>
+<li>See also <a href="#bdd-tools"><code>bdd tools</code></a> and <a href="#bdd-ask"><code>bdd ask</code></a>.</li>
 </ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="bdd-tools"><a class="header" href="#bdd-tools">bdd tools</a></h1>
+<p>Inspect and attach the tools a model call may use. Built-in tools are
+listed offline from <code>bdd mcp serve</code>. External MCP servers from
+<code>mcp.json</code> are discovered on demand and must be attached <strong>per command</strong>
+with <code>--for</code> — never globally.</p>
+<pre><code class="language-text">Usage: bdd tools [OPTIONS] &lt;COMMAND&gt;
+
+Commands:
+  list      Catalog (optionally `--for` one caller, `--offline`, `--refresh`)
+  profiles  Every caller and its resolved set
+  show      One tool's description and schema
+  enable    Attach a tool to a caller (`--for` required)
+  disable   Remove a tool from a caller (`--for` required)
+  refresh   Rediscover external servers and rewrite `.bdd-cache/tools/`
+  servers   Registered mcp.json servers and parse problems
+</code></pre>
+<pre><code class="language-bash">bdd tools profiles
+# spec-draft          4  list_requirements, get_requirement, validate_spec, refine_requirement
+# implement           7  get_requirement, feature_read, …, command_run, changes_show
+# status              6  list_requirements, …, changes_show, changes_validate
+
+bdd tools list --for status          # exactly those six
+bdd tools list --offline             # built-ins only; never connects
+bdd tools enable self__validate_spec --for status
+bdd tools servers
+</code></pre>
+<p><code>--for</code> accepts: <code>spec-draft</code>, <code>spec-reword</code>, <code>steps-generate</code>,
+<code>unittest-generate</code>, <code>implement-advice</code>, <code>implement</code>, <code>status</code>, <code>ask</code>.
+Omitting it lists those names and exits nonzero.</p>
+<p>Default profiles contain no staging or commit tools. The only mutation
+a CLI-side model may request is <code>command_run</code> on the <code>implement</code>
+profile, and that call still asks the human to confirm.</p>
+<p>External tools are namespaced <code>server__tool</code>. A name in config that is
+not in the catalog is a warning, not a hard failure.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="bdd-ask"><a class="header" href="#bdd-ask">bdd ask</a></h1>
+<p>Ask the local model a question with the <strong>ask</strong> tool profile: the ten
+read-only workflow tools (spec, TDD state, inspect, features, staged
+changes). The model may look things up; it cannot stage, commit, or
+mark a requirement implemented.</p>
+<pre><code class="language-text">Usage: bdd ask [OPTIONS] [TASK]...
+</code></pre>
+<pre><code class="language-bash">bdd ask "which pending requirement should we implement next?"
+bdd ask --json "what phase is the bar in?"
+</code></pre>
+<p>With a TTY and no task, <code>bdd ask</code> opens a multi-turn prompt (<code>ask&gt;</code>).
+Empty input, <code>exit</code>, or <code>quit</code> ends the session. Piped stdin without a
+task is refused so CI never hangs.</p>
+<p>A model must be resolved (<code>bdd model use</code>, <code>--model</code>, or a single
+installed Ollama tag). There is no template fallback.</p>
+<p>The offered tools are the <code>ask</code> row of <a href="#bdd-tools"><code>bdd tools profiles</code></a>.
+Override for one run with <code>--tools</code>.</p>
 
                     </main>
 

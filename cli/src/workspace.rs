@@ -6,6 +6,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::application::spec_service::ProjectLayout;
+use crate::domain::language::{Language, detect_languages};
 
 /// Where the requirements spec lives, relative to the project root.
 pub const SPEC_PATH: &str = "requirements/requirements.json";
@@ -109,6 +110,32 @@ pub fn feature_search_root(root: &Path) -> PathBuf {
     }
 }
 
+/// Detect the project's primary language. Memory (a greenfield choice)
+/// wins over marker detection so a polyglot tree keeps the chosen stack.
+/// Failure names `bdd inspect` so both composition roots can surface it.
+pub fn primary_language(root: &Path) -> Result<Language, String> {
+    use crate::adapters::fs_memory::{FsMemoryStore, FsProjectInventory};
+    use crate::adapters::fs_project::FsProjectFiles;
+    use crate::application::memory_service::MemoryService;
+
+    let files = FsProjectFiles::new(root.to_path_buf());
+    let memory = MemoryService::new(
+        FsMemoryStore::new(root.to_path_buf()),
+        FsProjectInventory::new(root.to_path_buf()),
+        FsProjectFiles::new(root.to_path_buf()),
+    );
+    if let Ok(memory) = memory.load()
+        && let Some(language) = Language::parse(&memory.language)
+    {
+        return Ok(language);
+    }
+    detect_languages(&files).first().copied().ok_or_else(|| {
+        "No supported project detected (pom.xml, build.gradle, package.json, \
+         *.csproj, Cargo.toml). Run bdd inspect."
+            .into()
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -188,5 +215,21 @@ mod tests {
             layout.production_location,
             workshop_layout().production_location
         );
+    }
+
+    #[test]
+    fn primary_language_prefers_memory_then_markers() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("pom.xml"), "<project/>").unwrap();
+        assert_eq!(primary_language(dir.path()).unwrap(), Language::Java);
+        fs::write(
+            dir.path().join(".bdd-memory.json"),
+            r#"{"version":1,"language":"Rust","refreshedAt":"2026-01-01T00:00:00Z"}"#,
+        )
+        .unwrap();
+        assert_eq!(primary_language(dir.path()).unwrap(), Language::Rust);
+        let empty = tempfile::tempdir().unwrap();
+        let error = primary_language(empty.path()).unwrap_err();
+        assert!(error.contains("bdd inspect"), "{error}");
     }
 }

@@ -38,7 +38,10 @@ class SdkMappersTest {
                         .description("Run the kata test suite.")
                         .build()), null);
         assertThat(SdkMappers.toTools(result))
-                .containsExactly(new DiscoveredTool("run_tests", "Run the kata test suite."));
+                .containsExactly(new DiscoveredTool(
+                        "run_tests",
+                        "Run the kata test suite.",
+                        Map.of("type", "object")));
     }
 
     @Test

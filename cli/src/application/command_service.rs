@@ -54,7 +54,7 @@ impl<S: StateStore, E: CommandExecutor> CommandService<S, E> {
         argv: &[String],
         timeout_secs: Option<u64>,
     ) -> Result<CommandReport, ServiceError> {
-        command_policy::validate(argv).map_err(|refusal| ServiceError(refusal.0))?;
+        command_policy::validate(argv)?;
         let phase = self.phase()?;
         if phase != TddPhase::Red {
             return Err(ServiceError(format!(
@@ -68,10 +68,7 @@ impl<S: StateStore, E: CommandExecutor> CommandService<S, E> {
                 .unwrap_or(MAX_TIMEOUT_SECS)
                 .min(MAX_TIMEOUT_SECS),
         );
-        let outcome = self
-            .executor
-            .run(argv, &self.root, timeout)
-            .map_err(|e| ServiceError(e.0))?;
+        let outcome = self.executor.run(argv, &self.root, timeout)?;
         let next_step = if outcome.timed_out {
             format!(
                 "The command was killed after {} seconds. Try a narrower command, \
@@ -93,7 +90,7 @@ impl<S: StateStore, E: CommandExecutor> CommandService<S, E> {
     }
 
     fn phase(&self) -> Result<TddPhase, ServiceError> {
-        let snapshot = self.state.load().map_err(|e| ServiceError(e.0))?;
+        let snapshot = self.state.load()?;
         Ok(TddStateMachine::restore(snapshot).phase())
     }
 }

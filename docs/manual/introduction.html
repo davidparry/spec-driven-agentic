@@ -35,10 +35,10 @@
             const path_to_root = "";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "searchindex-e8590d4e.js";
+            window.path_to_searchindex_js = "searchindex-42bba400.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-521911c0.js"></script>
+        <script src="toc-d1ab0951.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -214,8 +214,8 @@ optional.</li>
 interactive. Every reply carries a <code>nextStep</code> field that says what
 to do next — the same guidance an AI agent receives over MCP.</li>
 <li>Names in parentheses in help text, like <code>(run_tests)</code>, are the
-matching MCP tool names — frozen contracts kept byte-identical to
-the workshop’s Java <code>tdd-workflow-server</code>.</li>
+matching MCP tool names — frozen contracts kept by
+<code>cli/tests/mcp_conformance.rs</code> and mcp-client <code>ToolPlan</code>.</li>
 </ul>
 <h2 id="supported-languages"><a class="header" href="#supported-languages">Supported languages</a></h2>
 <div class="table-wrapper">
@@ -237,7 +237,7 @@ it reports a structured <code>runtime_missing</code> refusal otherwise and never
 installs anything.</p>
 <p>LLM-backed generation uses local <a href="https://ollama.com">Ollama</a>. The
 model this CLI is developed and run against is
-<code>qwen3-coder-next:latest</code> — see <a href="getting-started.html">Getting started</a>
+<code>qwen3.8-flash-next:125b-mlx</code> — see <a href="getting-started.html">Getting started</a>
 and <a href="commands/model.html"><code>bdd model</code></a>. Your mileage will vary with
 other models, especially those not trained for development work.</p>
 

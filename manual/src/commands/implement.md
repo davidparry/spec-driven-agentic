@@ -19,7 +19,7 @@ Requires a resolved model (configured with
 [`bdd model use`](model.md#bdd-model-use), passed with `--model`, or
 the session default when Ollama has installed models). Without one the
 command is refused — implementing stays in your hands. The model this
-CLI is developed and run against is `qwen3-coder-next:latest`; your
+CLI is developed and run against is `qwen3.8-flash-next:125b-mlx`; your
 mileage will vary with a different model, especially one trained for
 work other than development.
 
@@ -194,8 +194,14 @@ The attempt log is scoped to the requirement and cleared the moment a
 test run goes GREEN — a closed loop leaves no history for the next
 requirement to inherit.
 
+`run_tests` during this command sees the **working tree**, not the
+unstaged patch sitting in `.bdd-staged/`. Commit (or apply) before you
+trust the bar. If the model requests `command_run`, the CLI asks you to
+confirm first; piped or CI stdin declines and never hangs.
+
 ## See also
 
 - [`bdd greenfield`](greenfield.md) — the orchestrated loop with the same attempt built in.
 - [`bdd changes`](changes.md) — review and apply the staged files.
 - [`bdd test`](test.md) — the run that decides.
+- [`bdd tools`](tools.md) — the implement profile (includes `command_run`).

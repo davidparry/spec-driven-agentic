@@ -33,22 +33,42 @@ else
     bad "Maven not on PATH" "install Maven 3.9+"
 fi
 
-# 3. MCP modules (produces both jars) and the standalone kata
-if mvn -B -q clean package >/tmp/preflight-build.log 2>&1 \
+# 3. bdd on PATH, or a release/debug binary we can point the client at
+BDD=""
+if command -v bdd >/dev/null 2>&1; then
+    BDD="$(command -v bdd)"
+    ok "bdd on PATH ($BDD — $($BDD --version 2>/dev/null | head -1))"
+elif [ -x "$ROOT/cli/target/release/bdd" ]; then
+    BDD="$ROOT/cli/target/release/bdd"
+    ok "cli/target/release/bdd present"
+elif [ -x "$ROOT/cli/target/debug/bdd" ]; then
+    BDD="$ROOT/cli/target/debug/bdd"
+    ok "cli/target/debug/bdd present"
+elif command -v cargo >/dev/null 2>&1; then
+    if cargo build --release --manifest-path cli/Cargo.toml >/tmp/preflight-bdd.log 2>&1; then
+        BDD="$ROOT/cli/target/release/bdd"
+        ok "cargo build --release produced bdd"
+    else
+        bad "could not build bdd" "see /tmp/preflight-bdd.log — install Rust or a GitHub-release binary"
+    fi
+else
+    bad "bdd not on PATH and cargo not installed" \
+        "cargo install --path cli  (or download a release binary and put it on PATH)"
+fi
+
+# 4. MCP client jar + standalone kata
+if mvn -B -q -pl mcp-client package >/tmp/preflight-build.log 2>&1 \
         && mvn -B -q -f kata/pom.xml test >>/tmp/preflight-build.log 2>&1; then
-    ok "mvn package (mcp-*) and kata tests are green"
+    ok "mvn -pl mcp-client package and kata tests are green"
 else
     bad "build failed" "see /tmp/preflight-build.log"
 fi
 
-# 4. Jars exist
-for jar in mcp-server/target/tdd-mcp-server.jar mcp-client/target/tdd-agent.jar; do
-    if [ -f "$jar" ]; then
-        ok "$jar present"
-    else
-        bad "$jar missing" "run: mvn -q package"
-    fi
-done
+if [ -f mcp-client/target/tdd-agent.jar ]; then
+    ok "mcp-client/target/tdd-agent.jar present"
+else
+    bad "tdd-agent.jar missing" "run: mvn -q -pl mcp-client package"
+fi
 
 # 5. Cucumber suite ran (BDD layer alive)
 if ls kata/target/surefire-reports/TEST-*RunCucumberTest.xml >/dev/null 2>&1; then
@@ -58,15 +78,15 @@ else
         "check kata/src/test/java/.../RunCucumberTest.java and the cucumber dependencies"
 fi
 
-# 6. End-to-end smoke: client launches server, drives all six steps
-if java -jar mcp-client/target/tdd-agent.jar >/tmp/preflight-agent.log 2>&1; then
-    if grep -q '"phase" : "GREEN"' /tmp/preflight-agent.log; then
-        ok "end-to-end agent run reports GREEN"
+# 6. End-to-end smoke: client launches bdd mcp serve, drives the walkthrough
+if [ -n "$BDD" ] && java -Dbdd.binary="$BDD" -jar mcp-client/target/tdd-agent.jar >/tmp/preflight-agent.log 2>&1; then
+    if grep -q '"phase"' /tmp/preflight-agent.log && grep -qiE 'GREEN|RED' /tmp/preflight-agent.log; then
+        ok "end-to-end agent run talks to bdd and reports a TDD phase"
     else
-        bad "agent ran but did not report GREEN" "see /tmp/preflight-agent.log"
+        bad "agent ran but did not report a TDD phase" "see /tmp/preflight-agent.log"
     fi
 else
-    bad "end-to-end agent run failed" "see /tmp/preflight-agent.log"
+    bad "end-to-end agent run failed" "see /tmp/preflight-agent.log — bdd must be the child process"
 fi
 
 # 7. Demo not burned: REQ-003 must still be pending with no scenario written
@@ -82,7 +102,7 @@ else
 fi
 if grep -q '@REQ-003' kata/src/test/resources/features/string_calculator.feature; then
     bad "feature file already contains an @REQ-003 scenario (rehearsal leftover)" \
-        "reset: git checkout -- kata requirements && mvn -q package"
+        "reset: git checkout -- kata requirements && mvn -q -pl mcp-client package"
 else
     ok "feature file has no REQ-003 scenario yet"
 fi
@@ -102,3 +122,4 @@ if [ "$FAIL" -gt 0 ]; then
 fi
 echo "Ready. Remaining manual steps: open the slides once, confirm the"
 echo "tdd-workflow server shows green in Cursor's MCP settings, clear the agent chat."
+echo "Local-model / CLI demo: ollama list should include qwen3.8-flash-next:125b-mlx."

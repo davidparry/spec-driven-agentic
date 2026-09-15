@@ -20,6 +20,14 @@ pub const ALLOWED_PROGRAMS: &[&str] = &[
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandRefusal(pub String);
 
+impl std::fmt::Display for CommandRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for CommandRefusal {}
+
 /// Flags and subcommands that turn an allowed tool into an arbitrary
 /// code or shell escape, refused per program.
 fn eval_escapes(program: &str) -> &'static [&'static str] {
@@ -65,18 +73,14 @@ pub fn validate(argv: &[String]) -> Result<(), CommandRefusal> {
         }
         // Path jail: the process runs inside the project root, and no
         // argument may point outside it. `=`-joined flag values count.
+        // `foo...bar` is a Normal path component, not a parent hop.
         for piece in argument.split('=') {
-            if piece.starts_with('/') || piece.starts_with('\\') {
-                return Err(CommandRefusal(format!(
-                    "'{argument}' is refused: absolute paths are not allowed — \
-                     everything happens inside the project root.",
-                )));
+            if piece.is_empty() {
+                continue;
             }
-        }
-        if argument.contains("..") {
-            return Err(CommandRefusal(format!(
-                "'{argument}' is refused: '..' could reach outside the project root.",
-            )));
+            if let Err(reason) = crate::domain::paths::confine(piece) {
+                return Err(CommandRefusal(format!("'{argument}' is refused: {reason}")));
+            }
         }
     }
     Ok(())
@@ -175,14 +179,22 @@ mod tests {
             vec!["cargo", "build", "--manifest-path", "/etc/Cargo.toml"],
             vec!["cargo", "build", "--manifest-path=/etc/Cargo.toml"],
             vec!["javac", "/etc/passwd"],
+            vec!["dotnet", "build", r"C:\proj\app.csproj"],
+            vec!["mvn", "-f", "C:/other/pom.xml"],
         ] {
             let error = validate(&argv(&command)).unwrap_err();
             assert!(
-                error.0.contains("absolute paths"),
+                error.0.contains("absolute paths") || error.0.contains("home-directory"),
                 "{command:?}: {}",
                 error.0
             );
         }
+        let home = validate(&argv(&["tsc", "~/code/index.ts"])).unwrap_err();
+        assert!(
+            home.0.contains("home-directory"),
+            "tilde home path: {}",
+            home.0
+        );
     }
 
     #[test]
@@ -203,5 +215,10 @@ mod tests {
         // "; rm -rf /" reaches the allowed program as a literal string.
         // The policy only refuses what could still act: the path jail.
         assert_eq!(validate(&argv(&["cargo", "test", "a;b|c&&d"])), Ok(()));
+        assert_eq!(
+            validate(&argv(&["cargo", "test", "foo...bar"])),
+            Ok(()),
+            "ellipsis is not a parent-directory hop"
+        );
     }
 }

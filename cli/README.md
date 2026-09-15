@@ -6,8 +6,10 @@
 [![Clippy](https://img.shields.io/badge/clippy--D%20warnings-enforced-blue)](../.github/workflows/ci.yml)
 
 One native binary for the whole spec-driven loop (spec → Gherkin → RED →
-GREEN → REFACTOR) with an embedded MCP server that keeps the seven
-`tdd-workflow-server` tool contracts.
+GREEN → REFACTOR) **and** the workshop MCP server: `bdd mcp serve` exposes
+23 tools (wire identity `tdd-workflow-server` / `1.0.0`). Frozen seven-tool
+reply shapes stay; the source of truth is `tests/mcp_conformance.rs` plus
+mcp-client `ToolPlan`.
 
 **Full command manual:** every command, subcommand, and flag with
 in-depth examples, searchable —
@@ -39,14 +41,15 @@ that one idea:
 - The LLM is local by default (Ollama), discovered rather than assumed,
   and generation degrades gracefully to authoring-only when it — or a
   language runtime — is missing. Nothing is ever installed for you. This
-  CLI is developed and run against `qwen3-coder-next:latest`; see
+  CLI is developed and run against `qwen3.8-flash-next:125b-mlx`; see
   [Ollama model](#ollama-model).
 
 The CLI grew out of a talk and hands-on class that teaches spec-driven
 development with BDD and TDD — this repository is that workshop (see
 [../student-follow-along.md](../student-follow-along.md)). The class
-walks students through the loop with the Java `tdd-workflow-server`.
-To finish the same kata with this binary instead, follow
+walks students through the loop in Cursor against **this binary**
+(`bdd mcp serve`, 23 tools). To finish the same kata from the terminal
+with scoped profiles (Wi-Fi off), follow
 [../student-follow-docs/cli-path.md](../student-follow-docs/cli-path.md).
 
 ## How it differs from the closest projects
@@ -84,9 +87,9 @@ Every roadmap phase through greenfield mode has landed, with clean
 architecture and full test coverage throughout:
 
 - `bdd spec list | show | validate | refine` — the `list_requirements`,
-  `get_requirement`, `validate_spec`, and `refine_requirement` behaviors,
-  ported from the Java `tdd-workflow-server` with byte-identical reply
-  strings.
+  `get_requirement`, `validate_spec`, and `refine_requirement` behaviors.
+  Frozen seven-tool reply shapes are gated by `tests/mcp_conformance.rs`
+  (and mcp-client `ToolPlan`).
 - `bdd spec draft | mark-implemented` — interactive drafting where the
   human words the spec and validate/refine findings drive rewording
   until clean. With a resolved model, drafting starts from a plain-words
@@ -143,9 +146,15 @@ architecture and full test coverage throughout:
   model is briefed with the whole process document (states, commands,
   loop, invariants) plus the full project state, and names the next
   command in plain words.
-- `bdd mcp serve` — the embedded MCP stdio server exposing the seven
-  frozen tools plus the additive typed tools, conformance-tested over
-  real JSON-RPC.
+- `bdd mcp serve` — the workshop MCP stdio server: 23 tools (frozen seven
+  plus authoring/staging/inspect). Conformance-tested over real JSON-RPC.
+  Cursor sees all 23; CLI LLM commands attach a scoped profile.
+- `bdd mcp tools | call` — list or invoke one tool over a throwaway
+  session (loopback or `--stdio`).
+- `bdd tools list | profiles | show | enable | disable | refresh | servers`
+  — per-command profiles and the `mcp.json` registry. External tools attach
+  with `--for`, never globally.
+- `bdd ask` — free-form question with the read-only profile.
 - `bdd init` and `bdd greenfield` — per-language scaffolds and the whole
   orchestrated loop from an empty directory with exactly two human
   gates (see [Greenfield mode flow](#greenfield-mode-flow)).
@@ -167,11 +176,11 @@ architecture and full test coverage throughout:
 
 Generation talks to a local [Ollama](https://ollama.com) instance. The
 model this CLI is developed and run against is
-`qwen3-coder-next:latest` — a coding model:
+`qwen3.8-flash-next:125b-mlx` — a coding model:
 
 ```bash
-ollama pull qwen3-coder-next:latest
-bdd model use qwen3-coder-next:latest
+ollama pull qwen3.8-flash-next:125b-mlx
+bdd model use qwen3.8-flash-next:125b-mlx
 ```
 
 Your mileage will vary with a different model. A stronger coding model
@@ -265,7 +274,7 @@ $ bdd
   ▲                                  │
   ╰──────────────────────────────────╯
 
-Model set for this session: qwen3-coder-next:latest (not saved - keep it with: bdd model use qwen3-coder-next:latest).
+Model set for this session: qwen3.8-flash-next:125b-mlx (not saved - keep it with: bdd model use qwen3.8-flash-next:125b-mlx).
 bdd> spec list
 bdd> test
 bdd> state
@@ -281,7 +290,7 @@ if one is set; otherwise the first installed Ollama model, borrowed for
 this session only (nothing is written until you run
 `bdd model use <name>`). When Ollama is unreachable it says to install
 it from [ollama.com](https://ollama.com), and when no models are pulled
-it gives the exact command (`ollama pull qwen3-coder-next:latest`) —
+it gives the exact command (`ollama pull qwen3.8-flash-next:125b-mlx`) —
 generation falls back to deterministic templates either way. See
 [Ollama model](#ollama-model) for why that name, and why another model
 will change the quality of generated work.
@@ -327,9 +336,9 @@ greenfield orchestrator in `src/greenfield.rs`) name concrete adapters:
 | Layer | Module | Contents |
 | --- | --- | --- |
 | Domain | `src/domain/` | Requirement model, spec validator, wording refiner, TDD state machine, language detection, project memory scan, Gherkin feature model, step discovery, generation templates, scaffolds. Pure logic, no IO. |
-| Ports | `src/ports.rs` | Traits the inner layers depend on: `SpecRepository`, `FeatureFiles`, `FeatureCatalog`, `ChangeStore`, `Prompter`, `StateStore`, `TestRunner`, `LlmGenerator`, `ModelCatalog`, `ModelStore`, `ProjectFiles`, `ProjectInventory`, `MemoryStore`, `SourceFiles`, `ScaffoldWriter`, `RuntimeProbe`, `InteractiveShell`. |
+| Ports | `src/ports.rs` | Traits the inner layers depend on: `SpecRepository`, `FeatureFiles`, `FeatureCatalog`, `ChangeStore`, `Prompter`, `StateStore`, `TestRunner`, `LlmConversation`, `ToolBroker`, `ModelCatalog`, `ModelStore`, `ProjectFiles`, `ProjectInventory`, `MemoryStore`, `SourceFiles`, `ScaffoldWriter`, `RuntimeProbe`, `InteractiveShell`. |
 | Application | `src/application/` | Use-case services (`SpecService`, `SpecMutationService`, `ScenarioService`, `ChangeService`, `TddService`, `GenerationService`, `InitService`, `ModelService`, `InspectService`, `MemoryService`) composed via constructor injection. The interactive shell loop lives in `src/repl.rs`. |
-| Adapters | `src/adapters/` | Filesystem spec/feature/staging/state/source/memory access, the four test runners (Maven, cucumber-js, dotnet, cargo), Ollama HTTP catalog and generator, TOML config store, console prompter, rustyline shell with the persistent `.bdd-history`, runtime probe. |
+| Adapters | `src/adapters/` | Filesystem spec/feature/staging/state/source/memory access, the four test runners (Maven, cucumber-js, dotnet, cargo), Ollama HTTP catalog and `/api/chat`, MCP loopback/stdio broker, TOML config store, console prompter, rustyline shell with the persistent `.bdd-history`, runtime probe. |
 
 ## Building
 
@@ -494,7 +503,7 @@ cargo llvm-cov --ignore-filename-regex 'main\.rs' --summary-only
     they are composition roots like `main.rs`, wiring the same services
     onto a different delivery mechanism.
   - `workshop_layout()` hard-codes the Java kata paths so the frozen
-    `get_requirement` tool stays byte-identical to the Java server.
+    `get_requirement` reply shape stays stable for workshop clients.
   - The feature-file surface has two ports (`FeatureFiles` for existence
     and tag checks, `FeatureCatalog` for parsing) because the spec
     validator and the readers genuinely need different capabilities.
@@ -611,14 +620,15 @@ test-first:
 2. **Respect the dependency rule.** Domain code takes no IO and imports
    nothing from `adapters/`; anything the inner layers need from the
    outside world enters through a trait in `src/ports.rs`. Only the
-   composition roots — `main.rs`, `mcp.rs`, and `greenfield.rs` — may
+   composition roots — `main.rs`, `mcp.rs`, `greenfield.rs`, and `wiring.rs` — may
    name concrete adapter types.
 3. **Keep the tool contracts frozen.** The seven adopted tools
    (`list_requirements`, `get_requirement`, `validate_spec`,
    `refine_requirement`, `run_tests`, `get_tdd_state`, `start_refactor`)
-   must stay byte-identical to the Java `tdd-workflow-server` — reply
-   strings included. The Java sources under `../mcp-server/` are the
-   reference; the unit tests here are the conformance suite.
+   must keep their reply shapes. The source of truth is
+   `tests/mcp_conformance.rs` plus mcp-client `ToolPlan` (exactly 23
+   names; a 24th tool fails that Java build). Backup Inspector:
+   `npx @modelcontextprotocol/inspector bdd mcp serve --root $PWD`.
 4. **Never expose escape hatches.** No `write_file`, `run_shell`,
    `install_dependency`, or arbitrary-path tools. Mutations go through
    typed, validated tools only.

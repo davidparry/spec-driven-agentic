@@ -7,9 +7,9 @@ commands. Everything works without a model; generation just stays at
 template quality.
 
 The model this CLI is developed and run against is
-`qwen3-coder-next:latest`. Pull it with
-`ollama pull qwen3-coder-next:latest`, then persist the choice with
-`bdd model use qwen3-coder-next:latest`. Your mileage will vary with
+`qwen3.8-flash-next:125b-mlx`. Pull it with
+`ollama pull qwen3.8-flash-next:125b-mlx`, then persist the choice with
+`bdd model use qwen3.8-flash-next:125b-mlx`. Your mileage will vary with
 other models: a stronger coding model may improve drafts and
 implementations; a model trained for chat, general knowledge, or work
 other than development will typically produce weaker specs, steps,
@@ -49,7 +49,7 @@ bdd model list
 
 ```text
 Models available in Ollama:
-* qwen3-coder-next:latest   (configured)
+* qwen3.8-flash-next:125b-mlx   (configured)
   qwen3:8b
   llama3:8b
 ```
@@ -69,14 +69,14 @@ bdd model current
 ```
 
 ```text
-Configured model: qwen3-coder-next:latest
+Configured model: qwen3.8-flash-next:125b-mlx
 ```
 
 With nothing configured but models installed, the first one is the
 session default and the output tells you it is not saved:
 
 ```text
-Model set for this session: qwen3-coder-next:latest (not saved - keep it with: bdd model use qwen3-coder-next:latest).
+Model set for this session: qwen3.8-flash-next:125b-mlx (not saved - keep it with: bdd model use qwen3.8-flash-next:125b-mlx).
 ```
 
 The same announcement appears when the
@@ -93,11 +93,11 @@ Usage: bdd model use [OPTIONS] <MODEL_NAME>
 ```
 
 ```bash
-bdd model use qwen3-coder-next:latest
+bdd model use qwen3.8-flash-next:125b-mlx
 ```
 
 ```text
-Configured model: qwen3-coder-next:latest
+Configured model: qwen3.8-flash-next:125b-mlx
 Written to /Users/you/code/calculator/.bdd-mcp.toml
 ```
 
@@ -110,7 +110,7 @@ Everything model-related lives under `[llm]` in `.bdd-mcp.toml`:
 
 ```toml
 [llm]
-model = "qwen3-coder-next:latest"     # persisted by bdd model use
+model = "qwen3.8-flash-next:125b-mlx"     # persisted by bdd model use
 endpoint = "http://localhost:11434"   # the Ollama endpoint
 timeout_seconds = 300                 # generation timeout (default 300)
 ```

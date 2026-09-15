@@ -20,22 +20,25 @@ There is a better answer, and Java developers have had it for twenty years:
 write the specification first, and make the tests the contract.
 
 This session walks through a working, open-source pipeline where a requirements
-catalog — not a chat transcript — is the source of truth. A Java MCP server
-exposes a small, deliberately locked-down set of tools: no "write this file," no
-shell. The agent must validate a requirement's structure, survive a wording
+catalog — not a chat transcript — is the source of truth. One MCP server
+(`bdd mcp serve`, 23 tools) exposes a deliberately locked-down set: no
+"write this file," no open shell. Cursor sees every tool, including staging.
+The agent must validate a requirement's structure, survive a wording
 review that rejects ambiguity like *should*, *handles*, and *properly*, turn the
-accepted criteria into a tagged Gherkin scenario and a JUnit test, watch it go
-red, then make it green. A state machine refuses to let it refactor on a red
-bar, and every write lands in a staging area a human reviews.
+accepted criteria into a tagged Gherkin scenario and a JUnit test **through
+those tools**, watch it go red, then make it green. A state machine refuses
+to let it refactor on a red bar, and every write lands in a staging area a
+human reviews. `requirement_mark_implemented` is GREEN-gated.
 
-Here is the part worth your hour: once that discipline lives in deterministic
-Java instead of in a prompt, model capability stops being the variable that
-decides quality. We run the identical loop twice against the same server — once
-with a frontier agent in an IDE, once with a coder model on the laptop on stage
-through Ollama — and compare the diffs. Then we look at what makes the local
-model hold up: JSON-only response contracts, one-finding-at-a-time correction,
-validate-and-retry that feeds the invalid reply back, and deterministic
-templates as the floor when generation fails.
+Here is the part worth your hour: once that discipline lives in the server
+instead of in a prompt, model capability stops being the variable that
+decides quality. We run the identical **contracts** twice — once with a
+frontier agent in Cursor (all 23 tools), once with
+`qwen3.8-flash-next:125b-mlx` on the laptop on stage through Ollama and the
+CLI's per-command profiles (3–7 tools) — and compare the diffs. Then we look at
+what makes the local model hold up: JSON-only response contracts,
+one-finding-at-a-time correction, validate-and-retry that feeds the invalid
+reply back, and deterministic templates as the floor when generation fails.
 
 Then comes the segment most talks skip: **Where This Breaks.** Real failures
 this project hit — format drift, fixing the wrong file, silently dropping a
@@ -74,7 +77,8 @@ failure the project actually hit; each is now caught by a deterministic check.
 | Looping | Repeated an attempt that had already failed | Attempt history — targets written and what the following test run reported — is fed into the next prompt |
 | Ambiguity leaking into the spec | Wrote "handles negatives properly" | A deterministic wording review rejects a fixed list of ambiguous words before any code is written |
 | Refactoring on red | Offered to "clean up" while tests were failing | The TDD state machine refuses the transition from any phase but GREEN |
-| Premature completion | Marked a requirement implemented with nothing proving it | `mark-implemented` requires GREEN plus a scenario tagged with the requirement ID |
+| Premature completion | Marked a requirement implemented with nothing proving it | `requirement_mark_implemented` requires GREEN plus a scenario tagged with the requirement ID |
+| Tool-calling drift | Local model invented a tool, skipped staging, or called `command_run` without waiting | Per-command profiles (`bdd tools profiles`) offer 3–7 tools; `[tool_rules]` in `cli/prompts/prompts.toml`; CLI `command_run` asks the human to confirm |
 
 Where a frontier model is still the better call, and where a human still has to
 be on the review, is stated plainly rather than skipped.
@@ -98,22 +102,22 @@ or LLM experience required; comfort with JUnit and Cucumber is assumed.
 - Stage projector and my laptop.
 - **No conference network needed.** The entire demo runs locally against
   Ollama, which is the thesis rather than a convenience.
-- Stack on stage: Java 21, Maven, MCP Java SDK 2.0, Cucumber-JVM 7, JUnit 5,
-  Ollama running `qwen3-coder-next`.
-- For the workshop format: attendees need Java 21, Maven, git, and — to run
-  fully offline — Ollama with a coder model pulled ahead of time. An IDE agent
-  such as Cursor or Claude works as an alternative to the local model.
+- Stack on stage: Java 21, Maven, the `bdd` binary (`bdd mcp serve`), Cucumber-JVM 7, JUnit 5,
+  Ollama running `qwen3.8-flash-next:125b-mlx`. The bundled `tdd-agent.jar` is an MCP **client**.
+- For the workshop format: attendees need **`bdd` on PATH**, Java 21, Maven, git, Cursor (or
+  Claude), and — to run fully offline — Ollama with `qwen3.8-flash-next:125b-mlx` pulled ahead of
+  time. The [CLI path](student-follow-docs/cli-path.md) is the Wi-Fi-off alternative.
 
 ## What is on stage, in this repo
 
 | Shown live | Where it lives |
 | --- | --- |
-| The seven-tool MCP server enforcing the loop | `mcp-server/` |
-| The deterministic structure and wording reviews | `mcp-server/src/main/java/com/davidparry/workshop/mcp/server/requirements/` |
-| The state machine that refuses a red-bar refactor | `mcp-server/src/main/java/com/davidparry/workshop/mcp/server/tdd/TddStateMachine.java` |
+| The 22-tool MCP server enforcing the loop | `cli/src/mcp.rs` (`bdd mcp serve`) |
+| The deterministic structure and wording reviews | `cli/src/domain/` (spec validator, requirement refiner) |
+| The state machine that refuses a red-bar refactor | `cli/src/domain/tdd.rs` (`TddStateMachine`) |
 | The requirements catalog that drives everything | `requirements/requirements.json` |
 | Gherkin and JUnit generated from the spec | `kata/` |
-| The offline CLI running the same loop on a local model | [`cli/README.md`](cli/README.md) |
+| The offline CLI: same server, scoped profiles on `qwen3.8-flash-next:125b-mlx` | [`cli/README.md`](cli/README.md), [`student-follow-docs/cli-path.md`](student-follow-docs/cli-path.md) |
 | Every prompt sent to the model, in one auditable file | `cli/prompts/prompts.toml` |
 | The slide deck | [`slides/index.html`](slides/index.html) |
 
