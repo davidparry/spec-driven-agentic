@@ -121,8 +121,26 @@ async fn the_server_identifies_as_the_workshop_server_and_lists_all_tools() {
 
     let info = client.peer_info().expect("server info");
     let implementation = info.server_info.as_ref().expect("server implementation");
-    assert_eq!(implementation.name, "tdd-workflow-server");
+    assert_eq!(implementation.name, "spec-driven-server");
+    assert_eq!(implementation.title.as_deref(), Some("Spec Driven"));
     assert_eq!(implementation.version, "1.0.0");
+    assert_eq!(
+        implementation.description.as_deref(),
+        Some("Serves spec-driven TDD and BDD tools. The requirements spec is the source of truth.")
+    );
+    assert_eq!(
+        implementation.website_url.as_deref(),
+        Some("https://davidparry.github.io/tdd-bdd-agentic/")
+    );
+    let icons = implementation.icons.as_ref().expect("icons");
+    assert_eq!(icons.len(), 1);
+    assert_eq!(
+        icons[0].src,
+        "https://davidparry.github.io/tdd-bdd-agentic/assets/bdd-cli-mark.png"
+    );
+    assert_eq!(icons[0].mime_type.as_deref(), Some("image/png"));
+    assert_eq!(icons[0].sizes, Some(vec!["1024x1024".into()]));
+    assert_eq!(icons[0].theme, Some(rmcp::model::IconTheme::Dark));
 
     let tools = client.list_all_tools().await.unwrap();
     let names: Vec<&str> = tools.iter().map(|t| t.name.as_ref()).collect();

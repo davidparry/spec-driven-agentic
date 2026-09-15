@@ -68,7 +68,7 @@ presenter, not in the repo.)
 | Module / folder | What it is |
 | --- | --- |
 | `kata/` | A **standalone** Maven project — the String Calculator kata. It has its own `pom.xml` (no parent). Two requirements are implemented; the rest are driven agentically during the workshop. Gherkin feature files (`src/test/resources/features/`) are the executable behavior spec, run by Cucumber alongside the JUnit tests. Copy the folder and it still builds: `mvn -f kata/pom.xml test`. |
-| [`cli/`](cli/README.md) | The `bdd` CLI **and** the workshop MCP server. `bdd mcp serve` exposes 23 tools over stdio (wire identity `tdd-workflow-server` / `1.0.0`). Frozen seven-tool reply shapes are gated by `cli/tests/mcp_conformance.rs`. The same binary automates the spec-driven loop with per-command tool profiles (3–7 tools) and a local Ollama model (`qwen3.8-flash-next:125b-mlx`). See [`cli/README.md`](cli/README.md) and the searchable [command manual](https://davidparry.github.io/tdd-bdd-agentic/manual/). |
+| [`cli/`](cli/README.md) | The `bdd` CLI **and** the workshop MCP server. `bdd mcp serve` exposes 23 tools over stdio (wire identity `spec-driven-server` / `1.0.0`, title `Spec Driven`, website [tdd-bdd-agentic](https://davidparry.github.io/tdd-bdd-agentic/)). Frozen seven-tool reply shapes are gated by `cli/tests/mcp_conformance.rs`. The same binary automates the spec-driven loop with per-command tool profiles (3–7 tools) and a local Ollama model (`qwen3.8-flash-next:125b-mlx`). See [`cli/README.md`](cli/README.md) and the searchable [command manual](https://davidparry.github.io/tdd-bdd-agentic/manual/). |
 | `smoke-test/` | A narrated **smoke test** of `bdd mcp serve` (`smoke-test.jar`) plus an automated 23-tool sweep. It launches **only** that server as a child process — discovery, baseline `run_tests`, then remaining read-only tools (`validate_spec`, `project_inspect`, `feature_list` / `feature_read`, `changes_show` / `changes_validate`, `step_definitions_find`; no `initialize` handshake). Mutating tools stay behind `--sweep --include-mutating`. Own spec (`smoke-test/requirements/requirements.json`), tagged Cucumber scenarios, `SpecCompletenessTest`, 100% instruction/branch coverage (JaCoCo-enforced; excludes `TddAgent` and `SdkToolClient` only), SpotBugs + PMD gating `mvn -pl smoke-test verify`. |
 | `requirements/requirements.json` | The SDD spec: the requirements backlog, and the root of the **spec catalog** — it holds requirements of its own and may `include` child spec files (which may include further files, N levels deep); the tooling merges the tree into one backlog. Each requirement carries acceptance criteria (already phrased Given/When/Then) that agents turn into executable Gherkin scenarios and failing tests, plus a `featureFile` pointer to where its scenarios live. Full field-by-field reference: [The requirements format](https://davidparry.github.io/tdd-bdd-agentic/manual/spec-format.html). |
 | `slides/index.html` | The reveal.js slide deck for the 60-minute talk (self-contained, CDN-based). |
@@ -138,6 +138,23 @@ pushed (`scripts/release.sh`), not locally.
 - Maven 3.9+
 - An MCP host for the exercises (Cursor, Claude Desktop, or the bundled `smoke-test.jar`)
 - Optional: Node.js for the MCP Inspector (`npx @modelcontextprotocol/inspector bdd mcp serve --root $PWD`)
+
+`cargo clean` then `cargo build --all-targets` only rebuilds into
+`cli/target/debug/`. It does **not** copy `bdd` onto PATH. Cursor's
+`.cursor/mcp.json` runs `"command": "bdd"`, which is
+`~/.cargo/bin/bdd` after install, so a rebuild alone leaves the old
+server in place. After changing the CLI, install from the **repository
+root** (not from inside `cli/`):
+
+```bash
+cargo install --path cli
+```
+
+From `cli/` itself use `cargo install --path .` — `--path cli` from
+there looks for `cli/cli` and fails.
+
+Then reload the MCP server in Cursor (toggle it off/on). To try a
+debug binary without installing: `cli/target/debug/bdd mcp serve --root .`.
 
 ## Setup (do this before the workshop)
 

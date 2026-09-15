@@ -11,7 +11,10 @@ use std::sync::Arc;
 
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
-use rmcp::model::{CallToolResult, ContentBlock, ProtocolVersion, ServerCapabilities, ServerInfo};
+use rmcp::model::{
+    CallToolResult, ContentBlock, Icon, IconTheme, Implementation, ProtocolVersion,
+    ServerCapabilities, ServerConfig,
+};
 use rmcp::{ErrorData as McpError, ServerHandler, tool, tool_handler, tool_router};
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -672,14 +675,24 @@ impl WorkflowServer {
 
 #[tool_handler]
 impl ServerHandler for WorkflowServer {
-    fn get_info(&self) -> ServerInfo {
-        let mut info = ServerInfo::default();
-        info.server_info.name = "tdd-workflow-server".into();
-        info.server_info.version = "1.0.0".into();
-        info.protocol_version = ProtocolVersion::V_2026_07_28;
-        info.capabilities = ServerCapabilities::builder().enable_tools().build();
-        info.instructions = Some(crate::domain::prompts::mcp_instructions());
-        info
+    fn get_info(&self) -> ServerConfig {
+        ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
+            .with_protocol_version(ProtocolVersion::V_2026_07_28)
+            .with_server_info(
+                Implementation::new("spec-driven-server", "1.0.0")
+                    .with_title("Spec Driven")
+                    .with_description(
+                        "Serves spec-driven TDD and BDD tools. The requirements spec is the source of truth.",
+                    )
+                    .with_icons(vec![Icon::new(
+                        "https://davidparry.github.io/tdd-bdd-agentic/assets/bdd-cli-mark.png",
+                    )
+                    .with_mime_type("image/png")
+                    .with_sizes(vec!["1024x1024".into()])
+                    .with_theme(IconTheme::Dark)])
+                    .with_website_url("https://davidparry.github.io/tdd-bdd-agentic/"),
+            )
+            .with_instructions(crate::domain::prompts::mcp_instructions())
     }
 
     fn supported_protocol_versions(&self) -> std::borrow::Cow<'static, [ProtocolVersion]> {

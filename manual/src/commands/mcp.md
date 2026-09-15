@@ -14,8 +14,12 @@ Commands:
   call   Call one tool over one throwaway session
 ```
 
-Keep the wire identity `tdd-workflow-server` / `1.0.0` so existing
-clients stay stable. Frozen seven-tool **reply shapes** are owned by
+Wire identity is `spec-driven-server` / `1.0.0` (title `Spec Driven`:
+serves spec-driven TDD and BDD tools; the requirements spec is the
+source of truth; website
+https://davidparry.github.io/tdd-bdd-agentic/; icon
+https://davidparry.github.io/tdd-bdd-agentic/assets/bdd-cli-mark.png). Frozen seven-tool
+**reply shapes** are owned by
 `cli/tests/mcp_conformance.rs` and smoke-test's `ToolPlan` — not by a
 separate Java server.
 

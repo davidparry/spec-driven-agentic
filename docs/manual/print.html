@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "searchindex-42bba400.js";
+            window.path_to_searchindex_js = "searchindex-752a18c2.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-d1ab0951.js"></script>
@@ -2499,14 +2499,21 @@ Commands:
   tools  List tools over one throwaway session
   call   Call one tool over one throwaway session
 </code></pre>
-<p>Keep the wire identity <code>tdd-workflow-server</code> / <code>1.0.0</code> so existing
-clients stay stable. Frozen seven-tool <strong>reply shapes</strong> are owned by
+<p>Wire identity is <code>spec-driven-server</code> / <code>1.0.0</code> (title <code>Spec Driven</code>:
+serves spec-driven TDD and BDD tools; the requirements spec is the
+source of truth; website
+https://davidparry.github.io/tdd-bdd-agentic/; icon
+https://davidparry.github.io/tdd-bdd-agentic/assets/bdd-cli-mark.png). Frozen seven-tool
+<strong>reply shapes</strong> are owned by
 <code>cli/tests/mcp_conformance.rs</code> and smoke-test’s <code>ToolPlan</code> — not by a
 separate Java server.</p>
 <p>The server is stdio only: JSON-RPC on stdin/stdout. Cursor, Claude,
-Inspector, and <code>smoke-test.jar</code> launch it as a child process. rmcp 3.3
-still speaks the initialize handshake on this transport so those hosts
-keep working.</p>
+Inspector, and <code>smoke-test.jar</code> launch it as a child process. It prefers
+protocol <code>2026-07-28</code>: no <code>initialize</code> handshake. <code>bdd mcp call</code> and
+<code>bdd mcp tools</code> open a session with <code>server/discover</code> and per-request
+<code>_meta</code>. The Java smoke walkthrough starts at <code>tools/list</code> (it does not
+call <code>initialize</code>). A host that still sends <code>initialize</code> is answered by
+rmcp for compatibility; this project’s own Rust clients do not.</p>
 <hr>
 <h2 id="bdd-mcp-serve"><a class="header" href="#bdd-mcp-serve">bdd mcp serve</a></h2>
 <p>Serve the MCP tools over stdio. The process reads JSON-RPC on stdin

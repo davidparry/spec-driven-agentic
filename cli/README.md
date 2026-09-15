@@ -7,7 +7,9 @@
 
 One native binary for the whole spec-driven loop (spec → Gherkin → RED →
 GREEN → REFACTOR) **and** the workshop MCP server: `bdd mcp serve` exposes
-23 tools (wire identity `tdd-workflow-server` / `1.0.0`). Frozen seven-tool
+23 tools (wire identity `spec-driven-server` / `1.0.0`, title
+`Spec Driven`, website
+https://davidparry.github.io/tdd-bdd-agentic/). Frozen seven-tool
 reply shapes stay; the source of truth is `tests/mcp_conformance.rs` plus
 smoke-test `ToolPlan`.
 
