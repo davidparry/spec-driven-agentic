@@ -39,7 +39,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: reports-${{ github.ref_name }}-${{ github.run_number }}
+          name: reports-${{ github.run_id }}-${{ github.run_number }}
           if-no-files-found: warn
           path: |
             **/target/surefire-reports/**
