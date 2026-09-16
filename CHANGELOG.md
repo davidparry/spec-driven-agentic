@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- The chat cache keeps only terminal model turns. A turn carrying tool
+  calls is neither stored nor served, so an identical later request asks
+  the model again rather than replaying calls the agent loop would
+  execute a second time. An entry written by an earlier build is swept
+  when it is read.
+
 - `bdd config` prints every LLM and tools key with `(default)` or the
   path of the `.bdd.toml` it was read from. With no `llm.model` in the
   file, Ollama is asked which model a run would use and it prints as

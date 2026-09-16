@@ -1,6 +1,9 @@
 //! A disk-backed response cache decorating any [`LlmConversation`]:
 //! identical histories within the TTL are answered from `.bdd-cache/`
-//! without calling the model. A cache error is never fatal.
+//! without calling the model. Only terminal turns are cached: the agent
+//! loop executes the tool calls a turn carries, so serving one from disk
+//! would repeat their side effects without the model ever deciding to.
+//! A cache error is never fatal.
 
 use std::fs;
 use std::path::PathBuf;
@@ -80,7 +83,13 @@ impl<C> CachedConversation<C> {
             let _ = fs::remove_file(&path);
             return None;
         }
-        serde_json::from_str(&entry.content).ok()
+        let turn: ChatTurn = serde_json::from_str(&entry.content).ok()?;
+        if !turn.tool_calls.is_empty() {
+            debug!(key = &key[..12], "chat cache entry has tool calls, removed");
+            let _ = fs::remove_file(&path);
+            return None;
+        }
+        Some(turn)
     }
 
     fn store(&self, key: &str, turn: &ChatTurn) {
@@ -155,7 +164,16 @@ impl<C: LlmConversation> LlmConversation for CachedConversation<C> {
         }
         debug!(model, key = &key[..12], "chat cache miss");
         let turn = self.inner.chat(model, messages, tools)?;
-        self.store(&key, &turn);
+        if turn.tool_calls.is_empty() {
+            self.store(&key, &turn);
+        } else {
+            debug!(
+                model,
+                key = &key[..12],
+                calls = turn.tool_calls.len(),
+                "chat cache declined a tool-calling turn"
+            );
+        }
         Ok(turn)
     }
 }
@@ -165,7 +183,7 @@ mod tests {
     use std::cell::{Cell, RefCell};
 
     use super::*;
-    use crate::domain::tools::{ChatMessage, ToolOrigin};
+    use crate::domain::tools::{ChatMessage, ToolCall, ToolOrigin};
 
     struct CountingChat {
         calls: Cell<usize>,
@@ -197,6 +215,16 @@ mod tests {
         ChatTurn {
             content: content.into(),
             tool_calls: Vec::new(),
+        }
+    }
+
+    fn calling_turn(tool: &str) -> ChatTurn {
+        ChatTurn {
+            content: String::new(),
+            tool_calls: vec![ToolCall {
+                name: tool.into(),
+                arguments: serde_json::json!({}),
+            }],
         }
     }
 
@@ -308,6 +336,66 @@ mod tests {
             catalog.exists(),
             "the tools/ subdirectory must survive prune_expired"
         );
+    }
+
+    #[test]
+    fn an_identical_tool_calling_reply_reaches_the_model_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = cached_in(
+            &dir,
+            vec![
+                Ok(calling_turn("command_run")),
+                Ok(calling_turn("command_run")),
+            ],
+        );
+        let first = cache.chat("m", &messages(), &tools()).unwrap();
+        let second = cache.chat("m", &messages(), &tools()).unwrap();
+        assert_eq!(first.tool_calls, second.tool_calls);
+        assert_eq!(
+            cache.inner.calls.get(),
+            2,
+            "serving the second from cache would re-run the tool call's side effects"
+        );
+    }
+
+    #[test]
+    fn a_tool_calling_reply_is_not_written_to_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = cached_in(&dir, vec![Ok(calling_turn("run_tests"))]);
+        let key = cache.key("m", &messages(), &tools());
+        cache.chat("m", &messages(), &tools()).unwrap();
+        assert!(!cache.entry_path(&key).exists());
+    }
+
+    #[test]
+    fn a_stored_tool_calling_entry_is_a_miss_and_is_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = cached_in(&dir, vec![Ok(calling_turn("command_run"))]);
+        let key = cache.key("m", &messages(), &tools());
+        fs::create_dir_all(&cache.dir).unwrap();
+        let written_by_an_older_build = CacheEntry {
+            content: serde_json::to_string(&calling_turn("command_run")).unwrap(),
+            created_at: now(),
+        };
+        fs::write(
+            cache.entry_path(&key),
+            serde_json::to_string(&written_by_an_older_build).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            cache
+                .chat("m", &messages(), &tools())
+                .unwrap()
+                .tool_calls
+                .len(),
+            1
+        );
+        assert_eq!(
+            cache.inner.calls.get(),
+            1,
+            "an entry carrying tool calls must never be served"
+        );
+        assert!(!cache.entry_path(&key).exists());
     }
 
     #[test]
