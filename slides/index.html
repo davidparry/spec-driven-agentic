@@ -57,8 +57,9 @@
       <h1>TDD &middot; BDD &middot; Spec-Driven</h1>
       <h3>Development in the Agentic Era — one MCP-powered workflow, hands on</h3>
       <p class="muted">60-minute workshop &nbsp;·&nbsp; bring your laptop &nbsp;·&nbsp; you drive an agent from exercise one</p>
+      <p class="muted">One server: <code>bdd mcp serve</code> (24 tools) &nbsp;·&nbsp; local model: <code>qwen3.8-flash-next:125b-mlx</code></p>
       <p><span class="badge red">RED</span> <span class="badge green">GREEN</span> <span class="badge refactor">REFACTOR</span> — now with agents</p>
-      <aside class="notes">Welcome. Promise of the hour: everyone here has watched an agent demo — nobody leaves having only watched one. The MCP server and client in the repo are finished infrastructure; the hour is spent on the workflow they enable: drafting a spec with an agent, validating it through a tool, and driving spec to green. Everything is in the repo you cloned.</aside>
+      <aside class="notes">Welcome. Promise of the hour: everyone here has watched an agent demo — nobody leaves having only watched one. The MCP server and client in the repo are finished infrastructure; the hour is spent on the workflow they enable: drafting a spec with an agent, validating it through a tool, and driving spec to green. Everything is in the repo you cloned. The local model on this machine is qwen3.8-flash-next:125b-mlx through Ollama — Wi-Fi off still works. Attendees on Cursor can stay on their IDE agent; the CLI path uses this same local model.</aside>
     </section>
 
     <section>
@@ -66,8 +67,8 @@
       <ul>
         <li>A <strong>spec-authoring loop</strong>: you and an AI agent draft a requirement, <code>validate_spec</code> checks its structure, <code>refine_requirement</code> critiques its wording — and the agent iterates until both are clean</li>
         <li>A complete <strong>spec-to-green workflow</strong> you drove yourself: requirement → Gherkin → RED → GREEN → refactor</li>
-        <li>A working grasp of how <strong>MCP feeds your tools into any agent</strong> — Cursor, Claude, or the bundled CLI client</li>
-        <li>A completed, fully tested <strong>MCP server</strong> in the repo to read line by line and point at your own project</li>
+        <li>A working grasp of how <strong>MCP feeds your tools into any agent</strong> — Cursor (all 24 tools) or the CLI on <code>qwen3.8-flash-next:125b-mlx</code> (scoped profiles, same server)</li>
+        <li>A completed, fully tested <strong>MCP server in <code>bdd</code></strong> to point at your own project</li>
       </ul>
       <aside class="notes">Set expectations up front: the MCP server and client are already built — we use them, we don't build them. MCP gets about seven minutes as plumbing; the workflow gets the hour. ~35 of the 60 minutes are keyboard time.</aside>
     </section>
@@ -75,7 +76,7 @@
     <section>
       <h2>The next 60 minutes <span class="badge time">agenda</span></h2>
       <table>
-        <tr><td>0–5</td><td>Welcome, setup check (<code>mvn -q package</code> should be green)</td></tr>
+        <tr><td>0–5</td><td>Welcome, setup check (<code>bdd --version</code> and kata tests green)</td></tr>
         <tr><td>5–13</td><td>TDD refresher, agents, and the SDD → BDD → TDD stack</td></tr>
         <tr><td>13–20</td><td>The plumbing: MCP in seven minutes — the pre-built server and client, and how tools reach any agent</td></tr>
         <tr><td>20–32</td><td><span class="badge exercise">EX 1</span> Draft the spec with your agent, iterate with <code>validate_spec</code></td></tr>
@@ -218,7 +219,7 @@ requirements/
 { "jsonrpc": "2.0", "id": 1,
   "result": { "protocolVersion": "2025-11-25",
               "capabilities": { "tools": { "listChanged": true }, "logging": { } },
-              "serverInfo": { "name": "tdd-workflow-server", "version": "1.0.0" },
+              "serverInfo": { "name": "spec-driven-server", "title": "Spec Driven", "version": "1.0.0", "description": "Serves spec-driven TDD and BDD tools. The requirements spec is the source of truth.", "websiteUrl": "https://davidparry.github.io/spec-driven-agentic/", "icons": [{ "src": "https://davidparry.github.io/spec-driven-agentic/assets/bdd-cli-mark.png", "mimeType": "image/png", "sizes": ["1024x1024"], "theme": "dark" }] },
               "instructions": "Drives a spec-driven TDD/BDD workflow..." } }
       </code></pre>
       <aside class="notes">The handshake negotiates protocol version and capabilities. The server's "instructions" field is prompt text the host may feed to the LLM — we use it to teach the agent our workflow.</aside>
@@ -240,90 +241,79 @@ requirements/
     <!-- ============ 13-20 min: THE PLUMBING (pre-built) ============ -->
     <section>
       <h2><span class="badge time">PLUMBING</span> The server — already built <span class="badge time">13–20 min</span></h2>
-      <p class="small"><code>mcp-server/</code> is complete, spec-driven, and tested to 100% coverage. Two minutes on its shape:</p>
-      <pre><code class="language-java" data-trim>
-// TddMcpServer.main — the whole composition root
-WorkflowToolHandlers handlers = new WorkflowToolHandlers(
-    () -> RequirementsRepository.load(requirementsFile),  // re-read fresh per call
-    new SpecValidator(requirementsFile, root),            // structure: is it usable?
-    new RequirementRefiner(),                             // wording: is it any good?
-    new MavenTestRunner(root),
-    new TddStateMachine());
-
-McpSyncServer server = McpServerFactory.create(
-    new StdioServerTransportProvider(McpJsonDefaults.getMapper()), handlers);
-      </code></pre>
-      <p class="small">One transport, seven tools. A stdio server must <strong>never print to stdout</strong> — that corrupts the JSON-RPC stream. Diagnostics go to stderr.</p>
-      <aside class="notes">Do not linger — this is infrastructure, not the point of the hour. Attendees read it line by line on the plane; it follows the same spec/BDD/TDD discipline it enforces. Say the stdout rule twice anyway.</aside>
+      <p class="small">One binary: <code>bdd mcp serve --root ${workspaceFolder}</code>. Composition root <code>cli/src/mcp.rs</code> plus the CLI TDD services. Twenty-four tools in three groups:</p>
+      <ul class="small">
+        <li><strong>Frozen seven</strong> — <code>list_requirements</code>, <code>get_requirement</code>, <code>validate_spec</code>, <code>refine_requirement</code>, <code>run_tests</code>, <code>get_tdd_state</code>, <code>start_refactor</code></li>
+        <li><strong>Authoring / staging</strong> — features, scenarios, <code>changes_*</code>, <code>requirement_mark_implemented</code>, template-only <code>step_definition_create</code> / <code>unit_test_create</code></li>
+        <li><strong>Inspect</strong> — <code>project_root</code>, <code>project_inspect</code>, <code>command_run</code> (allowlisted, RED-gated)</li>
+      </ul>
+      <p class="small">A stdio server must <strong>never print to stdout</strong> — that corrupts the JSON-RPC stream. Diagnostics go to stderr. Wire identity is <code>spec-driven-server</code> / <code>1.0.0</code> (title <code>Spec Driven</code>).</p>
+      <aside class="notes">Do not linger — this is infrastructure, not the point of the hour. There is no spec_draft or implement MCP tool. Attendees see all 24 in Cursor. The CLI path later offers 3–7 per command.</aside>
     </section>
 
     <section>
       <h2>Anatomy of a tool — what the agent sees</h2>
-      <pre><code class="language-java" data-trim>
-new SyncToolSpecification(
-    Tool.builder("get_requirement", Map.of(
-            "type", "object",
-            "properties", Map.of("id", Map.of(
-                "type", "string",
-                "description", "The requirement id, e.g. REQ-003")),
-            "required", List.of("id")))
-        .description("Get the user story and acceptance criteria for one requirement. "
-            + "Turn each acceptance criterion into a failing JUnit test ...")
-        .build(),
-    (exchange, request) -> handlers.getRequirement(request.arguments()))
+      <pre><code class="language-rust" data-trim>
+#[tool(
+    description = "Get the user story and acceptance criteria for one requirement. \
+    Turn each acceptance criterion into a failing test before writing production code."
+)]
+async fn get_requirement(
+    &self,
+    Parameters(params): Parameters&lt;IdParam&gt;,
+) -> Result&lt;CallToolResult, McpError&gt; {
+    match self.spec_service().get_requirement(&amp;params.id) {
+        Ok(requirement) => json_result(&amp;requirement),
+        Err(e) => error_result(&amp;e.0),
+    }
+}
       </code></pre>
       <ul class="small">
         <li><strong>Name + JSON Schema + description</strong> → the API docs the LLM reads at discovery</li>
-        <li><strong>Handler</strong> → plain Java; return content + <code>isError</code></li>
+        <li><strong>Handler</strong> → the same CLI services; return content + <code>isError</code></li>
         <li>This is how MCP feeds <em>your</em> tools into <em>whatever</em> agent your team uses</li>
       </ul>
-      <aside class="notes">The one MCP idea worth two minutes: descriptions double as agent guidance ("turn criteria into failing tests" — prompt engineering in the schema). Tool errors are results with isError=true, not protocol errors — the agent reads and recovers.</aside>
+      <aside class="notes">The one MCP idea worth two minutes: descriptions double as agent guidance. Tool errors are results with isError=true, not protocol errors — the agent reads and recovers.</aside>
     </section>
 
     <section>
       <h2>The tool that closes the loop: <code>run_tests</code></h2>
-      <pre><code class="language-java" data-trim>
-// MavenTestRunner: launch `mvn -q -B -f kata/pom.xml test`, then parse Surefire XML
-TestRunSummary summary = testRunner.runKataTests();
-var phase = tdd.recordTestRun(summary);   // failures -> RED, all pass -> GREEN
-
-body.put("phase", phase.name());          // the agent literally sees the bar color
-body.put("failureDetails", summary.failureDetails());
-body.put("nextStep", tdd.suggestion());   // "Write the simplest code that passes..."
+      <pre><code class="language-rust" data-trim>
+// TddService::run_tests — Maven / cucumber-js / dotnet / cargo
+let report = tdd.run_tests(runner, &amp;TestFilter::default())?;
+// failures -> RED, all pass -> GREEN
+// body.phase is the bar color the agent literally sees
+// body.nextStep coaches the next legal move
       </code></pre>
-      <p class="small">The <code>TddStateMachine</code> enforces the discipline in code:
-        <code>start_refactor</code> throws unless the bar is GREEN. The server is itself spec-driven — its own
-        requirements file, Cucumber scenarios, and 100% coverage: <code>mvn verify -pl mcp-server</code>.</p>
-      <aside class="notes">This is the workshop thesis in one slide: the workflow rules live in the tool, so any agent that connects inherits the discipline. Dogfooding: the server hosts its own SDD/BDD/TDD triangle.</aside>
+      <p class="small">The <code>TddStateMachine</code> in <code>cli/src/domain/tdd.rs</code> enforces the discipline:
+        <code>start_refactor</code> refuses unless the bar is GREEN.
+        <code>requirement_mark_implemented</code> is GREEN-gated too. Conformance:
+        <code>cli/tests/mcp_conformance.rs</code>.</p>
+      <aside class="notes">This is the workshop thesis in one slide: the workflow rules live in the tool, so any agent that connects inherits the discipline.</aside>
     </section>
 
     <section>
       <h2>Proof it feeds any agent: the bundled client <span class="badge time">2 min demo</span></h2>
       <pre><code class="language-java" data-trim>
-ServerParameters params = ServerParameters.builder("java")
-    .args("-Dworkshop.root=" + root, "-jar", serverJar.toString())
-    .build();
-var transport = new StdioClientTransport(params, McpJsonDefaults.getMapper());
-
+ServerLaunch launch = ServerLaunch.bdd(root, bddBinary);
+// child: bdd mcp serve --root &lt;root&gt;
 McpSyncClient client = McpClient.sync(transport)
-    .requestTimeout(Duration.ofMinutes(6))          // run_tests invokes Maven
     .clientInfo(new McpSchema.Implementation("tdd-workshop-agent", "1.0.0"))
     .build();
-
 client.initialize();                                 // the handshake
-var tools = client.listTools();                      // discovery
-var result = client.callTool(                        // invocation
+var tools = client.listTools();                      // discovery — 24 tools
+var result = client.callTool(
     CallToolRequest.builder("run_tests").arguments(Map.of()).build());
       </code></pre>
-      <p class="small">Run it: <code>mvn -q package && java -jar mcp-client/target/tdd-agent.jar</code></p>
-      <aside class="notes">Two minutes, one run, no exercise: the bundled CLI client launches the server as a child process and narrates handshake → discovery → invocation — exactly what Cursor and Claude do under the hood. The point: the server doesn't care which agent connects. Then move on; the workflow is next.</aside>
+      <p class="small">Run it: <code>java -jar smoke-test/target/smoke-test.jar</code> (needs <code>bdd</code> on PATH)</p>
+      <aside class="notes">Two minutes, one run: the jar is only a client. The child is bdd mcp serve. Discovery lists 24 tools, not seven. Then move on; the workflow is next.</aside>
     </section>
 
     <!-- ============ 20-32 min: EXERCISE 1 — DRAFT AND REFINE THE SPEC ============ -->
     <section>
       <h2><span class="badge exercise">EXERCISE 1</span> Draft the spec with your agent <span class="badge time">20–32 min</span></h2>
       <p class="small">The spec comes first — and the agent helps write it, then <em>refine</em> it. Prompt your IDE agent:</p>
-      <blockquote class="small">"Add a new requirement to <code>requirements/requirements.json</code>: newlines may separate numbers in addition to commas. Follow the existing format — unique id, title, user story, acceptance criteria phrased Given/When/Then, status pending. Then call <code>validate_spec</code> and fix every issue until the spec is valid. Then call <code>refine_requirement</code> on the new requirement and reword it from the findings until there are none. Do not write scenarios or code yet — we are only agreeing on the spec."</blockquote>
+      <blockquote class="small">"Add a new requirement to <code>requirements/requirements.json</code>: a custom delimiter may be declared on the first line, so <code>//+\n1+2</code> adds up to 3. Follow the existing format — unique id, title, user story, acceptance criteria phrased Given/When/Then, status pending. Then call <code>validate_spec</code> and fix every issue until the spec is valid. Then call <code>refine_requirement</code> on the new requirement and reword it from the findings until there are none. Do not write scenarios or code yet — we are only agreeing on the spec."</blockquote>
       <ul class="small">
         <li>Two feedback loops: <code>validate_spec</code> owns <strong>structure</strong>, <code>refine_requirement</code> owns <strong>wording quality</strong></li>
         <li>The agent drafts, the server critiques, the agent rewords — <strong>you approve the final wording</strong></li>
@@ -353,16 +343,15 @@ var result = client.callTool(                        // invocation
 // .cursor/mcp.json  (already in the repo)
 {
   "mcpServers": {
-    "tdd-workflow": {
-      "command": "java",
-      "args": ["-Dworkshop.root=${workspaceFolder}",
-               "-jar", "${workspaceFolder}/mcp-server/target/tdd-mcp-server.jar"]
+    "spec-driven-server": {
+      "command": "bdd",
+      "args": ["mcp", "serve", "--root", "${workspaceFolder}"]
     }
   }
 }
       </code></pre>
       <p class="small">Then prompt the agent:</p>
-      <blockquote class="small">"Using the tdd-workflow tools: validate the spec first, then find the next pending requirement, add a Gherkin scenario for its acceptance criteria to the feature file (tag it with the requirement id), reuse or add step definitions, add a matching JUnit unit test, run the tests to show RED, then implement the simplest code to reach GREEN, then refactor, then mark the requirement implemented in <code>requirements/requirements.json</code>. Ask me before each phase change."</blockquote>
+      <blockquote class="small">"Using the spec-driven-server tools: validate the spec first, then <code>get_requirement</code> for the next pending id. Add its Gherkin with <code>scenario_add</code> (tag the requirement id), add missing steps with <code>step_definition_create</code> if <code>step_definitions_find</code> reports any, add a unit test with <code>unit_test_create</code>. Show <code>changes_show</code> and ask me before <code>changes_commit</code>. Then <code>run_tests</code> (expect RED). Implement the simplest production code in <code>StringCalculator</code>. <code>run_tests</code> (GREEN). <code>start_refactor</code> if I agree. On GREEN, <code>requirement_mark_implemented</code>. Ask me before each phase change."</blockquote>
       <aside class="notes">Everyone drives this at their own keyboard; you demo REQ-003 (comma-separated numbers) end to end. Show the agent calling validate_spec, then get_requirement (note the featureLocation and workflowHint fields), appending the scenario and the unit test, run_tests RED (8 tests, 3 failing — 2 Cucumber failures + 1 JUnit error), implementation, run_tests GREEN (8 tests), start_refactor, then marking REQ-003 implemented in the spec. Pause after the scenario is written: that's the spec review moment.</aside>
     </section>
 
@@ -371,13 +360,13 @@ var result = client.callTool(                        // invocation
       <table class="small">
         <tr><td><span class="badge time">agent</span></td><td><code>validate_spec</code> → the spec (including your new requirement) is valid</td></tr>
         <tr><td><span class="badge time">agent</span></td><td><code>get_requirement("REQ-003")</code> → acceptance criteria + feature file location</td></tr>
-        <tr><td><span class="badge time">agent</span></td><td>writes the <code>@REQ-003</code> Gherkin scenario (BDD) and any <code>@Test</code> methods (TDD)</td></tr>
-        <tr><td><span class="badge time">you</span></td><td>review the scenario — <em>is this the behavior I want?</em> (the spec review)</td></tr>
+        <tr><td><span class="badge time">agent</span></td><td><code>scenario_add</code> / <code>unit_test_create</code> — staged; <code>changes_show</code></td></tr>
+        <tr><td><span class="badge time">you</span></td><td>review staged Gherkin — then allow <code>changes_commit</code></td></tr>
         <tr><td><span class="badge red">RED</span></td><td><code>run_tests</code> → Cucumber + JUnit failures returned to the agent</td></tr>
         <tr><td><span class="badge time">agent</span></td><td>implements the simplest passing code in <code>StringCalculator</code></td></tr>
         <tr><td><span class="badge green">GREEN</span></td><td><code>run_tests</code> → all pass</td></tr>
         <tr><td><span class="badge refactor">REFACTOR</span></td><td><code>start_refactor</code> → clean up → <code>run_tests</code> stays green</td></tr>
-        <tr><td><span class="badge time">you</span></td><td>approve; agent marks REQ-003 <code>implemented</code> in the spec; repeat with REQ-004..006</td></tr>
+        <tr><td><span class="badge time">you</span></td><td>approve; <code>requirement_mark_implemented</code> (GREEN-gated); repeat with REQ-004..006</td></tr>
       </table>
       <aside class="notes">Call out the two human checkpoints: reviewing the failing test (the spec) and approving the final code. That is "human in the loop" concretely, not as a slogan.</aside>
     </section>
@@ -389,9 +378,29 @@ var result = client.callTool(                        // invocation
         <li><strong>Ground truth</strong>: the agent doesn't guess whether code works — <code>run_tests</code> tells it</li>
         <li><strong>Guardrails in tools</strong>: refactor-on-red is impossible; the server refuses</li>
         <li><strong>Small steps</strong>: one requirement, one cycle — failures stay cheap</li>
-        <li><strong>Portable</strong>: same server works in Cursor, Claude, our CLI agent, MCP Inspector</li>
+        <li><strong>Portable</strong>: same <code>bdd mcp serve</code> in Cursor (24 tools), the bundled client, MCP Inspector, and CLI profiles (3–7)</li>
       </ul>
       <aside class="notes">This is the difference between "LLM writes code" and an engineered workflow: feedback loops and enforced invariants.</aside>
+    </section>
+
+    </section>
+
+    <section>
+      <h2>Same server, scoped profiles <span class="badge time">Wi-Fi off</span></h2>
+      <p class="small">Cursor saw 24 tools. The CLI offers 3–7 per command — not a second implementation.</p>
+      <pre><code class="language-bash" data-trim>
+bdd tools profiles
+bdd mcp call get_tdd_state
+bdd spec draft …          # lookup of disk catalog; parse_proposals_checked is the gate
+bdd implement REQ-003     # run_tests sees the working tree; command_run asks you first
+bdd ask "what is pending?"
+      </code></pre>
+      <ul class="small">
+        <li>Frontier: Cursor + all 24, including staging</li>
+        <li>Local: <code>qwen3.8-flash-next:125b-mlx</code> + profiles; <code>[tool_rules]</code> if the model drifts</li>
+        <li>Follow-along: <code>student-follow-docs/cli-path.md</code></li>
+      </ul>
+      <aside class="notes">Skippable in a Cursor-only room. Conference half: switch Wi-Fi off, run these. Dual harness is Cursor-all-22 vs bdd-command-profiles.</aside>
     </section>
 
     <!-- ============ 55-60 min: WRAP ============ -->
@@ -400,7 +409,7 @@ var result = client.callTool(                        // invocation
       <ul>
         <li>Drafted a requirement <em>with</em> an agent and iterated it through two server feedback loops — <code>validate_spec</code> for structure, <code>refine_requirement</code> for wording — until valid and clean</li>
         <li>Drove a full spec-to-green cycle: requirement → Gherkin (Cucumber) → RED → GREEN → refactor</li>
-        <li>Saw how MCP feeds the same seven tools into any agent — Cursor, Claude, or the bundled client</li>
+        <li>Saw how MCP feeds the same <code>bdd</code> server into any agent — Cursor (24 tools) or CLI profiles on <code>qwen3.8-flash-next:125b-mlx</code></li>
         <li>Kept every engineering decision: the agent turned the crank, you steered</li>
       </ul>
       <h3 style="margin-top:0.8em">Keep building</h3>
@@ -416,6 +425,7 @@ var result = client.callTool(                        // invocation
       <h2>Resources</h2>
       <ul class="small">
         <li>This repo: everything you used today, AGPL-3.0 licensed</li>
+        <li>Local model (talk + CLI path): <code>qwen3.8-flash-next:125b-mlx</code> via Ollama — <code>ollama pull qwen3.8-flash-next:125b-mlx</code> then <code>bdd model use qwen3.8-flash-next:125b-mlx</code></li>
         <li>MCP spec &amp; docs: <a href="https://modelcontextprotocol.io">modelcontextprotocol.io</a></li>
         <li>MCP Java SDK: <a href="https://github.com/modelcontextprotocol/java-sdk">github.com/modelcontextprotocol/java-sdk</a></li>
         <li>MCP Inspector: <code>npx @modelcontextprotocol/inspector</code></li>
@@ -431,12 +441,11 @@ var result = client.callTool(                        // invocation
       <h2><span class="badge exercise">BACKUP</span> Inspect the wire <span class="badge time">if time allows</span></h2>
       <p class="small">Option A — MCP Inspector (browser UI + message log):</p>
       <pre><code class="language-bash" data-trim>
-npx @modelcontextprotocol/inspector \
-  java -Dworkshop.root=$PWD -jar mcp-server/target/tdd-mcp-server.jar
+npx @modelcontextprotocol/inspector bdd mcp serve --root $PWD
       </code></pre>
       <p class="small">Option B — be the client yourself; paste one line at a time:</p>
       <pre><code class="language-bash" data-trim>
-java -Dworkshop.root=$PWD -jar mcp-server/target/tdd-mcp-server.jar
+bdd mcp serve --root $PWD
 {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"me","version":"0"}}}
 {"jsonrpc":"2.0","method":"notifications/initialized"}
 {"jsonrpc":"2.0","id":2,"method":"tools/list"}
@@ -446,7 +455,7 @@ java -Dworkshop.root=$PWD -jar mcp-server/target/tdd-mcp-server.jar
         <li>The protocol is newline-delimited JSON on stdin/stdout — nothing hidden</li>
         <li>Tool results are content blocks; <code>isError: true</code> lets agents read failures and self-correct</li>
       </ul>
-      <aside class="notes">Backup material for a fast room. Option B is the aha moment: watch the tools/list response carry the schemas from McpServerFactory, and the nextStep hints that nudge the agent through the cycle.</aside>
+      <aside class="notes">Backup material for a fast room. Option B is the aha moment: watch the tools/list response carry 22 schemas from bdd mcp serve, and the nextStep hints that nudge the agent through the cycle.</aside>
     </section>
 
   </div>

@@ -38,8 +38,8 @@ Use the search icon (or press <kbd>S</kbd>) to search the whole manual.
   interactive. Every reply carries a `nextStep` field that says what
   to do next — the same guidance an AI agent receives over MCP.
 - Names in parentheses in help text, like `(run_tests)`, are the
-  matching MCP tool names — frozen contracts kept byte-identical to
-  the workshop's Java `tdd-workflow-server`.
+  matching MCP tool names — frozen contracts kept by
+  `cli/tests/mcp_conformance.rs` and smoke-test `ToolPlan`.
 
 ## Supported languages
 
@@ -57,6 +57,6 @@ installs anything.
 
 LLM-backed generation uses local [Ollama](https://ollama.com). The
 model this CLI is developed and run against is
-`qwen3-coder-next:latest` — see [Getting started](getting-started.md)
+`qwen3.8-flash-next:125b-mlx` — see [Getting started](getting-started.md)
 and [`bdd model`](commands/model.md). Your mileage will vary with
 other models, especially those not trained for development work.

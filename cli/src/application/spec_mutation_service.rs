@@ -5,10 +5,12 @@
 
 use serde::Serialize;
 
+use crate::application::agent_service::{Agent, AgentConfig, DEFAULT_MAX_ROUNDS, NullBroker};
 use crate::application::assets::{feature_tagged, load_effective_catalog};
 use crate::application::spec_service::ServiceError;
-use crate::application::{DEFAULT_LLM_ATTEMPTS, LlmReplyError, generate_valid};
+use crate::application::{DEFAULT_LLM_ATTEMPTS, LlmReplyError};
 use crate::domain::model::{Requirement, Spec, SpecCatalog};
+use crate::domain::prompts::RenderedPrompt;
 use crate::domain::proposal::{
     ProposedRequirement, parse_proposals_checked, parse_rewording_checked, proposal_prompt,
     rewording_prompt,
@@ -16,15 +18,42 @@ use crate::domain::proposal::{
 use crate::domain::refiner::{RequirementRefiner, finding_signature, suggestion_for};
 use crate::domain::spec_validator::SpecValidator;
 use crate::domain::tdd::TddPhase;
+use crate::domain::tools::ToolDefinition;
 use crate::ports::{
-    ChangeStore, FeatureCatalog, FeatureFiles, LlmGenerator, Prompter, SpecRepository, StateStore,
+    ChangeStore, FeatureCatalog, FeatureFiles, LlmConversation, Prompter, SpecRepository,
+    StateStore, ToolBroker,
 };
 
-/// A resolved model to call: name + generator.
-type Model<'a> = (&'a str, &'a dyn LlmGenerator);
+/// A resolved model to call: name + conversation.
+type Model<'a> = (&'a str, &'a dyn LlmConversation);
 
 /// A resolved model available to assist drafting, when there is one.
 type ModelAid<'a> = Option<Model<'a>>;
+
+struct LlmCall<'a> {
+    model: &'a str,
+    llm: &'a dyn LlmConversation,
+    tools: &'a [ToolDefinition],
+    broker: &'a dyn ToolBroker,
+    config: AgentConfig,
+}
+
+fn ask_llm<T>(
+    call: LlmCall<'_>,
+    prompter: &mut dyn Prompter,
+    prompt: &RenderedPrompt,
+    parse: impl Fn(&str) -> Result<T, String>,
+    on_retry: impl FnMut(u32, u32, &str),
+) -> Result<T, LlmReplyError> {
+    Agent::new(
+        call.model,
+        call.llm,
+        call.broker,
+        call.tools.to_vec(),
+        call.config,
+    )
+    .ask(prompter, prompt, parse, on_retry)
+}
 
 /// Where a drafted requirement lands: the resolved catalog and the
 /// document inside it that receives the wording.
@@ -127,51 +156,64 @@ pub struct MarkReport {
 
 pub struct SpecMutationService<
     R: SpecRepository,
-    F: FeatureFiles,
-    G: FeatureCatalog,
+    G: FeatureCatalog + FeatureFiles,
     C: ChangeStore,
     S: StateStore,
 > {
     repository: R,
-    feature_files: F,
     catalog: G,
     store: C,
     state: S,
     spec_path: String,
     llm_attempts: u32,
     max_reword_passes: u32,
+    tools: Vec<ToolDefinition>,
+    max_rounds: u32,
+    confirm: Vec<String>,
+    broker: Option<Box<dyn ToolBroker>>,
 }
 
 /// Rewording passes before the wizard stops looping on its own and asks
 /// the developer how to continue.
 pub const DEFAULT_MAX_REWORD_PASSES: u32 = 3;
 
-impl<R: SpecRepository, F: FeatureFiles, G: FeatureCatalog, C: ChangeStore, S: StateStore>
-    SpecMutationService<R, F, G, C, S>
+impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: StateStore>
+    SpecMutationService<R, G, C, S>
 {
-    pub fn new(
-        repository: R,
-        feature_files: F,
-        catalog: G,
-        store: C,
-        state: S,
-        spec_path: String,
-    ) -> Self {
+    pub fn new(repository: R, catalog: G, store: C, state: S, spec_path: String) -> Self {
         Self {
             repository,
-            feature_files,
             catalog,
             store,
             state,
             spec_path,
             llm_attempts: DEFAULT_LLM_ATTEMPTS,
             max_reword_passes: DEFAULT_MAX_REWORD_PASSES,
+            tools: Vec::new(),
+            max_rounds: DEFAULT_MAX_ROUNDS,
+            confirm: Vec::new(),
+            broker: None,
         }
     }
 
     /// How many times a model reply is tried when validation fails.
     pub fn with_llm_attempts(mut self, attempts: u32) -> Self {
         self.llm_attempts = attempts.max(1);
+        self
+    }
+
+    /// Offer this caller's tools during assisted draft/reword.
+    pub fn with_tool_loop(
+        mut self,
+        tools: Vec<ToolDefinition>,
+        max_rounds: u32,
+        confirm: Vec<String>,
+        broker: Box<dyn ToolBroker>,
+    ) -> Self {
+        self.tools = tools;
+        self.max_rounds = max_rounds.max(1);
+        self.confirm = confirm;
+        self.broker = Some(broker);
         self
     }
 
@@ -217,7 +259,7 @@ impl<R: SpecRepository, F: FeatureFiles, G: FeatureCatalog, C: ChangeStore, S: S
         &self,
         prompter: &mut dyn Prompter,
         model: &str,
-        llm: &dyn LlmGenerator,
+        llm: &dyn LlmConversation,
     ) -> Result<DraftReport, ServiceError> {
         self.draft_assisted_in(prompter, model, llm, None)
     }
@@ -228,7 +270,7 @@ impl<R: SpecRepository, F: FeatureFiles, G: FeatureCatalog, C: ChangeStore, S: S
         &self,
         prompter: &mut dyn Prompter,
         model: &str,
-        llm: &dyn LlmGenerator,
+        llm: &dyn LlmConversation,
         file: Option<&str>,
     ) -> Result<DraftReport, ServiceError> {
         let mut catalog = self.effective_catalog()?;
@@ -255,19 +297,35 @@ impl<R: SpecRepository, F: FeatureFiles, G: FeatureCatalog, C: ChangeStore, S: S
             "Splitting the description into requirements with {model} - working"
         ));
         let prompt = proposal_prompt(&description);
-        let outcome = generate_valid(
-            llm,
-            model,
+        let retries = std::cell::RefCell::new(Vec::<String>::new());
+        let null = NullBroker;
+        let broker: &dyn ToolBroker = self.broker.as_deref().unwrap_or(&null);
+        let outcome = ask_llm(
+            LlmCall {
+                model,
+                llm,
+                tools: &self.tools,
+                broker,
+                config: AgentConfig::new(
+                    "proposal",
+                    self.llm_attempts,
+                    self.max_rounds,
+                    self.confirm.clone(),
+                ),
+            },
+            prompter,
             &prompt,
-            self.llm_attempts,
             parse_proposals_checked,
             |attempt, of, reason| {
-                prompter.warn(&format!(
+                retries.borrow_mut().push(format!(
                     "The model reply was invalid ({reason}) - asking again ({attempt} of {of})"
                 ));
             },
         );
         drop(work);
+        for message in retries.into_inner() {
+            prompter.warn(&message);
+        }
         let proposals = match outcome {
             Ok(proposals) => proposals,
             Err(LlmReplyError::Call(error)) => {
@@ -339,7 +397,7 @@ impl<R: SpecRepository, F: FeatureFiles, G: FeatureCatalog, C: ChangeStore, S: S
         // Land in the working-tree spec file now, not after the refine
         // wizard. The human already accepted these rows; they should be
         // visible in requirements.json while the first one is reviewed.
-        self.store.commit().map_err(|e| ServiceError(e.0))?;
+        self.store.commit()?;
         prompter.tell(&format!(
             "Accepted requirements are now stored in {} as pending:",
             self.project_path(&target)
@@ -446,7 +504,7 @@ impl<R: SpecRepository, F: FeatureFiles, G: FeatureCatalog, C: ChangeStore, S: S
         prompter: &mut dyn Prompter,
         id: &str,
         model: &str,
-        llm: &dyn LlmGenerator,
+        llm: &dyn LlmConversation,
     ) -> Result<DraftReport, ServiceError> {
         self.reword_with(prompter, id, Some((model, llm)))
     }
@@ -742,20 +800,14 @@ impl<R: SpecRepository, F: FeatureFiles, G: FeatureCatalog, C: ChangeStore, S: S
             });
         }
         let child_project = self.project_path(&child);
-        let created = self
-            .store
-            .content(&child_project)
-            .map_err(|e| ServiceError(e.0))?
-            .is_none()
+        let created = self.store.content(&child_project)?.is_none()
             && self.repository.read_raw(&child).is_err();
         if created {
-            self.store
-                .stage(
-                    &child_project,
-                    "{\n  \"requirements\": []\n}\n",
-                    &format!("create the spec file {child_project}"),
-                )
-                .map_err(|e| ServiceError(e.0))?;
+            self.store.stage(
+                &child_project,
+                "{\n  \"requirements\": []\n}\n",
+                &format!("create the spec file {child_project}"),
+            )?;
         }
         // The include entry is written relative to the parent document.
         let entry = relative_to(parent_dir(&parent), &child);
@@ -1025,19 +1077,35 @@ impl<R: SpecRepository, F: FeatureFiles, G: FeatureCatalog, C: ChangeStore, S: S
                 }
                 Ok(proposal)
             };
-            let outcome = generate_valid(
-                llm,
-                model,
+            let retries = std::cell::RefCell::new(Vec::<String>::new());
+            let null = NullBroker;
+            let broker: &dyn ToolBroker = self.broker.as_deref().unwrap_or(&null);
+            let outcome = ask_llm(
+                LlmCall {
+                    model,
+                    llm,
+                    tools: &self.tools,
+                    broker,
+                    config: AgentConfig::new(
+                        "rewording",
+                        self.llm_attempts,
+                        self.max_rounds,
+                        self.confirm.clone(),
+                    ),
+                },
+                prompter,
                 &prompt,
-                self.llm_attempts,
                 check,
                 |attempt, of, reason| {
-                    prompter.warn(&format!(
+                    retries.borrow_mut().push(format!(
                         "The model's rewording was invalid ({reason}) - asking again ({attempt} of {of})"
                     ));
                 },
             );
             drop(work);
+            for message in retries.into_inner() {
+                prompter.warn(&message);
+            }
             let proposal = match outcome {
                 Ok(proposal) => proposal,
                 Err(LlmReplyError::Call(error)) => {
@@ -1074,7 +1142,7 @@ impl<R: SpecRepository, F: FeatureFiles, G: FeatureCatalog, C: ChangeStore, S: S
     /// scenario). Re-running on an already-implemented requirement
     /// backfills a missing featureFile.
     pub fn mark_implemented(&self, id: &str) -> Result<MarkReport, ServiceError> {
-        let snapshot = self.state.load().map_err(|e| ServiceError(e.0))?;
+        let snapshot = self.state.load()?;
         if snapshot.phase() != TddPhase::Green {
             return Err(ServiceError(format!(
                 "Requirements are only marked implemented on GREEN (current phase: \
@@ -1110,8 +1178,8 @@ impl<R: SpecRepository, F: FeatureFiles, G: FeatureCatalog, C: ChangeStore, S: S
             status: "implemented".into(),
             staged: true,
             next_step: format!(
-                "Review with changes show, run bdd validate (it checks the @{id} \
-                 scenario exists), then bdd changes commit."
+                "Review with changes show, run validate (it checks the @{id} \
+                 scenario exists), then changes commit."
             ),
         })
     }
@@ -1190,7 +1258,7 @@ impl<R: SpecRepository, F: FeatureFiles, G: FeatureCatalog, C: ChangeStore, S: S
         }
         let prefix = format!("{}:", candidate.id);
         Findings {
-            structural: SpecValidator::new(&self.feature_files)
+            structural: SpecValidator::new(&self.catalog)
                 .validate(&with_candidate)
                 .into_iter()
                 .filter(|issue| issue.starts_with(&prefix))
@@ -1213,13 +1281,12 @@ impl<R: SpecRepository, F: FeatureFiles, G: FeatureCatalog, C: ChangeStore, S: S
             .spec;
         let json = serde_json::to_string_pretty(doc).expect("spec is always serializable");
         self.store
-            .stage(&self.project_path(target), &json, summary)
-            .map_err(|e| ServiceError(e.0))?;
+            .stage(&self.project_path(target), &json, summary)?;
         Ok(())
     }
 
     fn ask(&self, prompter: &mut dyn Prompter, question: &str) -> Result<String, ServiceError> {
-        prompter.ask(question).map_err(|e| ServiceError(e.0))
+        prompter.ask(question).map_err(ServiceError::from)
     }
 
     /// One named field of the requirement. Rewording passes show the prior
@@ -1287,7 +1354,7 @@ impl<R: SpecRepository, F: FeatureFiles, G: FeatureCatalog, C: ChangeStore, S: S
     }
 
     fn confirm(&self, prompter: &mut dyn Prompter, question: &str) -> Result<bool, ServiceError> {
-        prompter.confirm(question).map_err(|e| ServiceError(e.0))
+        prompter.confirm(question).map_err(ServiceError::from)
     }
 }
 
@@ -1406,10 +1473,10 @@ fn duplicate_warning(spec: &Spec, candidate: &Requirement) -> Option<String> {
 mod tests {
     use super::*;
     use crate::domain::tdd::TddSnapshot;
-    use crate::ports::{PromptError, SpecError};
+    use crate::ports::{LlmConversation, PromptError, SpecError};
     use crate::test_support::{
-        FakeFeatureFiles, FixedStateStore, InMemoryChangeStore, InMemoryFeatureCatalog,
-        InMemorySpecRepository, calculator_catalog,
+        FixedStateStore, InMemoryChangeStore, InMemoryFeatureCatalog, InMemorySpecRepository,
+        calculator_catalog,
     };
     use std::collections::VecDeque;
 
@@ -1477,7 +1544,6 @@ mod tests {
         state: FixedStateStore,
     ) -> SpecMutationService<
         InMemorySpecRepository,
-        FakeFeatureFiles,
         InMemoryFeatureCatalog,
         InMemoryChangeStore,
         FixedStateStore,
@@ -1486,7 +1552,6 @@ mod tests {
         // REQ-007 has no tagged scenario anywhere.
         SpecMutationService::new(
             InMemorySpecRepository(spec),
-            FakeFeatureFiles::default(),
             calculator_catalog(),
             InMemoryChangeStore::default(),
             state,
@@ -1643,17 +1708,20 @@ mod tests {
         );
     }
 
-    /// [`LlmGenerator`] with one scripted outcome.
+    /// Scripted [`LlmConversation`] with one text outcome.
     struct FakeLlm(Result<String, String>);
 
-    impl LlmGenerator for FakeLlm {
-        fn generate(
+    impl LlmConversation for FakeLlm {
+        fn chat(
             &self,
             _model: &str,
-            _system: &str,
-            _user: &str,
-        ) -> Result<String, crate::ports::LlmError> {
-            self.0.clone().map_err(crate::ports::LlmError)
+            _messages: &[crate::domain::tools::ChatMessage],
+            _tools: &[crate::domain::tools::ToolDefinition],
+        ) -> Result<crate::domain::tools::ChatTurn, crate::ports::LlmError> {
+            self.0
+                .clone()
+                .map_err(crate::ports::LlmError)
+                .map(crate::domain::tools::text_turn)
         }
     }
 
@@ -1744,22 +1812,23 @@ mod tests {
         assert_eq!(drafted.acceptance_criteria[1], EDGE_CRITERION);
     }
 
-    /// [`LlmGenerator`] recording every call's system and user prompt
+    /// [`LlmConversation`] recording every call's system and user prompt
     /// (joined with a newline), replying the same thing.
     struct RecordingLlm {
         reply: String,
         prompts: std::cell::RefCell<Vec<String>>,
     }
 
-    impl LlmGenerator for RecordingLlm {
-        fn generate(
+    impl LlmConversation for RecordingLlm {
+        fn chat(
             &self,
             _model: &str,
-            system: &str,
-            user: &str,
-        ) -> Result<String, crate::ports::LlmError> {
+            messages: &[crate::domain::tools::ChatMessage],
+            _tools: &[crate::domain::tools::ToolDefinition],
+        ) -> Result<crate::domain::tools::ChatTurn, crate::ports::LlmError> {
+            let (system, user) = crate::domain::tools::system_and_user(messages);
             self.prompts.borrow_mut().push(format!("{system}\n{user}"));
-            Ok(self.reply.clone())
+            Ok(crate::domain::tools::text_turn(self.reply.clone()))
         }
     }
 
@@ -1880,23 +1949,23 @@ mod tests {
         told("Asking test-model to address finding 2 of 2 - working ...");
     }
 
-    /// [`LlmGenerator`] that answers the first call and fails the rest.
+    /// [`LlmConversation`] that answers the first call and fails the rest.
     struct FlakyLlm {
         reply: String,
         calls: std::cell::RefCell<usize>,
     }
 
-    impl LlmGenerator for FlakyLlm {
-        fn generate(
+    impl LlmConversation for FlakyLlm {
+        fn chat(
             &self,
             _model: &str,
-            _system: &str,
-            _user: &str,
-        ) -> Result<String, crate::ports::LlmError> {
+            _messages: &[crate::domain::tools::ChatMessage],
+            _tools: &[crate::domain::tools::ToolDefinition],
+        ) -> Result<crate::domain::tools::ChatTurn, crate::ports::LlmError> {
             let mut calls = self.calls.borrow_mut();
             *calls += 1;
             if *calls == 1 {
-                Ok(self.reply.clone())
+                Ok(crate::domain::tools::text_turn(self.reply.clone()))
             } else {
                 Err(crate::ports::LlmError("boom".into()))
             }
@@ -2538,8 +2607,8 @@ mod tests {
                 id: "REQ-001".into(),
                 status: "implemented".into(),
                 staged: true,
-                next_step: "Review with changes show, run bdd validate (it checks the \
-                            @REQ-001 scenario exists), then bdd changes commit."
+                next_step: "Review with changes show, run validate (it checks the \
+                            @REQ-001 scenario exists), then changes commit."
                     .into(),
             }
         );
@@ -2705,7 +2774,6 @@ mod tests {
     fn stage_split_spec(
         service: &SpecMutationService<
             InMemorySpecRepository,
-            FakeFeatureFiles,
             InMemoryFeatureCatalog,
             InMemoryChangeStore,
             FixedStateStore,
@@ -3045,7 +3113,6 @@ mod tests {
     fn list_requirements_with_a_bare_spec_path_keeps_catalog_paths() {
         let service = SpecMutationService::new(
             InMemorySpecRepository(Ok(spec())),
-            FakeFeatureFiles::default(),
             calculator_catalog(),
             InMemoryChangeStore::default(),
             green(),

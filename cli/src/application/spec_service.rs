@@ -1,6 +1,6 @@
-//! Spec use cases: list, show (enriched), validate, refine. Reply shapes
-//! and `nextStep` strings match the Java server's `WorkflowToolHandlers`
-//! verbatim.
+//! Spec use cases: list, show (enriched), validate, refine. Frozen
+//! `validate_spec` / `list_requirements` / `get_requirement` reply shapes
+//! stay in `cli/tests/mcp_conformance.rs`.
 
 use serde::Serialize;
 
@@ -67,6 +67,39 @@ pub struct EnrichedRequirement {
 #[derive(Debug, PartialEq, Eq)]
 pub struct ServiceError(pub String);
 
+impl std::fmt::Display for ServiceError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for ServiceError {}
+
+macro_rules! from_port_error {
+    ($($t:ty),+ $(,)?) => {$(
+        impl From<$t> for ServiceError {
+            fn from(error: $t) -> Self {
+                Self(error.0)
+            }
+        }
+    )+};
+}
+
+from_port_error!(
+    crate::ports::StageError,
+    crate::ports::SpecError,
+    crate::ports::FeatureError,
+    crate::ports::SourceError,
+    crate::ports::StateError,
+    crate::ports::PromptError,
+    crate::ports::ExecError,
+    crate::ports::ScaffoldError,
+    crate::ports::LlmError,
+    crate::ports::ToolError,
+    crate::ports::MemoryError,
+    crate::domain::command_policy::CommandRefusal,
+);
+
 pub struct SpecService<R: SpecRepository, F: FeatureFiles> {
     repository: R,
     feature_files: F,
@@ -83,7 +116,7 @@ impl<R: SpecRepository, F: FeatureFiles> SpecService<R, F> {
     }
 
     pub fn list_requirements(&self) -> Result<Vec<RequirementSummary>, ServiceError> {
-        let spec = self.repository.load().map_err(|e| ServiceError(e.0))?;
+        let spec = self.repository.load()?;
         Ok(spec
             .requirements
             .into_iter()
@@ -96,7 +129,7 @@ impl<R: SpecRepository, F: FeatureFiles> SpecService<R, F> {
     }
 
     pub fn get_requirement(&self, id: &str) -> Result<EnrichedRequirement, ServiceError> {
-        let spec = self.repository.load().map_err(|e| ServiceError(e.0))?;
+        let spec = self.repository.load()?;
         spec.requirements
             .into_iter()
             .find(|r| r.id == id)
@@ -129,7 +162,7 @@ impl<R: SpecRepository, F: FeatureFiles> SpecService<R, F> {
     }
 
     pub fn refine_requirement(&self, id: &str) -> Result<RefinementReport, ServiceError> {
-        let spec = self.repository.load().map_err(|e| ServiceError(e.0))?;
+        let spec = self.repository.load()?;
         let requirement = spec
             .requirements
             .iter()

@@ -5,6 +5,17 @@
 
 use crate::domain::model::{ROOT_SPEC_FILE, Spec, SpecCatalog};
 
+macro_rules! string_error {
+    ($name:ident) => {
+        impl std::fmt::Display for $name {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str(&self.0)
+            }
+        }
+        impl std::error::Error for $name {}
+    };
+}
+
 /// Loads the requirements spec. The error string is already formatted the
 /// way the workshop server reports unreadable specs, so it can be surfaced
 /// directly as a validation issue.
@@ -38,6 +49,7 @@ pub trait SpecRepository {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpecError(pub String);
+string_error!(SpecError);
 
 /// Read-only queries about Gherkin feature files, used by spec validation
 /// (does the file exist, does it carry the requirement's tag).
@@ -55,6 +67,7 @@ pub trait FeatureCatalog {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FeatureError(pub String);
+string_error!(FeatureError);
 
 /// Read-only questions about a project's marker files, used by language
 /// detection (`pom.xml`, `package.json`, `*.csproj`, ...).
@@ -82,6 +95,7 @@ pub trait MemoryStore {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MemoryError(pub String);
+string_error!(MemoryError);
 
 /// Probes whether a runtime command is installed. `None` means the
 /// command is not available; `Some` carries its version line.
@@ -105,6 +119,7 @@ pub trait ModelCatalog {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LlmError(pub String);
+string_error!(LlmError);
 
 /// Reads and persists the configured model choice.
 pub trait ModelStore {
@@ -112,12 +127,91 @@ pub trait ModelStore {
     fn persist(&self, model: &str) -> Result<(), LlmError>;
 }
 
-/// Sends one generation request to the resolved LLM model and returns its
-/// raw text response. Every call carries a system prompt (the model's role
-/// and rules) and a user prompt (the call's data) - both rendered from the
-/// prompt catalog in `prompts/prompts.toml`.
-pub trait LlmGenerator {
-    fn generate(&self, model: &str, system: &str, user: &str) -> Result<String, LlmError>;
+/// One tool-using round trip. Stateless in the adapter — the caller
+/// owns the message history. Every production model call goes through
+/// this port (`Agent::ask` over Ollama `/api/chat`).
+pub trait LlmConversation {
+    fn chat(
+        &self,
+        model: &str,
+        messages: &[crate::domain::tools::ChatMessage],
+        tools: &[crate::domain::tools::ToolDefinition],
+    ) -> Result<crate::domain::tools::ChatTurn, LlmError>;
+}
+
+impl<T: LlmConversation + ?Sized> LlmConversation for &T {
+    fn chat(
+        &self,
+        model: &str,
+        messages: &[crate::domain::tools::ChatMessage],
+        tools: &[crate::domain::tools::ToolDefinition],
+    ) -> Result<crate::domain::tools::ChatTurn, LlmError> {
+        (**self).chat(model, messages, tools)
+    }
+}
+
+impl<T: LlmConversation + ?Sized> LlmConversation for std::sync::Arc<T> {
+    fn chat(
+        &self,
+        model: &str,
+        messages: &[crate::domain::tools::ChatMessage],
+        tools: &[crate::domain::tools::ToolDefinition],
+    ) -> Result<crate::domain::tools::ChatTurn, LlmError> {
+        self.as_ref().chat(model, messages, tools)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolError(pub String);
+string_error!(ToolError);
+
+/// Invokes one tool by its catalog name. Built-in tools loop back
+/// through the embedded server; registered tools reach their own.
+pub trait ToolBroker {
+    fn call(
+        &self,
+        name: &str,
+        arguments: &serde_json::Value,
+    ) -> Result<crate::domain::tools::ToolOutcome, ToolError>;
+}
+
+impl<T: ToolBroker + ?Sized> ToolBroker for &T {
+    fn call(
+        &self,
+        name: &str,
+        arguments: &serde_json::Value,
+    ) -> Result<crate::domain::tools::ToolOutcome, ToolError> {
+        (**self).call(name, arguments)
+    }
+}
+
+/// Connects to one registered MCP server and lists its tools.
+pub trait ToolDiscovery {
+    fn discover(
+        &self,
+        server: &crate::domain::mcp_registry::ServerSpec,
+    ) -> Result<Vec<crate::domain::tools::ToolDefinition>, ToolError>;
+
+    /// Bypass any catalog cache (`bdd tools refresh`). Defaults to [`Self::discover`].
+    fn discover_fresh(
+        &self,
+        server: &crate::domain::mcp_registry::ServerSpec,
+    ) -> Result<Vec<crate::domain::tools::ToolDefinition>, ToolError> {
+        self.discover(server)
+    }
+}
+
+/// Reads the registered external MCP servers. Never fails: an absent or
+/// broken registration file is reported as `problems`.
+pub trait McpRegistrySource {
+    fn load(&self) -> crate::domain::mcp_registry::RegistryLoad;
+}
+
+/// Reads and persists the per-command tool attachments and overrides.
+pub trait ToolStore {
+    fn overrides(&self) -> crate::domain::tool_profile::ProfileOverrides;
+    fn attach(&self, caller: &str, tool: &str) -> Result<(), ToolError>;
+    fn detach(&self, caller: &str, tool: &str) -> Result<(), ToolError>;
 }
 
 /// One source file, read for step-definition discovery.
@@ -135,6 +229,7 @@ pub trait SourceFiles {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceError(pub String);
+string_error!(SourceError);
 
 /// Writes scaffold files during `bdd init`. Never overwrites: existing
 /// files are reported as skipped so re-running init is always safe.
@@ -146,6 +241,7 @@ pub trait ScaffoldWriter {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScaffoldError(pub String);
+string_error!(ScaffoldError);
 
 /// One file change waiting in the staging area.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -173,6 +269,19 @@ pub trait ChangeStore {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StageError(pub String);
+string_error!(StageError);
+
+impl From<StageError> for FeatureError {
+    fn from(error: StageError) -> Self {
+        Self(error.0)
+    }
+}
+
+impl From<StageError> for SourceError {
+    fn from(error: StageError) -> Self {
+        Self(error.0)
+    }
+}
 
 /// A long-running step in progress. Hold it while the work runs and
 /// drop it when the work is done; an interactive implementation
@@ -211,6 +320,7 @@ pub trait Prompter {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PromptError(pub String);
+string_error!(PromptError);
 
 /// One read from the interactive `bdd` shell.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -224,6 +334,7 @@ pub enum ShellLine {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ShellError(pub String);
+string_error!(ShellError);
 
 /// Driving port for the interactive shell: line-edited input with a
 /// session history that persists between shells. Behind a port so the
@@ -238,7 +349,7 @@ pub trait InteractiveShell {
 /// Persists the TDD state log between CLI invocations
 /// (`.bdd-state.json`): timestamped entries plus interpretation
 /// instructions, so `test`, `state`, and `refactor` share one machine
-/// like the long-running Java server does.
+/// across CLI invocations.
 pub trait StateStore {
     fn load(&self) -> Result<crate::domain::tdd::TddSnapshot, StateError>;
     fn save(&self, snapshot: &crate::domain::tdd::TddSnapshot) -> Result<(), StateError>;
@@ -246,6 +357,7 @@ pub trait StateStore {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StateError(pub String);
+string_error!(StateError);
 
 /// Narrows a test run to one feature file and/or one scenario name.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -298,3 +410,4 @@ pub trait CommandExecutor {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecError(pub String);
+string_error!(ExecError);

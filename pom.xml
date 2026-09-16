@@ -6,21 +6,19 @@
 
     <groupId>com.davidparry.workshop</groupId>
     <artifactId>tdd-bdd-agentic</artifactId>
-    <version>1.0.0-SNAPSHOT</version>
+    <version>1.0.0</version>
     <packaging>pom</packaging>
 
     <name>TDD, BDD and Spec-Driven Development in the Agentic Era - MCP Workshop</name>
     <description>
-        A 60-minute hands-on workshop: build an MCP server that drives a
-        spec-driven development workflow spanning SDD, BDD, and TDD — the
-        requirements spec becomes executable Gherkin scenarios (Cucumber) and
-        unit tests (JUnit), and agents collaborate with developers through the
-        Red/Green/Refactor cycle.
+        A 60-minute hands-on workshop: drive a spec-driven development
+        workflow spanning SDD, BDD, and TDD. The MCP server is `bdd mcp serve`;
+        this reactor is the Java MCP-server smoke test (`smoke-test.jar`) plus the
+        standalone kata.
     </description>
 
     <modules>
-        <module>mcp-server</module>
-        <module>mcp-client</module>
+        <module>smoke-test</module>
     </modules>
 
     <properties>

@@ -1,6 +1,6 @@
-//! The Red/Green/Refactor state machine — the Rust port of the Java
-//! server's `TddStateMachine`. Transition rules and message strings match
-//! the Java implementation verbatim.
+//! The Red/Green/Refactor state machine. Transition rules and message
+//! strings match the frozen seven-tool MCP contract
+//! (`cli/tests/mcp_conformance.rs`).
 //!
 //! Transitions:
 //! - any phase + failing test run -> RED

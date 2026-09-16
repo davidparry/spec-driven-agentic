@@ -30,7 +30,8 @@ target/
 .idea/
 *.iml
 .vscode/
-.cursor/
+.cursor/*
+!.cursor/mcp.json
 .qodo/
 
 # Copy produced at the repo root by `dist build` (extra-artifacts)
@@ -52,4 +53,9 @@ _site/
 
 # macOS Finder metadata
 .DS_Store
-/.claude/
+# Claude Code: keep shared project settings; ignore machine-local files
+.claude/*
+!.claude/settings.json
+/.bdd-memory.json
+/.bdd-state.json
+

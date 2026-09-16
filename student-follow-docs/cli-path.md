@@ -1,9 +1,11 @@
 # Finish the String Calculator workshop with `bdd`
 
 The 60-minute hour in [student-follow-along.md](../student-follow-along.md)
-uses Cursor and the Java `tdd-workflow` MCP tools. This page is the same
-end state — every requirement `implemented`, including Exercise 1’s
-**REQ-007** — driven with the `bdd` CLI instead.
+uses Cursor against **the same** `bdd mcp serve` (all 24 tools, including
+staging). This page is the same end state — every requirement
+`implemented`, including Exercise 1’s **REQ-007** — driven with `bdd`
+commands instead. Dual harness: **Cursor + all 24** vs **local model +
+scoped profiles**. Not Java vs Rust.
 
 Do **not** work on `trunk`. `scripts/check-workshop-start.sh` must keep
 passing there.
@@ -19,13 +21,38 @@ bdd --version
 
 A local [Ollama](https://ollama.com) model is optional. It is only
 required for `bdd implement`. Without one, implement
-`StringCalculator.java` by hand after the tests go RED.
+`StringCalculator.java` by hand after the tests go RED. The model this
+talk and workshop run against is `qwen3.8-flash-next:125b-mlx`.
 
 ```bash
-# optional
-ollama pull qwen3-coder-next:latest
-bdd model use qwen3-coder-next:latest
+# the local model this workshop and talk run against
+ollama pull qwen3.8-flash-next:125b-mlx
+bdd model use qwen3.8-flash-next:125b-mlx
 ```
+
+## Same server, narrower tools
+
+```bash
+bdd tools profiles
+# spec-draft          4  list_requirements, get_requirement, validate_spec, refine_requirement
+# implement           7  … command_run, changes_show
+# status              5  …
+
+bdd mcp call get_tdd_state          # bytes the model would read, no tokens
+bdd mcp tools                       # the 22 built-ins
+```
+
+Cursor would have seen all 24. These commands offer 3–7. Default profiles
+contain no staging or commit tools. The only mutation a CLI-side model may
+request is `command_run` on the `implement` profile, and that call still
+asks you to confirm (piped/CI stdin declines; it never hangs).
+
+`validate_spec` / `refine_requirement` during `bdd spec draft` inspect the
+**disk** catalog. They do **not** critique the in-flight proposal. The gate
+is still `parse_proposals_checked`.
+
+`bdd test` / `run_tests` during `bdd implement` see the **working tree**,
+not an unstaged patch. Commit before you trust the bar.
 
 ## Files this loop must reuse
 
@@ -46,7 +73,9 @@ wordings so `bdd steps generate` is a no-op.
 Every authoring command **stages**. Review with `bdd changes show`, then
 `bdd changes commit`. `bdd test` runs Maven on the **working tree**, so
 commit before you trust the bar. `bdd spec mark-implemented` is allowed
-only on GREEN.
+only on GREEN. `bdd implement` may offer `command_run`; confirm before it
+spawns. Optional: `bdd ask "which pending requirement next?"` (read-only
+profile).
 
 ## Step 1 — Branch and baseline
 
@@ -64,18 +93,19 @@ that branch instead of `trunk` so `bdd test` understands this repo.
 
 ```bash
 bdd spec draft \
-  --title "Newlines as delimiters" \
-  --story "As a calculator user, I want newlines to separate numbers in addition to commas so that multi-line input just works." \
-  --criterion 'Given the input "1\n2,3", when add is called, then the result is 6' \
-  --criterion 'Given an empty string "", when add is called, then the result is 0'
+  --title "Custom delimiter declared on the first line" \
+  --story "As a calculator user, I want to declare a custom delimiter on the first line so that I can separate numbers with a character of my choosing." \
+  --criterion 'Given the input "//+\n1+2", when add is called, then the result is 3' \
+  --criterion 'Given an empty delimiter declaration "//\n1+2", when add is called, then an IllegalArgumentException is thrown'
 bdd changes commit
 bdd spec refine REQ-007
 # if findings: bdd spec reword REQ-007 && bdd changes commit, then refine again
 bdd spec list                     # REQ-007 pending
 ```
 
-A similar title or criterion to REQ-001 / REQ-005 may print a warning.
-That does not block staging. Do **not** mark REQ-007 implemented yet.
+Nothing in REQ-001..006 specifies a custom delimiter, so this draft earns
+no duplicate warning. (Reuse an existing title or criterion verbatim and
+`bdd spec draft` warns you.) Do **not** mark REQ-007 implemented yet.
 
 ## Recipe used for every pending requirement
 
@@ -131,14 +161,18 @@ Repeat the recipe. Suggested scenarios (reuse existing steps):
 | REQ-005 | Newlines alone delimit numbers | `"4\n5\n6"` | result is 15 |
 | REQ-006 | A negative number is rejected | `"1,-2"` | `Then an IllegalArgumentException is thrown with a message containing "negatives not allowed"` |
 | REQ-006 | Every negative number is listed in the error | `"-1,-2"` | two further `Then`/`And` steps containing `"-1"` and `"-2"` |
-| REQ-007 | Newlines as delimiters (workshop draft) | `"1\n2,3"` | result is 6 |
+| REQ-007 | A custom delimiter declared on the first line is used | `"//+\n1+2"` | result is 3 |
+| REQ-007 | An empty delimiter declaration is rejected | `"//\n1+2"` | `Then an IllegalArgumentException is thrown` |
 
-REQ-007 overlaps REQ-005. A second `@REQ-007` scenario is enough for
-`mark-implemented`. Dual-tagging one scenario `@REQ-005 @REQ-007` is
-optional.
+No earlier requirement overlaps REQ-007 — it is the behavior you drafted in
+Step 2, so both of its scenarios are new.
 
 Gherkin cannot put a real newline inside `"…"`. Write `\n` in the
 `When I add` string; `StringCalculatorSteps` unescapes it.
+
+`+` is a regex metacharacter, so `"1+2".split("+")` throws
+`PatternSyntaxException`. Take the RED bar first, then `Pattern.quote` the
+delimiter.
 
 ## Step 5 — Done
 

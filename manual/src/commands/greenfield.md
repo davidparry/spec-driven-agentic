@@ -54,7 +54,7 @@ instead of a blank title prompt:
 ```text
 Describe what to build in plain words (one or several requirements). Enter drafts manually instead:
 sum numbers from a comma separated string, empty input means zero
-Splitting the description into requirements with qwen3-coder-next:latest - working ...
+Splitting the description into requirements with qwen3.8-flash-next:125b-mlx - working ...
 Accept all these requirements to refine, or enter comma-separated numbers of the ones to accept.
 The description holds 2 requirement(s):
   1. Comma separated numbers are summed
@@ -173,7 +173,7 @@ and the findings each one produced, so the model never circles back to
 a wording the review already rejected:
 
 ```text
-Asking qwen3-coder-next:latest to address finding 1 of 1 - working ...
+Asking qwen3.8-flash-next:125b-mlx to address finding 1 of 1 - working ...
 The model reworded the draft. Each prompt shows its proposal - Enter accepts it, or type your own wording.
 ```
 
@@ -257,7 +257,7 @@ continue.
 - An LLM is optional: with no reachable Ollama model the generation
   steps fall back to deterministic templates you edit yourself. The
   model this CLI is developed and run against is
-  `qwen3-coder-next:latest` (`ollama pull qwen3-coder-next:latest`).
+  `qwen3.8-flash-next:125b-mlx` (`ollama pull qwen3.8-flash-next:125b-mlx`).
   Your mileage will vary with other models, especially those not
   trained for development work.
 

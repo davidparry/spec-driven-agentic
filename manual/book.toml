@@ -14,7 +14,7 @@ default-theme = "ayu"
 preferred-dark-theme = "ayu"
 git-repository-url = "https://github.com/davidparry/tdd-bdd-agentic"
 edit-url-template = "https://github.com/davidparry/tdd-bdd-agentic/edit/trunk/manual/{path}"
-site-url = "/tdd-bdd-agentic/manual/"
+site-url = "/spec-driven-agentic/manual/"
 
 [output.html.search]
 enable = true

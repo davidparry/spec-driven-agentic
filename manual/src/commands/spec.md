@@ -171,7 +171,7 @@ includes the edge-case criterion it added):
 Findings to address:
   - criteria: only happy paths - add at least one edge case (empty, invalid, or error input)
     try: add an edge case, e.g. Given an empty string "", when add is called, then the result is 0
-Asking qwen3-coder-next:latest to address finding 1 of 1 - working ...
+Asking qwen3.8-flash-next:125b-mlx to address finding 1 of 1 - working ...
 The model reworded the draft. Each prompt shows its proposal - Enter accepts it, or type your own wording.
 REQ-004 title [Newlines act as delimiters] (Enter keeps it):
 REQ-004 criterion 2 [Given an empty string "", when add is called, then the result is 0] (Enter keeps it, '-' drops it):

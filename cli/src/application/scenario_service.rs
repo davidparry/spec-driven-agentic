@@ -106,7 +106,7 @@ impl<C: ChangeStore, F: FeatureCatalog> ScenarioService<C, F> {
     /// The feature as it would look after commit: staged content wins,
     /// then the working tree; `None` when the file exists nowhere.
     fn effective_doc(&self, path: &str) -> Result<Option<FeatureDoc>, ServiceError> {
-        if let Some(content) = self.store.content(path).map_err(|e| ServiceError(e.0))? {
+        if let Some(content) = self.store.content(path)? {
             return feature::parse(path, &content)
                 .map(Some)
                 .map_err(ServiceError);
@@ -117,7 +117,7 @@ impl<C: ChangeStore, F: FeatureCatalog> ScenarioService<C, F> {
         self.catalog
             .read(path)
             .map(Some)
-            .map_err(|e| ServiceError(e.0))
+            .map_err(ServiceError::from)
     }
 
     fn existing_doc(&self, path: &str) -> Result<FeatureDoc, ServiceError> {
@@ -132,9 +132,7 @@ impl<C: ChangeStore, F: FeatureCatalog> ScenarioService<C, F> {
     fn stage(&self, doc: &FeatureDoc, summary: &str) -> Result<(), ServiceError> {
         let text = feature::render(doc);
         feature::parse(&doc.path, &text).map_err(ServiceError)?;
-        self.store
-            .stage(&doc.path, &text, summary)
-            .map_err(|e| ServiceError(e.0))?;
+        self.store.stage(&doc.path, &text, summary)?;
         Ok(())
     }
 

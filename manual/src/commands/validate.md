@@ -2,7 +2,9 @@
 
 Validate all Gherkin in the project — committed feature files **and**
 staged ones — so a broken scenario never reaches a test run. This is
-the cheap gate to run before `bdd changes commit`.
+the cheap gate to run before `bdd changes commit`. MCP clients call the
+same check as `changes_validate` (`validate_spec` remains the on-disk
+frozen tool).
 
 ```text
 Usage: bdd validate [OPTIONS]

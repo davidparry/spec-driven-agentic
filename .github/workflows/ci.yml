@@ -1,20 +1,12 @@
 # CI for the workshop repo.
 #
-# Four jobs, four meanings:
-#   - build-and-test: must be green on every branch. Runs Maven verify
-#     for mcp-server and mcp-client (JaCoCo 100%, SpotBugs, PMD) and a
-#     separate `mvn -f kata/pom.xml test` for the standalone kata
-#     (JUnit + Cucumber). Publishes every report as a build artifact.
-#   - cli: must be green on every branch. Runs the Rust bdd CLI's tests
-#     (unit + cucumber), clippy, and fmt from cli/.
-#   - class-completeness: asserts the 60-minute class deliverables exist
-#     (REQ-003 implemented, REQ-007 drafted). Runs only on the complete
-#     branch - trunk is the starting point attendees clone, so the check
-#     would fail there by definition.
-#   - workshop-start: the inverse gate. Asserts the workshop STARTING state
-#     (REQ-003..006 pending, no REQ-007, no scenarios beyond REQ-001/002).
-#     Runs only on trunk, catching any accidental "completeness leak" into
-#     the branch attendees clone.
+# Jobs:
+#   - build-and-test: smoke-test verify (JaCoCo 100%, SpotBugs, PMD) and
+#     `mvn -f kata/pom.xml test`. Does not require the bdd binary, so a
+#     missing Rust build cannot look like a JaCoCo failure.
+#   - cli: bdd tests, clippy, fmt, coverage, and the release binary.
+#   - smoke-test-live: needs cli; drives smoke-test.jar against that binary.
+#   - class-completeness / workshop-start: branch guards as before.
 name: CI
 
 on:
@@ -37,8 +29,8 @@ jobs:
           java-version: '21'
           cache: maven
 
-      - name: Verify MCP modules (tests, JaCoCo 100%, SpotBugs, PMD)
-        run: mvn -B verify
+      - name: Verify smoke test (tests, JaCoCo 100%, SpotBugs, PMD)
+        run: mvn -B -pl smoke-test verify
 
       - name: Test standalone kata (JUnit + Cucumber)
         run: mvn -B -f kata/pom.xml test
@@ -47,7 +39,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: reports-${{ github.ref_name }}-${{ github.run_number }}
+          name: reports-${{ github.run_id }}-${{ github.run_number }}
           if-no-files-found: warn
           path: |
             **/target/surefire-reports/**
@@ -62,8 +54,6 @@ jobs:
   cli:
     name: bdd CLI (tests, clippy, fmt, coverage)
     runs-on: ubuntu-latest
-    # contents: write lets the badge step push the coverage JSON to the
-    # badges branch; everything else in this job only reads.
     permissions:
       contents: write
     defaults:
@@ -91,11 +81,15 @@ jobs:
       - name: Format
         run: cargo fmt --check
 
-      # Line coverage over the library. main.rs (the composition root)
-      # is excluded - see cli/README.md for the documented metric.
-      # Measure first, then gate: --fail-under-lines exits before the
-      # percent is written, which left the badges-branch JSON stuck at
-      # the last passing value while this job went red.
+      - name: Release binary
+        run: cargo build --release
+
+      - name: Upload bdd binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: bdd-linux
+          path: cli/target/release/bdd
+
       - name: Coverage
         id: coverage
         run: |
@@ -109,10 +103,6 @@ jobs:
             exit 1
           fi
 
-      # shields.io renders the badge straight from this JSON on the
-      # badges branch, so the README badge updates on every trunk push
-      # without any external coverage service or token. always() keeps
-      # the badge in sync even when the gate fails.
       - name: Publish the coverage badge (trunk pushes only)
         if: always() && github.event_name == 'push' && github.ref_name == 'trunk' && steps.coverage.outputs.percent != ''
         working-directory: ${{ github.workspace }}
@@ -131,6 +121,30 @@ jobs:
           git add coverage.json
           git commit -m "cli coverage badge: ${PCT}% lines"
           git push --force origin badges
+
+  smoke-test-live:
+    name: smoke-test live against bdd
+    needs: cli
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: bdd-linux
+          path: /tmp/bdd-bin
+
+      - name: Live sweep (24 tools against the real binary)
+        run: |
+          chmod +x /tmp/bdd-bin/bdd
+          mvn -B -pl smoke-test test -Dbdd.binary=/tmp/bdd-bin/bdd
 
   class-completeness:
     name: Class completeness (complete branch only)

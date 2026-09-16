@@ -1,0 +1,69 @@
+# bdd CLI configuration.
+#
+# Keys left commented use the defaults shown. Uncomment to override.
+# [tools.profiles] is the tools each command offers the model.
+
+[llm]
+# Persisted by `bdd model use`. Flag `--model` wins for one run.
+model = "qwen3.8-flash-next:125b-mlx"
+endpoint = "http://localhost:11434"
+# Generation timeout; large prompts on local models can need more.
+timeout_seconds = 900
+# Identical requests reuse the cached response in .bdd-cache/
+# for this many seconds; 0 disables the cache.
+cache_ttl_seconds = 600
+# How many times to try a model call when the reply fails
+# validation; each retry includes the invalid reply. `--retry` wins.
+# retry = 3
+
+[tools]
+# Tool-call rounds Agent::ask may take before it must return a reply.
+# `--max-rounds` wins for one run.
+# max_rounds = 12
+# Names that must be confirmed by the human before the call runs.
+# confirm = ["command_run"]
+# How long connecting to an mcp.json server may take.
+# discovery_timeout_seconds = 10
+# How long one tool invocation may take.
+# call_timeout_seconds = 300
+# How long discovered mcp.json tool lists stay cached under .bdd-cache/tools/.
+# cache_ttl_seconds = 86400
+# Optional path to an mcp.json (otherwise the usual candidates are tried).
+# mcp_config = "mcp.json"
+
+# Tools offered to the model on each LLM-backed command. These are the
+# built-in defaults, written so you can see and edit them. A listed
+# command's array replaces that command's set. Name a tool as:
+#   validate_spec                 — built-in (exact catalog name)
+#   builtin:validate_spec         — the same built-in, pinned when an
+#                                   mcp.json tool shares the short name
+#   playwright:browser_navigate   — mcp.json server "playwright"
+#   playwright__browser_navigate  — same MCP tool (catalog name)
+#
+# Add an MCP server in mcp.json, then `bdd tools refresh`, then put
+# `server:tool` (or `server__tool`) on the command that should use it.
+
+[tools.profiles]
+# bdd spec draft
+spec-draft = ["list_requirements", "get_requirement", "validate_spec", "refine_requirement"]
+# bdd spec reword
+spec-reword = ["get_requirement", "validate_spec", "refine_requirement"]
+# bdd steps generate
+steps-generate = ["project_inspect", "feature_list", "feature_read", "step_definitions_find"]
+# bdd unittest generate
+unittest-generate = ["project_inspect", "get_requirement", "feature_read", "step_definitions_find"]
+# bdd implement (preflight advice)
+implement-advice = ["get_tdd_state", "validate_spec", "feature_list", "changes_show", "changes_validate"]
+# bdd implement
+implement = ["get_requirement", "feature_read", "step_definitions_find", "get_tdd_state", "run_tests", "command_run", "changes_show"]
+# bdd status
+status = ["project_root", "list_requirements", "get_requirement", "get_tdd_state", "validate_spec", "changes_show", "changes_validate"]
+# bdd ask
+ask = ["project_root", "list_requirements", "get_requirement", "validate_spec", "refine_requirement", "get_tdd_state", "project_inspect", "feature_list", "feature_read", "step_definitions_find", "changes_show", "changes_validate"]
+# Extra tools attached on top of the default or profiles list.
+# [tools.enabled]
+# implement = ["playwright:browser_navigate"]
+#
+# Tools removed from the default or profiles list.
+# [tools.disabled]
+# implement = ["command_run"]

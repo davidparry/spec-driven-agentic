@@ -2,7 +2,16 @@
 //! a build file, a Cucumber runner, an empty requirements spec, and the
 //! CLI configuration. Pure text; writing is the adapter's job.
 
+use crate::domain::config_report::{
+    DEFAULT_LLM_CACHE_TTL_SECONDS, DEFAULT_LLM_ENDPOINT, DEFAULT_LLM_RETRY,
+    DEFAULT_LLM_TIMEOUT_SECONDS, DEFAULT_TOOLS_CACHE_TTL_SECONDS,
+    DEFAULT_TOOLS_CALL_TIMEOUT_SECONDS, DEFAULT_TOOLS_CONFIRM,
+    DEFAULT_TOOLS_DISCOVERY_TIMEOUT_SECONDS, DEFAULT_TOOLS_MAX_ROUNDS,
+};
 use crate::domain::language::Language;
+use crate::domain::tool_profile::{Caller, default_profile};
+use crate::domain::tools::BUILTIN_ORIGIN;
+use crate::domain::{CONFIG_FILE, RECOMMENDED_MODEL};
 
 /// One file the scaffold wants on disk.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -22,18 +31,8 @@ pub fn scaffold(language: Language, project_name: &str) -> Vec<ScaffoldFile> {
             ),
         },
         ScaffoldFile {
-            path: ".bdd-mcp.toml".into(),
-            content: "[llm]\n# model = \"qwen3-coder-next:latest\"\n\
-                      endpoint = \"http://localhost:11434\"\n\
-                      # Generation timeout; large prompts on local models can need more.\n\
-                      # timeout_seconds = 300\n\
-                      # Identical requests reuse the cached response in .bdd-cache/\n\
-                      # for this many seconds; 0 disables the cache.\n\
-                      # cache_ttl_seconds = 600\n\
-                      # How many times to try a model call when the reply fails\n\
-                      # validation; each retry includes the invalid reply.\n\
-                      # retry = 3\n"
-                .into(),
+            path: CONFIG_FILE.into(),
+            content: default_config_toml(),
         },
         ScaffoldFile {
             path: ".gitignore".into(),
@@ -50,6 +49,102 @@ pub fn scaffold(language: Language, project_name: &str) -> Vec<ScaffoldFile> {
         Language::Rust => rust_files(project_name),
     });
     files
+}
+
+/// `.bdd.toml` with every key the CLI reads. Scalar knobs stay
+/// commented at their defaults. `[tools.profiles]` is written live:
+/// each LLM-backed command and the tools that call offers the model.
+pub fn default_config_toml() -> String {
+    format!(
+        "\
+# bdd CLI configuration.
+#
+# Keys left commented use the defaults shown. Uncomment to override.
+# [tools.profiles] is the tools each command offers the model.
+
+[llm]
+# Persisted by `bdd model use`. Flag `--model` wins for one run.
+# model = \"{model}\"
+endpoint = \"{endpoint}\"
+# Generation timeout; large prompts on local models can need more.
+# timeout_seconds = {timeout}
+# Identical requests reuse the cached response in .bdd-cache/
+# for this many seconds; 0 disables the cache.
+# cache_ttl_seconds = {llm_cache}
+# How many times to try a model call when the reply fails
+# validation; each retry includes the invalid reply. `--retry` wins.
+# retry = {retry}
+
+[tools]
+# Tool-call rounds Agent::ask may take before it must return a reply.
+# `--max-rounds` wins for one run.
+# max_rounds = {max_rounds}
+# Names that must be confirmed by the human before the call runs.
+# confirm = [{confirm}]
+# How long connecting to an mcp.json server may take.
+# discovery_timeout_seconds = {discovery}
+# How long one tool invocation may take.
+# call_timeout_seconds = {call}
+# How long discovered mcp.json tool lists stay cached under .bdd-cache/tools/.
+# cache_ttl_seconds = {tools_cache}
+# Optional path to an mcp.json (otherwise the usual candidates are tried).
+# mcp_config = \"mcp.json\"
+
+# Tools offered to the model on each LLM-backed command. These are the
+# built-in defaults, written so you can see and edit them. A listed
+# command's array replaces that command's set. Name a tool as:
+#   validate_spec                 — built-in (exact catalog name)
+#   {builtin}:validate_spec       — the same built-in, pinned when an
+#                                   mcp.json tool shares the short name
+#   playwright:browser_navigate   — mcp.json server \"playwright\"
+#   playwright__browser_navigate  — same MCP tool (catalog name)
+#
+# Add an MCP server in mcp.json, then `bdd tools refresh`, then put
+# `server:tool` (or `server__tool`) on the command that should use it.
+
+{profiles}\
+# Extra tools attached on top of the default or profiles list.
+# [tools.enabled]
+# implement = [\"playwright:browser_navigate\"]
+#
+# Tools removed from the default or profiles list.
+# [tools.disabled]
+# implement = [\"command_run\"]
+",
+        model = RECOMMENDED_MODEL,
+        endpoint = DEFAULT_LLM_ENDPOINT,
+        timeout = DEFAULT_LLM_TIMEOUT_SECONDS,
+        llm_cache = DEFAULT_LLM_CACHE_TTL_SECONDS,
+        retry = DEFAULT_LLM_RETRY,
+        max_rounds = DEFAULT_TOOLS_MAX_ROUNDS,
+        confirm = toml_quoted_list(DEFAULT_TOOLS_CONFIRM),
+        discovery = DEFAULT_TOOLS_DISCOVERY_TIMEOUT_SECONDS,
+        call = DEFAULT_TOOLS_CALL_TIMEOUT_SECONDS,
+        tools_cache = DEFAULT_TOOLS_CACHE_TTL_SECONDS,
+        builtin = BUILTIN_ORIGIN,
+        profiles = default_profiles_toml(),
+    )
+}
+
+fn default_profiles_toml() -> String {
+    let mut out = String::from("[tools.profiles]\n");
+    for caller in Caller::ALL {
+        out.push_str(&format!(
+            "# {}\n{} = [{}]\n",
+            caller.cli_command(),
+            caller.key(),
+            toml_quoted_list(default_profile(caller))
+        ));
+    }
+    out
+}
+
+fn toml_quoted_list(names: &[&str]) -> String {
+    names
+        .iter()
+        .map(|name| format!("\"{name}\""))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn java_files(project_name: &str) -> Vec<ScaffoldFile> {
@@ -326,13 +421,13 @@ mod tests {
                 paths.contains(&"requirements/requirements.json"),
                 "{language:?}: {paths:?}"
             );
-            assert!(paths.contains(&".bdd-mcp.toml"), "{language:?}: {paths:?}");
+            assert!(paths.contains(&CONFIG_FILE), "{language:?}: {paths:?}");
             let spec = &files[0].content;
             assert!(spec.contains("\"project\": \"String Calculator\""));
             assert!(spec.contains("\"requirements\": []"));
-            let toml = files.iter().find(|f| f.path == ".bdd-mcp.toml").unwrap();
+            let toml = files.iter().find(|f| f.path == CONFIG_FILE).unwrap();
             assert!(
-                toml.content.contains("qwen3-coder-next:latest"),
+                toml.content.contains(crate::domain::RECOMMENDED_MODEL),
                 "{language:?}: recommended Ollama model missing from scaffold"
             );
             assert!(
@@ -340,9 +435,59 @@ mod tests {
                 "{language:?}: response-cache knob missing from scaffold"
             );
             assert!(
-                toml.content.contains("retry = 3"),
+                toml.content
+                    .contains(&format!("retry = {DEFAULT_LLM_RETRY}")),
                 "{language:?}: retry knob missing from scaffold"
             );
+            assert!(
+                toml.content.contains("[tools.profiles]"),
+                "{language:?}: per-command tool mapping missing from scaffold"
+            );
+            assert!(
+                toml.content.contains("\nspec-draft = ["),
+                "{language:?}: default profiles must be written live, not commented"
+            );
+            assert!(
+                toml.content
+                    .contains(&format!("{BUILTIN_ORIGIN}:validate_spec")),
+                "{language:?}: builtin qualifier missing from scaffold"
+            );
+            for caller in Caller::ALL {
+                assert!(
+                    toml.content.contains(caller.key()),
+                    "{language:?}: caller {} missing from scaffold",
+                    caller.key()
+                );
+                assert!(
+                    toml.content.contains(caller.cli_command()),
+                    "{language:?}: CLI command {} missing from scaffold",
+                    caller.cli_command()
+                );
+            }
+            let table = toml
+                .content
+                .parse::<toml::Table>()
+                .expect("the scaffold .bdd.toml must be valid TOML");
+            let profiles = table
+                .get("tools")
+                .and_then(|v| v.get("profiles"))
+                .and_then(|v| v.as_table())
+                .expect("live [tools.profiles] table");
+            for caller in Caller::ALL {
+                let names: Vec<&str> = profiles
+                    .get(caller.key())
+                    .and_then(|v| v.as_array())
+                    .unwrap_or_else(|| panic!("missing profile {}", caller.key()))
+                    .iter()
+                    .map(|item| item.as_str().expect("tool name"))
+                    .collect();
+                assert_eq!(
+                    names,
+                    default_profile(caller),
+                    "{language:?}: {} tools",
+                    caller.key()
+                );
+            }
             let gitignore = files.iter().find(|f| f.path == ".gitignore").unwrap();
             assert!(
                 gitignore.content.contains(".bdd-cache/"),

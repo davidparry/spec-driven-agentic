@@ -35,10 +35,10 @@
             const path_to_root = "";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "searchindex-e8590d4e.js";
+            window.path_to_searchindex_js = "searchindex-8826377a.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-521911c0.js"></script>
+        <script src="toc-9d4e1520.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -196,9 +196,9 @@ cargo build --release
 <h2 id="local-llm-ollama"><a class="header" href="#local-llm-ollama">Local LLM (Ollama)</a></h2>
 <p>LLM-backed generation uses a local <a href="https://ollama.com">Ollama</a>
 instance. The model this CLI is developed and run against is
-<code>qwen3-coder-next:latest</code>:</p>
-<pre><code class="language-bash">ollama pull qwen3-coder-next:latest
-bdd model use qwen3-coder-next:latest
+<code>qwen3.8-flash-next:125b-mlx</code>:</p>
+<pre><code class="language-bash">ollama pull qwen3.8-flash-next:125b-mlx
+bdd model use qwen3.8-flash-next:125b-mlx
 </code></pre>
 <p>Your mileage will vary with a different model. A stronger coding model
 may draft, generate, and implement better; a model trained for chat,
@@ -218,7 +218,7 @@ version, the model status, and an interactive prompt:</p>
   ▲                                  │
   ╰──────────────────────────────────╯
 
-Model set for this session: qwen3-coder-next:latest (not saved - keep it with: bdd model use qwen3-coder-next:latest).
+Model set for this session: qwen3.8-flash-next:125b-mlx (not saved - keep it with: bdd model use qwen3.8-flash-next:125b-mlx).
 Interactive shell - type commands without the bdd prefix (e.g. spec list).
 bdd&gt;
 </code></pre>

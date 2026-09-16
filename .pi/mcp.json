@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "spec-driven-server": {
+      "transport": "stdio",
+      "command": "bdd",
+      "args": ["mcp", "serve"],
+      "lifecycle": "eager"
+    }
+  }
+}

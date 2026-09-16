@@ -36,15 +36,12 @@ pub(crate) fn find_missing_steps(
     language: Language,
 ) -> Result<Vec<MissingStep>, ServiceError> {
     let docs: Vec<FeatureDoc> = features
-        .list()
-        .map_err(|e| ServiceError(e.0))?
+        .list()?
         .iter()
         .map(|summary| features.read(&summary.path))
-        .collect::<Result<_, _>>()
-        .map_err(|e| ServiceError(e.0))?;
+        .collect::<Result<_, _>>()?;
     let patterns: Vec<String> = sources
-        .sources(source_extension(language))
-        .map_err(|e| ServiceError(e.0))?
+        .sources(source_extension(language))?
         .iter()
         .flat_map(|file| extract_patterns(language, &file.content))
         .collect();
@@ -57,10 +54,8 @@ pub(crate) fn feature_tagged(
     features: &impl FeatureCatalog,
     tag: &str,
 ) -> Result<Option<String>, ServiceError> {
-    for summary in features.list().map_err(|e| ServiceError(e.0))? {
-        let doc = features
-            .read(&summary.path)
-            .map_err(|e| ServiceError(e.0))?;
+    for summary in features.list()? {
+        let doc = features.read(&summary.path)?;
         if doc.all_tags().iter().any(|t| t == tag) {
             return Ok(Some(doc.path));
         }
@@ -102,9 +97,7 @@ pub(crate) fn asset_survey(
         present: tagged_feature.is_some(),
     });
 
-    let source_files = sources
-        .sources(source_extension(language))
-        .map_err(|e| ServiceError(e.0))?;
+    let source_files = sources.sources(source_extension(language))?;
 
     let missing_steps = find_missing_steps(features, sources, language)?;
     if !missing_steps.is_empty() {

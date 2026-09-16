@@ -16,7 +16,7 @@ flowchart TD
     subgraph phase0 [Phase 0 - Scaffolding, one time, no behavior yet]
         pom["1. pom.xml (MCP reactor) + kata/pom.xml<br/>(standalone kata: JUnit 5, Cucumber, AssertJ)"]
         runner["2. RunCucumberTest.java<br/>Cucumber-JUnit bridge, empty suite"]
-        mcp["3. .cursor/mcp.json + mcp-server jar<br/>agent tooling (optional)"]
+        mcp["3. .cursor/mcp.json → bdd mcp serve<br/>agent tooling (optional)"]
         pom --> runner --> mcp
     end
 
@@ -59,15 +59,16 @@ flowchart TD
 
 **Phase 0 — scaffolding (once, before any behavior exists):**
 
-1. `pom.xml` (MCP server + client reactor) and `kata/pom.xml` (a
+1. `pom.xml` (smoke-test reactor) and `kata/pom.xml` (a
    **standalone** Maven project — no parent — with JUnit 5, Cucumber,
    AssertJ). The kata compiles and runs on its own: `mvn -f kata/pom.xml test`.
+   The workshop server is the `bdd` binary, not a Maven module.
 2. `kata/src/test/java/com/davidparry/workshop/kata/RunCucumberTest.java` —
    the bridge that makes Cucumber scenarios run under JUnit. Created once,
    never changed; with no feature files yet it discovers nothing.
-3. `.cursor/mcp.json` and the `mcp-server` jar — the agent tooling. Optional
-   in the sense that the loop works by hand; in this workshop it is what
-   turns the spec into something an agent can be *held to*.
+3. `.cursor/mcp.json` pointing at `bdd mcp serve --root …` — the agent
+   tooling. Optional in the sense that the loop works by hand; in this
+   workshop it is what turns the spec into something an agent can be *held to*.
 
 **Phase 1 — the spec is the first meaningful artifact:**
 

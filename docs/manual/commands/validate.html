@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-e8590d4e.js";
+            window.path_to_searchindex_js = "../searchindex-8826377a.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-521911c0.js"></script>
+        <script src="../toc-9d4e1520.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -183,7 +183,9 @@
                         <h1 id="bdd-validate"><a class="header" href="#bdd-validate">bdd validate</a></h1>
 <p>Validate all Gherkin in the project — committed feature files <strong>and</strong>
 staged ones — so a broken scenario never reaches a test run. This is
-the cheap gate to run before <code>bdd changes commit</code>.</p>
+the cheap gate to run before <code>bdd changes commit</code>. MCP clients call the
+same check as <code>changes_validate</code> (<code>validate_spec</code> remains the on-disk
+frozen tool).</p>
 <pre><code class="language-text">Usage: bdd validate [OPTIONS]
 </code></pre>
 <h2 id="flags"><a class="header" href="#flags">Flags</a></h2>

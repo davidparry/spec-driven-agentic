@@ -7,48 +7,56 @@ use std::path::{Path, PathBuf};
 
 use clap::{Args, Parser, Subcommand};
 
-use bdd_cli::adapters::config::TomlModelStore;
+use bdd_cli::adapters::chat_cache::{CachedConversation, DEFAULT_CACHE_TTL};
+use bdd_cli::adapters::config::{
+    TomlModelStore, TomlToolStore, config_path, inspect_config, tools_settings,
+};
 use bdd_cli::adapters::console_prompt::ConsolePrompter;
 use bdd_cli::adapters::fs_project::FsProjectFiles;
 use bdd_cli::adapters::fs_scaffold::FsScaffoldWriter;
-use bdd_cli::adapters::fs_sources::FsSourceFiles;
-use bdd_cli::adapters::fs_spec::{FsFeatureFiles, FsSpecRepository};
+use bdd_cli::adapters::fs_spec::FsSpecRepository;
 use bdd_cli::adapters::fs_staging::FsChangeStore;
-use bdd_cli::adapters::fs_state::FsStateStore;
-use bdd_cli::adapters::gherkin_features::GherkinFeatureCatalog;
-use bdd_cli::adapters::llm_cache::{CachedGenerator, DEFAULT_CACHE_TTL};
-use bdd_cli::adapters::ollama::{
-    DEFAULT_ENDPOINT, DEFAULT_GENERATION_TIMEOUT, OllamaCatalog, OllamaGenerator,
-};
-use bdd_cli::adapters::overlay::{OverlayCatalog, OverlaySources};
+use bdd_cli::adapters::mcp_client::McpToolBroker;
+use bdd_cli::adapters::mcp_config::FsMcpRegistry;
+use bdd_cli::adapters::ollama::{DEFAULT_ENDPOINT, DEFAULT_GENERATION_TIMEOUT, OllamaCatalog};
+use bdd_cli::adapters::ollama_chat::OllamaChat;
 use bdd_cli::adapters::process_runtime::ProcessRuntimeProbe;
 use bdd_cli::adapters::readline_prompt::ReadlinePrompter;
 use bdd_cli::adapters::readline_shell::ReadlineShell;
 use bdd_cli::adapters::runners::detect_runner;
 use bdd_cli::adapters::spinner::Spinner;
+use bdd_cli::adapters::tool_cache::CachedDiscovery;
 use bdd_cli::application::DEFAULT_LLM_ATTEMPTS;
-use bdd_cli::application::change_service::ChangeService;
+use bdd_cli::application::agent_service::AgentConfig;
 use bdd_cli::application::generation_service::{GenerationService, ResolvedLlm};
 use bdd_cli::application::implement_service::ImplementService;
 use bdd_cli::application::init_service::InitService;
 use bdd_cli::application::inspect_service::InspectService;
-use bdd_cli::application::memory_service::MemoryAwareGenerator;
+use bdd_cli::application::memory_service::MemoryAwareConversation;
 use bdd_cli::application::model_service::{
     ModelResolution, ModelService, ModelSource, SessionModel,
 };
-use bdd_cli::application::scenario_service::ScenarioService;
 use bdd_cli::application::spec_mutation_service::SpecMutationService;
-use bdd_cli::application::spec_service::SpecService;
 use bdd_cli::application::status_service::StatusService;
-use bdd_cli::application::tdd_service::{TddError, TddService};
-use bdd_cli::domain::language::{Language, detect_languages};
+use bdd_cli::application::tdd_service::TddError;
+use bdd_cli::application::tool_call_service::ToolCallService;
+use bdd_cli::application::tool_service::ToolService;
+use bdd_cli::domain::RECOMMENDED_MODEL;
+use bdd_cli::domain::config_report::{ConfigSource, LLM_MODEL_KEY};
+use bdd_cli::domain::language::Language;
+use bdd_cli::domain::mcp_registry::ServerSpec;
+use bdd_cli::domain::prompts::ask_prompt;
 use bdd_cli::domain::tdd::ImplementAttempt;
+use bdd_cli::domain::tool_profile::{Caller, resolve};
 use bdd_cli::greenfield::{
-    DynLlm, Greenfield, parse_language, project_memory_service, prompt_language,
-    refresh_project_memory,
+    DynLlm, Greenfield, parse_language, prompt_language, refresh_project_memory,
 };
-use bdd_cli::ports::{FeatureCatalog as _, Prompter, TestFilter};
+use bdd_cli::mcp::{WorkflowServer, builtin_tool_definitions};
+use bdd_cli::ports::{
+    FeatureCatalog as _, McpRegistrySource as _, Prompter, TestFilter, ToolStore as _,
+};
 use bdd_cli::repl::{Ending, is_greenfield_start, offer_greenfield, run_shell};
+use bdd_cli::wiring;
 use bdd_cli::workspace::{SPEC_PATH, detect_project_layout};
 
 #[derive(Parser)]
@@ -62,7 +70,7 @@ struct Cli {
     #[arg(long, global = true)]
     model: Option<String>,
 
-    /// Project root (where requirements/ and .bdd-mcp.toml live)
+    /// Project root (where requirements/ and .bdd.toml live)
     #[arg(long, global = true, default_value = ".")]
     root: PathBuf,
 
@@ -73,6 +81,14 @@ struct Cli {
     /// Max attempts when a model reply fails validation (default 3)
     #[arg(long, global = true)]
     retry: Option<u32>,
+
+    /// Replace this command's tool profile for one run (comma-separated names)
+    #[arg(long, global = true)]
+    tools: Option<String>,
+
+    /// Override [tools] max_rounds for one run
+    #[arg(long, global = true)]
+    max_rounds: Option<u32>,
 
     /// Omitted entirely: print help and open the interactive shell
     #[command(subcommand)]
@@ -120,9 +136,25 @@ enum Command {
     /// LLM model discovery and selection (Ollama)
     #[command(subcommand)]
     Model(ModelCommand),
+    /// Print resolved configuration and where each value came from
+    Config {
+        /// Print JSON instead of the tab-separated table
+        #[arg(long)]
+        json: bool,
+    },
     /// MCP server
     #[command(subcommand)]
     Mcp(McpCommand),
+    /// Per-command tool profiles and the external MCP registry
+    #[command(subcommand)]
+    Tools(ToolsCommand),
+    /// Free-form question with the read-only tool profile
+    Ask {
+        /// The question. Omit on a tty for a multi-turn prompt.
+        task: Vec<String>,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -303,6 +335,80 @@ enum ModelCommand {
 enum McpCommand {
     /// Serve the MCP tools over stdio
     Serve,
+    /// List tools over one throwaway MCP session
+    Tools {
+        /// Spawn `bdd mcp serve` as a child instead of the in-process loopback
+        #[arg(long)]
+        stdio: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Call one tool over a throwaway MCP session
+    Call {
+        tool: String,
+        /// Repeatable key=value (always a string unless the value parses as JSON)
+        #[arg(long = "arg", value_parser = parse_arg_pair)]
+        arg: Vec<(String, String)>,
+        /// JSON object merged under --arg
+        #[arg(long = "args")]
+        args: Option<String>,
+        /// Spawn `bdd mcp serve` as a child instead of the in-process loopback
+        #[arg(long)]
+        stdio: bool,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum ToolsCommand {
+    /// List tools (optionally one caller's resolved profile)
+    List {
+        #[arg(long = "for")]
+        for_caller: Option<String>,
+        #[arg(long)]
+        offline: bool,
+        #[arg(long)]
+        refresh: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Every caller and its resolved tool set
+    Profiles {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Description, JSON Schema, and origin of one tool
+    Show { name: String },
+    /// Attach a tool to one command's profile
+    Enable {
+        name: String,
+        #[arg(long = "for")]
+        for_caller: Option<String>,
+    },
+    /// Remove a tool from one command's profile
+    Disable {
+        name: String,
+        #[arg(long = "for")]
+        for_caller: Option<String>,
+    },
+    /// Rediscover every registered server and rewrite the catalog cache
+    Refresh,
+    /// Registered servers, config path, and problems
+    Servers {
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+fn parse_arg_pair(raw: &str) -> Result<(String, String), String> {
+    let (key, value) = raw
+        .split_once('=')
+        .ok_or_else(|| format!("--arg expects key=value, got {raw}"))?;
+    if key.is_empty() {
+        return Err("--arg key is empty".into());
+    }
+    Ok((key.to_string(), value.to_string()))
 }
 
 /// A command that already printed its (JSON) reply but must exit
@@ -329,6 +435,8 @@ fn main() -> anyhow::Result<()> {
                 &cli.root,
                 cli.model.as_deref(),
                 cli.retry,
+                cli.tools.as_deref(),
+                cli.max_rounds,
                 &Command::Greenfield,
             ) {
                 Err(error) if error.is::<NonzeroExit>() => {
@@ -339,7 +447,14 @@ fn main() -> anyhow::Result<()> {
                 Ok(()) => resume_shell_after_greenfield(&cli.root, cli.model.as_deref(), cli.retry),
             }
         }
-        Some(ref command) => match execute(&cli.root, cli.model.as_deref(), cli.retry, command) {
+        Some(ref command) => match execute(
+            &cli.root,
+            cli.model.as_deref(),
+            cli.retry,
+            cli.tools.as_deref(),
+            cli.max_rounds,
+            command,
+        ) {
             Err(error) if error.is::<NonzeroExit>() => {
                 // process::exit skips destructors; flush the log queue first.
                 drop(log_guard);
@@ -398,12 +513,23 @@ fn execute(
     root: &Path,
     model: Option<&str>,
     retry: Option<u32>,
+    tools: Option<&str>,
+    max_rounds: Option<u32>,
     command: &Command,
 ) -> anyhow::Result<()> {
     let attempts = resolve_llm_attempts(root, retry);
     match command {
-        Command::Spec(command) => run_spec(root, model, attempts, command),
+        Command::Spec(command) => run_spec(root, model, attempts, tools, max_rounds, command),
         Command::Model(command) => run_model(root, model, command),
+        Command::Config { json } => {
+            let report = config_report(root);
+            if *json {
+                print_json(&report)
+            } else {
+                print!("{report}");
+                Ok(())
+            }
+        }
         Command::Inspect => {
             let service =
                 InspectService::new(FsProjectFiles::new(root.to_path_buf()), ProcessRuntimeProbe);
@@ -412,16 +538,13 @@ fn execute(
         Command::Feature(command) => run_feature(root, command),
         Command::Scenario(command) => run_scenario(root, command),
         Command::Changes(command) => run_changes(root, command),
-        Command::Validate => print_json(
-            &change_service(root)
-                .validate()
-                .map_err(|e| anyhow::anyhow!(e.0))?,
-        ),
+        Command::Validate => print_json(&change_service(root).validate()?),
         Command::Init(args) => run_init(root, args),
         Command::Greenfield => run_greenfield(root, model, attempts),
-        Command::Mcp(McpCommand::Serve) => {
-            let runtime = tokio::runtime::Runtime::new()?;
-            runtime.block_on(bdd_cli::mcp::serve_stdio(root.to_path_buf()))
+        Command::Mcp(command) => run_mcp(root, command),
+        Command::Tools(command) => run_tools(root, command),
+        Command::Ask { task, json } => {
+            run_ask(root, model, attempts, tools, max_rounds, task, *json)
         }
         Command::Test(args) => run_test(root, args),
         Command::State => tdd_reply(tdd_service(root).state()),
@@ -429,10 +552,8 @@ fn execute(
             let state = tdd_service(root)
                 .state()
                 .map_err(|e| anyhow::anyhow!(tdd_error_message(e)))?;
-            let service = status_service(root, model, attempts)?;
-            let report = service
-                .status(&state.phase)
-                .map_err(|e| anyhow::anyhow!(e.0))?;
+            let service = status_service(root, model, attempts, tools, max_rounds)?;
+            let report = service.status(&state.phase)?;
             print_json(&report)?;
             // Deterministic nextStep already names the command for asset
             // gaps. Do not let the model override that with spec draft.
@@ -440,7 +561,8 @@ fn execute(
                 const RED: &str = "\x1b[31m";
                 const RESET: &str = "\x1b[0m";
                 let work = Spinner::start("Asking the model for the next step - working");
-                let advice = service.advice(&report, &state.last_run);
+                let mut prompter = interactive_prompter();
+                let advice = service.advice(prompter.as_mut(), &report, &state.last_run);
                 drop(work);
                 match advice {
                     Ok(Some(advice)) => println!("Model advice: {advice}"),
@@ -452,13 +574,19 @@ fn execute(
         }
         Command::Refactor(args) => tdd_reply(tdd_service(root).refactor(args.note.as_deref())),
         Command::Steps(command) => {
-            let service = generation_service(root, model, attempts)?;
+            let service = generation_service(
+                root,
+                model,
+                attempts,
+                tools,
+                max_rounds,
+                Caller::StepsGenerate,
+            )?;
             match command {
-                StepsCommand::Missing => {
-                    print_json(&service.steps_missing().map_err(|e| anyhow::anyhow!(e.0))?)
-                }
+                StepsCommand::Missing => print_json(&service.steps_missing()?),
                 StepsCommand::Generate => {
-                    print_json(&service.steps_generate().map_err(|e| anyhow::anyhow!(e.0))?)
+                    let mut prompter = interactive_prompter();
+                    print_json(&service.steps_generate(prompter.as_mut())?)
                 }
             }
         }
@@ -466,8 +594,9 @@ fn execute(
             const RED: &str = "\x1b[31m";
             const GREEN: &str = "\x1b[32m";
             const RESET: &str = "\x1b[0m";
-            let service = implement_service(root, model, attempts)?;
-            let tdd = TddService::new(FsStateStore::new(root.to_path_buf()));
+            let service =
+                implement_service(root, model, attempts, tools, max_rounds, Caller::Implement)?;
+            let tdd = tdd_service(root);
             let phase = tdd
                 .state()
                 .map_err(|e| anyhow::anyhow!(tdd_error_message(e)))?
@@ -486,9 +615,7 @@ fn execute(
                 brief.failures.len(),
                 brief.history.len()
             );
-            let readiness = service
-                .readiness(req_id, &phase, &brief.failures)
-                .map_err(|e| anyhow::anyhow!(e.0))?;
+            let readiness = service.readiness(req_id, &phase, &brief.failures)?;
             for asset in &readiness.assets {
                 let mark = if asset.present {
                     format!("{GREEN}present{RESET}")
@@ -497,6 +624,7 @@ fn execute(
                 };
                 println!("  {}: {} - {mark}", asset.role, asset.path);
             }
+            let mut prompter = interactive_prompter();
             if !readiness.ready {
                 for finding in &readiness.findings {
                     println!("{RED}{finding}{RESET}");
@@ -504,7 +632,20 @@ fn execute(
                 if service.has_model() {
                     let work =
                         Spinner::start("Asking the model whether implement can run - working");
-                    let advice = service.advice(req_id, &readiness, &brief.failures);
+                    let advice_service = implement_service(
+                        root,
+                        model,
+                        attempts,
+                        tools,
+                        max_rounds,
+                        Caller::ImplementAdvice,
+                    )?;
+                    let advice = advice_service.advice(
+                        prompter.as_mut(),
+                        req_id,
+                        &readiness,
+                        &brief.failures,
+                    );
                     drop(work);
                     match advice {
                         Ok(Some(advice)) => println!("Model advice: {advice}"),
@@ -519,8 +660,14 @@ fn execute(
                  to the model - working",
             );
             let report = service
-                .generate(req_id, &brief.failures, &brief.history, &brief.states)
-                .map_err(|e| anyhow::anyhow!(e.0));
+                .generate(
+                    prompter.as_mut(),
+                    req_id,
+                    &brief.failures,
+                    &brief.history,
+                    &brief.states,
+                )
+                .map_err(anyhow::Error::from);
             drop(work);
             let report = report?;
             for target in &report.targets {
@@ -539,18 +686,23 @@ fn execute(
             })
             .map_err(|e| anyhow::anyhow!(tdd_error_message(e)))?;
             print_json(&report)?;
+            drop(prompter);
             if report.staged && !report.targets.is_empty() {
                 implement_follow_up(root, req_id)?;
             }
             Ok(())
         }
         Command::Unittest(UnittestCommand::Generate { req_id }) => {
-            let service = generation_service(root, model, attempts)?;
-            print_json(
-                &service
-                    .unittest_generate(req_id)
-                    .map_err(|e| anyhow::anyhow!(e.0))?,
-            )
+            let service = generation_service(
+                root,
+                model,
+                attempts,
+                tools,
+                max_rounds,
+                Caller::UnittestGenerate,
+            )?;
+            let mut prompter = interactive_prompter();
+            print_json(&service.unittest_generate(prompter.as_mut(), req_id)?)
         }
     }
 }
@@ -604,13 +756,13 @@ fn announce_session_model(root: &Path, flag: Option<&str>) -> bool {
         SessionModel::NoModels => println!(
             "Ollama is running but has no models - generation will use \
              deterministic templates. For optimal results pull a coding \
-             model, e.g.: ollama pull qwen3-coder-next:latest \
+             model, e.g.: ollama pull {RECOMMENDED_MODEL} \
              (mileage varies with models not trained for development)"
         ),
         SessionModel::ProviderDown(_) => println!(
             "Ollama is not reachable - generation will use deterministic \
              templates. Install it from https://ollama.com, start it, and \
-             pull a coding model, e.g.: ollama pull qwen3-coder-next:latest \
+             pull a coding model, e.g.: ollama pull {RECOMMENDED_MODEL} \
              (mileage varies with models not trained for development)"
         ),
     }
@@ -682,7 +834,14 @@ fn interactive_shell_loop(
                     let line_root = if explicit_root { &cli.root } else { root };
                     let line_model = cli.model.as_deref().or(model);
                     let line_retry = cli.retry.or(retry);
-                    match execute(line_root, line_model, line_retry, &command) {
+                    match execute(
+                        line_root,
+                        line_model,
+                        line_retry,
+                        cli.tools.as_deref(),
+                        cli.max_rounds,
+                        &command,
+                    ) {
                         Ok(()) => {}
                         // The refusal already printed its JSON reply.
                         Err(error) if error.is::<NonzeroExit>() => {}
@@ -713,35 +872,18 @@ fn interactive_shell_loop(
 /// Detect the project's primary language. Memory (a greenfield choice)
 /// wins over marker detection so a polyglot tree keeps the chosen stack.
 fn primary_language(root: &Path) -> anyhow::Result<Language> {
-    if let Ok(memory) = project_memory_service(root.to_path_buf()).load()
-        && let Some(language) = Language::parse(&memory.language)
-    {
-        return Ok(language);
-    }
-    let files = FsProjectFiles::new(root.to_path_buf());
-    detect_languages(&files).first().copied().ok_or_else(|| {
-        anyhow::anyhow!(
-            "No supported project detected (pom.xml, build.gradle, package.json, \
-             *.csproj, Cargo.toml). Run bdd inspect."
-        )
-    })
+    bdd_cli::workspace::primary_language(root).map_err(anyhow::Error::msg)
 }
 
-type OverlayFeatures = OverlayCatalog<GherkinFeatureCatalog, FsChangeStore>;
-type OverlayTree = OverlaySources<FsSourceFiles, FsChangeStore>;
+type OverlayFeatures = wiring::OverlayFeatures;
+type OverlayTree = wiring::OverlayTree;
 
 fn overlay_catalog(root: &Path) -> OverlayFeatures {
-    OverlayCatalog::new(
-        GherkinFeatureCatalog::new(root.to_path_buf()),
-        FsChangeStore::new(root.to_path_buf()),
-    )
+    wiring::overlay_catalog(root)
 }
 
 fn overlay_sources(root: &Path) -> OverlayTree {
-    OverlaySources::new(
-        FsSourceFiles::new(root.to_path_buf()),
-        FsChangeStore::new(root.to_path_buf()),
-    )
+    wiring::overlay_sources(root)
 }
 
 fn deterministic_status_gap(next_step: &str) -> bool {
@@ -756,19 +898,27 @@ fn generation_service(
     root: &Path,
     model_flag: Option<&str>,
     attempts: u32,
+    tools: Option<&str>,
+    max_rounds: Option<u32>,
+    caller: Caller,
 ) -> anyhow::Result<
-    GenerationService<OverlayFeatures, OverlayTree, FsChangeStore, FsSpecRepository, Llm>,
+    GenerationService<
+        OverlayFeatures,
+        OverlayTree,
+        FsChangeStore,
+        FsSpecRepository,
+        ChatLlm,
+        LiveBroker,
+    >,
 > {
     let language = primary_language(root)?;
-    let llm = resolved_ollama(root, model_flag)
-        .map(|(model, generator)| ResolvedLlm::with_attempts(model, generator, attempts));
     Ok(GenerationService::new(
         overlay_catalog(root),
         overlay_sources(root),
-        FsChangeStore::new(root.to_path_buf()),
-        FsSpecRepository::new(root.join(SPEC_PATH)),
+        wiring::change_store(root),
+        wiring::spec_repository(root),
         language,
-        llm,
+        connected_llm(root, model_flag, caller, attempts, tools, max_rounds),
     ))
 }
 
@@ -776,19 +926,27 @@ fn implement_service(
     root: &Path,
     model_flag: Option<&str>,
     attempts: u32,
+    tools: Option<&str>,
+    max_rounds: Option<u32>,
+    caller: Caller,
 ) -> anyhow::Result<
-    ImplementService<OverlayFeatures, OverlayTree, FsChangeStore, FsSpecRepository, Llm>,
+    ImplementService<
+        OverlayFeatures,
+        OverlayTree,
+        FsChangeStore,
+        FsSpecRepository,
+        ChatLlm,
+        LiveBroker,
+    >,
 > {
     let language = primary_language(root)?;
-    let llm = resolved_ollama(root, model_flag)
-        .map(|(model, generator)| ResolvedLlm::with_attempts(model, generator, attempts));
     Ok(ImplementService::new(
         overlay_catalog(root),
         overlay_sources(root),
-        FsChangeStore::new(root.to_path_buf()),
-        FsSpecRepository::new(root.join(SPEC_PATH)),
+        wiring::change_store(root),
+        wiring::spec_repository(root),
         language,
-        llm,
+        connected_llm(root, model_flag, caller, attempts, tools, max_rounds),
     ))
 }
 
@@ -796,35 +954,52 @@ fn status_service(
     root: &Path,
     model_flag: Option<&str>,
     attempts: u32,
-) -> anyhow::Result<StatusService<OverlayFeatures, OverlayTree, FsChangeStore, FsSpecRepository, Llm>>
-{
-    let llm = resolved_ollama(root, model_flag)
-        .map(|(model, generator)| ResolvedLlm::with_attempts(model, generator, attempts));
+    tools: Option<&str>,
+    max_rounds: Option<u32>,
+) -> anyhow::Result<
+    StatusService<
+        OverlayFeatures,
+        OverlayTree,
+        FsChangeStore,
+        FsSpecRepository,
+        ChatLlm,
+        LiveBroker,
+    >,
+> {
     Ok(StatusService::new(
         overlay_catalog(root),
         overlay_sources(root),
-        FsChangeStore::new(root.to_path_buf()),
-        FsSpecRepository::new(root.join(SPEC_PATH)),
+        wiring::change_store(root),
+        wiring::spec_repository(root),
         primary_language(root)?,
-        llm,
+        connected_llm(
+            root,
+            model_flag,
+            Caller::Status,
+            attempts,
+            tools,
+            max_rounds,
+        ),
     ))
 }
 
-fn spec_service(root: &Path) -> SpecService<FsSpecRepository, FsFeatureFiles> {
-    SpecService::new(
-        FsSpecRepository::new(root.join(SPEC_PATH)),
-        FsFeatureFiles::new(root.to_path_buf()),
-        detect_project_layout(root),
-    )
+fn spec_service(
+    root: &Path,
+) -> bdd_cli::application::spec_service::SpecService<
+    FsSpecRepository,
+    bdd_cli::adapters::fs_spec::FsFeatureFiles,
+> {
+    wiring::spec_service(root, detect_project_layout(root))
 }
 
-fn change_service(root: &Path) -> ChangeService<FsChangeStore, FsSpecRepository, FsFeatureFiles> {
-    ChangeService::new(
-        FsChangeStore::new(root.to_path_buf()),
-        FsSpecRepository::new(root.join(SPEC_PATH)),
-        FsFeatureFiles::new(root.to_path_buf()),
-        SPEC_PATH.into(),
-    )
+fn change_service(
+    root: &Path,
+) -> bdd_cli::application::change_service::ChangeService<
+    bdd_cli::adapters::fs_staging::FsChangeStore,
+    FsSpecRepository,
+    OverlayFeatures,
+> {
+    wiring::change_service(root)
 }
 
 fn mutation_service(
@@ -832,31 +1007,26 @@ fn mutation_service(
     attempts: u32,
 ) -> SpecMutationService<
     FsSpecRepository,
-    FsFeatureFiles,
     OverlayFeatures,
-    FsChangeStore,
-    FsStateStore,
+    bdd_cli::adapters::fs_staging::FsChangeStore,
+    bdd_cli::adapters::fs_state::FsStateStore,
 > {
-    SpecMutationService::new(
-        FsSpecRepository::new(root.join(SPEC_PATH)),
-        FsFeatureFiles::new(root.to_path_buf()),
-        overlay_catalog(root),
-        FsChangeStore::new(root.to_path_buf()),
-        FsStateStore::new(root.to_path_buf()),
-        SPEC_PATH.into(),
-    )
-    .with_llm_attempts(attempts)
+    wiring::mutation_service(root, attempts)
 }
 
-fn scenario_service(root: &Path) -> ScenarioService<FsChangeStore, GherkinFeatureCatalog> {
-    ScenarioService::new(
-        FsChangeStore::new(root.to_path_buf()),
-        GherkinFeatureCatalog::new(root.to_path_buf()),
-    )
+fn scenario_service(
+    root: &Path,
+) -> bdd_cli::application::scenario_service::ScenarioService<
+    bdd_cli::adapters::fs_staging::FsChangeStore,
+    OverlayFeatures,
+> {
+    wiring::scenario_service(root)
 }
 
-fn tdd_service(root: &Path) -> TddService<FsStateStore> {
-    TddService::new(FsStateStore::new(root.to_path_buf()))
+fn tdd_service(
+    root: &Path,
+) -> bdd_cli::application::tdd_service::TddService<bdd_cli::adapters::fs_state::FsStateStore> {
+    wiring::tdd_service(root)
 }
 
 fn run_test(root: &Path, args: &TestArgs) -> anyhow::Result<()> {
@@ -891,9 +1061,7 @@ fn implement_follow_up(root: &Path, req_id: &str) -> anyhow::Result<()> {
         );
         return Ok(());
     }
-    let changes = change_service(root)
-        .commit()
-        .map_err(|e| anyhow::anyhow!(e.0))?;
+    let changes = change_service(root).commit()?;
     print_json(&changes)?;
     let runner = detect_runner(root).map_err(|message| anyhow::anyhow!(message))?;
     let filter = TestFilter {
@@ -955,8 +1123,7 @@ fn run_changes(root: &Path, command: &ChangesCommand) -> anyhow::Result<()> {
         ChangesCommand::Show => service.show(),
         ChangesCommand::Commit => service.commit(),
         ChangesCommand::Discard => service.discard(),
-    }
-    .map_err(|e| anyhow::anyhow!(e.0))?;
+    }?;
     print_json(&report)
 }
 
@@ -969,9 +1136,7 @@ fn run_scenario(root: &Path, command: &ScenarioCommand) -> anyhow::Result<()> {
             name,
             steps,
         } => {
-            let report = service
-                .add_scenario(feature, req, name, steps.clone())
-                .map_err(|e| anyhow::anyhow!(e.0))?;
+            let report = service.add_scenario(feature, req, name, steps.clone())?;
             let _ = mutation_service(root, DEFAULT_LLM_ATTEMPTS).set_feature(req, feature);
             report
         }
@@ -980,12 +1145,8 @@ fn run_scenario(root: &Path, command: &ScenarioCommand) -> anyhow::Result<()> {
             name,
             req,
             steps,
-        } => service
-            .update_scenario(feature, name, steps.clone(), req.as_deref())
-            .map_err(|e| anyhow::anyhow!(e.0))?,
-        ScenarioCommand::Delete { feature, name } => service
-            .delete_scenario(feature, name)
-            .map_err(|e| anyhow::anyhow!(e.0))?,
+        } => service.update_scenario(feature, name, steps.clone(), req.as_deref())?,
+        ScenarioCommand::Delete { feature, name } => service.delete_scenario(feature, name)?,
     };
     print_json(&report)
 }
@@ -994,20 +1155,18 @@ fn run_spec(
     root: &Path,
     model: Option<&str>,
     attempts: u32,
+    tools: Option<&str>,
+    max_rounds: Option<u32>,
     command: &SpecCommand,
 ) -> anyhow::Result<()> {
     let service = spec_service(root);
     match command {
         SpecCommand::List => {
-            let requirements = mutation_service(root, attempts)
-                .list_requirements()
-                .map_err(|e| anyhow::anyhow!(e.0))?;
+            let requirements = mutation_service(root, attempts).list_requirements()?;
             print_json(&requirements)
         }
         SpecCommand::Show { req_id } => {
-            let requirement = service
-                .get_requirement(req_id)
-                .map_err(|e| anyhow::anyhow!(e.0))?;
+            let requirement = service.get_requirement(req_id)?;
             print_json(&requirement)
         }
         SpecCommand::Validate => {
@@ -1022,9 +1181,7 @@ fn run_spec(
             print_json(&report)
         }
         SpecCommand::Refine { req_id } => {
-            let report = service
-                .refine_requirement(req_id)
-                .map_err(|e| anyhow::anyhow!(e.0))?;
+            let report = service.refine_requirement(req_id)?;
             print_json(&report)
         }
         SpecCommand::Draft {
@@ -1045,19 +1202,18 @@ fn run_spec(
                 if criterion.is_empty() {
                     anyhow::bail!("bdd spec draft needs at least one --criterion");
                 }
-                let report = mutations
-                    .draft_direct_in(title, story, criterion.clone(), file)
-                    .map_err(|e| anyhow::anyhow!(e.0))?;
+                let report = mutations.draft_direct_in(title, story, criterion.clone(), file)?;
                 return print_json(&report);
             }
             let mut prompter = interactive_prompter();
-            let report = match resolved_ollama(root, model) {
-                Some((name, generator)) => {
-                    mutations.draft_assisted_in(prompter.as_mut(), &name, &generator, file)
+            let report = match resolved_chat(root, model) {
+                Some((name, chat)) => {
+                    let mutations =
+                        mutation_with_tools(root, attempts, Caller::SpecDraft, tools, max_rounds);
+                    mutations.draft_assisted_in(prompter.as_mut(), &name, &chat, file)
                 }
                 None => mutations.draft_in(prompter.as_mut(), file),
-            }
-            .map_err(|e| anyhow::anyhow!(e.0))?;
+            }?;
             print_json(&report)
         }
         SpecCommand::Reword {
@@ -1068,61 +1224,74 @@ fn run_spec(
         } => {
             let mutations = mutation_service(root, attempts);
             if title.is_some() || story.is_some() || !criterion.is_empty() {
-                let report = mutations
-                    .reword_direct(req_id, title.clone(), story.clone(), criterion.clone())
-                    .map_err(|e| anyhow::anyhow!(e.0))?;
+                let report = mutations.reword_direct(
+                    req_id,
+                    title.clone(),
+                    story.clone(),
+                    criterion.clone(),
+                )?;
                 return print_json(&report);
             }
             let mut prompter = interactive_prompter();
-            let report = match resolved_ollama(root, model) {
-                Some((name, generator)) => {
-                    mutations.reword_assisted(prompter.as_mut(), req_id, &name, &generator)
+            let report = match resolved_chat(root, model) {
+                Some((name, chat)) => {
+                    let mutations =
+                        mutation_with_tools(root, attempts, Caller::SpecReword, tools, max_rounds);
+                    mutations.reword_assisted(prompter.as_mut(), req_id, &name, &chat)
                 }
                 None => mutations.reword(prompter.as_mut(), req_id),
-            }
-            .map_err(|e| anyhow::anyhow!(e.0))?;
+            }?;
             print_json(&report)
         }
         SpecCommand::SetFeature { req_id, file } => {
-            let report = mutation_service(root, attempts)
-                .set_feature(req_id, file)
-                .map_err(|e| anyhow::anyhow!(e.0))?;
+            let report = mutation_service(root, attempts).set_feature(req_id, file)?;
             print_json(&report)
         }
         SpecCommand::MarkImplemented { req_id } => {
-            let report = mutation_service(root, attempts)
-                .mark_implemented(req_id)
-                .map_err(|e| anyhow::anyhow!(e.0))?;
+            let report = mutation_service(root, attempts).mark_implemented(req_id)?;
             print_json(&report)
         }
         SpecCommand::Include(IncludeCommand::Add { path, from }) => {
-            let report = mutation_service(root, attempts)
-                .include_add(path, from.as_deref())
-                .map_err(|e| anyhow::anyhow!(e.0))?;
+            let report = mutation_service(root, attempts).include_add(path, from.as_deref())?;
             print_json(&report)
         }
     }
 }
 
 fn config_file(root: &Path) -> PathBuf {
-    root.join(".bdd-mcp.toml")
+    config_path(root)
+}
+
+/// The configuration dump. When the file names no model, Ollama is
+/// asked which one a run would actually use, so `llm.model` shows that
+/// instead of `(unset)`. A configured model skips the call entirely;
+/// an unreachable or empty provider leaves the key unset.
+fn config_report(root: &Path) -> bdd_cli::domain::config_report::ConfigReport {
+    let mut report = inspect_config(&config_file(root));
+    let configured = report
+        .setting(LLM_MODEL_KEY)
+        .is_some_and(|setting| setting.source != ConfigSource::Default);
+    if !configured
+        && let SessionModel::Ready { model, .. } = model_service(root).session_model(None)
+    {
+        report.apply_discovered_model(&model);
+    }
+    report
 }
 
 fn run_feature(root: &Path, command: &FeatureCommand) -> anyhow::Result<()> {
-    let catalog = GherkinFeatureCatalog::new(root.to_path_buf());
+    let catalog = overlay_catalog(root);
     match command {
         FeatureCommand::List => {
-            let summaries = catalog.list().map_err(|e| anyhow::anyhow!(e.0))?;
+            let summaries = catalog.list()?;
             print_json(&summaries)
         }
         FeatureCommand::Show { path } => {
-            let doc = catalog.read(path).map_err(|e| anyhow::anyhow!(e.0))?;
+            let doc = catalog.read(path)?;
             print_json(&doc)
         }
         FeatureCommand::Create { path, name } => {
-            let report = scenario_service(root)
-                .create_feature(path, name)
-                .map_err(|e| anyhow::anyhow!(e.0))?;
+            let report = scenario_service(root).create_feature(path, name)?;
             print_json(&report)
         }
     }
@@ -1136,15 +1305,12 @@ fn model_service(root: &Path) -> ModelService<OllamaCatalog, TomlModelStore> {
     ModelService::new(OllamaCatalog::new(endpoint), store)
 }
 
-/// Every live generator is wrapped in the disk-backed response cache, so
-/// repeated identical requests skip inference across CLI invocations.
-type CachedLlm = CachedGenerator<OllamaGenerator>;
-type Llm = MemoryAwareGenerator<CachedLlm>;
+/// Cached Ollama chat without project-memory wrapping. Greenfield wraps
+/// after the scaffold scan so a brand-new project still briefs the
+/// model with the files that were just written.
+type CachedChat = CachedConversation<OllamaChat>;
 
-/// Cached Ollama generator without project-memory wrapping. Greenfield
-/// wraps after the scaffold scan so a brand-new project still briefs
-/// the model with the files that were just written.
-fn cached_ollama(root: &Path, model_flag: Option<&str>) -> Option<(String, CachedLlm)> {
+fn cached_chat(root: &Path, model_flag: Option<&str>) -> Option<(String, CachedChat)> {
     match model_service(root).resolve(model_flag) {
         ModelResolution::Resolved { model, .. } => {
             let store = TomlModelStore::new(config_file(root));
@@ -1157,42 +1323,27 @@ fn cached_ollama(root: &Path, model_flag: Option<&str>) -> Option<(String, Cache
             let ttl = store
                 .cache_ttl_seconds()
                 .map_or(DEFAULT_CACHE_TTL, std::time::Duration::from_secs);
-            // The endpoint shapes the answer (different servers can hold
-            // different data behind the same tag), so it joins the cache
-            // key; keep_alive deliberately does not.
             let context = endpoint.clone();
-            let generator = CachedGenerator::new(
-                OllamaGenerator::with_timeout(endpoint, timeout),
+            let chat = CachedConversation::new(
+                OllamaChat::with_timeout(endpoint, timeout),
                 root.join(".bdd-cache"),
                 ttl,
                 context,
             );
-            Some((model, generator))
+            Some((model, chat))
         }
         ModelResolution::Unavailable(_) => None,
     }
-}
-
-/// The one place a model flag becomes a live Ollama generator for
-/// one-shot commands. Hybrid generation: templates always work, a
-/// resolved model only improves them, so any resolution problem
-/// silently means "no LLM". Project memory is refreshed here so those
-/// commands carry the current stack even without a shell session.
-fn resolved_ollama(root: &Path, model_flag: Option<&str>) -> Option<(String, Llm)> {
-    cached_ollama(root, model_flag).map(|(model, generator)| {
-        let brief = refresh_project_memory(root, None).brief();
-        (model, MemoryAwareGenerator::new(generator, brief))
-    })
 }
 
 fn run_model(root: &Path, flag: Option<&str>, command: &ModelCommand) -> anyhow::Result<()> {
     let service = model_service(root);
     match command {
         ModelCommand::List => {
-            let models = service.list().map_err(|e| anyhow::anyhow!(e.0))?;
+            let models = service.list()?;
             if models.is_empty() {
                 println!(
-                    "No models installed - pull one first (e.g. `ollama pull qwen3-coder-next:latest`)."
+                    "No models installed - pull one first (e.g. `ollama pull {RECOMMENDED_MODEL}`)."
                 );
                 return Ok(());
             }
@@ -1223,9 +1374,7 @@ fn run_model(root: &Path, flag: Option<&str>, command: &ModelCommand) -> anyhow:
             ModelResolution::Unavailable(message) => anyhow::bail!(message),
         },
         ModelCommand::Use { model_name } => {
-            service
-                .choose(model_name)
-                .map_err(|e| anyhow::anyhow!(e.0))?;
+            service.choose(model_name)?;
             let file = config_file(root);
             // Canonicalize after the write so the user sees the real
             // absolute location, not the raw --root-relative path.
@@ -1246,7 +1395,7 @@ fn run_init(root: &Path, args: &InitArgs) -> anyhow::Result<()> {
         })?,
         None => {
             let mut prompter = interactive_prompter();
-            prompt_language(prompter.as_mut()).map_err(|e| anyhow::anyhow!(e.0))?
+            prompt_language(prompter.as_mut())?
         }
     };
     let name = match &args.name {
@@ -1257,16 +1406,15 @@ fn run_init(root: &Path, args: &InitArgs) -> anyhow::Result<()> {
             .and_then(|path| path.file_name().map(|n| n.to_string_lossy().into_owned()))
             .unwrap_or_else(|| "project".into()),
     };
-    let report = InitService::new(FsScaffoldWriter::new(root.to_path_buf()))
-        .init(language, &name)
-        .map_err(|e| anyhow::anyhow!(e.0))?;
+    let report =
+        InitService::new(FsScaffoldWriter::new(root.to_path_buf())).init(language, &name)?;
     refresh_project_memory(root, Some(language));
     print_json(&report)
 }
 
 fn run_greenfield(root: &Path, model_flag: Option<&str>, attempts: u32) -> anyhow::Result<()> {
-    let llm = cached_ollama(root, model_flag)
-        .map(|(model, generator)| (model, DynLlm(std::sync::Arc::new(generator))));
+    let llm = cached_chat(root, model_flag)
+        .map(|(model, chat)| (model, std::sync::Arc::new(chat) as DynLlm));
     let mut prompter = interactive_prompter();
     let report = Greenfield::new(root.to_path_buf(), llm)
         .with_llm_attempts(attempts)
@@ -1306,4 +1454,423 @@ fn interactive_prompter() -> Box<dyn Prompter> {
 fn print_json<T: serde::Serialize>(value: &T) -> anyhow::Result<()> {
     println!("{}", serde_json::to_string_pretty(value)?);
     Ok(())
+}
+
+type ChatLlm = MemoryAwareConversation<CachedConversation<OllamaChat>>;
+type LiveBroker = McpToolBroker<WorkflowServer>;
+type LiveTools = ToolService<TomlToolStore, CachedDiscovery<LiveBroker>, FsMcpRegistry>;
+
+fn live_broker(root: &Path) -> LiveBroker {
+    let settings = tools_settings(&config_file(root));
+    let servers = mcp_registry(root).load().servers;
+    McpToolBroker::with_timeouts(
+        WorkflowServer::new(root.to_path_buf()),
+        servers,
+        settings.discovery_timeout,
+        settings.call_timeout,
+    )
+}
+
+fn mcp_registry(root: &Path) -> FsMcpRegistry {
+    FsMcpRegistry::new(
+        root.to_path_buf(),
+        tools_settings(&config_file(root)).mcp_config.clone(),
+    )
+}
+
+fn tool_service(root: &Path) -> LiveTools {
+    let settings = tools_settings(&config_file(root));
+    ToolService::new(
+        TomlToolStore::new(config_file(root)),
+        CachedDiscovery::new(
+            live_broker(root),
+            root.join(".bdd-cache").join("tools"),
+            settings.cache_ttl,
+        ),
+        mcp_registry(root),
+        builtin_tool_definitions(),
+    )
+}
+
+fn self_stdio_spec(root: &Path) -> anyhow::Result<ServerSpec> {
+    let program = std::env::current_exe()
+        .map_err(|e| anyhow::anyhow!("cannot locate this bdd binary: {e}"))?;
+    Ok(ServerSpec {
+        name: "bdd".into(),
+        program: program.display().to_string(),
+        args: vec![
+            "mcp".into(),
+            "serve".into(),
+            "--root".into(),
+            root.display().to_string(),
+        ],
+        env: vec![],
+    })
+}
+
+fn call_broker(root: &Path, stdio: bool) -> anyhow::Result<LiveBroker> {
+    let broker = live_broker(root);
+    if stdio {
+        Ok(broker.with_self_stdio(self_stdio_spec(root)?))
+    } else {
+        Ok(broker)
+    }
+}
+
+fn parse_caller_arg(raw: Option<&str>) -> anyhow::Result<Caller> {
+    bdd_cli::application::tool_service::parse_caller(raw).map_err(anyhow::Error::from)
+}
+
+fn warn_unknown(unknown: &[String]) {
+    for name in unknown {
+        eprintln!("warning: tool {name} is named in config but not in the catalog");
+    }
+}
+
+fn one_shot_overrides(
+    root: &Path,
+    caller: Caller,
+    tools_flag: Option<&str>,
+) -> bdd_cli::domain::tool_profile::ProfileOverrides {
+    let mut overrides = TomlToolStore::new(config_file(root)).overrides();
+    if let Some(flag) = tools_flag {
+        let names: Vec<String> = flag
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        overrides.replace.insert(caller.key().into(), names);
+    }
+    overrides
+}
+
+fn connected_llm(
+    root: &Path,
+    model_flag: Option<&str>,
+    caller: Caller,
+    attempts: u32,
+    tools_flag: Option<&str>,
+    max_rounds_flag: Option<u32>,
+) -> Option<ResolvedLlm<ChatLlm, LiveBroker>> {
+    let (model, chat) = resolved_chat(root, model_flag)?;
+    let settings = tools_settings(&config_file(root));
+    let catalog = tool_service(root).catalog(false, false);
+    warn_unknown(&catalog.problems);
+    let resolved = resolve(
+        caller,
+        &one_shot_overrides(root, caller, tools_flag),
+        &catalog.tools,
+    );
+    warn_unknown(&resolved.unknown);
+    Some(ResolvedLlm::connected(
+        model,
+        chat,
+        live_broker(root),
+        resolved.tools,
+        AgentConfig::new(
+            caller.section(),
+            attempts,
+            max_rounds_flag.unwrap_or(settings.max_rounds),
+            settings.confirm,
+        ),
+    ))
+}
+
+fn resolved_chat(root: &Path, model_flag: Option<&str>) -> Option<(String, ChatLlm)> {
+    cached_chat(root, model_flag).map(|(model, chat)| {
+        (
+            model,
+            MemoryAwareConversation::new(chat, refresh_project_memory(root, None).brief()),
+        )
+    })
+}
+
+fn mutation_with_tools(
+    root: &Path,
+    attempts: u32,
+    caller: Caller,
+    tools_flag: Option<&str>,
+    max_rounds_flag: Option<u32>,
+) -> SpecMutationService<
+    FsSpecRepository,
+    OverlayFeatures,
+    bdd_cli::adapters::fs_staging::FsChangeStore,
+    bdd_cli::adapters::fs_state::FsStateStore,
+> {
+    let settings = tools_settings(&config_file(root));
+    let catalog = tool_service(root).catalog(false, false);
+    warn_unknown(&catalog.problems);
+    let resolved = resolve(
+        caller,
+        &one_shot_overrides(root, caller, tools_flag),
+        &catalog.tools,
+    );
+    warn_unknown(&resolved.unknown);
+    mutation_service(root, attempts).with_tool_loop(
+        resolved.tools,
+        max_rounds_flag.unwrap_or(settings.max_rounds),
+        settings.confirm,
+        Box::new(live_broker(root)),
+    )
+}
+
+fn run_tools(root: &Path, command: &ToolsCommand) -> anyhow::Result<()> {
+    let service = tool_service(root);
+    match command {
+        ToolsCommand::List {
+            for_caller,
+            offline,
+            refresh,
+            json,
+        } => {
+            if let Some(raw) = for_caller {
+                let caller = parse_caller_arg(Some(raw))?;
+                let (resolved, problems) = service.list_for(caller, *refresh, *offline);
+                for problem in &problems {
+                    eprintln!("warning: {problem}");
+                }
+                warn_unknown(&resolved.unknown);
+                if *json {
+                    return print_json(&resolved.tools.iter().map(|t| &t.name).collect::<Vec<_>>());
+                }
+                for tool in &resolved.tools {
+                    println!(
+                        "{}\t{}",
+                        tool.name,
+                        ToolService::<TomlToolStore, CachedDiscovery<LiveBroker>, FsMcpRegistry>::origin_label(
+                            &tool.origin
+                        )
+                    );
+                }
+                return Ok(());
+            }
+            let list = service.catalog(*refresh, *offline);
+            for problem in &list.problems {
+                eprintln!("warning: {problem}");
+            }
+            if *json {
+                return print_json(&list.tools.iter().map(|t| &t.name).collect::<Vec<_>>());
+            }
+            for tool in &list.tools {
+                println!(
+                    "{}\t{}",
+                    tool.name,
+                    ToolService::<TomlToolStore, CachedDiscovery<LiveBroker>, FsMcpRegistry>::origin_label(
+                        &tool.origin
+                    )
+                );
+            }
+            if *offline {
+                for name in &list.undiscovered {
+                    eprintln!("warning: {name} (not discovered — run bdd tools refresh)");
+                }
+            }
+            Ok(())
+        }
+        ToolsCommand::Profiles { json } => {
+            let (views, problems) = service.profiles(false);
+            for problem in &problems {
+                eprintln!("warning: {problem}");
+            }
+            if *json {
+                return print_json(
+                    &views
+                        .iter()
+                        .map(|v| {
+                            serde_json::json!({
+                                "caller": v.caller,
+                                "tools": v.tools,
+                                "unknown": v.unknown,
+                            })
+                        })
+                        .collect::<Vec<_>>(),
+                );
+            }
+            for view in views {
+                warn_unknown(&view.unknown);
+                println!(
+                    "{}\t{}\t{}",
+                    view.caller,
+                    view.tools.len(),
+                    view.tools.join(", ")
+                );
+            }
+            Ok(())
+        }
+        ToolsCommand::Show { name } => {
+            let shown = service.show(name)?;
+            println!(
+                "{}\t{}",
+                shown.name,
+                ToolService::<TomlToolStore, CachedDiscovery<LiveBroker>, FsMcpRegistry>::origin_label(
+                    &shown.origin
+                )
+            );
+            println!("{}", shown.description);
+            println!("{}", serde_json::to_string_pretty(&shown.schema)?);
+            Ok(())
+        }
+        ToolsCommand::Enable { name, for_caller } => {
+            let caller = parse_caller_arg(for_caller.as_deref())?;
+            service.enable(name, caller)?;
+            println!("Enabled {name} for {}", caller.key());
+            Ok(())
+        }
+        ToolsCommand::Disable { name, for_caller } => {
+            let caller = parse_caller_arg(for_caller.as_deref())?;
+            service.disable(name, caller)?;
+            println!("Disabled {name} for {}", caller.key());
+            Ok(())
+        }
+        ToolsCommand::Refresh => {
+            let list = service.catalog(true, false);
+            for problem in &list.problems {
+                eprintln!("warning: {problem}");
+            }
+            println!("Refreshed {} tool(s).", list.tools.len());
+            Ok(())
+        }
+        ToolsCommand::Servers { json } => {
+            let load = service.registry();
+            if *json {
+                return print_json(&serde_json::json!({
+                    "path": load.path,
+                    "servers": load.servers.iter().map(|s| {
+                        serde_json::json!({
+                            "name": s.name,
+                            "program": s.program,
+                            "args": s.args,
+                        })
+                    }).collect::<Vec<_>>(),
+                    "problems": load.problems,
+                }));
+            }
+            match &load.path {
+                Some(path) => println!("{path}"),
+                None => println!("(no mcp.json found)"),
+            }
+            for server in &load.servers {
+                println!(
+                    "{}\t{}\t{}",
+                    server.name,
+                    server.program,
+                    server.args.join(" ")
+                );
+            }
+            for problem in &load.problems {
+                eprintln!("warning: {problem}");
+            }
+            Ok(())
+        }
+    }
+}
+
+fn run_mcp(root: &Path, command: &McpCommand) -> anyhow::Result<()> {
+    match command {
+        McpCommand::Serve => {
+            let runtime = tokio::runtime::Runtime::new()?;
+            runtime.block_on(bdd_cli::mcp::serve_stdio(root.to_path_buf()))
+        }
+        McpCommand::Tools { stdio, json } => {
+            let broker = call_broker(root, *stdio)?;
+            let tools = broker.list_builtin_tools()?;
+            if *json {
+                return print_json(&tools.iter().map(|t| &t.name).collect::<Vec<_>>());
+            }
+            for tool in tools {
+                println!("{}", tool.name);
+            }
+            Ok(())
+        }
+        McpCommand::Call {
+            tool,
+            arg,
+            args,
+            stdio,
+            json,
+        } => {
+            let mut catalog = builtin_tool_definitions();
+            if bdd_cli::domain::tools::find(&catalog, tool).is_err() {
+                catalog = tool_service(root).catalog(false, false).tools;
+            }
+            let arguments = ToolCallService::merge_arguments(args.as_deref(), arg)?;
+            ToolCallService::prepare(&catalog, tool, &arguments)?;
+            let broker = call_broker(root, *stdio)?;
+            let envelope = ToolCallService::call(&broker, &catalog, tool, &arguments)?;
+            if *json {
+                print_json(&envelope)?;
+            } else {
+                println!("{}", envelope.content);
+            }
+            if envelope.is_error {
+                return Err(NonzeroExit.into());
+            }
+            Ok(())
+        }
+    }
+}
+
+fn run_ask(
+    root: &Path,
+    model: Option<&str>,
+    attempts: u32,
+    tools: Option<&str>,
+    max_rounds: Option<u32>,
+    task: &[String],
+    json: bool,
+) -> anyhow::Result<()> {
+    let Some(llm) = connected_llm(root, model, Caller::Ask, attempts, tools, max_rounds) else {
+        anyhow::bail!("no model resolved - pull one with ollama and run bdd model use <name>");
+    };
+    let mut prompter = interactive_prompter();
+    let joined = task.join(" ").trim().to_string();
+    if joined.is_empty() {
+        use std::io::IsTerminal as _;
+        if !std::io::stdin().is_terminal() {
+            anyhow::bail!("bdd ask needs a task (or a tty for the multi-turn prompt)");
+        }
+        loop {
+            let line = prompter.ask("ask> ")?;
+            let line = line.trim().to_string();
+            if line.is_empty() || line == "exit" || line == "quit" {
+                break;
+            }
+            ask_once(&llm, prompter.as_mut(), &line, json)?;
+        }
+        return Ok(());
+    }
+    ask_once(&llm, prompter.as_mut(), &joined, json)
+}
+
+fn ask_once(
+    llm: &ResolvedLlm<ChatLlm, LiveBroker>,
+    prompter: &mut dyn Prompter,
+    task: &str,
+    json: bool,
+) -> anyhow::Result<()> {
+    let prompt = ask_prompt(task);
+    let answer = llm
+        .ask(
+            prompter,
+            &prompt,
+            |text| {
+                let body = text.trim();
+                if body.is_empty() {
+                    Err("the answer was empty".into())
+                } else {
+                    Ok(body.to_string())
+                }
+            },
+            |_, _, _| {},
+        )
+        .map_err(|e| match e {
+            bdd_cli::application::LlmReplyError::Call(error) => anyhow::anyhow!(error.0),
+            bdd_cli::application::LlmReplyError::Invalid { reason } => anyhow::anyhow!(reason),
+        })?;
+    if json {
+        print_json(&serde_json::json!({ "answer": answer }))
+    } else {
+        println!("{answer}");
+        Ok(())
+    }
 }

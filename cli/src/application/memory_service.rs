@@ -6,18 +6,18 @@ use crate::domain::memory::{
     Manifests, ProjectMemory, ScanInput, apply_chosen, prepend_brief, scan_memory,
 };
 use crate::ports::{
-    LlmError, LlmGenerator, MemoryError, MemoryStore, ProjectFiles, ProjectInventory,
+    LlmConversation, LlmError, MemoryError, MemoryStore, ProjectFiles, ProjectInventory,
 };
 
-/// Decorates any [`LlmGenerator`] by prepending the project-memory brief
-/// to the system prompt. An empty brief is a no-op.
-pub struct MemoryAwareGenerator<G> {
-    inner: G,
+/// Decorates any [`LlmConversation`] by prepending the project-memory brief
+/// to the first system message. An empty brief is a no-op.
+pub struct MemoryAwareConversation<C> {
+    inner: C,
     brief: String,
 }
 
-impl<G> MemoryAwareGenerator<G> {
-    pub fn new(inner: G, brief: impl Into<String>) -> Self {
+impl<C> MemoryAwareConversation<C> {
+    pub fn new(inner: C, brief: impl Into<String>) -> Self {
         Self {
             inner,
             brief: brief.into(),
@@ -25,14 +25,23 @@ impl<G> MemoryAwareGenerator<G> {
     }
 }
 
-impl<G: LlmGenerator> LlmGenerator for MemoryAwareGenerator<G> {
-    fn generate(&self, model: &str, system: &str, user: &str) -> Result<String, LlmError> {
-        let system = prepend_brief(&self.brief, system);
+impl<C: LlmConversation> LlmConversation for MemoryAwareConversation<C> {
+    fn chat(
+        &self,
+        model: &str,
+        messages: &[crate::domain::tools::ChatMessage],
+        tools: &[crate::domain::tools::ToolDefinition],
+    ) -> Result<crate::domain::tools::ChatTurn, LlmError> {
+        use crate::domain::tools::{ChatMessage, ChatRole};
+        let mut rewritten: Vec<ChatMessage> = messages.to_vec();
+        if let Some(system) = rewritten.iter_mut().find(|m| m.role == ChatRole::System) {
+            system.content = prepend_brief(&self.brief, &system.content);
+        }
         tracing::debug!(
             has_memory = !self.brief.trim().is_empty(),
-            "LLM system prompt project memory"
+            "LLM chat system prompt project memory"
         );
-        self.inner.generate(model, &system, user)
+        self.inner.chat(model, &rewritten, tools)
     }
 }
 
@@ -258,28 +267,37 @@ mod tests {
     }
 
     #[test]
-    fn wrapper_prepends_the_brief_to_the_system_prompt() {
+    fn conversation_wrapper_prepends_the_brief_to_the_system_message() {
+        use crate::domain::tools::{ChatMessage, ChatTurn, ToolDefinition};
         let calls = RefCell::new(Vec::new());
-        struct Shared<'a>(&'a RefCell<Vec<(String, String)>>);
-        impl LlmGenerator for Shared<'_> {
-            fn generate(&self, _model: &str, system: &str, user: &str) -> Result<String, LlmError> {
-                self.0.borrow_mut().push((system.into(), user.into()));
-                Ok("ok".into())
+        struct Shared<'a>(&'a RefCell<Vec<String>>);
+        impl LlmConversation for Shared<'_> {
+            fn chat(
+                &self,
+                _model: &str,
+                messages: &[ChatMessage],
+                _tools: &[ToolDefinition],
+            ) -> Result<ChatTurn, LlmError> {
+                self.0.borrow_mut().push(messages[0].content.clone());
+                Ok(ChatTurn {
+                    content: "ok".into(),
+                    tool_calls: Vec::new(),
+                })
             }
         }
         let wrapped =
-            MemoryAwareGenerator::new(Shared(&calls), "Project memory:\n- Language: Java");
-        wrapped.generate("m", "You implement", "do it").unwrap();
-        let recorded = calls.borrow();
-        assert!(recorded[0].0.starts_with("Project memory:"));
-        assert!(recorded[0].0.contains("You implement"));
-        assert_eq!(recorded[0].1, "do it");
-
-        let calls = RefCell::new(Vec::new());
-        MemoryAwareGenerator::new(Shared(&calls), "  ")
-            .generate("m", "You implement", "x")
+            MemoryAwareConversation::new(Shared(&calls), "Project memory:\n- Language: Java");
+        wrapped
+            .chat(
+                "m",
+                &[
+                    ChatMessage::system("You implement"),
+                    ChatMessage::user("do it"),
+                ],
+                &[],
+            )
             .unwrap();
-        assert_eq!(calls.borrow()[0].0, "You implement");
+        assert!(calls.borrow()[0].starts_with("Project memory:"));
     }
 
     #[test]

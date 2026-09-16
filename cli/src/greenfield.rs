@@ -15,18 +15,16 @@ use serde::Serialize;
 use crate::adapters::fs_memory::{FsMemoryStore, FsProjectInventory};
 use crate::adapters::fs_project::FsProjectFiles;
 use crate::adapters::fs_scaffold::FsScaffoldWriter;
-use crate::adapters::fs_sources::FsSourceFiles;
-use crate::adapters::fs_spec::{FsFeatureFiles, FsSpecRepository};
+use crate::adapters::fs_spec::FsSpecRepository;
 use crate::adapters::fs_staging::FsChangeStore;
 use crate::adapters::fs_state::FsStateStore;
-use crate::adapters::gherkin_features::GherkinFeatureCatalog;
 use crate::adapters::runners::detect_runner;
 use crate::application::DEFAULT_LLM_ATTEMPTS;
 use crate::application::change_service::ChangeService;
 use crate::application::generation_service::{GenerationService, ResolvedLlm};
 use crate::application::implement_service::ImplementService;
 use crate::application::init_service::InitService;
-use crate::application::memory_service::{MemoryAwareGenerator, MemoryService};
+use crate::application::memory_service::{MemoryAwareConversation, MemoryService};
 use crate::application::scenario_service::ScenarioService;
 use crate::application::spec_mutation_service::SpecMutationService;
 use crate::application::tdd_service::{TddError, TddService, TestReport};
@@ -38,7 +36,7 @@ use crate::domain::scaffold::slug;
 use crate::domain::steps::criterion_to_steps;
 use crate::domain::tdd::ImplementAttempt;
 use crate::ports::{
-    ChangeStore as _, LlmError, LlmGenerator, PromptError, Prompter, TestFilter, TestRunner,
+    ChangeStore as _, LlmConversation, PromptError, Prompter, TestFilter, TestRunner,
 };
 use crate::workspace::SPEC_PATH;
 
@@ -67,16 +65,9 @@ pub fn refresh_project_memory(root: &Path, chosen: Option<Language>) -> ProjectM
 /// Picks the test runner for a project root, or explains why none fits.
 pub type RunnerFactory = Arc<dyn Fn(&Path) -> Result<Box<dyn TestRunner>, String> + Send + Sync>;
 
-/// [`LlmGenerator`] over a shared trait object, so the orchestrator can
-/// carry whichever generator the composition root resolved.
-#[derive(Clone)]
-pub struct DynLlm(pub Arc<dyn LlmGenerator + Send + Sync>);
-
-impl LlmGenerator for DynLlm {
-    fn generate(&self, model: &str, system: &str, user: &str) -> Result<String, LlmError> {
-        self.0.generate(model, system, user)
-    }
-}
+/// [`LlmConversation`] over a shared trait object, so the orchestrator can
+/// carry whichever chat adapter the composition root resolved.
+pub type DynLlm = Arc<dyn LlmConversation + Send + Sync>;
 
 /// Where the run ended, and what the human does next.
 #[derive(Debug, Serialize, PartialEq, Eq)]
@@ -114,7 +105,7 @@ fn pick_pending(
     let count = pending.len();
     let question = format!("Which pending requirement next? [1-{count}, Enter for 1] (n stops):");
     loop {
-        let answer = prompter.ask(&question).map_err(|e| e.0)?;
+        let answer = prompter.ask(&question).map_err(|e| e.to_string())?;
         match parse_pending_pick(&answer, count) {
             Ok(Some(index)) => return Ok(Some(pending[index].0.clone())),
             Ok(None) => return Ok(None),
@@ -211,7 +202,7 @@ impl Greenfield {
             Some((model, llm)) => mutation.draft_assisted(prompter, &model, &llm),
             None => mutation.draft(prompter),
         }
-        .map_err(|e| e.0)?;
+        .map_err(|e| e.to_string())?;
         if !draft.staged {
             return Ok(GreenfieldReport {
                 requirement: None,
@@ -249,7 +240,7 @@ impl Greenfield {
                     .reword_assisted(prompter, &next_id, &model, &llm),
                 None => self.mutation_service().reword(prompter, &next_id),
             }
-            .map_err(|e| e.0)?;
+            .map_err(|e| e.to_string())?;
             if !reworded.staged {
                 return Ok(GreenfieldReport {
                     requirement: Some(next_id),
@@ -284,15 +275,19 @@ impl Greenfield {
         // Generation into staging, then gate 2: review before commit.
         let generation = self.generation_service(language);
         let implement = self.implement_service(language);
-        let missing = generation.steps_missing().map_err(|e| e.0)?;
+        let missing = generation.steps_missing().map_err(|e| e.to_string())?;
         if !missing.missing.is_empty() {
             let work = prompter.working("Generating step definitions - working");
-            let report = generation.steps_generate().map_err(|e| e.0)?;
+            let report = generation
+                .steps_generate(prompter)
+                .map_err(|e| e.to_string())?;
             drop(work);
             prompter.tell(&format!("Staged {} ({}).", report.target, report.source));
         }
         let work = prompter.working(&format!("Generating the unit test for {req_id} - working"));
-        let unit_test = generation.unittest_generate(req_id).map_err(|e| e.0)?;
+        let unit_test = generation
+            .unittest_generate(prompter, req_id)
+            .map_err(|e| e.to_string())?;
         drop(work);
         prompter.tell(&format!(
             "Staged {} ({}).",
@@ -301,16 +296,16 @@ impl Greenfield {
         if let Some(content) = self
             .change_store()
             .content(&unit_test.target)
-            .map_err(|e| e.0)?
+            .map_err(|e| e.to_string())?
         {
             prompter.tell("Generated unit test (the assertions are yours to sharpen):");
             prompter.tell(&content);
         }
         if !prompter
             .confirm("Commit the generated tests and step definitions?")
-            .map_err(|e| e.0)?
+            .map_err(|e| e.to_string())?
         {
-            self.change_service().discard().map_err(|e| e.0)?;
+            self.change_service().discard().map_err(|e| e.to_string())?;
             return Ok(GreenfieldReport {
                 requirement: Some(req_id.to_string()),
                 feature: Some(feature_path),
@@ -346,7 +341,7 @@ impl Greenfield {
                 "Implement the production code now. Press Enter to run the tests \
                  again, or type stop to pause here:"
             };
-            let answer = prompter.ask(question).map_err(|e| e.0)?;
+            let answer = prompter.ask(question).map_err(|e| e.to_string())?;
             if answer.eq_ignore_ascii_case("stop") {
                 let next_step = format!(
                     "Paused on RED. Implement by hand or run bdd implement {req_id}, \
@@ -387,7 +382,7 @@ impl Greenfield {
 
         if prompter
             .confirm("Green bar. Start a refactor step before closing the loop?")
-            .map_err(|e| e.0)?
+            .map_err(|e| e.to_string())?
         {
             prompter.tell(
                 "A refactor changes structure, never behavior - and the edits \
@@ -397,7 +392,7 @@ impl Greenfield {
             );
             let note = prompter
                 .ask("When your edits are in place, describe what you changed and why:")
-                .map_err(|e| e.0)?;
+                .map_err(|e| e.to_string())?;
             tdd.refactor(Some(&note)).map_err(tdd_message)?;
             report = self
                 .try_run(&tdd, runner.as_ref(), prompter)?
@@ -418,7 +413,7 @@ impl Greenfield {
         let work = prompter.working("Saving status - working");
         self.mutation_service()
             .mark_implemented(req_id)
-            .map_err(|e| e.0)?;
+            .map_err(|e| e.to_string())?;
         self.commit()?;
         drop(work);
         prompter.tell(&format!("{req_id} is implemented. Loop closed."));
@@ -441,11 +436,11 @@ impl Greenfield {
             return Ok(language);
         }
         prompter.tell("No project detected - scaffolding a new one.");
-        let language = prompt_language(prompter).map_err(|e| e.0)?;
-        let name = prompter.ask("Project name:").map_err(|e| e.0)?;
+        let language = prompt_language(prompter).map_err(|e| e.to_string())?;
+        let name = prompter.ask("Project name:").map_err(|e| e.to_string())?;
         let report = InitService::new(FsScaffoldWriter::new(self.root.clone()))
             .init(language, &name)
-            .map_err(|e| e.0)?;
+            .map_err(|e| e.to_string())?;
         prompter.tell(&format!(
             "Scaffolded {} files for {} ({}).",
             report.created.len(),
@@ -465,7 +460,7 @@ impl Greenfield {
     ) -> Result<String, String> {
         let spec: Spec = {
             let repository = FsSpecRepository::new(self.root.join(SPEC_PATH));
-            crate::ports::SpecRepository::load(&repository).map_err(|e| e.0)?
+            crate::ports::SpecRepository::load(&repository).map_err(|e| e.to_string())?
         };
         let requirement = spec
             .requirements
@@ -477,7 +472,7 @@ impl Greenfield {
         let scenarios = self.scenario_service();
         scenarios
             .create_feature(&feature_path, title)
-            .map_err(|e| e.0)?;
+            .map_err(|e| e.to_string())?;
         for (index, criterion) in requirement.acceptance_criteria.iter().enumerate() {
             let Some(steps) = criterion_to_steps(criterion) else {
                 prompter.warn(&format!(
@@ -488,7 +483,7 @@ impl Greenfield {
             let name = format!("{} case {}", title, index + 1);
             scenarios
                 .add_scenario(&feature_path, req_id, &name, steps)
-                .map_err(|e| e.0)?;
+                .map_err(|e| e.to_string())?;
         }
         Ok(feature_path)
     }
@@ -497,7 +492,7 @@ impl Greenfield {
     /// catalog order.
     fn pending_requirements(&self) -> Result<Vec<(String, String)>, String> {
         let repository = FsSpecRepository::new(self.root.join(SPEC_PATH));
-        let spec = crate::ports::SpecRepository::load(&repository).map_err(|e| e.0)?;
+        let spec = crate::ports::SpecRepository::load(&repository).map_err(|e| e.to_string())?;
         Ok(spec
             .requirements
             .into_iter()
@@ -558,8 +553,8 @@ impl Greenfield {
         &self,
         prompter: &mut dyn Prompter,
         implement: &ImplementService<
-            GherkinFeatureCatalog,
-            FsSourceFiles,
+            crate::wiring::OverlayFeatures,
+            crate::wiring::OverlayTree,
             FsChangeStore,
             FsSpecRepository,
             DynLlm,
@@ -569,7 +564,13 @@ impl Greenfield {
     ) -> Result<(), String> {
         let brief = tdd.implementation_brief(req_id).map_err(tdd_message)?;
         let work = prompter.working("Generating an implementation attempt - working");
-        let outcome = implement.generate(req_id, &brief.failures, &brief.history, &brief.states);
+        let outcome = implement.generate(
+            prompter,
+            req_id,
+            &brief.failures,
+            &brief.history,
+            &brief.states,
+        );
         drop(work);
         match outcome {
             Ok(attempt) => {
@@ -598,7 +599,7 @@ impl Greenfield {
     }
 
     fn commit(&self) -> Result<(), String> {
-        self.change_service().commit().map_err(|e| e.0)?;
+        self.change_service().commit().map_err(|e| e.to_string())?;
         Ok(())
     }
 
@@ -606,55 +607,40 @@ impl Greenfield {
         FsChangeStore::new(self.root.clone())
     }
 
-    fn change_service(&self) -> ChangeService<FsChangeStore, FsSpecRepository, FsFeatureFiles> {
-        ChangeService::new(
-            self.change_store(),
-            FsSpecRepository::new(self.root.join(SPEC_PATH)),
-            FsFeatureFiles::new(self.root.clone()),
-            SPEC_PATH.into(),
-        )
+    fn change_service(
+        &self,
+    ) -> ChangeService<FsChangeStore, FsSpecRepository, crate::wiring::OverlayFeatures> {
+        crate::wiring::change_service(&self.root)
     }
 
     fn mutation_service(
         &self,
     ) -> SpecMutationService<
         FsSpecRepository,
-        FsFeatureFiles,
-        GherkinFeatureCatalog,
+        crate::wiring::OverlayFeatures,
         FsChangeStore,
         FsStateStore,
     > {
-        SpecMutationService::new(
-            FsSpecRepository::new(self.root.join(SPEC_PATH)),
-            FsFeatureFiles::new(self.root.clone()),
-            GherkinFeatureCatalog::new(self.root.clone()),
-            self.change_store(),
-            FsStateStore::new(self.root.clone()),
-            SPEC_PATH.into(),
-        )
-        .with_llm_attempts(self.llm_attempts)
+        crate::wiring::mutation_service(&self.root, self.llm_attempts)
     }
 
-    fn scenario_service(&self) -> ScenarioService<FsChangeStore, GherkinFeatureCatalog> {
-        ScenarioService::new(
-            self.change_store(),
-            GherkinFeatureCatalog::new(self.root.clone()),
-        )
+    fn scenario_service(&self) -> ScenarioService<FsChangeStore, crate::wiring::OverlayFeatures> {
+        crate::wiring::scenario_service(&self.root)
     }
 
     fn generation_service(
         &self,
         language: Language,
     ) -> GenerationService<
-        GherkinFeatureCatalog,
-        FsSourceFiles,
+        crate::wiring::OverlayFeatures,
+        crate::wiring::OverlayTree,
         FsChangeStore,
         FsSpecRepository,
         DynLlm,
     > {
         GenerationService::new(
-            GherkinFeatureCatalog::new(self.root.clone()),
-            FsSourceFiles::new(self.root.clone()),
+            crate::wiring::overlay_catalog(&self.root),
+            crate::wiring::overlay_sources(&self.root),
             self.change_store(),
             FsSpecRepository::new(self.root.join(SPEC_PATH)),
             language,
@@ -668,15 +654,15 @@ impl Greenfield {
         &self,
         language: Language,
     ) -> ImplementService<
-        GherkinFeatureCatalog,
-        FsSourceFiles,
+        crate::wiring::OverlayFeatures,
+        crate::wiring::OverlayTree,
         FsChangeStore,
         FsSpecRepository,
         DynLlm,
     > {
         ImplementService::new(
-            GherkinFeatureCatalog::new(self.root.clone()),
-            FsSourceFiles::new(self.root.clone()),
+            crate::wiring::overlay_catalog(&self.root),
+            crate::wiring::overlay_sources(&self.root),
             self.change_store(),
             FsSpecRepository::new(self.root.join(SPEC_PATH)),
             language,
@@ -695,10 +681,7 @@ impl Greenfield {
         self.llm.as_ref().map(|(model, inner)| {
             (
                 model.clone(),
-                DynLlm(Arc::new(MemoryAwareGenerator::new(
-                    inner.clone(),
-                    brief.clone(),
-                ))),
+                Arc::new(MemoryAwareConversation::new(inner.clone(), brief.clone())) as DynLlm,
             )
         })
     }
@@ -727,6 +710,7 @@ fn tdd_message(error: TddError) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ports::LlmError;
 
     #[test]
     fn language_answers_parse_with_aliases() {
@@ -774,16 +758,34 @@ mod tests {
 
     struct EchoLlm;
 
-    impl LlmGenerator for EchoLlm {
-        fn generate(&self, model: &str, system: &str, user: &str) -> Result<String, LlmError> {
-            Ok(format!("{model}:{system}:{user}"))
+    impl LlmConversation for EchoLlm {
+        fn chat(
+            &self,
+            model: &str,
+            messages: &[crate::domain::tools::ChatMessage],
+            _tools: &[crate::domain::tools::ToolDefinition],
+        ) -> Result<crate::domain::tools::ChatTurn, LlmError> {
+            let (system, user) = crate::domain::tools::system_and_user(messages);
+            Ok(crate::domain::tools::text_turn(format!(
+                "{model}:{system}:{user}"
+            )))
         }
     }
 
     #[test]
-    fn a_dyn_llm_delegates_to_the_wrapped_generator() {
-        let llm = DynLlm(Arc::new(EchoLlm));
-        assert_eq!(llm.generate("m", "s", "p"), Ok("m:s:p".into()));
+    fn a_dyn_llm_delegates_to_the_wrapped_conversation() {
+        let llm: DynLlm = Arc::new(EchoLlm);
+        let turn = llm
+            .chat(
+                "m",
+                &[
+                    crate::domain::tools::ChatMessage::system("s"),
+                    crate::domain::tools::ChatMessage::user("p"),
+                ],
+                &[],
+            )
+            .unwrap();
+        assert_eq!(turn.content, "m:s:p");
     }
 
     #[test]

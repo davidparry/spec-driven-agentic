@@ -1,22 +1,22 @@
-//! Ollama implementations of the [`ModelCatalog`] and [`LlmGenerator`]
-//! ports: `GET /api/tags` for discovery and `POST /api/generate` for
-//! generation, against the configured endpoint (default
-//! `http://localhost:11434`). The HTTP shells are deliberately thin; the
-//! JSON translations are pure functions so they are unit-testable
-//! without a network.
+//! Ollama implementation of the [`ModelCatalog`] port: `GET /api/tags`
+//! against the configured endpoint (default `http://localhost:11434`).
+//! Chat completions live in [`super::ollama_chat`]. The HTTP shell is
+//! deliberately thin; the JSON translations are pure functions so they
+//! are unit-testable without a network.
 
 use std::time::Duration;
 
 use serde::Deserialize;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, warn};
 
-use crate::ports::{LlmError, LlmGenerator, ModelCatalog, ModelInfo};
+use crate::domain::config_report::{DEFAULT_LLM_ENDPOINT, DEFAULT_LLM_TIMEOUT_SECONDS};
+use crate::ports::{LlmError, ModelCatalog, ModelInfo};
 
-pub const DEFAULT_ENDPOINT: &str = "http://localhost:11434";
+pub const DEFAULT_ENDPOINT: &str = DEFAULT_LLM_ENDPOINT;
 
 /// Local models chew on large prompts (an implementation attempt
 /// carries the whole project) for minutes, not seconds.
-pub const DEFAULT_GENERATION_TIMEOUT: Duration = Duration::from_secs(300);
+pub const DEFAULT_GENERATION_TIMEOUT: Duration = Duration::from_secs(DEFAULT_LLM_TIMEOUT_SECONDS);
 
 /// How long Ollama keeps the model resident after a request. A loaded
 /// model skips the multi-second startup cost on the next call.
@@ -31,12 +31,12 @@ pub const KEEP_ALIVE: &str = "30m";
 /// cause (connection refused, timed out, ...) in the source chain,
 /// which would otherwise be dropped - a timeout then reads like the
 /// provider is down.
-fn describe(error: &reqwest::Error, timeout: Duration) -> String {
+pub(crate) fn describe(error: &reqwest::Error, timeout: Duration) -> String {
     if error.is_timeout() {
         return format!(
             "no reply within {}s - large prompts can outlast the timeout while \
              the model is still generating; set timeout_seconds under [llm] in \
-             .bdd-mcp.toml to wait longer",
+             .bdd.toml to wait longer",
             timeout.as_secs()
         );
     }
@@ -50,16 +50,29 @@ fn describe(error: &reqwest::Error, timeout: Duration) -> String {
     messages.join(" - ")
 }
 
+pub(crate) fn http_client(timeout: Duration) -> reqwest::blocking::Client {
+    reqwest::blocking::Client::builder()
+        .timeout(timeout)
+        .build()
+        .expect("a timeout-only HTTP client configuration cannot fail to build")
+}
+
 pub struct OllamaCatalog {
     endpoint: String,
     timeout: Duration,
+    client: reqwest::blocking::Client,
 }
 
 impl OllamaCatalog {
     pub fn new(endpoint: String) -> Self {
+        Self::with_timeout(endpoint, Duration::from_secs(5))
+    }
+
+    pub fn with_timeout(endpoint: String, timeout: Duration) -> Self {
         Self {
+            client: http_client(timeout),
             endpoint,
-            timeout: Duration::from_secs(5),
+            timeout,
         }
     }
 }
@@ -67,12 +80,9 @@ impl OllamaCatalog {
 impl ModelCatalog for OllamaCatalog {
     fn models(&self) -> Result<Vec<ModelInfo>, LlmError> {
         let url = format!("{}/api/tags", self.endpoint.trim_end_matches('/'));
-        let client = reqwest::blocking::Client::builder()
-            .timeout(self.timeout)
-            .build()
-            .expect("a timeout-only HTTP client configuration cannot fail to build");
         debug!(endpoint = %self.endpoint, "listing Ollama models");
-        let body = client
+        let body = self
+            .client
             .get(&url)
             .send()
             .and_then(reqwest::blocking::Response::error_for_status)
@@ -120,74 +130,6 @@ pub fn parse_tags(body: &str) -> Result<Vec<ModelInfo>, LlmError> {
             modified_at: tag.modified_at,
         })
         .collect())
-}
-
-pub struct OllamaGenerator {
-    endpoint: String,
-    timeout: Duration,
-}
-
-impl OllamaGenerator {
-    pub fn new(endpoint: String) -> Self {
-        Self::with_timeout(endpoint, DEFAULT_GENERATION_TIMEOUT)
-    }
-
-    /// A custom generation timeout - `timeout_seconds` under `[llm]`
-    /// in `.bdd-mcp.toml`.
-    pub fn with_timeout(endpoint: String, timeout: Duration) -> Self {
-        Self { endpoint, timeout }
-    }
-}
-
-impl LlmGenerator for OllamaGenerator {
-    fn generate(&self, model: &str, system: &str, user: &str) -> Result<String, LlmError> {
-        let url = format!("{}/api/generate", self.endpoint.trim_end_matches('/'));
-        let client = reqwest::blocking::Client::builder()
-            .timeout(self.timeout)
-            .build()
-            .expect("a timeout-only HTTP client configuration cannot fail to build");
-        info!(model, endpoint = %self.endpoint, "sending LLM generation request");
-        debug!(system_chars = %system.len(), prompt_chars = %user.len(), "LLM prompt sizes");
-        debug!(system_prompt = %system, "LLM system prompt");
-        debug!(user_prompt = %user, "LLM user prompt");
-        let started = std::time::Instant::now();
-        let body = client
-            .post(&url)
-            .json(&serde_json::json!({
-                "model": model,
-                "system": system,
-                "prompt": user,
-                "stream": false,
-                "keep_alive": KEEP_ALIVE,
-            }))
-            .send()
-            .and_then(reqwest::blocking::Response::error_for_status)
-            .and_then(|response| response.text())
-            .map_err(|e| {
-                let detail = describe(&e, self.timeout);
-                error!(model, error = %detail, "LLM generation request failed");
-                LlmError(format!("Ollama at {} - {detail}", self.endpoint))
-            })?;
-        debug!(model, raw_response = %body, "LLM raw /api/generate response body");
-        let reply = parse_generate(&body)
-            .inspect_err(|e| error!(model, error = %e.0, "LLM response could not be parsed"))?;
-        let elapsed_ms = started.elapsed().as_millis() as u64;
-        info!(model, elapsed_ms, response_chars = %reply.len(), "LLM response received");
-        debug!(response = %reply, "LLM response text");
-        Ok(reply)
-    }
-}
-
-#[derive(Deserialize)]
-struct GenerateResponse {
-    response: String,
-}
-
-/// Translates Ollama's `/api/generate` JSON into the completion text.
-pub fn parse_generate(body: &str) -> Result<String, LlmError> {
-    let response: GenerateResponse = serde_json::from_str(body)
-        .map_err(|e| LlmError(format!("unexpected /api/generate response - {e}")))?;
-    Ok(response.response)
 }
 
 #[cfg(test)]
@@ -247,95 +189,12 @@ mod tests {
     }
 
     #[test]
-    fn generate_json_translates_to_the_completion_text() {
-        let body = r#"{"model":"llama3","response":"Given('a', ...)","done":true}"#;
-        assert_eq!(parse_generate(body).unwrap(), "Given('a', ...)");
-    }
-
-    #[test]
-    fn malformed_generate_json_is_a_structured_error() {
-        let error = parse_generate("{}").unwrap_err();
-        assert!(error.0.starts_with("unexpected /api/generate response -"));
-    }
-
-    #[test]
-    fn a_reachable_endpoint_gets_both_prompts_and_returns_the_generated_text() {
-        use std::io::{Read as _, Write as _};
-        use std::net::TcpListener;
-
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
-        let server = std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            let mut request = [0u8; 4096];
-            let read = stream.read(&mut request).unwrap();
-            let body = r#"{"response":"generated code"}"#;
-            let response = format!(
-                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\n\
-                 content-length: {}\r\nconnection: close\r\n\r\n{body}",
-                body.len()
-            );
-            stream.write_all(response.as_bytes()).unwrap();
-            String::from_utf8_lossy(&request[..read]).to_string()
-        });
-        let generator = OllamaGenerator::new(format!("http://127.0.0.1:{port}/"));
-        let text = generator
-            .generate("llama3", "you write steps", "write steps")
-            .unwrap();
-        let request = server.join().unwrap();
-        assert_eq!(text, "generated code");
-        assert!(
-            request.contains(r#""system":"you write steps""#),
-            "the system prompt travels in its own field: {request}"
-        );
-        assert!(
-            request.contains(r#""prompt":"write steps""#),
-            "the user prompt is the generation prompt: {request}"
-        );
-        assert!(
-            request.contains(r#""keep_alive":"30m""#),
-            "the model is asked to stay resident: {request}"
-        );
-        assert!(
-            !request.contains("temperature"),
-            "sampling stays at the model default so retries vary: {request}"
-        );
-    }
-
-    #[test]
-    fn an_unreachable_generate_endpoint_reports_the_endpoint() {
-        let generator = OllamaGenerator {
-            endpoint: "http://127.0.0.1:9".into(),
-            timeout: Duration::from_millis(300),
-        };
-        let error = generator
-            .generate("llama3", "system", "prompt")
-            .unwrap_err();
-        assert!(error.0.contains("http://127.0.0.1:9"), "got: {}", error.0);
-    }
-
-    #[test]
     fn an_unreachable_endpoint_reports_the_endpoint_in_the_error() {
         // Port 9 (discard) is reliably closed/unroutable for a fast failure.
-        let catalog = OllamaCatalog {
-            endpoint: "http://127.0.0.1:9".into(),
-            timeout: Duration::from_millis(300),
-        };
+        let catalog =
+            OllamaCatalog::with_timeout("http://127.0.0.1:9".into(), Duration::from_millis(300));
         let error = catalog.models().unwrap_err();
         assert!(error.0.contains("http://127.0.0.1:9"), "got: {}", error.0);
-    }
-
-    #[test]
-    fn a_connection_failure_reports_the_underlying_cause_not_just_the_wrapper() {
-        let generator = OllamaGenerator {
-            endpoint: "http://127.0.0.1:9".into(),
-            timeout: Duration::from_millis(300),
-        };
-        let error = generator
-            .generate("llama3", "system", "prompt")
-            .unwrap_err();
-        // The cause chain (e.g. "Connection refused") must survive, not
-        // just reqwest's generic "error sending request" wrapper.
         assert!(
             error.0.matches(" - ").count() >= 2 || error.0.contains("refused"),
             "got: {}",
@@ -354,17 +213,14 @@ mod tests {
             let (mut stream, _) = listener.accept().unwrap();
             let mut request = [0u8; 4096];
             let _ = stream.read(&mut request);
-            // Reply only after the client's timeout has expired.
             std::thread::sleep(Duration::from_millis(600));
             let _ = stream.write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\n\r\n");
         });
-        let generator = OllamaGenerator {
-            endpoint: format!("http://127.0.0.1:{port}"),
-            timeout: Duration::from_millis(200),
-        };
-        let error = generator
-            .generate("llama3", "system", "prompt")
-            .unwrap_err();
+        let catalog = OllamaCatalog::with_timeout(
+            format!("http://127.0.0.1:{port}"),
+            Duration::from_millis(200),
+        );
+        let error = catalog.models().unwrap_err();
         server.join().unwrap();
         assert!(error.0.contains("no reply within 0s"), "got: {}", error.0);
         assert!(error.0.contains("timeout_seconds"), "got: {}", error.0);

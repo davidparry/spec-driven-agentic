@@ -9,10 +9,11 @@ use crate::application::generation_service::ResolvedLlm;
 use crate::domain::feature::{self, FeatureDoc, FeatureSummary};
 use crate::domain::model::{Requirement, Spec};
 use crate::domain::tdd::TddSnapshot;
+use crate::domain::tools::{ChatMessage, ChatTurn, ToolDefinition, text_turn};
 use crate::ports::{
-    ChangeStore, FeatureCatalog, FeatureError, FeatureFiles, LlmError, LlmGenerator, RuntimeProbe,
-    SourceError, SourceFile, SourceFiles, SpecError, SpecRepository, StageError, StagedChange,
-    StateError, StateStore,
+    ChangeStore, FeatureCatalog, FeatureError, FeatureFiles, LlmConversation, LlmError,
+    RuntimeProbe, SourceError, SourceFile, SourceFiles, SpecError, SpecRepository, StageError,
+    StagedChange, StateError, StateStore,
 };
 
 /// [`ChangeStore`] over a map. `failing` makes every listing operation
@@ -181,11 +182,28 @@ impl FeatureCatalog for InMemoryFeatureCatalog {
     }
 
     fn read(&self, path: &str) -> Result<FeatureDoc, FeatureError> {
-        feature::parse(path, &self.files[path]).map_err(FeatureError)
+        let content = self.files.get(path).ok_or_else(|| {
+            FeatureError(format!(
+                "{path}: no such feature file. Call feature list to see valid paths."
+            ))
+        })?;
+        feature::parse(path, content).map_err(FeatureError)
     }
 
     fn exists(&self, path: &str) -> bool {
         self.files.contains_key(path)
+    }
+}
+
+impl FeatureFiles for InMemoryFeatureCatalog {
+    fn exists(&self, path: &str) -> bool {
+        FeatureCatalog::exists(self, path)
+    }
+
+    fn has_tag(&self, path: &str, tag: &str) -> bool {
+        self.read(path)
+            .map(|doc| doc.all_tags().iter().any(|t| t == tag))
+            .unwrap_or(false)
     }
 }
 
@@ -207,8 +225,8 @@ impl SourceFiles for FailingSources {
     }
 }
 
-/// Scripted [`LlmGenerator`]: records each call's system and user prompt
-/// joined with a newline, replies with a fixed response.
+/// Scripted [`LlmConversation`]: records each call's system and user
+/// prompt joined with a newline, replies with a fixed text turn.
 pub struct FakeLlm {
     pub response: Result<String, LlmError>,
     pub prompts: RefCell<Vec<String>>,
@@ -236,10 +254,16 @@ impl FakeLlm {
     }
 }
 
-impl LlmGenerator for FakeLlm {
-    fn generate(&self, _model: &str, system: &str, user: &str) -> Result<String, LlmError> {
+impl LlmConversation for FakeLlm {
+    fn chat(
+        &self,
+        _model: &str,
+        messages: &[ChatMessage],
+        _tools: &[ToolDefinition],
+    ) -> Result<ChatTurn, LlmError> {
+        let (system, user) = crate::domain::tools::system_and_user(messages);
         self.prompts.borrow_mut().push(format!("{system}\n{user}"));
-        self.response.clone()
+        self.response.clone().map(text_turn)
     }
 }
 
@@ -390,8 +414,8 @@ mod tests {
             "features/x.feature".into(),
             "Feature: X\n\n  Scenario: S\n    Given a\n".into(),
         );
-        assert!(catalog.exists("features/x.feature"));
-        assert!(!catalog.exists("features/y.feature"));
+        assert!(FeatureCatalog::exists(&catalog, "features/x.feature"));
+        assert!(!FeatureCatalog::exists(&catalog, "features/y.feature"));
         let summaries = catalog.list().unwrap();
         assert_eq!(summaries[0].name, "X");
         assert_eq!(

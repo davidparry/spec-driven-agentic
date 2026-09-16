@@ -17,6 +17,49 @@ const OUTPUT_LINES: usize = 200;
 /// How often the executor checks whether the child finished.
 const POLL: Duration = Duration::from_millis(50);
 
+fn isolate_group(command: &mut Command) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+        command.creation_flags(CREATE_NEW_PROCESS_GROUP);
+    }
+}
+
+fn kill_tree(child: &mut std::process::Child) {
+    #[cfg(unix)]
+    {
+        let pid = child.id() as i32;
+        // SAFETY: `isolate_group` put this child in its own process group
+        // whose pgid equals the child's pid; killpg only signals that group.
+        unsafe {
+            libc::killpg(pid, libc::SIGKILL);
+        }
+        let _ = child.wait();
+    }
+    #[cfg(windows)]
+    {
+        let pid = child.id().to_string();
+        let _ = Command::new("taskkill")
+            .args(["/PID", &pid, "/T", "/F"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+        let _ = child.wait();
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+}
+
 pub struct ProcessCommandExecutor;
 
 /// Drain one child stream on its own thread so a full pipe buffer can
@@ -41,12 +84,15 @@ impl CommandExecutor for ProcessCommandExecutor {
         timeout: Duration,
     ) -> Result<ExecOutcome, ExecError> {
         let started = Instant::now();
-        let mut child = Command::new(&argv[0])
+        let mut command = Command::new(&argv[0]);
+        command
             .args(&argv[1..])
             .current_dir(dir)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stderr(Stdio::piped());
+        isolate_group(&mut command);
+        let mut child = command
             .spawn()
             .map_err(|e| ExecError(format!("unable to launch {} - {e}", argv[0])))?;
         let stdout = drain(child.stdout.take());
@@ -57,8 +103,7 @@ impl CommandExecutor for ProcessCommandExecutor {
                 Err(e) => return Err(ExecError(format!("waiting on {} failed - {e}", argv[0]))),
                 Ok(Some(status)) => break (status.code(), false),
                 Ok(None) if started.elapsed() >= timeout => {
-                    let _ = child.kill();
-                    let _ = child.wait();
+                    kill_tree(&mut child);
                     break (None, true);
                 }
                 Ok(None) => std::thread::sleep(POLL),
@@ -155,6 +200,30 @@ mod tests {
             error
                 .0
                 .starts_with("unable to launch definitely-not-a-command-xyz -")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn timeout_kills_the_process_group() {
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("alive");
+        let script = format!(
+            "(sleep 1; echo still > '{}') & exec sleep 30",
+            marker.display()
+        );
+        let outcome = ProcessCommandExecutor
+            .run(
+                &argv(&["sh", "-c", &script]),
+                dir.path(),
+                Duration::from_millis(200),
+            )
+            .unwrap();
+        assert!(outcome.timed_out);
+        std::thread::sleep(Duration::from_millis(1200));
+        assert!(
+            !marker.exists(),
+            "a grandchild must not outlive the timed-out command"
         );
     }
 }

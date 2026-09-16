@@ -22,13 +22,9 @@ impl<F: FeatureCatalog, C: ChangeStore> OverlayCatalog<F, C> {
 impl<F: FeatureCatalog, C: ChangeStore> FeatureCatalog for OverlayCatalog<F, C> {
     fn list(&self) -> Result<Vec<FeatureSummary>, FeatureError> {
         let mut summaries = self.inner.list()?;
-        let changes = self.store.changes().map_err(|e| FeatureError(e.0))?;
+        let changes = self.store.changes()?;
         for change in changes.into_iter().filter(|c| c.path.ends_with(".feature")) {
-            let Some(content) = self
-                .store
-                .content(&change.path)
-                .map_err(|e| FeatureError(e.0))?
-            else {
+            let Some(content) = self.store.content(&change.path)? else {
                 continue;
             };
             let doc = feature::parse(&change.path, &content).map_err(FeatureError)?;
@@ -42,14 +38,44 @@ impl<F: FeatureCatalog, C: ChangeStore> FeatureCatalog for OverlayCatalog<F, C> 
     }
 
     fn read(&self, path: &str) -> Result<FeatureDoc, FeatureError> {
-        if let Ok(Some(content)) = self.store.content(path) {
-            return feature::parse(path, &content).map_err(FeatureError);
+        match self.store.content(path)? {
+            Some(content) => feature::parse(path, &content).map_err(FeatureError),
+            None => self.inner.read(path),
         }
-        self.inner.read(path)
     }
 
     fn exists(&self, path: &str) -> bool {
-        matches!(self.store.content(path), Ok(Some(_))) || self.inner.exists(path)
+        match self.store.content(path) {
+            Ok(Some(_)) => true,
+            Ok(None) => self.inner.exists(path),
+            Err(error) => {
+                tracing::error!(error = %error, path, "staging overlay unreadable");
+                false
+            }
+        }
+    }
+}
+
+impl<F: FeatureCatalog, C: ChangeStore> crate::ports::FeatureFiles for OverlayCatalog<F, C> {
+    fn exists(&self, path: &str) -> bool {
+        FeatureCatalog::exists(self, path)
+    }
+
+    fn has_tag(&self, path: &str, tag: &str) -> bool {
+        match self.store.content(path) {
+            Ok(Some(content)) => feature::parse(path, &content)
+                .map(|doc| doc.all_tags().iter().any(|t| t == tag))
+                .unwrap_or(false),
+            Ok(None) => self
+                .inner
+                .read(path)
+                .map(|doc| doc.all_tags().iter().any(|t| t == tag))
+                .unwrap_or(false),
+            Err(error) => {
+                tracing::error!(error = %error, path, "staging overlay unreadable");
+                false
+            }
+        }
     }
 }
 
@@ -68,13 +94,9 @@ impl<S: SourceFiles, C: ChangeStore> SourceFiles for OverlaySources<S, C> {
     fn sources(&self, extension: &str) -> Result<Vec<SourceFile>, SourceError> {
         let mut files = self.inner.sources(extension)?;
         let suffix = format!(".{extension}");
-        let changes = self.store.changes().map_err(|e| SourceError(e.0))?;
+        let changes = self.store.changes()?;
         for change in changes.into_iter().filter(|c| c.path.ends_with(&suffix)) {
-            let Some(content) = self
-                .store
-                .content(&change.path)
-                .map_err(|e| SourceError(e.0))?
-            else {
+            let Some(content) = self.store.content(&change.path)? else {
                 continue;
             };
             if let Some(existing) = files.iter_mut().find(|f| f.path == change.path) {
@@ -260,6 +282,27 @@ mod tests {
                 .0
                 .contains("cannot read")
         );
+    }
+
+    #[test]
+    fn a_failing_content_read_surfaces_as_a_feature_error() {
+        let overlay = OverlayCatalog::new(
+            InMemoryFeatureCatalog {
+                files: HashMap::new(),
+            },
+            GhostStore {
+                listed: vec!["features/x.feature".into()],
+                fail_content: true,
+            },
+        );
+        assert!(
+            overlay
+                .read("features/x.feature")
+                .unwrap_err()
+                .0
+                .contains("cannot read")
+        );
+        assert!(!overlay.exists("features/x.feature"));
     }
 
     struct GhostStore {

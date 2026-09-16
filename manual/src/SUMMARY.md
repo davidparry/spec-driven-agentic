@@ -30,4 +30,7 @@
 - [bdd refactor](commands/refactor.md)
 - [bdd changes](commands/changes.md)
 - [bdd model](commands/model.md)
+- [bdd config](commands/config.md)
 - [bdd mcp](commands/mcp.md)
+- [bdd tools](commands/tools.md)
+- [bdd ask](commands/ask.md)

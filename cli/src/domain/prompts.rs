@@ -12,13 +12,14 @@ use serde::Serialize;
 const PROMPTS_TOML: &str = include_str!("../../prompts/prompts.toml");
 
 /// The sections the catalog must hold, one per LLM call.
-pub const SECTIONS: [&str; 6] = [
+pub const SECTIONS: [&str; 7] = [
     "proposal",
     "rewording",
     "polish",
     "implementation",
     "advice",
     "next_step",
+    "ask",
 ];
 
 /// One LLM call's prompts: the system prompt carries the model's role
@@ -85,6 +86,22 @@ fn environment() -> &'static Environment<'static> {
         }
         env.add_template_owned("correction.user", correction.user.clone())
             .unwrap_or_else(|e| panic!("prompt template correction.user does not compile - {e}"));
+        let tool_rules = catalog
+            .get("tool_rules")
+            .unwrap_or_else(|| panic!("prompts/prompts.toml is missing [tool_rules]"));
+        if tool_rules.system.is_empty() {
+            panic!("prompts/prompts.toml [tool_rules] needs a system template");
+        }
+        env.add_template_owned("tool_rules.system", tool_rules.system.clone())
+            .unwrap_or_else(|e| panic!("prompt template tool_rules.system does not compile - {e}"));
+        let mcp = catalog
+            .get("mcp")
+            .unwrap_or_else(|| panic!("prompts/prompts.toml is missing [mcp]"));
+        if mcp.system.is_empty() {
+            panic!("prompts/prompts.toml [mcp] needs an instructions template in system");
+        }
+        env.add_template_owned("mcp.instructions", mcp.system.clone())
+            .unwrap_or_else(|e| panic!("prompt template mcp.instructions does not compile - {e}"));
         env
     })
 }
@@ -92,11 +109,26 @@ fn environment() -> &'static Environment<'static> {
 /// Render one section's system and user templates with the same context.
 pub(crate) fn render(section: &str, context: impl Serialize) -> RenderedPrompt {
     let value = minijinja::Value::from_serialize(&context);
+    let rules = render_one("tool_rules.system", &minijinja::Value::from_serialize(()));
     RenderedPrompt {
         section: section.to_string(),
-        system: render_one(&format!("{section}.system"), &value),
+        system: format!(
+            "{}\n\n{rules}",
+            render_one(&format!("{section}.system"), &value)
+        ),
         user: render_one(&format!("{section}.user"), &value),
     }
+}
+
+pub fn mcp_instructions() -> String {
+    render_snippet("mcp.instructions", minijinja::context! {})
+}
+
+pub fn ask_prompt(task: &str) -> RenderedPrompt {
+    render(
+        "ask",
+        minijinja::context! { task, instructions => mcp_instructions() },
+    )
 }
 
 /// Render the correction snippet appended when a model reply fails
@@ -139,6 +171,8 @@ mod tests {
         }
         assert!(env.get_template("project_memory.brief").is_ok());
         assert!(env.get_template("correction.user").is_ok());
+        assert!(env.get_template("tool_rules.system").is_ok());
+        assert!(env.get_template("mcp.instructions").is_ok());
     }
 
     #[test]

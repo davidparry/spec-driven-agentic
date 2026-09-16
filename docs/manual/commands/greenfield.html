@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-e8590d4e.js";
+            window.path_to_searchindex_js = "../searchindex-8826377a.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-521911c0.js"></script>
+        <script src="../toc-9d4e1520.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -231,7 +231,7 @@ generation, test execution, phase tracking — is automated.</p>
 instead of a blank title prompt:</p>
 <pre><code class="language-text">Describe what to build in plain words (one or several requirements). Enter drafts manually instead:
 sum numbers from a comma separated string, empty input means zero
-Splitting the description into requirements with qwen3-coder-next:latest - working ...
+Splitting the description into requirements with qwen3.8-flash-next:125b-mlx - working ...
 Accept all these requirements to refine, or enter comma-separated numbers of the ones to accept.
 The description holds 2 requirement(s):
   1. Comma separated numbers are summed
@@ -328,7 +328,7 @@ proposal — <kbd>Enter</kbd> accepts each fix. If the review rejects a
 wording again, the next model call also recounts every earlier wording
 and the findings each one produced, so the model never circles back to
 a wording the review already rejected:</p>
-<pre><code class="language-text">Asking qwen3-coder-next:latest to address finding 1 of 1 - working ...
+<pre><code class="language-text">Asking qwen3.8-flash-next:125b-mlx to address finding 1 of 1 - working ...
 The model reworded the draft. Each prompt shows its proposal - Enter accepts it, or type your own wording.
 </code></pre>
 <p>With several findings, each one is its own model call — call 2 is
@@ -393,7 +393,7 @@ continue.</p>
 <li>An LLM is optional: with no reachable Ollama model the generation
 steps fall back to deterministic templates you edit yourself. The
 model this CLI is developed and run against is
-<code>qwen3-coder-next:latest</code> (<code>ollama pull qwen3-coder-next:latest</code>).
+<code>qwen3.8-flash-next:125b-mlx</code> (<code>ollama pull qwen3.8-flash-next:125b-mlx</code>).
 Your mileage will vary with other models, especially those not
 trained for development work.</li>
 </ul>

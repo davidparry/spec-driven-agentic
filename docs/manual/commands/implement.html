@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-e8590d4e.js";
+            window.path_to_searchindex_js = "../searchindex-8826377a.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-521911c0.js"></script>
+        <script src="../toc-9d4e1520.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -197,7 +197,7 @@ tree, and the next test run is the real validator.</p>
 <a href="model.html#bdd-model-use"><code>bdd model use</code></a>, passed with <code>--model</code>, or
 the session default when Ollama has installed models). Without one the
 command is refused — implementing stays in your hands. The model this
-CLI is developed and run against is <code>qwen3-coder-next:latest</code>; your
+CLI is developed and run against is <code>qwen3.8-flash-next:125b-mlx</code>; your
 mileage will vary with a different model, especially one trained for
 work other than development.</p>
 <pre><code class="language-bash">bdd test                 # a fresh RED bar records the failure details
@@ -308,7 +308,7 @@ is staged, and you implement by hand instead.</p>
 <p>The implementation prompt is the largest call the CLI makes, so a
 local model can need minutes to answer. The generation timeout
 defaults to 300 seconds; if you see <code>no reply within ...s</code>, raise
-<code>timeout_seconds</code> under <code>[llm]</code> in <code>.bdd-mcp.toml</code> (see
+<code>timeout_seconds</code> under <code>[llm]</code> in <code>.bdd.toml</code> (see
 <a href="model.html#the-llm-configuration-block"><code>bdd model</code></a>).</p>
 <h2 id="where-it-fits"><a class="header" href="#where-it-fits">Where it fits</a></h2>
 <p>This is the standalone form of the <a href="greenfield.html">greenfield</a>
@@ -342,11 +342,16 @@ stays on disk for humans; it is not sent to the model.</p>
 <p>The attempt log is scoped to the requirement and cleared the moment a
 test run goes GREEN — a closed loop leaves no history for the next
 requirement to inherit.</p>
+<p><code>run_tests</code> during this command sees the <strong>working tree</strong>, not the
+unstaged patch sitting in <code>.bdd-staged/</code>. Commit (or apply) before you
+trust the bar. If the model requests <code>command_run</code>, the CLI asks you to
+confirm first; piped or CI stdin declines and never hangs.</p>
 <h2 id="see-also"><a class="header" href="#see-also">See also</a></h2>
 <ul>
 <li><a href="greenfield.html"><code>bdd greenfield</code></a> — the orchestrated loop with the same attempt built in.</li>
 <li><a href="changes.html"><code>bdd changes</code></a> — review and apply the staged files.</li>
 <li><a href="test.html"><code>bdd test</code></a> — the run that decides.</li>
+<li><a href="tools.html"><code>bdd tools</code></a> — the implement profile (includes <code>command_run</code>).</li>
 </ul>
 
                     </main>

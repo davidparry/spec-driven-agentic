@@ -88,6 +88,18 @@ impl FeatureCatalog for GherkinFeatureCatalog {
     }
 }
 
+impl crate::ports::FeatureFiles for GherkinFeatureCatalog {
+    fn exists(&self, path: &str) -> bool {
+        FeatureCatalog::exists(self, path)
+    }
+
+    fn has_tag(&self, path: &str, tag: &str) -> bool {
+        self.read(path)
+            .map(|doc| doc.all_tags().iter().any(|t| t == tag))
+            .unwrap_or(false)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

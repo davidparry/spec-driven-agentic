@@ -6,12 +6,13 @@
 
 use serde::Serialize;
 
+use crate::application::agent_service::{Agent, AgentConfig, DEFAULT_MAX_ROUNDS, NullBroker};
 use crate::application::assets::{
     find_missing_steps, find_requirement, load_effective_spec, production_path,
     production_type_name, unit_test_path,
 };
 use crate::application::spec_service::ServiceError;
-use crate::application::{DEFAULT_LLM_ATTEMPTS, generate_valid};
+use crate::application::{DEFAULT_LLM_ATTEMPTS, LlmReplyError};
 use crate::domain::generation::{
     append_unit_tests, looks_like_step_definitions, looks_like_unit_test, looks_like_unit_test_for,
     polish_prompt, step_definitions_template, steps_target_path, strip_code_fences,
@@ -19,7 +20,9 @@ use crate::domain::generation::{
 };
 use crate::domain::language::Language;
 use crate::domain::steps::MissingStep;
-use crate::ports::{ChangeStore, FeatureCatalog, LlmGenerator, SourceFiles, SpecRepository};
+use crate::ports::{
+    ChangeStore, FeatureCatalog, LlmConversation, Prompter, SourceFiles, SpecRepository, ToolBroker,
+};
 
 /// Reply of `bdd steps missing`.
 #[derive(Debug, Serialize, PartialEq, Eq)]
@@ -44,51 +47,84 @@ pub struct GenerationReport {
     pub next_step: String,
 }
 
-/// The resolved LLM, when one is available: model name + generator +
-/// how many times to try a reply that fails validation.
-pub struct ResolvedLlm<L: LlmGenerator> {
-    pub model: String,
-    pub generator: L,
-    pub attempts: u32,
+/// The resolved LLM, when one is available: an [`Agent`] already scoped
+/// to this caller's tools.
+pub struct ResolvedLlm<L: LlmConversation, B: ToolBroker = NullBroker> {
+    agent: Agent<L, B>,
 }
 
-impl<L: LlmGenerator> ResolvedLlm<L> {
-    pub fn new(model: impl Into<String>, generator: L) -> Self {
-        Self::with_attempts(model, generator, DEFAULT_LLM_ATTEMPTS)
+impl<L: LlmConversation> ResolvedLlm<L, NullBroker> {
+    pub fn new(model: impl Into<String>, chat: L) -> Self {
+        Self::with_attempts(model, chat, DEFAULT_LLM_ATTEMPTS)
     }
 
-    pub fn with_attempts(model: impl Into<String>, generator: L, attempts: u32) -> Self {
+    pub fn with_attempts(model: impl Into<String>, chat: L, attempts: u32) -> Self {
         Self {
-            model: model.into(),
-            generator,
-            attempts: attempts.max(1),
+            agent: Agent::new(
+                model,
+                chat,
+                NullBroker,
+                Vec::new(),
+                AgentConfig::new("llm", attempts, DEFAULT_MAX_ROUNDS, Vec::new()),
+            ),
         }
     }
 }
 
-pub struct GenerationService<F, S, C, R, L>
+impl<L: LlmConversation, B: ToolBroker> ResolvedLlm<L, B> {
+    pub fn connected(
+        model: impl Into<String>,
+        chat: L,
+        broker: B,
+        tools: Vec<crate::domain::tools::ToolDefinition>,
+        config: crate::application::agent_service::AgentConfig,
+    ) -> Self {
+        Self {
+            agent: Agent::new(model, chat, broker, tools, config),
+        }
+    }
+
+    pub fn ask<T>(
+        &self,
+        prompter: &mut dyn Prompter,
+        prompt: &crate::domain::prompts::RenderedPrompt,
+        parse: impl Fn(&str) -> Result<T, String>,
+        on_retry: impl FnMut(u32, u32, &str),
+    ) -> Result<T, LlmReplyError> {
+        self.agent.ask(prompter, prompt, parse, on_retry)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn chat(&self) -> &L {
+        self.agent.chat()
+    }
+}
+
+pub struct GenerationService<F, S, C, R, L, B = NullBroker>
 where
     F: FeatureCatalog,
     S: SourceFiles,
     C: ChangeStore,
     R: SpecRepository,
-    L: LlmGenerator,
+    L: LlmConversation,
+    B: ToolBroker,
 {
     features: F,
     sources: S,
     store: C,
     spec: R,
     language: Language,
-    llm: Option<ResolvedLlm<L>>,
+    llm: Option<ResolvedLlm<L, B>>,
 }
 
-impl<F, S, C, R, L> GenerationService<F, S, C, R, L>
+impl<F, S, C, R, L, B> GenerationService<F, S, C, R, L, B>
 where
     F: FeatureCatalog,
     S: SourceFiles,
     C: ChangeStore,
     R: SpecRepository,
-    L: LlmGenerator,
+    L: LlmConversation,
+    B: ToolBroker,
 {
     pub fn new(
         features: F,
@@ -96,7 +132,7 @@ where
         store: C,
         spec: R,
         language: Language,
-        llm: Option<ResolvedLlm<L>>,
+        llm: Option<ResolvedLlm<L, B>>,
     ) -> Self {
         Self {
             features,
@@ -129,7 +165,10 @@ where
 
     /// Stage pending step definitions for every undefined step
     /// (step_definition_create).
-    pub fn steps_generate(&self) -> Result<GenerationReport, ServiceError> {
+    pub fn steps_generate(
+        &self,
+        prompter: &mut dyn Prompter,
+    ) -> Result<GenerationReport, ServiceError> {
         let missing = find_missing_steps(&self.features, &self.sources, self.language)?;
         if missing.is_empty() {
             return Err(ServiceError(
@@ -137,7 +176,7 @@ where
             ));
         }
         let template = step_definitions_template(self.language, &missing);
-        let (content, source) = self.polish(&template, |code| {
+        let (content, source) = self.polish(prompter, &template, |code| {
             looks_like_step_definitions(self.language, code)
         });
         let target = steps_target_path(self.language).to_string();
@@ -145,9 +184,7 @@ where
             "generate pending step definitions for {} missing step(s) ({source})",
             missing.len()
         );
-        self.store
-            .stage(&target, &content, &summary)
-            .map_err(|e| ServiceError(e.0))?;
+        self.store.stage(&target, &content, &summary)?;
         Ok(GenerationReport {
             target,
             staged: true,
@@ -162,13 +199,16 @@ where
     /// criteria (unit_test_create). When a brownfield test class already
     /// exists, the new methods are appended to it instead of writing a
     /// parallel `Req00NTest`.
-    pub fn unittest_generate(&self, req_id: &str) -> Result<GenerationReport, ServiceError> {
+    pub fn unittest_generate(
+        &self,
+        prompter: &mut dyn Prompter,
+        req_id: &str,
+    ) -> Result<GenerationReport, ServiceError> {
         let spec = load_effective_spec(&self.spec, &self.store)?;
         let requirement = find_requirement(&spec, req_id)?;
         let sources = self
             .sources
-            .sources(crate::domain::steps::source_extension(self.language))
-            .map_err(|e| ServiceError(e.0))?;
+            .sources(crate::domain::steps::source_extension(self.language))?;
         let target = unit_test_path(&sources, self.language, req_id);
         let conventional = unit_test_target_path(self.language, req_id);
         let existing = sources.iter().find(|file| file.path == target);
@@ -185,7 +225,7 @@ where
                 .find(|line| line.starts_with("package "))
                 .map(str::to_string)
         });
-        let (content, source) = self.polish(&template, |code| {
+        let (content, source) = self.polish(prompter, &template, |code| {
             if append {
                 looks_like_unit_test_for(self.language, code, production_type.as_deref())
                     && package_line
@@ -200,9 +240,7 @@ where
             "generate failing unit test for {req_id} ({} criteria, {source})",
             requirement.acceptance_criteria.len()
         );
-        self.store
-            .stage(&target, &content, &summary)
-            .map_err(|e| ServiceError(e.0))?;
+        self.store.stage(&target, &content, &summary)?;
         Ok(GenerationReport {
             target,
             staged: true,
@@ -215,16 +253,19 @@ where
 
     /// The hybrid pass: prefer validated LLM output, fall back to the
     /// template silently on any failure.
-    fn polish(&self, template: &str, valid: impl Fn(&str) -> bool) -> (String, String) {
+    fn polish(
+        &self,
+        prompter: &mut dyn Prompter,
+        template: &str,
+        valid: impl Fn(&str) -> bool,
+    ) -> (String, String) {
         let Some(llm) = &self.llm else {
             return (template.to_string(), "template".into());
         };
         let prompt = polish_prompt(self.language, template);
-        match generate_valid(
-            &llm.generator,
-            &llm.model,
+        match llm.ask(
+            prompter,
             &prompt,
-            llm.attempts,
             |response| {
                 let code = strip_code_fences(response);
                 if valid(&code) {
@@ -324,7 +365,9 @@ mod tests {
     #[test]
     fn generate_without_a_model_stages_the_template() {
         let service = service(vec![], None);
-        let report = service.steps_generate().unwrap();
+        let report = service
+            .steps_generate(&mut crate::application::agent_service::NullPrompter)
+            .unwrap();
         assert_eq!(report.source, "template");
         assert_eq!(report.target, "src/test/java/GeneratedSteps.java");
         assert!(report.staged);
@@ -343,7 +386,9 @@ mod tests {
             "add is called with {string}",
             "the result is {int}",
         ]);
-        let error = service(sources, None).steps_generate().unwrap_err();
+        let error = service(sources, None)
+            .steps_generate(&mut crate::application::agent_service::NullPrompter)
+            .unwrap_err();
         assert_eq!(
             error.0,
             "Every step already has a definition - nothing to generate."
@@ -355,11 +400,13 @@ mod tests {
         let reply = "public class GeneratedSteps {\n    @Given(\"a calculator\") public void polished() {}\n}";
         let llm = FakeLlm::replying(&format!("```java\n{reply}\n```"));
         let service = service(vec![], Some(llm));
-        let report = service.steps_generate().unwrap();
+        let report = service
+            .steps_generate(&mut crate::application::agent_service::NullPrompter)
+            .unwrap();
         assert_eq!(report.source, "llm");
         let content = service.store.content(&report.target).unwrap().unwrap();
         assert_eq!(content, reply);
-        let prompts = service.llm.as_ref().unwrap().generator.prompts.borrow();
+        let prompts = service.llm.as_ref().unwrap().chat().prompts.borrow();
         assert!(
             prompts[0].contains("Cucumber-JVM"),
             "prompt names the framework"
@@ -378,7 +425,9 @@ mod tests {
     #[test]
     fn invalid_llm_output_falls_back_to_the_template_silently() {
         let service = service(vec![], Some(FakeLlm::replying("I cannot help with that.")));
-        let report = service.steps_generate().unwrap();
+        let report = service
+            .steps_generate(&mut crate::application::agent_service::NullPrompter)
+            .unwrap();
         assert_eq!(report.source, "template");
         let content = service.store.content(&report.target).unwrap().unwrap();
         assert!(content.contains("PendingException"));
@@ -387,14 +436,21 @@ mod tests {
     #[test]
     fn an_llm_failure_falls_back_to_the_template_silently() {
         let service = service(vec![], Some(FakeLlm::failing()));
-        let report = service.steps_generate().unwrap();
+        let report = service
+            .steps_generate(&mut crate::application::agent_service::NullPrompter)
+            .unwrap();
         assert_eq!(report.source, "template");
     }
 
     #[test]
     fn a_unit_test_is_staged_from_the_requirements_criteria() {
         let service = service(vec![], None);
-        let report = service.unittest_generate("REQ-001").unwrap();
+        let report = service
+            .unittest_generate(
+                &mut crate::application::agent_service::NullPrompter,
+                "REQ-001",
+            )
+            .unwrap();
         assert_eq!(report.target, "src/test/java/Req001Test.java");
         assert_eq!(report.source, "template");
         assert!(report.summary.contains("1 criteria"));
@@ -406,7 +462,10 @@ mod tests {
     #[test]
     fn a_unit_test_for_an_unknown_requirement_is_refused() {
         let error = service(vec![], None)
-            .unittest_generate("REQ-999")
+            .unittest_generate(
+                &mut crate::application::agent_service::NullPrompter,
+                "REQ-999",
+            )
             .unwrap_err();
         assert_eq!(
             error.0,
@@ -418,7 +477,12 @@ mod tests {
     fn validated_llm_output_replaces_the_unit_test_template() {
         let llm = FakeLlm::replying("@Test void polished() {}");
         let service = service(vec![], Some(llm));
-        let report = service.unittest_generate("REQ-001").unwrap();
+        let report = service
+            .unittest_generate(
+                &mut crate::application::agent_service::NullPrompter,
+                "REQ-001",
+            )
+            .unwrap();
         assert_eq!(report.source, "llm");
         let content = service.store.content(&report.target).unwrap().unwrap();
         assert_eq!(content, "@Test void polished() {}");
@@ -431,7 +495,12 @@ mod tests {
             content: "package com.example;\n\nclass StringCalculatorTest {\n}\n".into(),
         }];
         let service = service(sources, None);
-        let report = service.unittest_generate("REQ-001").unwrap();
+        let report = service
+            .unittest_generate(
+                &mut crate::application::agent_service::NullPrompter,
+                "REQ-001",
+            )
+            .unwrap();
         assert_eq!(
             report.target,
             "src/test/java/com/example/StringCalculatorTest.java"
@@ -454,7 +523,12 @@ mod tests {
             "package com.wrong;\n@Test void two() { fail(\"TODO\"); new StringCalculator(); }",
         );
         let service = service(sources, Some(llm));
-        let report = service.unittest_generate("REQ-001").unwrap();
+        let report = service
+            .unittest_generate(
+                &mut crate::application::agent_service::NullPrompter,
+                "REQ-001",
+            )
+            .unwrap();
         assert_eq!(report.source, "template");
         let content = service.store.content(&report.target).unwrap().unwrap();
         assert!(content.contains("package com.example;"));

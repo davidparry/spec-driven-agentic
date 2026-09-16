@@ -1,5 +1,5 @@
 //! The TDD loop use cases: run tests, show the phase, start a refactor.
-//! Reply shapes for `run_tests` still match the Java server. `get_tdd_state`
+//! Reply shapes for `run_tests` stay frozen (`cli/tests/mcp_conformance.rs`). `get_tdd_state`
 //! adds interpretation instructions and at most the three latest dated
 //! entries so an LLM is never briefed with the whole log.
 

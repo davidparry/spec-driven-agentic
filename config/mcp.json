@@ -1,12 +1,8 @@
 {
   "mcpServers": {
-    "tdd-workflow": {
-      "command": "java",
-      "args": [
-        "-Dworkshop.root=${workspaceFolder}",
-        "-jar",
-        "${workspaceFolder}/mcp-server/target/tdd-mcp-server.jar"
-      ]
+    "spec-driven-server": {
+      "command": "bdd",
+      "args": ["mcp", "serve", "--root", "${workspaceFolder}"]
     }
   }
 }
