@@ -151,8 +151,9 @@ impl<R: SpecRepository, F: FeatureFiles> SpecService<R, F> {
             "The spec is valid. Call get_requirement for a pending requirement and write \
              its Gherkin scenario from the acceptance criteria."
         } else {
-            "Fix the issues in the requirements file, then call validate_spec again. \
-             Iterate until valid is true before writing scenarios or code."
+            "Call requirement_reword to fix the issues - never edit the requirements \
+             file by hand - then call validate_spec again. Iterate until valid is true \
+             before writing scenarios or code."
         };
         ValidationReport {
             valid,
@@ -178,9 +179,9 @@ impl<R: SpecRepository, F: FeatureFiles> SpecService<R, F> {
             "The wording reads clean. Confirm it with the developer, then write the \
              Gherkin scenario from the acceptance criteria."
         } else {
-            "Refine the wording in the requirements file to address each finding, run \
-             validate_spec, then call refine_requirement again. Iterate until there are \
-             no findings."
+            "Call requirement_reword to address each finding - never edit the \
+             requirements file by hand - then run validate_spec and call \
+             refine_requirement again. Iterate until there are no findings."
         };
         Ok(RefinementReport {
             id: id.to_string(),
@@ -337,8 +338,9 @@ mod tests {
         assert_eq!(report.issues.len(), 1);
         assert_eq!(
             report.next_step,
-            "Fix the issues in the requirements file, then call validate_spec again. \
-             Iterate until valid is true before writing scenarios or code."
+            "Call requirement_reword to fix the issues - never edit the requirements \
+             file by hand - then call validate_spec again. Iterate until valid is true \
+             before writing scenarios or code."
         );
     }
 
@@ -433,9 +435,9 @@ mod tests {
         assert_eq!(report.findings.len(), 6);
         assert_eq!(
             report.next_step,
-            "Refine the wording in the requirements file to address each finding, run \
-             validate_spec, then call refine_requirement again. Iterate until there are \
-             no findings."
+            "Call requirement_reword to address each finding - never edit the \
+             requirements file by hand - then run validate_spec and call \
+             refine_requirement again. Iterate until there are no findings."
         );
     }
 }

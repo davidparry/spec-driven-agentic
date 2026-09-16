@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+- `scripts/verify-workshop-run.sh check` grades Exercise 1 on its own
+  terms. It used to demand that REQ-007 match the `complete` branch word
+  for word, which no correct run could satisfy: the wording is authored
+  live by the student and their agent, and the recorded one predates the
+  custom-delimiter prompt. It now asks `bdd spec validate` and
+  `bdd spec refine` — the same deterministic checks Exercise 1 runs — and
+  that a criterion covers the `//` declaration. REQ-003, whose wording
+  ships on trunk, is still compared against `complete`.
+
+- Exercise 2 names REQ-003 in its prompt — in the follow-along, the
+  README, and the slide deck, the three places attendees paste it from.
+  "the next pending id" was ambiguous once Exercise 1 succeeded, because
+  the REQ-007 just drafted is pending too and freshest in context, so
+  agents took it to green and left REQ-003 untouched. Every phase gate
+  passed while it happened, which is the point: the gates police how an
+  agent works, never what it works on. That is now a documented outcome
+  in Step 6, a presenter note on the deck, and a row in the *Where This
+  Breaks* catalog.
+
+- MCP `requirement_reword` rewords one requirement's title, story, or
+  acceptance criteria into the staging area, the same mutation
+  `bdd spec reword` performs. `validate_spec` and `refine_requirement` now
+  name it in their `nextStep` instead of telling an agent to edit the
+  requirements file: the spec file's JSON escaping and indentation differ
+  from what the read tools return, so a hand-written string replacement
+  against `requirements.json` does not match. The catalog is 25 tools.
+
 - The chat cache keeps only terminal model turns. A turn carrying tool
   calls is neither stored nor served, so an identical later request asks
   the model again rather than replaying calls the agent loop would
@@ -22,7 +49,7 @@
   `builtin:name` pins the CLI tool when short names collide.
 
 - MCP `project_root` returns the absolute `--root` this `bdd mcp serve`
-  process uses for every other tool. The catalog is 24 tools.
+  process uses for every other tool.
 - Claude Code can use the workshop MCP server from the committed
   `.mcp.json` (enabled in `.claude/settings.json`).
 - MCP server identity is `spec-driven-server` / `1.0.0`, title `Spec Driven`,
@@ -52,7 +79,7 @@
   deprecated).
 - The workshop MCP server stays stdio-only (`bdd mcp serve`) on rmcp 3.4.
 
-- One MCP server: `bdd mcp serve` (24 tools, including `project_root`
+- One MCP server: `bdd mcp serve` (25 tools, including `project_root`
   and `changes_validate`
   for staged-wins spec+Gherkin checks). Workshop Cursor config and
   `smoke-test.jar` launch that binary; the Java `mcp-server/` module is gone.

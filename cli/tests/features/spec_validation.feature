@@ -16,7 +16,7 @@ Feature: Spec validation
     When the spec is validated
     Then the spec is invalid
     And an issue is "REQ-007: criterion "the result should be 6 for 1\n2,3" must be phrased Given/When/Then"
-    And the next step advises fixing the issues and re-validating
+    And the next step advises requirement_reword and re-validating
 
   Scenario: Requirement ids must follow the REQ-007 shape
     Given a valid pending requirement "req-1"

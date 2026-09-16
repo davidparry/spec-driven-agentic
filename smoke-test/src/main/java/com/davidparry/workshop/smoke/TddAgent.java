@@ -14,7 +14,7 @@ import java.util.Arrays;
  * {@code --sweep --include-mutating}.
  *
  * <p>This class is the composition root and nothing else. All walkthrough
- * logic lives in {@link AgentWorkflow}; the 24-tool sweep lives in
+ * logic lives in {@link AgentWorkflow}; the 25-tool sweep lives in
  * {@link ToolSweep}. Both are covered at 100% against a scripted fake.
  *
  * <p>Run it from the repo root after {@code bdd} is installed and on

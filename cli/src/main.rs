@@ -1176,12 +1176,19 @@ fn run_spec(
                  its Gherkin scenario (bdd scenario add)."
                     .into()
             } else {
-                "Fix the issues in the requirements file, then run bdd spec validate again.".into()
+                "Run bdd spec reword to fix the issues, then run bdd spec validate again.".into()
             };
             print_json(&report)
         }
         SpecCommand::Refine { req_id } => {
-            let report = service.refine_requirement(req_id)?;
+            let mut report = service.refine_requirement(req_id)?;
+            if !report.clean {
+                report.next_step = format!(
+                    "Run bdd spec reword {req_id} to address each finding, then run \
+                     bdd spec validate and bdd spec refine {req_id} again. Iterate \
+                     until there are no findings."
+                );
+            }
             print_json(&report)
         }
         SpecCommand::Draft {

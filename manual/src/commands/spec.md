@@ -15,7 +15,8 @@ Commands: list, show, draft, validate, refine, reword, set-feature, mark-impleme
 ```
 
 MCP tool equivalents: `list_requirements`, `get_requirement`,
-`validate_spec`, `refine_requirement`, `requirement_mark_implemented`.
+`validate_spec`, `refine_requirement`, `requirement_reword`,
+`requirement_mark_implemented`.
 
 ---
 
@@ -294,6 +295,12 @@ bdd spec reword REQ-007 \
   --criterion 'Given the input "1\n2,3", when add is called, then the result is 6' \
   --criterion 'Given an empty string "", when add is called, then the result is 0'
 ```
+
+Over MCP this is `requirement_reword` (arguments `id`, `title`, `story`,
+`acceptance_criteria`). It is how an agent repairs whatever `validate_spec`
+or `refine_requirement` reported: the spec file's JSON escaping and
+indentation differ from what the read tools return, so a hand-written
+string replacement against `requirements.json` will not match.
 
 ---
 

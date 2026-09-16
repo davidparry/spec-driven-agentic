@@ -18,14 +18,14 @@ class LiveBddServerTest {
     Path project;
 
     @Test
-    @DisplayName("the live bdd binary serves exactly the 24 planned tools")
+    @DisplayName("the live bdd binary serves exactly the 25 planned tools")
     void liveSweep() throws IOException {
         seedProject(project);
         Path bdd = Path.of(System.getProperty("bdd.binary"));
         try (SdkToolClient client = new SdkToolClient(project, bdd)) {
             ToolSweep.SweepReport report = new ToolSweep().run(client, new Narrator(line -> {
             }), false);
-            assertThat(report.discovered()).hasSize(24);
+            assertThat(report.discovered()).hasSize(25);
             assertThat(report.missing()).isEmpty();
             assertThat(report.unexpected()).isEmpty();
             assertThat(report.failures()).isEmpty();

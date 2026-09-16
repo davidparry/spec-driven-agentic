@@ -128,6 +128,24 @@ pub struct CommandRunParams {
     pub timeout_secs: Option<u64>,
 }
 
+#[derive(Deserialize, JsonSchema)]
+pub struct RequirementRewordParams {
+    /// The requirement id, e.g. REQ-003
+    pub id: String,
+    /// New title; omit to keep the current one
+    #[serde(default)]
+    #[schemars(schema_with = "nullable_string")]
+    pub title: Option<String>,
+    /// New user story; omit to keep the current one
+    #[serde(default)]
+    #[schemars(schema_with = "nullable_string")]
+    pub story: Option<String>,
+    /// The full new set of acceptance criteria, each phrased
+    /// Given/When/Then. Replaces the existing list; omit to keep it.
+    #[serde(default)]
+    pub acceptance_criteria: Vec<String>,
+}
+
 /// The MCP delivery of the workflow: seven frozen tools plus the
 /// additive typed tools, all backed by the same application services the
 /// CLI commands use.
@@ -620,6 +638,54 @@ impl WorkflowServer {
             Ok(report) => json_result(&report),
             Err(e) => error_result(e),
         })
+    }
+
+    #[tool(
+        description = "Reword one requirement's title, story, or acceptance criteria \
+        (staged; apply with changes_commit). Use this to repair whatever validate_spec \
+        or refine_requirement reported - never hand-edit the requirements file, whose \
+        JSON escaping and indentation differ from what the read tools return. Passing \
+        acceptance_criteria replaces the whole list; status and featureFile are kept."
+    )]
+    async fn requirement_reword(
+        &self,
+        Parameters(params): Parameters<RequirementRewordParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let _span = tool_call("requirement_reword");
+        tracing::debug!(
+            id = %params.id,
+            criteria = params.acceptance_criteria.len(),
+            "tool arguments"
+        );
+        Ok(
+            match self.mutation_service().reword_direct(
+                &params.id,
+                params.title,
+                params.story,
+                params.acceptance_criteria,
+            ) {
+                // The service words its next step for the CLI. Over MCP the
+                // agent has tools, not a shell, so name the tools instead —
+                // the mirror of what `bdd spec validate` does to
+                // `validate_spec`.
+                Ok(mut report) => {
+                    report.next_step = if report.findings.is_empty() {
+                        "Review with changes_show, check it with changes_validate, then \
+                         apply with changes_commit."
+                            .to_string()
+                    } else {
+                        format!(
+                            "Staged {} with open wording findings. Call \
+                             requirement_reword again to address them, then \
+                             changes_commit.",
+                            report.id
+                        )
+                    };
+                    json_result(&report)
+                }
+                Err(e) => error_result(e),
+            },
+        )
     }
 
     #[tool(

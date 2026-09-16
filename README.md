@@ -22,7 +22,7 @@
 > grades your run against the `complete` branch.
 
 A 60-minute hands-on workshop. There is **one MCP implementation**: `bdd mcp
-serve` (24 tools). Cursor and the bundled `smoke-test.jar` both drive that
+serve` (25 tools). Cursor and the bundled `smoke-test.jar` both drive that
 binary over stdio. What you drive is a **spec-driven development workflow
 spanning SDD, BDD, and TDD**: you and an AI agent draft requirements together
 and iterate them through two server feedback loops — `validate_spec` for
@@ -68,8 +68,8 @@ presenter, not in the repo.)
 | Module / folder | What it is |
 | --- | --- |
 | `kata/` | A **standalone** Maven project — the String Calculator kata. It has its own `pom.xml` (no parent). Two requirements are implemented; the rest are driven agentically during the workshop. Gherkin feature files (`src/test/resources/features/`) are the executable behavior spec, run by Cucumber alongside the JUnit tests. Copy the folder and it still builds: `mvn -f kata/pom.xml test`. |
-| [`cli/`](cli/README.md) | The `bdd` CLI **and** the workshop MCP server. `bdd mcp serve` exposes 24 tools over stdio (wire identity `spec-driven-server` / `1.0.0`, title `Spec Driven`, website [spec-driven-agentic](https://davidparry.github.io/spec-driven-agentic/)). Frozen seven-tool reply shapes are gated by `cli/tests/mcp_conformance.rs`. The same binary automates the spec-driven loop with per-command tool profiles (3–7 tools) and a local Ollama model (`qwen3.8-flash-next:125b-mlx`). See [`cli/README.md`](cli/README.md) and the searchable [command manual](https://davidparry.github.io/spec-driven-agentic/manual/). |
-| `smoke-test/` | A narrated **smoke test** of `bdd mcp serve` (`smoke-test.jar`) plus an automated 24-tool sweep. It launches **only** that server as a child process — discovery, baseline `run_tests`, then remaining read-only tools (`validate_spec`, `project_root`, `project_inspect`, `feature_list` / `feature_read`, `changes_show` / `changes_validate`, `step_definitions_find`; no `initialize` handshake). Mutating tools stay behind `--sweep --include-mutating`. Own spec (`smoke-test/requirements/requirements.json`), tagged Cucumber scenarios, `SpecCompletenessTest`, 100% instruction/branch coverage (JaCoCo-enforced; excludes `TddAgent` and `SdkToolClient` only), SpotBugs + PMD gating `mvn -pl smoke-test verify`. |
+| [`cli/`](cli/README.md) | The `bdd` CLI **and** the workshop MCP server. `bdd mcp serve` exposes 25 tools over stdio (wire identity `spec-driven-server` / `1.0.0`, title `Spec Driven`, website [spec-driven-agentic](https://davidparry.github.io/spec-driven-agentic/)). Frozen seven-tool reply shapes are gated by `cli/tests/mcp_conformance.rs`. The same binary automates the spec-driven loop with per-command tool profiles (3–7 tools) and a local Ollama model (`qwen3.8-flash-next:125b-mlx`). See [`cli/README.md`](cli/README.md) and the searchable [command manual](https://davidparry.github.io/spec-driven-agentic/manual/). |
+| `smoke-test/` | A narrated **smoke test** of `bdd mcp serve` (`smoke-test.jar`) plus an automated 25-tool sweep. It launches **only** that server as a child process — discovery, baseline `run_tests`, then remaining read-only tools (`validate_spec`, `project_root`, `project_inspect`, `feature_list` / `feature_read`, `changes_show` / `changes_validate`, `step_definitions_find`; no `initialize` handshake). Mutating tools stay behind `--sweep --include-mutating`. Own spec (`smoke-test/requirements/requirements.json`), tagged Cucumber scenarios, `SpecCompletenessTest`, 100% instruction/branch coverage (JaCoCo-enforced; excludes `TddAgent` and `SdkToolClient` only), SpotBugs + PMD gating `mvn -pl smoke-test verify`. |
 | `requirements/requirements.json` | The SDD spec: the requirements backlog, and the root of the **spec catalog** — it holds requirements of its own and may `include` child spec files (which may include further files, N levels deep); the tooling merges the tree into one backlog. Each requirement carries acceptance criteria (already phrased Given/When/Then) that agents turn into executable Gherkin scenarios and failing tests, plus a `featureFile` pointer to where its scenarios live. Full field-by-field reference: [The requirements format](https://davidparry.github.io/spec-driven-agentic/manual/spec-format.html). |
 | `slides/index.html` | The reveal.js slide deck for the 60-minute talk (self-contained, CDN-based). |
 | `student-follow-along.md` | The attendee's step-by-step companion: commands, prompts, expected output, self-check, homework. |
@@ -175,13 +175,14 @@ reset by re-branching. Details in
 
 ## The server's tools
 
-`bdd mcp serve` exposes **24 tools**. Cursor sees all of them. CLI commands
+`bdd mcp serve` exposes **25 tools**. Cursor sees all of them. CLI commands
 that call a model attach a scoped profile (`bdd tools profiles`) of 3–7.
 
-There is no `spec_draft` or `implement` MCP tool. Cursor writes
-`requirements.json` and production Java; Gherkin, steps, unit-test
-scaffolds, mark-implemented, and staging go through tools. Generation over
-MCP is template-only.
+There is no `spec_draft` or `implement` MCP tool: a **new** requirement is
+still drafted by the human (`bdd spec draft`), and Cursor writes production
+Java. Rewording an existing requirement, Gherkin, steps, unit-test
+scaffolds, mark-implemented, and staging all go through tools. Generation
+over MCP is template-only.
 
 **Frozen seven** (reply shapes stay; conformance is `cli/tests/mcp_conformance.rs`
 plus smoke-test `ToolPlan`):
@@ -198,7 +199,10 @@ plus smoke-test `ToolPlan`):
 
 **Authoring / staging:** `feature_list`, `feature_read`, `feature_create`,
 `scenario_add`, `scenario_update`, `scenario_delete`, `changes_show`,
-`changes_validate`, `changes_commit`, `changes_discard`, `requirement_mark_implemented`
+`changes_validate`, `changes_commit`, `changes_discard`, `requirement_reword`
+(the repair path `validate_spec` and `refine_requirement` point at — agents
+must never hand-edit `requirements.json`, whose JSON escaping and indentation
+differ from what the read tools return), `requirement_mark_implemented`
 (GREEN-gated, tagged scenario required), `step_definitions_find`,
 `step_definition_create`, `unit_test_create` (arg `req_id`).
 
@@ -212,7 +216,7 @@ The Java **smoke test** practices what it preaches: `smoke-test/requirements/req
 with `@CLI-XXX` tags, tagged Gherkin scenarios, a `SpecCompletenessTest`, and
 100% instruction/branch coverage with SpotBugs and PMD gating
 `mvn -pl smoke-test verify`. The Rust server's frozen contracts are the
-conformance suite plus that module's `ToolPlan` (exactly 24 names; a 25th
+conformance suite plus that module's `ToolPlan` (exactly 25 names; a 26th
 tool fails the Java build).
 
 ## The workshop
@@ -223,7 +227,7 @@ The server is `bdd mcp serve` — this segment is a quick tour, not an
 exercise. Composition root: `cli/src/mcp.rs` plus the CLI TDD services. A
 stdio server must never write to stdout — that corrupts the JSON-RPC stream.
 Prove the plumbing with the bundled **smoke test**, which does exactly what an
-IDE does: launch `bdd mcp serve`, `tools/list` (24 tools),
+IDE does: launch `bdd mcp serve`, `tools/list` (25 tools),
 then `tools/call` — narrating each step. No `initialize` handshake.
 Default smoke is read-only plus the baseline `run_tests`: after
 `get_requirement` it also calls `validate_spec`, `refine_requirement`,
@@ -284,7 +288,13 @@ the server owns the critique.
 With a valid spec, prompt your agent to **use MCP tools** (not hand-edits of
 Gherkin, tests, or spec status):
 
-> Using the spec-driven-server tools: validate the spec first, then `get_requirement` for the next pending id. Add its Gherkin with `scenario_add` (tag the requirement id), add missing steps with `step_definition_create` if `step_definitions_find` reports any, add a unit test with `unit_test_create`. Show `changes_show` and ask me before `changes_commit`. Then `run_tests` (expect RED). Implement the simplest production code in `StringCalculator`. `run_tests` (GREEN). `start_refactor` if I agree. On GREEN, `requirement_mark_implemented`. Ask me before each phase change.
+> Using the spec-driven-server tools: validate the spec first, then `get_requirement` for REQ-003 — not the REQ-007 you just drafted, which stays pending until homework. Add its Gherkin with `scenario_add` (tag the requirement id), add missing steps with `step_definition_create` if `step_definitions_find` reports any, add a unit test with `unit_test_create`. Show `changes_show` and ask me before `changes_commit`. Then `run_tests` (expect RED). Implement the simplest production code in `StringCalculator`. `run_tests` (GREEN). `start_refactor` if I agree. On GREEN, `requirement_mark_implemented`. Ask me before each phase change.
+
+Name the id. "The next pending id" reads fine until Exercise 1 succeeds —
+then REQ-007 is pending too, and it is the freshest thing in the agent's
+context, so that is what gets taken to green. Correct discipline, wrong
+requirement: the phase gates police *how* an agent works, never *what it
+works on*.
 
 You'll watch the loop: `validate_spec` → `get_requirement` →
 `scenario_add` / `unit_test_create` (staged) → **you review with
@@ -293,8 +303,10 @@ production `add` (a file edit) → `run_tests` (GREEN) → `start_refactor` if
 you agree → **`requirement_mark_implemented`** (the tool refuses off GREEN
 or without a tagged scenario). Requirements REQ-003 through REQ-006 are
 waiting — plus the one you drafted in Exercise 1. When you're done,
-`scripts/verify-workshop-run.sh check` grades your end state against the
-`complete` branch.
+`scripts/verify-workshop-run.sh check` grades your end state: REQ-003's
+scenarios and unit test against the `complete` branch, and the REQ-007 you
+drafted against `bdd spec validate` and `bdd spec refine` rather than
+anyone else's wording.
 
 ### Backup — Inspect the protocol (if time allows)
 

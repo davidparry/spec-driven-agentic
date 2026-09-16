@@ -53,10 +53,11 @@ Feature: Stateless MCP tool calls from the shell
     And mcp call "get_tdd_state"
     Then the tool reply contains "phase"
 
-  Scenario: mcp tools lists 24 names over the wire
+  Scenario: mcp tools lists 25 names over the wire
     When mcp tools are listed over the wire
-    Then 24 MCP tools are listed
+    Then 25 MCP tools are listed
     And the listed MCP tools include "project_root"
+    And the listed MCP tools include "requirement_reword"
     And the listed MCP tools include "requirement_mark_implemented"
     And the listed MCP tools include "unit_test_create"
     And the listed MCP tools include "changes_validate"

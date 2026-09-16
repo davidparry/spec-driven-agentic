@@ -79,6 +79,17 @@ def reference(path):
     return subprocess.run(["git", "-C", ref_repo, "show", f"{ref_branch}:{path}"],
                           capture_output=True, text=True, check=True).stdout
 
+def bdd(*args):
+    """Ask the bdd CLI, so Exercise 1 is graded by the same deterministic
+    validator and refiner the workshop tools use. None when bdd is missing
+    or did not answer with JSON."""
+    try:
+        out = subprocess.run(["bdd", "spec", *args, "--root", root],
+                             capture_output=True, text=True, check=True).stdout
+        return json.loads(out)
+    except (OSError, subprocess.CalledProcessError, json.JSONDecodeError):
+        return None
+
 fail = 0
 def report(ok, label, detail=""):
     global fail
@@ -90,21 +101,36 @@ def req(doc, rid):
     return next((r for r in doc["requirements"] if r["id"] == rid), None)
 
 spec = json.loads(local(SPEC))
-ref_spec = json.loads(reference(SPEC))
 
+# ---- Exercise 1: the requirement you drafted -----------------------------
+# The wording here is authored by you and your agent, so it is graded the
+# way the workshop grades it - the spec validates, the refiner has nothing
+# left to say, and the behavior Exercise 1 asked for is covered - never
+# against one canned paragraph.
+r7 = req(spec, "REQ-007")
+report(r7 is not None, "REQ-007 was drafted into the spec",
+       "missing - Exercise 1 drafts it")
+
+validation = bdd("validate")
+report(validation is not None and validation.get("valid") is True,
+       "the spec is valid",
+       "; ".join(validation["issues"]) if validation else "bdd is not on PATH - see scripts/preflight.sh")
+
+if r7 is not None:
+    refinement = bdd("refine", "REQ-007")
+    report(refinement is not None and refinement.get("clean") is True,
+           "REQ-007 wording is refine-clean",
+           "; ".join(refinement["findings"]) if refinement else "bdd is not on PATH - see scripts/preflight.sh")
+    report(any("//" in c for c in r7.get("acceptanceCriteria", [])),
+           "REQ-007 covers the first-line delimiter declaration",
+           'no criterion mentions the "//" declaration Exercise 1 asks for')
+
+# ---- Exercise 2: REQ-003 taken to green ---------------------------------
 r3 = req(spec, "REQ-003")
 report(r3 is not None and r3.get("status") == "implemented",
        "REQ-003 status is 'implemented' in the spec",
-       f"status is {r3.get('status') if r3 else 'missing'}")
-
-r7, ref7 = req(spec, "REQ-007"), req(ref_spec, "REQ-007")
-if r7 is None:
-    report(False, "REQ-007 present in the spec", "missing - Exercise 1 drafts it")
-else:
-    strip = lambda r: {k: v for k, v in r.items() if k != "status"}
-    report(strip(r7) == strip(ref7),
-           "REQ-007 wording matches the complete branch (status ignored)",
-           "title/story/criteria differ from complete")
+       f"status is {r3.get('status') if r3 else 'missing'}"
+       + (" - Exercise 2 takes REQ-003, not the REQ-007 you drafted" if r3 and r3.get("status") == "pending" else ""))
 
 def scenario_blocks(text, tag):
     blocks, lines = [], text.splitlines()

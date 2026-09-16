@@ -25,7 +25,7 @@ Feature: Requirement refinement
     And a finding is "story: 'should' is ambiguous - describe the observable behavior instead"
     And a finding is "story: 'handle' is ambiguous - describe the observable behavior instead"
     And a finding is "story: 'quickly' is ambiguous - describe the observable behavior instead"
-    And the next step advises rewording from the findings and iterating
+    And the next step advises requirement_reword and iterating
 
   Scenario: Happy-path-only criteria earn the coverage finding
     Given a requirement "REQ-007" with story "As a user, I want newlines to separate numbers so that multi-line input works."

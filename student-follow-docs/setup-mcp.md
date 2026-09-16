@@ -14,7 +14,7 @@ bdd mcp serve --root /absolute/path/to/tdd-bdd-agentic
 ```
 
 Cursor and the bundled `smoke-test.jar` both speak to this process over
-stdio and see **all 24 tools**, including staging.
+stdio and see **all 25 tools**, including staging.
 
 ---
 

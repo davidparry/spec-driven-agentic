@@ -7,7 +7,7 @@
 
 One native binary for the whole spec-driven loop (spec → Gherkin → RED →
 GREEN → REFACTOR) **and** the workshop MCP server: `bdd mcp serve` exposes
-24 tools (wire identity `spec-driven-server` / `1.0.0`, title
+25 tools (wire identity `spec-driven-server` / `1.0.0`, title
 `Spec Driven`, website
 https://davidparry.github.io/spec-driven-agentic/). Frozen seven-tool
 reply shapes stay; the source of truth is `tests/mcp_conformance.rs` plus
@@ -50,7 +50,7 @@ The CLI grew out of a talk and hands-on class that teaches spec-driven
 development with BDD and TDD — this repository is that workshop (see
 [../student-follow-along.md](../student-follow-along.md)). The class
 walks students through the loop in Cursor against **this binary**
-(`bdd mcp serve`, 24 tools). To finish the same kata from the terminal
+(`bdd mcp serve`, 25 tools). To finish the same kata from the terminal
 with scoped profiles (Wi-Fi off), follow
 [../student-follow-docs/cli-path.md](../student-follow-docs/cli-path.md).
 
@@ -148,9 +148,9 @@ architecture and full test coverage throughout:
   model is briefed with the whole process document (states, commands,
   loop, invariants) plus the full project state, and names the next
   command in plain words.
-- `bdd mcp serve` — the workshop MCP stdio server: 24 tools (frozen seven
+- `bdd mcp serve` — the workshop MCP stdio server: 25 tools (frozen seven
   plus authoring/staging/inspect). Conformance-tested over real JSON-RPC.
-  Cursor sees all 24; CLI LLM commands attach a scoped profile.
+  Cursor sees all 25; CLI LLM commands attach a scoped profile.
 - `bdd mcp tools | call` — list or invoke one tool over a throwaway
   session (loopback or `--stdio`).
 - `bdd tools list | profiles | show | enable | disable | refresh | servers`
@@ -633,8 +633,8 @@ test-first:
    (`list_requirements`, `get_requirement`, `validate_spec`,
    `refine_requirement`, `run_tests`, `get_tdd_state`, `start_refactor`)
    must keep their reply shapes. The source of truth is
-   `tests/mcp_conformance.rs` plus smoke-test `ToolPlan` (exactly 24
-   names; a 25th tool fails that Java build). Backup Inspector:
+   `tests/mcp_conformance.rs` plus smoke-test `ToolPlan` (exactly 25
+   names; a 26th tool fails that Java build). Backup Inspector:
    `npx @modelcontextprotocol/inspector bdd mcp serve --root $PWD`.
 4. **Never expose escape hatches.** No `write_file`, `run_shell`,
    `install_dependency`, or arbitrary-path tools. Mutations go through

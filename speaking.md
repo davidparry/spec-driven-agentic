@@ -21,7 +21,7 @@ write the specification first, and make the tests the contract.
 
 This session walks through a working, open-source pipeline where a requirements
 catalog — not a chat transcript — is the source of truth. One MCP server
-(`bdd mcp serve`, 24 tools) exposes a deliberately locked-down set: no
+(`bdd mcp serve`, 25 tools) exposes a deliberately locked-down set: no
 "write this file," no open shell. Cursor sees every tool, including staging.
 The agent must validate a requirement's structure, survive a wording
 review that rejects ambiguity like *should*, *handles*, and *properly*, turn the
@@ -33,7 +33,7 @@ human reviews. `requirement_mark_implemented` is GREEN-gated.
 Here is the part worth your hour: once that discipline lives in the server
 instead of in a prompt, model capability stops being the variable that
 decides quality. We run the identical **contracts** twice — once with a
-frontier agent in Cursor (all 24 tools), once with
+frontier agent in Cursor (all 25 tools), once with
 `qwen3.8-flash-next:125b-mlx` on the laptop on stage through Ollama and the
 CLI's per-command profiles (3–7 tools) — and compare the diffs. Then we look at
 what makes the local model hold up: JSON-only response contracts,
@@ -78,6 +78,7 @@ failure the project actually hit; each is now caught by a deterministic check.
 | Ambiguity leaking into the spec | Wrote "handles negatives properly" | A deterministic wording review rejects a fixed list of ambiguous words before any code is written |
 | Refactoring on red | Offered to "clean up" while tests were failing | The TDD state machine refuses the transition from any phase but GREEN |
 | Premature completion | Marked a requirement implemented with nothing proving it | `requirement_mark_implemented` requires GREEN plus a scenario tagged with the requirement ID |
+| Right process, wrong requirement | Asked for "the next pending id", took the requirement it had just drafted to green instead — correct discipline, every gate satisfied, an hour spent on work nobody asked for | Nothing in the loop, and that is the point: the phase gates police *how* the agent works, never *what it works on*. The prompt names the id, and the end-of-run verifier grades that id by name |
 | Tool-calling drift | Local model invented a tool, skipped staging, or called `command_run` without waiting | Per-command profiles (`bdd tools profiles`) offer 3–7 tools; `[tool_rules]` in `cli/prompts/prompts.toml`; CLI `command_run` asks the human to confirm |
 
 Where a frontier model is still the better call, and where a human still has to

@@ -172,6 +172,7 @@ async fn the_server_identifies_as_the_workshop_server_and_lists_all_tools() {
         "changes_commit",
         "changes_discard",
         "command_run",
+        "requirement_reword",
         "requirement_mark_implemented",
         "step_definitions_find",
         "step_definition_create",
@@ -182,7 +183,7 @@ async fn the_server_identifies_as_the_workshop_server_and_lists_all_tools() {
             "additive tool {additive} missing: {names:?}"
         );
     }
-    assert_eq!(tools.len(), 24, "tools: {names:?}");
+    assert_eq!(tools.len(), 25, "tools: {names:?}");
 
     let root_body = call_json(&client, "project_root", json!({})).await;
     let expected_root = std::path::absolute(dir.path()).unwrap();
@@ -576,6 +577,88 @@ async fn the_additive_tools_inspect_read_mutate_and_commit() {
 }
 
 #[tokio::test]
+async fn requirement_reword_stages_criteria_whose_escaping_survives_the_round_trip() {
+    let dir = tempfile::tempdir().unwrap();
+    write_project(dir.path());
+    let client = connect_default(dir.path()).await;
+
+    // A custom-delimiter criterion: embedded quotes plus a literal
+    // backslash-n. Hand-editing this in the spec file is what the tool
+    // exists to replace, so the escaping has to survive untouched.
+    let criterion = "Given \"//+\\n1+2\", when add is called, then the result is 3";
+    let body = call_json(
+        &client,
+        "requirement_reword",
+        json!({
+            "id": "REQ-001",
+            "title": "Custom delimiters can be declared on the first line",
+            "acceptance_criteria": [criterion],
+        }),
+    )
+    .await;
+    assert_eq!(body["id"], "REQ-001");
+    assert_eq!(body["staged"], true);
+    // Over MCP the next step names tools, never CLI commands the agent
+    // has no shell to run.
+    let next_step = body["nextStep"].as_str().unwrap();
+    assert!(next_step.contains("changes_commit"), "{next_step}");
+    assert!(!next_step.contains("bdd "), "{next_step}");
+
+    let validated = call_json(&client, "changes_validate", json!({})).await;
+    assert_eq!(validated["valid"], true, "{validated}");
+    call_json(&client, "changes_commit", json!({})).await;
+
+    let shown = call_json(&client, "get_requirement", json!({"id": "REQ-001"})).await;
+    assert_eq!(shown["acceptanceCriteria"], json!([criterion]));
+    assert_eq!(
+        shown["title"],
+        "Custom delimiters can be declared on the first line"
+    );
+    // The story and featureFile were not passed, so they stand.
+    assert_eq!(shown["featureLocation"], "features/calc.feature", "{shown}");
+
+    let on_disk = fs::read_to_string(dir.path().join("requirements/requirements.json")).unwrap();
+    assert!(
+        on_disk.contains(r#""Given \"//+\\n1+2\", when add is called, then the result is 3""#),
+        "escaping was mangled on disk: {on_disk}"
+    );
+
+    client.cancel().await.unwrap();
+}
+
+#[tokio::test]
+async fn requirement_reword_refuses_unknown_ids_and_criteria_that_are_not_given_when_then() {
+    let dir = tempfile::tempdir().unwrap();
+    write_project(dir.path());
+    let client = connect_default(dir.path()).await;
+
+    let (is_error, text) = call(&client, "requirement_reword", json!({"id": "REQ-999"})).await;
+    assert_eq!(is_error, Some(true));
+    assert!(
+        text.starts_with("No requirement with id 'REQ-999'"),
+        "{text}"
+    );
+
+    let (is_error, text) = call(
+        &client,
+        "requirement_reword",
+        json!({"id": "REQ-001", "acceptance_criteria": ["the result should be 6"]}),
+    )
+    .await;
+    assert_eq!(is_error, Some(true));
+    assert!(text.contains("must be phrased Given/When/Then"), "{text}");
+
+    let shown = call_json(&client, "changes_show", json!({})).await;
+    assert_eq!(
+        shown["changes"].as_array().unwrap().len(),
+        0,
+        "a rejected reword must not stage anything: {shown}"
+    );
+
+    client.cancel().await.unwrap();
+}
+
+#[tokio::test]
 async fn broken_project_state_surfaces_as_tool_errors_not_crashes() {
     let dir = tempfile::tempdir().unwrap();
     // Corrupt spec: list_requirements reports the repository error.
@@ -876,6 +959,7 @@ async fn new_tool_schemas_require_the_documented_arguments() {
         schema_of("requirement_mark_implemented")["required"],
         json!(["id"])
     );
+    assert_eq!(schema_of("requirement_reword")["required"], json!(["id"]));
     assert_eq!(schema_of("unit_test_create")["required"], json!(["req_id"]));
     let find = schema_of("step_definitions_find");
     let required = find.get("required");

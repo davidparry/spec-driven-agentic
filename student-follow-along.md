@@ -4,7 +4,7 @@ Your step-by-step companion for the 60-minute workshop. Everything the
 presenter does, you do — this page has the exact commands, the exact agent
 prompts, and what you should see at every step.
 
-**The big idea:** there is one MCP server — `bdd mcp serve` (24 tools).
+**The big idea:** there is one MCP server — `bdd mcp serve` (25 tools).
 Cursor and the bundled `smoke-test.jar` both talk to it. Your hour is the
 workflow it enables: draft a requirement *with* an agent, let the server
 critique it (structure first, wording second), then drive it
@@ -103,11 +103,11 @@ and the absolute repo paths in the log will differ on your machine.)
 
 **Expect:**
 
-- **STEP 1** — **24 tools** discovered. The frozen seven you already know
+- **STEP 1** — **25 tools** discovered. The frozen seven you already know
   (`list_requirements`, `get_requirement`, `validate_spec`,
   `refine_requirement`, `run_tests`, `get_tdd_state`, `start_refactor`) plus
   authoring/staging (`scenario_add`, `unit_test_create`, `changes_show`,
-  `changes_commit`, `requirement_mark_implemented`, …) and inspect
+  `changes_commit`, `requirement_reword`, `requirement_mark_implemented`, …) and inspect
   (`project_root`, `project_inspect`, `command_run`). Exercise 1 uses the structure/wording
   pair; Exercise 2 uses staging.
 - **STEP 4** — `run_tests` returns `"phase": "GREEN", "tests": 5`
@@ -242,12 +242,12 @@ spec.
      "id" : "REQ-007",
      "clean" : false,
      "findings" : [ "criteria: only happy paths - add at least one edge case (empty, invalid, or error input)" ],
-     "nextStep" : "Refine the wording in the requirements file to address each finding, run validate_spec, then call refine_requirement again. Iterate until there are no findings."
+     "nextStep" : "Call requirement_reword to address each finding - never edit the requirements file by hand - then run validate_spec and call refine_requirement again. Iterate until there are no findings."
    }
    ```
 
-   The agent rewords the JSON, re-validates, re-refines. Done looks like
-   this (only the `id` varies):
+   The agent calls `requirement_reword`, re-validates, re-refines. Done
+   looks like this (only the `id` varies):
 
    ```json
    {
@@ -295,12 +295,12 @@ tool catches it, agent repairs it.
    {
      "valid" : false,
      "issues" : [ "REQ-007: criterion \"the result should be 3 for //+\\n1+2\" must be phrased Given/When/Then" ],
-     "nextStep" : "Fix the issues in the requirements file, then call validate_spec again. Iterate until valid is true before writing scenarios or code."
+     "nextStep" : "Call requirement_reword to fix the issues - never edit the requirements file by hand - then call validate_spec again. Iterate until valid is true before writing scenarios or code."
    }
    ```
 
-4. Now let the agent off the leash: ask it to repair the criterion and call
-   `validate_spec` again until `"valid": true`.
+4. Now let the agent off the leash: ask it to repair the criterion with
+   `requirement_reword` and call `validate_spec` again until `"valid": true`.
 
 **Optional demo B — wording loop (`refine_requirement`)**
 
@@ -327,13 +327,13 @@ tool catches it, agent repairs it.
      "id" : "REQ-007",
      "clean" : false,
      "findings" : [ "story: missing the actor - start with 'As a ...' so we know who this is for", "story: missing the why - finish with 'so that ...' so the value is explicit", "story: 'should' is ambiguous - describe the observable behavior instead", "story: 'handle' is ambiguous - describe the observable behavior instead", "story: 'quickly' is ambiguous - describe the observable behavior instead" ],
-     "nextStep" : "Refine the wording in the requirements file to address each finding, run validate_spec, then call refine_requirement again. Iterate until there are no findings."
+     "nextStep" : "Call requirement_reword to address each finding - never edit the requirements file by hand - then run validate_spec and call refine_requirement again. Iterate until there are no findings."
    }
    ```
 
-4. Now let the agent reword from the findings, then re-run `validate_spec`
-   and `refine_requirement` until `"clean": true`. The failure is the
-   lesson.
+4. Now let the agent reword from the findings with `requirement_reword`,
+   then re-run `validate_spec` and `refine_requirement` until
+   `"clean": true`. The failure is the lesson.
 
 **Optional demo C — the spec is a catalog (includes)**
 
@@ -382,7 +382,8 @@ Paste this into your agent, word for word:
 
 ```text
 Using the spec-driven-server tools: validate the spec first, then
-`get_requirement` for the next pending id. Add its Gherkin with
+`get_requirement` for REQ-003 — not the REQ-007 you just drafted, which
+stays pending until homework. Add its Gherkin with
 `scenario_add` (tag the requirement id), add missing steps with
 `step_definition_create` if `step_definitions_find` reports any, add a
 unit test with `unit_test_create`. Show `changes_show` and ask me before
@@ -490,23 +491,66 @@ branch):
 scripts/verify-workshop-run.sh check
 ```
 
-**Expect all four PASS:**
+**Expect all seven PASS:**
 
 ```text
+  PASS  REQ-007 was drafted into the spec
+  PASS  the spec is valid
+  PASS  REQ-007 wording is refine-clean
+  PASS  REQ-007 covers the first-line delimiter declaration
   PASS  REQ-003 status is 'implemented' in the spec
-  PASS  REQ-007 wording matches the complete branch (status ignored)
   PASS  @REQ-003 scenarios match the complete branch (2 found, 2 expected)
   PASS  REQ-003 unit test matches the complete branch
 ```
 
+The first four grade Exercise 1, the last three Exercise 2. Note what is
+*not* graded: the REQ-007 wording you and your agent settled on. It is
+yours, so the verifier asks the same two questions you asked in Exercise 1
+— does `validate_spec` pass, does `refine_requirement` come back clean —
+rather than diffing your prose against someone else's. REQ-003 is the
+opposite case: its wording ships on trunk, so the scenarios and unit test
+it produces are compared against the `complete` branch.
+
 Any FAIL line tells you exactly which artifact to revisit.
+
+### The most common partial result
+
+Exercise 1 green, Exercise 2 red, three FAILs in a row:
+
+```text
+  PASS  REQ-007 was drafted into the spec
+  PASS  the spec is valid
+  PASS  REQ-007 wording is refine-clean
+  PASS  REQ-007 covers the first-line delimiter declaration
+  FAIL  REQ-003 status is 'implemented' in the spec - status is pending - Exercise 2 takes REQ-003, not the REQ-007 you drafted
+  FAIL  @REQ-003 scenarios match the complete branch (0 found, 2 expected) - scenario text differs or count is wrong
+  FAIL  REQ-003 unit test matches the complete branch - method missing or text differs
+```
+
+Nothing is broken. It means Exercise 2 ran its whole Red/Green/Refactor
+arc **on REQ-007** — the requirement you had just drafted, which was also
+pending and was the freshest thing in the agent's context. Run
+`mvn -f kata/pom.xml test` and you will find it green. Open the spec and
+REQ-007 says `"status": "implemented"`. Every gate in the server fired, in
+the right order, and refused nothing — because nothing was out of order.
+The target was wrong, not the process.
+
+**That is worth more than a clean scorecard.** The server polices *how*
+you work: no refactor on red, no `requirement_mark_implemented` without a
+green bar and a tagged scenario. It has no opinion about *which*
+requirement deserves the next hour, and no tool can have one. That
+decision was yours the whole time, and Step 6 is where you find out
+whether you made it or let the context window make it for you.
+
+To finish the run, paste Exercise 2's prompt again — it names REQ-003 —
+and leave REQ-007 for the homework it was always meant to be.
 
 ---
 
 ## Step 7 — Homework
 
 - **REQ-004, REQ-005, REQ-006** are still `pending` in the spec — run
-  Exercise 2's prompt again and the agent picks up the next one each time.
+  Exercise 2's prompt again with that id in place of REQ-003, one at a time.
 - **REQ-007** — the requirement *you* drafted — is waiting to be taken to
   green on the plane home. One warning for the unsupervised: `+` is a regex
   metacharacter, so `"1+2".split("+")` throws `PatternSyntaxException`. Let

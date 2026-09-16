@@ -444,9 +444,11 @@ fn next_step_advises_scenario(world: &mut BddWorld) {
     );
 }
 
-#[then("the next step advises fixing the issues and re-validating")]
+#[then("the next step advises requirement_reword and re-validating")]
 fn next_step_advises_fixing(world: &mut BddWorld) {
-    assert!(world.validation().next_step.starts_with("Fix the issues"));
+    let next_step = &world.validation().next_step;
+    assert!(next_step.contains("requirement_reword"), "{next_step}");
+    assert!(next_step.contains("validate_spec again"), "{next_step}");
 }
 
 // ---- refinement steps --------------------------------------------------------
@@ -521,13 +523,13 @@ fn next_step_advises_confirming(world: &mut BddWorld) {
     );
 }
 
-#[then("the next step advises rewording from the findings and iterating")]
+#[then("the next step advises requirement_reword and iterating")]
 fn next_step_advises_rewording(world: &mut BddWorld) {
+    let next_step = &world.refinement().next_step;
+    assert!(next_step.contains("requirement_reword"), "{next_step}");
     assert!(
-        world
-            .refinement()
-            .next_step
-            .starts_with("Refine the wording")
+        next_step.contains("refine_requirement again"),
+        "{next_step}"
     );
 }
 
@@ -3170,6 +3172,7 @@ fn no_default_profile_offers_staging(world: &mut BddWorld) {
         "feature_create",
         "changes_commit",
         "changes_discard",
+        "requirement_reword",
         "requirement_mark_implemented",
         "step_definition_create",
         "unit_test_create",

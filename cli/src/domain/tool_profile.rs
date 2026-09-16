@@ -140,13 +140,14 @@ pub fn default_profile(caller: Caller) -> &'static [&'static str] {
 }
 
 /// Tools that mutate the project (stage, commit, mark implemented).
-const MUTATING: [&str; 8] = [
+const MUTATING: [&str; 9] = [
     "scenario_add",
     "scenario_update",
     "scenario_delete",
     "feature_create",
     "changes_commit",
     "changes_discard",
+    "requirement_reword",
     "requirement_mark_implemented",
     "step_definition_create",
     // unit_test_create is also mutating; listed separately for the
@@ -266,6 +267,7 @@ mod tests {
             "changes_commit",
             "changes_discard",
             "command_run",
+            "requirement_reword",
             "requirement_mark_implemented",
             "step_definitions_find",
             "step_definition_create",

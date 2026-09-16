@@ -58,7 +58,7 @@ equivalent):
 }
 ```
 
-Cursor sees **all 24 tools**, including staging. CLI commands that
+Cursor sees **all 25 tools**, including staging. CLI commands that
 call a model attach a **narrower profile** (`bdd tools profiles`) —
 typically 3–7 tools — so a local model is not offered commit or
 mark-implemented.
@@ -90,11 +90,12 @@ bdd mcp call run_tests --stdio
 
 ## The tools served
 
-Twenty-four tools in three groups. There is no `spec_draft` or
-`implement` MCP tool: Cursor writes `requirements.json` and production
-Java; Gherkin, steps, unit-test scaffolds, mark-implemented, and
-staging go through tools. Generation over MCP is **template-only**
-(`source: "template"`).
+Twenty-five tools in three groups. There is no `spec_draft` or
+`implement` MCP tool: a **new** requirement is still drafted by the
+human (`bdd spec draft`) and Cursor writes production Java. Rewording an
+existing requirement, Gherkin, steps, unit-test scaffolds,
+mark-implemented, and staging all go through tools. Generation over MCP
+is **template-only** (`source: "template"`).
 
 ### Frozen seven (reply shapes stay)
 
@@ -116,6 +117,7 @@ staging go through tools. Generation over MCP is **template-only**
 | `scenario_add` / `scenario_update` / `scenario_delete` | [`bdd scenario`](scenario.md) |
 | `changes_show` / `changes_commit` / `changes_discard` | [`bdd changes`](changes.md) |
 | `changes_validate` | [`bdd validate`](validate.md) (staged-wins; frozen `validate_spec` stays on disk) |
+| `requirement_reword` | [`bdd spec reword`](spec.md#bdd-spec-reword) (the repair path for `validate_spec` and `refine_requirement` findings; never hand-edit the spec file) |
 | `requirement_mark_implemented` | [`bdd spec mark-implemented`](spec.md#bdd-spec-mark-implemented) |
 | `step_definitions_find` | [`bdd steps missing`](steps.md#bdd-steps-missing) |
 | `step_definition_create` | [`bdd steps generate`](steps.md#bdd-steps-generate) (template only) |

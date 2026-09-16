@@ -88,11 +88,11 @@
     },
     {
       "id": "CLI-009",
-      "title": "The tool plan names exactly the 24 served tools",
+      "title": "The tool plan names exactly the 25 served tools",
       "status": "implemented",
-      "story": "As a maintainer, I want a 25th MCP tool to fail the Java build until it is planned so that the smoke test cannot silently skip new surface area.",
+      "story": "As a maintainer, I want a 26th MCP tool to fail the Java build until it is planned so that the smoke test cannot silently skip new surface area.",
       "acceptanceCriteria": [
-        "Given the ToolPlan, when it is listed, then it names exactly 24 tools",
+        "Given the ToolPlan, when it is listed, then it names exactly 25 tools",
         "Given a discovered tool that is not in the plan, when the sweep runs, then that tool is reported as unexpected"
       ],
       "featureFile": "smoke-test/src/test/resources/features/tool_sweep.feature"
