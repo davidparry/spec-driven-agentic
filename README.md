@@ -260,13 +260,13 @@ the server's feedback. `.cursor/mcp.json` (same as [`config/mcp.json`](config/mc
 already registers `bdd mcp serve` with Cursor — `bdd` must be on PATH. Prompt
 your agent:
 
-> Add a new requirement to requirements/requirements.json: newlines may
-> separate numbers in addition to commas. Follow the existing format — unique
-> id, title, user story, acceptance criteria phrased Given/When/Then, status
-> pending. Then call validate_spec and fix every issue until the spec is
-> valid. Then call refine_requirement on the new requirement and reword it
-> from the findings until there are none. Do not write scenarios or code yet
-> — we are only agreeing on the spec.
+> Add a new requirement to requirements/requirements.json: a custom delimiter
+> may be declared on the first line, so "//+\n1+2" adds up to 3. Follow the
+> existing format — unique id, title, user story, acceptance criteria phrased
+> Given/When/Then, status pending. Then call validate_spec and fix every
+> issue until the spec is valid. Then call refine_requirement on the new
+> requirement and reword it from the findings until there are none. Do not
+> write scenarios or code yet — we are only agreeing on the spec.
 
 You'll watch spec iteration in two stages. **Structure:** the agent drafts
 the requirement → `validate_spec` arbitrates → `"valid": true` (a

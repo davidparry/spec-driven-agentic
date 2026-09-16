@@ -202,7 +202,14 @@ and toggle the server off/on.
 Paste this into your agent, word for word:
 
 ```text
-Add a new requirement to requirements/requirements.json: newlines may separate numbers in addition to commas. Follow the existing format — unique id, title, user story, acceptance criteria phrased Given/When/Then, status pending. Then call validate_spec and fix every issue until the spec is valid. Then call refine_requirement on the new requirement and reword it from the findings until there are none. Do not write scenarios or code yet — we are only agreeing on the spec.
+Add a new requirement to requirements/requirements.json: a custom
+delimiter may be declared on the first line, so "//+\n1+2" adds up to 3.
+Follow the existing format — unique id, title, user story, acceptance
+criteria phrased Given/When/Then, status pending. Then call validate_spec
+and fix every issue until the spec is valid. Then call refine_requirement
+on the new requirement and reword it from the findings until there are
+none. Do not write scenarios or code yet — we are only agreeing on the
+spec.
 ```
 
 **What you should see, in order:**
@@ -271,7 +278,7 @@ tool catches it, agent repairs it.
    yourself to exactly this, then save the file:
 
    ```text
-   the result should be 6 for 1\n2,3
+   the result should be 3 for //+\n1+2
    ```
 
 2. Ask the agent:
@@ -287,7 +294,7 @@ tool catches it, agent repairs it.
    ```json
    {
      "valid" : false,
-     "issues" : [ "REQ-007: criterion \"the result should be 6 for 1\\n2,3\" must be phrased Given/When/Then" ],
+     "issues" : [ "REQ-007: criterion \"the result should be 3 for //+\\n1+2\" must be phrased Given/When/Then" ],
      "nextStep" : "Fix the issues in the requirements file, then call validate_spec again. Iterate until valid is true before writing scenarios or code."
    }
    ```
@@ -302,7 +309,7 @@ tool catches it, agent repairs it.
    criteria alone):
 
    ```text
-   the calculator should handle newlines quickly
+   the calculator should handle custom delimiters quickly
    ```
 
 2. Ask the agent:
@@ -335,7 +342,7 @@ not have to hold every requirement itself: it can carry an `includes`
 list of child spec files, and children can include further files, N
 levels deep. The tools merge the whole tree into one backlog. To see it:
 
-1. Create `requirements/newlines.json` yourself with just REQ-007 in it
+1. Create `requirements/delimiters.json` yourself with just REQ-007 in it
    (cut the whole REQ-007 object out of `requirements.json` and paste it
    into the new file):
 
@@ -351,7 +358,7 @@ levels deep. The tools merge the whole tree into one backlog. To see it:
    `"description"`:
 
    ```json
-   "includes": ["newlines.json"],
+   "includes": ["delimiters.json"],
    ```
 
 3. Ask the agent:
@@ -374,7 +381,15 @@ levels deep. The tools merge the whole tree into one backlog. To see it:
 Paste this into your agent, word for word:
 
 ```text
-Using the spec-driven-server tools: validate the spec first, then `get_requirement` for the next pending id. Add its Gherkin with `scenario_add` (tag the requirement id), add missing steps with `step_definition_create` if `step_definitions_find` reports any, add a unit test with `unit_test_create`. Show `changes_show` and ask me before `changes_commit`. Then `run_tests` (expect RED). Implement the simplest production code in `StringCalculator`. `run_tests` (GREEN). `start_refactor` if I agree. On GREEN, `requirement_mark_implemented`. Ask me before each phase change.
+Using the spec-driven-server tools: validate the spec first, then
+`get_requirement` for the next pending id. Add its Gherkin with
+`scenario_add` (tag the requirement id), add missing steps with
+`step_definition_create` if `step_definitions_find` reports any, add a
+unit test with `unit_test_create`. Show `changes_show` and ask me before
+`changes_commit`. Then `run_tests` (expect RED). Implement the simplest
+production code in `StringCalculator`. `run_tests` (GREEN).
+`start_refactor` if I agree. On GREEN, `requirement_mark_implemented`.
+Ask me before each phase change.
 ```
 
 **What you should see, in order** (tool replies are shown so you can spot
@@ -493,7 +508,9 @@ Any FAIL line tells you exactly which artifact to revisit.
 - **REQ-004, REQ-005, REQ-006** are still `pending` in the spec — run
   Exercise 2's prompt again and the agent picks up the next one each time.
 - **REQ-007** — the requirement *you* drafted — is waiting to be taken to
-  green on the plane home.
+  green on the plane home. One warning for the unsupervised: `+` is a regex
+  metacharacter, so `"1+2".split("+")` throws `PatternSyntaxException`. Let
+  the RED bar tell you that, then reach for `Pattern.quote`.
 - Compare your final state with `git diff complete` when you finish them all.
 
 ---
@@ -504,7 +521,7 @@ Everything the exercises touched lives in `kata/` and `requirements/`:
 
 ```bash
 git checkout -- kata requirements     # rewind this branch to the start state
-git clean -fd requirements            # drop any spec files you added (demo C's newlines.json)
+git clean -fd requirements            # drop any spec files you added (demo C's delimiters.json)
 ```
 
 or throw the branch away and re-cut it:
