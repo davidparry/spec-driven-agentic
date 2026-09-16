@@ -130,13 +130,13 @@ async fn the_server_identifies_as_the_workshop_server_and_lists_all_tools() {
     );
     assert_eq!(
         implementation.website_url.as_deref(),
-        Some("https://davidparry.github.io/tdd-bdd-agentic/")
+        Some("https://davidparry.github.io/spec-driven-agentic/")
     );
     let icons = implementation.icons.as_ref().expect("icons");
     assert_eq!(icons.len(), 1);
     assert_eq!(
         icons[0].src,
-        "https://davidparry.github.io/tdd-bdd-agentic/assets/bdd-cli-mark.png"
+        "https://davidparry.github.io/spec-driven-agentic/assets/bdd-cli-mark.png"
     );
     assert_eq!(icons[0].mime_type.as_deref(), Some("image/png"));
     assert_eq!(icons[0].sizes, Some(vec!["1024x1024".into()]));

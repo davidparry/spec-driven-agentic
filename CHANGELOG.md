@@ -21,8 +21,8 @@
   `.mcp.json` (enabled in `.claude/settings.json`).
 - MCP server identity is `spec-driven-server` / `1.0.0`, title `Spec Driven`,
   description that the requirements spec is the source of truth, website
-  `https://davidparry.github.io/tdd-bdd-agentic/`, and icon
-  `https://davidparry.github.io/tdd-bdd-agentic/assets/bdd-cli-mark.png`.
+  `https://davidparry.github.io/spec-driven-agentic/`, and icon
+  `https://davidparry.github.io/spec-driven-agentic/assets/bdd-cli-mark.png`.
 - The smoke jar launches the `bdd` on `PATH` (the same binary `bdd --version`
   uses). It no longer looks under `cli/target`. If `bdd` is missing: install
   it (`cargo install --path cli`) or add its directory to `PATH`.

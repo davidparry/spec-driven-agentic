@@ -697,12 +697,12 @@ impl ServerHandler for WorkflowServer {
                         "Serves spec-driven TDD and BDD tools. The requirements spec is the source of truth.",
                     )
                     .with_icons(vec![Icon::new(
-                        "https://davidparry.github.io/tdd-bdd-agentic/assets/bdd-cli-mark.png",
+                        "https://davidparry.github.io/spec-driven-agentic/assets/bdd-cli-mark.png",
                     )
                     .with_mime_type("image/png")
                     .with_sizes(vec!["1024x1024".into()])
                     .with_theme(IconTheme::Dark)])
-                    .with_website_url("https://davidparry.github.io/tdd-bdd-agentic/"),
+                    .with_website_url("https://davidparry.github.io/spec-driven-agentic/"),
             )
             .with_instructions(crate::domain::prompts::mcp_instructions())
     }

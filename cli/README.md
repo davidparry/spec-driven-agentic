@@ -9,13 +9,13 @@ One native binary for the whole spec-driven loop (spec → Gherkin → RED →
 GREEN → REFACTOR) **and** the workshop MCP server: `bdd mcp serve` exposes
 24 tools (wire identity `spec-driven-server` / `1.0.0`, title
 `Spec Driven`, website
-https://davidparry.github.io/tdd-bdd-agentic/). Frozen seven-tool
+https://davidparry.github.io/spec-driven-agentic/). Frozen seven-tool
 reply shapes stay; the source of truth is `tests/mcp_conformance.rs` plus
 smoke-test `ToolPlan`.
 
 **Full command manual:** every command, subcommand, and flag with
 in-depth examples, searchable —
-[davidparry.github.io/tdd-bdd-agentic/manual](https://davidparry.github.io/tdd-bdd-agentic/manual/).
+[davidparry.github.io/spec-driven-agentic/manual](https://davidparry.github.io/spec-driven-agentic/manual/).
 Source lives in [`manual/src`](../manual/src); rebuild with
 `mdbook build manual` from the repository root (`cargo install
 mdbook` once). The built book is committed under `docs/manual/` so
