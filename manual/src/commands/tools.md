@@ -20,9 +20,14 @@ Commands:
 
 ```bash
 bdd tools profiles
-# spec-draft          4  list_requirements, get_requirement, validate_spec, refine_requirement
+# spec-draft          4  get_requirement, list_requirements, refine_requirement, validate_spec
+# spec-reword         3  get_requirement, refine_requirement, validate_spec
+# steps-generate      4  feature_list, feature_read, project_inspect, step_definitions_find
+# unittest-generate   4  feature_read, get_requirement, project_inspect, step_definitions_find
+# implement-advice    5  changes_show, changes_validate, feature_list, get_tdd_state, validate_spec
 # implement           7  get_requirement, feature_read, …, command_run, changes_show
 # status              7  project_root, list_requirements, …, changes_show, changes_validate
+# ask                12  the read-only set: everything above that only reads
 
 bdd tools list --for status          # exactly those seven
 bdd tools list --offline             # built-ins only; never connects
@@ -30,12 +35,17 @@ bdd tools enable self__validate_spec --for status
 bdd tools servers
 ```
 
+A command that generates or implements is handed **3–7** tools — the ones
+its current step can legitimately use, and nothing else. Only the read-only
+`ask` gets 12. Compare that with the **25** a general host such as Cursor or
+`pi -nbt` sees: same server, same tools, different amount of rope.
+
 `--for` accepts: `spec-draft`, `spec-reword`, `steps-generate`,
 `unittest-generate`, `implement-advice`, `implement`, `status`, `ask`.
 Omitting it lists those names and exits nonzero.
 
 Default profiles contain no staging or commit tools. The only mutation
-a CLI-side model may request is `command_run` on the `implement`
+a harness-side model may request is `command_run` on the `implement`
 profile, and that call still asks the human to confirm.
 
 External tools are namespaced `server__tool`. A name in config that is
@@ -76,7 +86,7 @@ origin when you need to be explicit:
 | `self:validate_spec` | mcp.json server `self` |
 | `self__validate_spec` | same MCP tool (catalog name) |
 
-`builtin` is reserved for the CLI's own tools. `bdd init` writes
+`builtin` is reserved for the harness's own tools. `bdd init` writes
 `.bdd.toml` with every key and a live `[tools.profiles]` list for each
 caller. [`bdd config`](config.md) prints the resolved set and whether
 each value is a default or came from the file.

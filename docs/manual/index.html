@@ -3,12 +3,12 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Introduction - bdd CLI Manual</title>
+        <title>Introduction - bdd Harness Manual</title>
 
 
         <!-- Custom HTML head -->
 
-        <meta name="description" content="The complete, searchable reference for the bdd command-line tool: every command, subcommand, and flag, with in-depth examples.">
+        <meta name="description" content="The complete, searchable reference for the bdd harness: every command, subcommand, and flag, with in-depth examples.">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff">
 
@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "searchindex-8826377a.js";
+            window.path_to_searchindex_js = "searchindex-aaad9ee5.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-9d4e1520.js"></script>
@@ -137,7 +137,7 @@
                         </button>
                     </div>
 
-                    <h1 class="menu-title">bdd CLI Manual</h1>
+                    <h1 class="menu-title">bdd Harness Manual</h1>
 
                     <div class="right-buttons">
                         <a href="print.html" title="Print this book" aria-label="Print this book">
@@ -188,7 +188,7 @@
 of truth, and the discipline is enforced by tooling, not by
 convention. The root file is a <a href="spec-format.html">catalog</a> that may
 include child spec files, so the backlog scales past one file while
-one entry point stays fixed. The CLI validates the spec’s structure,
+one entry point stays fixed. The harness validates the spec’s structure,
 quality-gates its wording, turns approved requirements into tagged
 Gherkin scenarios, runs the tests through your project’s own build
 tool, and tracks the persistent RED/GREEN/REFACTOR phase between
@@ -215,7 +215,7 @@ interactive. Every reply carries a <code>nextStep</code> field that says what
 to do next — the same guidance an AI agent receives over MCP.</li>
 <li>Names in parentheses in help text, like <code>(run_tests)</code>, are the
 matching MCP tool names — frozen contracts kept by
-<code>cli/tests/mcp_conformance.rs</code> and smoke-test <code>ToolPlan</code>.</li>
+<code>harness/tests/mcp_conformance.rs</code> and smoke-test <code>ToolPlan</code>.</li>
 </ul>
 <h2 id="supported-languages"><a class="header" href="#supported-languages">Supported languages</a></h2>
 <div class="table-wrapper">
@@ -232,11 +232,11 @@ matching MCP tool names — frozen contracts kept by
 </tbody>
 </table>
 </div>
-<p>The CLI only ever <em>executes</em> when the language’s runtime is present;
+<p>The harness only ever <em>executes</em> when the language’s runtime is present;
 it reports a structured <code>runtime_missing</code> refusal otherwise and never
 installs anything.</p>
 <p>LLM-backed generation uses local <a href="https://ollama.com">Ollama</a>. The
-model this CLI is developed and run against is
+model this harness is developed and run against is
 <code>qwen3.8-flash-next:125b-mlx</code> — see <a href="getting-started.html">Getting started</a>
 and <a href="commands/model.html"><code>bdd model</code></a>. Your mileage will vary with
 other models, especially those not trained for development work.</p>

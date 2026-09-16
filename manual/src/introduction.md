@@ -10,7 +10,7 @@ The requirements spec (`requirements/requirements.json`) is the source
 of truth, and the discipline is enforced by tooling, not by
 convention. The root file is a [catalog](spec-format.md) that may
 include child spec files, so the backlog scales past one file while
-one entry point stays fixed. The CLI validates the spec's structure,
+one entry point stays fixed. The harness validates the spec's structure,
 quality-gates its wording, turns approved requirements into tagged
 Gherkin scenarios, runs the tests through your project's own build
 tool, and tracks the persistent RED/GREEN/REFACTOR phase between
@@ -39,7 +39,7 @@ Use the search icon (or press <kbd>S</kbd>) to search the whole manual.
   to do next — the same guidance an AI agent receives over MCP.
 - Names in parentheses in help text, like `(run_tests)`, are the
   matching MCP tool names — frozen contracts kept by
-  `cli/tests/mcp_conformance.rs` and smoke-test `ToolPlan`.
+  `harness/tests/mcp_conformance.rs` and smoke-test `ToolPlan`.
 
 ## Supported languages
 
@@ -51,12 +51,12 @@ Use the search icon (or press <kbd>S</kbd>) to search the whole manual.
 | .NET | dotnet | Reqnroll | `dotnet` |
 | Rust | Cargo | cucumber-rs | `cargo` |
 
-The CLI only ever *executes* when the language's runtime is present;
+The harness only ever *executes* when the language's runtime is present;
 it reports a structured `runtime_missing` refusal otherwise and never
 installs anything.
 
 LLM-backed generation uses local [Ollama](https://ollama.com). The
-model this CLI is developed and run against is
+model this harness is developed and run against is
 `qwen3.8-flash-next:125b-mlx` — see [Getting started](getting-started.md)
 and [`bdd model`](commands/model.md). Your mileage will vary with
 other models, especially those not trained for development work.

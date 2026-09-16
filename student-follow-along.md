@@ -1,13 +1,14 @@
-# Student Follow-Along: TDD, BDD & Spec-Driven Development in the Agentic Era
+# Student Follow-Along: Spec-Driven with Harness
 
 Your step-by-step companion for the 60-minute workshop. Everything the
 presenter does, you do — this page has the exact commands, the exact agent
 prompts, and what you should see at every step.
 
 **The big idea:** there is one MCP server — `bdd mcp serve` (25 tools).
-Cursor and the bundled `smoke-test.jar` both talk to it. Your hour is the
-workflow it enables: draft a requirement *with* an agent, let the server
-critique it (structure first, wording second), then drive it
+Cursor talks to it, so does the bundled `smoke-test.jar`, and so does a free
+local agent if you take the [pi path](student-follow-docs/pi-path.md). Your
+hour is the workflow it enables: draft a requirement *with* an agent, let the
+server critique it (structure first, wording second), then drive it
 spec → Gherkin → RED → GREEN → REFACTOR through **tools**, with you
 reviewing staged changes before they land.
 
@@ -21,15 +22,18 @@ zero? See the greenfield build order, first file to last:
 
 You need:
 
-- **`bdd` on PATH** (`bdd --version`) — GitHub release, `cargo install --path cli`, or `cli/target/release/bdd`. Cursor will not connect without it.
+- **`bdd` on PATH** (`bdd --version`) — GitHub release, `cargo install --path harness`, or `harness/target/release/bdd`. Cursor will not connect without it.
 - **Java 21+** (`java -version`)
 - **Maven 3.9+** (`mvn -version`)
 - **Cursor** (or any MCP-capable agent — Claude Desktop works with the same JSON)
 - This repo cloned
-- **Optional (CLI / fully offline):** [Ollama](https://ollama.com) with
-  `qwen3.8-flash-next:125b-mlx` pulled. Prefer the terminal to an IDE?
-  Follow the [CLI path](student-follow-docs/cli-path.md) — **same server**,
-  narrower tools per `bdd` command, Wi-Fi off.
+- **Optional, and the fully offline route:** [Ollama](https://ollama.com) with
+  `qwen3.8-flash-next:125b-mlx` pulled. Two Wi-Fi-off alternatives, both on the
+  **same server**:
+  [the pi path](student-follow-docs/pi-path.md) — a free MIT agent you run with
+  `pi -nbt` so these 25 tools are all it gets — and
+  [the harness path](student-follow-docs/harness-path.md), the `bdd` runner
+  with narrower tools per command.
 
 Build once at home so the room's Wi-Fi never matters:
 
@@ -95,7 +99,11 @@ The smoke test narrates every step of the protocol exchange. It starts like this
 ========================================================================
 ```
 
-…and walks through discovery and tool calls (no initialize handshake). Compare yours
+…and walks through discovery and tool calls. This client skips the
+`initialize` handshake — the server's newer `2026-07-28` lifecycle does not
+need one — but the classic `initialize` (protocol `2025-11-25`) is answered
+just as well, which is why `.cursor/mcp.json` can say
+`"protocolEra": "auto"` and let the host choose. Compare yours
 against the full captured run:
 [student-follow-docs/step2.log](student-follow-docs/step2.log). (The
 interleaved `INFO io.modelcontextprotocol...` lines are SDK logging — normal —
@@ -121,7 +129,8 @@ and the absolute repo paths in the log will differ on your machine.)
   tools stay behind
   `java -jar smoke-test/target/smoke-test.jar --sweep --include-mutating`.
 
-That smoke test just did exactly what Cursor does: launch, discover, invoke.
+That smoke test just did what every host does: launch, discover, invoke.
+Cursor does it, and so does `pi` once its MCP extension is installed.
 That's all the MCP you need today.
 
 To connect your own agent, the ready-to-run configuration lives at
@@ -484,8 +493,7 @@ their edits differently):
 
 ## Step 6 — Check your work
 
-The repo can grade your run against the finished workshop (the `complete`
-branch):
+The repo can grade your run:
 
 ```bash
 scripts/verify-workshop-run.sh check
@@ -499,19 +507,25 @@ scripts/verify-workshop-run.sh check
   PASS  REQ-007 wording is refine-clean
   PASS  REQ-007 covers the first-line delimiter declaration
   PASS  REQ-003 status is 'implemented' in the spec
-  PASS  @REQ-003 scenarios match the complete branch (2 found, 2 expected)
-  PASS  REQ-003 unit test matches the complete branch
+  PASS  @REQ-003 scenarios cover every acceptance criterion (2 tagged, 2 criteria)
+  PASS  REQ-003 unit test asserts every acceptance criterion (2 @Test naming REQ-003)
 ```
 
 The first four grade Exercise 1, the last three Exercise 2. Note what is
-*not* graded: the REQ-007 wording you and your agent settled on. It is
-yours, so the verifier asks the same two questions you asked in Exercise 1
-— does `validate_spec` pass, does `refine_requirement` come back clean —
-rather than diffing your prose against someone else's. REQ-003 is the
-opposite case: its wording ships on trunk, so the scenarios and unit test
-it produces are compared against the `complete` branch.
+*not* graded: your wording, anywhere. The REQ-007 paragraph you and your
+agent settled on is yours, so the verifier asks the same two questions you
+asked in Exercise 1 — does `validate_spec` pass, does `refine_requirement`
+come back clean — rather than diffing your prose against someone else's.
+REQ-003's wording ships on trunk, but the scenarios and tests it produces
+are still yours: the verifier asks whether each of its two acceptance
+criteria reaches a scenario tagged `@REQ-003` and an assertion in a
+`@Test` that names the requirement. Scenario names, method names, and
+assertion style are free. The last count will read `1 @Test` if you wrote
+one method with both assertions and `2 @Test` if `bdd unittest generate`
+wrote one per criterion; both pass.
 
-Any FAIL line tells you exactly which artifact to revisit.
+Any FAIL line tells you exactly which artifact to revisit, and which
+criterion is unaccounted for.
 
 ### The most common partial result
 
@@ -523,8 +537,8 @@ Exercise 1 green, Exercise 2 red, three FAILs in a row:
   PASS  REQ-007 wording is refine-clean
   PASS  REQ-007 covers the first-line delimiter declaration
   FAIL  REQ-003 status is 'implemented' in the spec - status is pending - Exercise 2 takes REQ-003, not the REQ-007 you drafted
-  FAIL  @REQ-003 scenarios match the complete branch (0 found, 2 expected) - scenario text differs or count is wrong
-  FAIL  REQ-003 unit test matches the complete branch - method missing or text differs
+  FAIL  @REQ-003 scenarios cover every acceptance criterion (0 tagged, 2 criteria) - no scenario is tagged @REQ-003
+  FAIL  REQ-003 unit test asserts every acceptance criterion (0 @Test naming REQ-003) - no @Test names REQ-003 - the file groups tests by requirement id
 ```
 
 Nothing is broken. It means Exercise 2 ran its whole Red/Green/Refactor
@@ -544,6 +558,32 @@ whether you made it or let the context window make it for you.
 
 To finish the run, paste Exercise 2's prompt again — it names REQ-003 —
 and leave REQ-007 for the homework it was always meant to be.
+
+### The other partial result: one criterion, not two
+
+```text
+  FAIL  @REQ-003 scenarios cover every acceptance criterion (1 tagged, 2 criteria) - no scenario covers: Given "1,2", when add is called, then the result is 3
+```
+
+REQ-003 carries two acceptance criteria, and the agent wrote a scenario
+for one of them. Everything downstream still went green: Cucumber ran the
+scenario that exists, `bdd validate` passed, and
+`requirement_mark_implemented` accepted REQ-003 — that gate requires *a*
+scenario tagged `@REQ-003`, not one per criterion. So the spec says
+`implemented` while half the behavior the spec asks for is only asserted
+at the unit level.
+
+This is the gap worth seeing: a green bar measures the tests you wrote,
+never the criteria you skipped. Add the missing scenario and re-run:
+
+```bash
+bdd scenario add --feature kata/src/test/resources/features/string_calculator.feature \
+  --req REQ-003 --name "Two numbers separated by a comma are summed" \
+  --step 'Given a string calculator' \
+  --step 'When I add "1,2"' \
+  --step 'Then the result is 3'
+bdd changes commit && bdd test
+```
 
 ---
 

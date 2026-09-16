@@ -86,7 +86,7 @@ Error: no requirement with id REQ-999
 ## bdd spec draft
 
 Interactively draft a requirement. Human input drives the spec — the
-CLI never invents requirements. The draft is validated and
+harness never invents requirements. The draft is validated and
 quality-gated in a loop until it is clean, then staged.
 
 ```bash

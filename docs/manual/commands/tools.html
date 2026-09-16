@@ -3,12 +3,12 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>bdd tools - bdd CLI Manual</title>
+        <title>bdd tools - bdd Harness Manual</title>
 
 
         <!-- Custom HTML head -->
 
-        <meta name="description" content="The complete, searchable reference for the bdd command-line tool: every command, subcommand, and flag, with in-depth examples.">
+        <meta name="description" content="The complete, searchable reference for the bdd harness: every command, subcommand, and flag, with in-depth examples.">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff">
 
@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-8826377a.js";
+            window.path_to_searchindex_js = "../searchindex-aaad9ee5.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9d4e1520.js"></script>
@@ -137,7 +137,7 @@
                         </button>
                     </div>
 
-                    <h1 class="menu-title">bdd CLI Manual</h1>
+                    <h1 class="menu-title">bdd Harness Manual</h1>
 
                     <div class="right-buttons">
                         <a href="../print.html" title="Print this book" aria-label="Print this book">
@@ -197,20 +197,29 @@ Commands:
   servers   Registered mcp.json servers and parse problems
 </code></pre>
 <pre><code class="language-bash">bdd tools profiles
-# spec-draft          4  list_requirements, get_requirement, validate_spec, refine_requirement
+# spec-draft          4  get_requirement, list_requirements, refine_requirement, validate_spec
+# spec-reword         3  get_requirement, refine_requirement, validate_spec
+# steps-generate      4  feature_list, feature_read, project_inspect, step_definitions_find
+# unittest-generate   4  feature_read, get_requirement, project_inspect, step_definitions_find
+# implement-advice    5  changes_show, changes_validate, feature_list, get_tdd_state, validate_spec
 # implement           7  get_requirement, feature_read, …, command_run, changes_show
 # status              7  project_root, list_requirements, …, changes_show, changes_validate
+# ask                12  the read-only set: everything above that only reads
 
 bdd tools list --for status          # exactly those seven
 bdd tools list --offline             # built-ins only; never connects
 bdd tools enable self__validate_spec --for status
 bdd tools servers
 </code></pre>
+<p>A command that generates or implements is handed <strong>3–7</strong> tools — the ones
+its current step can legitimately use, and nothing else. Only the read-only
+<code>ask</code> gets 12. Compare that with the <strong>25</strong> a general host such as Cursor or
+<code>pi -nbt</code> sees: same server, same tools, different amount of rope.</p>
 <p><code>--for</code> accepts: <code>spec-draft</code>, <code>spec-reword</code>, <code>steps-generate</code>,
 <code>unittest-generate</code>, <code>implement-advice</code>, <code>implement</code>, <code>status</code>, <code>ask</code>.
 Omitting it lists those names and exits nonzero.</p>
 <p>Default profiles contain no staging or commit tools. The only mutation
-a CLI-side model may request is <code>command_run</code> on the <code>implement</code>
+a harness-side model may request is <code>command_run</code> on the <code>implement</code>
 profile, and that call still asks the human to confirm.</p>
 <p>External tools are namespaced <code>server__tool</code>. A name in config that is
 not in the catalog is a warning, not a hard failure.</p>
@@ -248,7 +257,7 @@ origin when you need to be explicit:</p>
 </tbody>
 </table>
 </div>
-<p><code>builtin</code> is reserved for the CLI’s own tools. <code>bdd init</code> writes
+<p><code>builtin</code> is reserved for the harness’s own tools. <code>bdd init</code> writes
 <code>.bdd.toml</code> with every key and a live <code>[tools.profiles]</code> list for each
 caller. <a href="config.html"><code>bdd config</code></a> prints the resolved set and whether
 each value is a default or came from the file.</p>

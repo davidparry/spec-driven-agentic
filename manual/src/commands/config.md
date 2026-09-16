@@ -1,6 +1,6 @@
 # bdd config
 
-Print every configuration key the CLI uses and whether the value is a
+Print every configuration key the harness uses and whether the value is a
 code **default** or was read from the project file (`.bdd.toml`).
 
 ```text

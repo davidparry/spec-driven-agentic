@@ -2,14 +2,38 @@
 
 ## Unreleased
 
+- The `cli/` directory is now `harness/` and the crate is `bdd-harness`:
+  what ships is a harness for the whole spec-driven loop — commands and
+  the embedded MCP server — not only a command line. The binary is still
+  `bdd` and no command, flag, or tool name changed. What does change:
+  release assets are `bdd-harness-*` (installer, archives, and
+  `bdd-harness-uninstaller.sh`), the install receipt is
+  `~/.config/bdd-harness/bdd-harness-receipt.json`, `RUST_LOG` filters on
+  `bdd_harness::…`, the CI job is `harness`, and the site serves the
+  harness page at `/harness/`. An existing install keeps working, but a
+  receipt written by an older installer is only understood by the old
+  `bdd-cli-uninstaller.sh`.
+
 - `scripts/verify-workshop-run.sh check` grades Exercise 1 on its own
   terms. It used to demand that REQ-007 match the `complete` branch word
   for word, which no correct run could satisfy: the wording is authored
   live by the student and their agent, and the recorded one predates the
   custom-delimiter prompt. It now asks `bdd spec validate` and
   `bdd spec refine` — the same deterministic checks Exercise 1 runs — and
-  that a criterion covers the `//` declaration. REQ-003, whose wording
-  ships on trunk, is still compared against `complete`.
+  that a criterion covers the `//` declaration.
+
+- Exercise 2 is graded the same way, so the verifier no longer reads the
+  `complete` branch at all. It used to require REQ-003's scenarios to
+  match that branch character for character and the unit test to contain a
+  method named `twoCommaSeparatedNumbersAreSummed`, which a harness-driven
+  run cannot produce: `bdd unittest generate` names one method per
+  acceptance criterion. A green run was failed for naming. Both checks now
+  ask whether every one of REQ-003's acceptance criteria is covered by a
+  scenario tagged `@REQ-003` and asserted by a `@Test` that names the
+  requirement — the criteria are the bar, the wording is the run's. A
+  missing scenario is still caught, and named: `bdd validate` only
+  requires that *one* tagged scenario exist, so a run that wrote a
+  scenario for one of two criteria used to pass every gate.
 
 - Exercise 2 names REQ-003 in its prompt — in the follow-along, the
   README, and the slide deck, the three places attendees paste it from.
@@ -46,7 +70,7 @@
   model (the code defaults, listed for reference). Other keys stay
   commented. A listed command replaces that caller's built-in tools.
   MCP tools from `mcp.json` are `server:tool` (or `server__tool`);
-  `builtin:name` pins the CLI tool when short names collide.
+  `builtin:name` pins the harness tool when short names collide.
 
 - MCP `project_root` returns the absolute `--root` this `bdd mcp serve`
   process uses for every other tool.
@@ -55,10 +79,10 @@
 - MCP server identity is `spec-driven-server` / `1.0.0`, title `Spec Driven`,
   description that the requirements spec is the source of truth, website
   `https://davidparry.github.io/spec-driven-agentic/`, and icon
-  `https://davidparry.github.io/spec-driven-agentic/assets/bdd-cli-mark.png`.
+  `https://davidparry.github.io/spec-driven-agentic/assets/bdd-harness-mark.png`.
 - The smoke jar launches the `bdd` on `PATH` (the same binary `bdd --version`
-  uses). It no longer looks under `cli/target`. If `bdd` is missing: install
-  it (`cargo install --path cli`) or add its directory to `PATH`.
+  uses). It no longer looks under `harness/target`. If `bdd` is missing: install
+  it (`cargo install --path harness`) or add its directory to `PATH`.
 - Default smoke walkthrough now calls the remaining read-only MCP tools
   (`validate_spec`, `refine_requirement`, `project_root`, `project_inspect`, `feature_list`,
   `feature_read` of the workshop kata feature, `changes_show`,
@@ -83,15 +107,15 @@
   and `changes_validate`
   for staged-wins spec+Gherkin checks). Workshop Cursor config and
   `smoke-test.jar` launch that binary; the Java `mcp-server/` module is gone.
-  Frozen seven-tool reply shapes stay (`cli/tests/mcp_conformance.rs` +
-  smoke-test `ToolPlan`). CLI LLM calls use Ollama `/api/chat` with
+  Frozen seven-tool reply shapes stay (`harness/tests/mcp_conformance.rs` +
+  smoke-test `ToolPlan`). Harness LLM calls use Ollama `/api/chat` with
   per-command tool profiles (`bdd tools`, `bdd mcp call`, `bdd ask`).
-- Switch the recommended Ollama model this CLI, talk, and workshop run
+- Switch the recommended Ollama model this harness, talk, and workshop run
   against to `qwen3.8-flash-next:125b-mlx`.
 
 ## 0.2.5
 
-- Document `qwen3-coder-next:latest` as the Ollama model this CLI is
+- Document `qwen3-coder-next:latest` as the Ollama model this harness is
   developed and run against. Your mileage will vary with other models,
   especially those not trained for development work. The session pull
   hint, empty-catalog `bdd model list` message, `llm_unavailable`

@@ -1,0 +1,67 @@
+[package]
+name = "bdd-harness"
+version = "0.4.1"
+edition = "2024"
+rust-version = "1.97"
+description = "Spec-driven BDD/TDD harness with an embedded MCP server"
+license = "AGPL-3.0-only"
+repository = "https://github.com/davidparry/tdd-bdd-agentic"
+
+[[bin]]
+name = "bdd"
+path = "src/main.rs"
+
+[[test]]
+name = "cucumber"
+harness = false
+
+[dependencies]
+anyhow = "1.0.104"
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
+clap = { version = "4.6.6", features = ["derive"] }
+gherkin = "0.16.0"
+minijinja = { version = "2.24.0", features = ["loader"] }
+quick-xml = "0.41.0"
+regex = "1.13.1"
+reqwest = { version = "0.13.4", features = ["blocking", "json"] }
+rmcp = { version = "3.4.0", features = [
+    "macros",
+    "schemars",
+    "server",
+    "transport-io",
+    "client",
+    "transport-child-process",
+] }
+rustyline = "18.0.1"
+schemars = "1.2.2"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+sha2 = "0.11.0"
+shell-words = "1.1.1"
+tokio = { version = "1.53.1", features = [
+    "rt-multi-thread",
+    "macros",
+    "io-std",
+    "io-util",
+    "process",
+    "sync",
+    "time",
+] }
+
+toml = "1.1.4"
+tracing = "0.1.44"
+tracing-appender = "0.2.5"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+cucumber = "0.23.0"
+futures = "0.3.34"
+tempfile = "3.27.0"
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"

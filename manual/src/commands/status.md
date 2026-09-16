@@ -35,7 +35,7 @@ bdd status
 
 The priority order mirrors the loop itself:
 
-1. **Staged changes wait** — nothing the CLI authors touches the
+1. **Staged changes wait** — nothing the harness authors touches the
    working tree until you apply it, so an unapplied implementation
    attempt (or scenario, or spec edit) always comes first:
    `bdd changes show`, then `bdd changes commit`, then `bdd test`.

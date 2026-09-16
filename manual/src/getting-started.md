@@ -8,19 +8,19 @@ Download an installer from the
 x86_64), or build from source:
 
 ```bash
-cd cli
+cd harness
 cargo build --release
 ./target/release/bdd --help
 ```
 
 The shell installer places the binary in `$CARGO_HOME/bin` (usually
 `~/.cargo/bin/bdd`) and writes an install receipt to
-`~/.config/bdd-cli/bdd-cli-receipt.json`.
+`~/.config/bdd-harness/bdd-harness-receipt.json`.
 
 ## Local LLM (Ollama)
 
 LLM-backed generation uses a local [Ollama](https://ollama.com)
-instance. The model this CLI is developed and run against is
+instance. The model this harness is developed and run against is
 `qwen3.8-flash-next:125b-mlx`:
 
 ```bash
@@ -32,7 +32,7 @@ Your mileage will vary with a different model. A stronger coding model
 may draft, generate, and implement better; a model trained for chat,
 general knowledge, or work other than development will typically
 produce weaker specs, step definitions, tests, and production code.
-Without a reachable model the CLI still runs — generation falls back
+Without a reachable model the harness still runs — generation falls back
 to deterministic templates.
 
 ## Your first session
@@ -45,7 +45,7 @@ $ bdd
 
   ╭──────────────────────────────────╮
   │                                  ▼
-  │    > bdd  v0.2.5                 │
+  │    > bdd  v0.4.0                 │
   │    spec → RED → GREEN → REFACTOR │
   ▲                                  │
   ╰──────────────────────────────────╯
@@ -93,7 +93,7 @@ REQ-007, then REQ-003…007 to implemented) is
 ## Working against an existing project
 
 Every command takes `--root` (see [Global flags](global-flags.md)), so
-you can point the CLI at any project:
+you can point the harness at any project:
 
 ```bash
 bdd --root ~/code/my-kata inspect

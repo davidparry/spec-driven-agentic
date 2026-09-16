@@ -1,7 +1,7 @@
 # bdd init
 
 Scaffold build files, a Cucumber runner, an empty requirements spec,
-and the CLI's configuration in the project root. Existing files are
+and the harness's configuration in the project root. Existing files are
 never overwritten — they are reported as skipped.
 
 ```text
@@ -25,7 +25,7 @@ Every language gets the two spec-driven anchors:
   the root of the [spec catalog](../spec-format.md): split the backlog
   into included files later with
   [`bdd spec include add`](spec.md#bdd-spec-include).
-- `.bdd.toml` — the CLI configuration (LLM, timeouts, per-command
+- `.bdd.toml` — the harness configuration (LLM, timeouts, per-command
   tool profiles). `bdd init` writes `[tools.profiles]` with the tools
   each LLM-backed command offers the model (the code defaults, listed
   for reference). Other keys are commented with their defaults.
@@ -95,7 +95,7 @@ bdd init --language rust
 }
 ```
 
-Omit `--language` and the CLI prompts with the supported list; an
+Omit `--language` and the harness prompts with the supported list; an
 unrecognized answer re-prompts.
 
 ## Notes

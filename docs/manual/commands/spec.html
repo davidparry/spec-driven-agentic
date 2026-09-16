@@ -3,12 +3,12 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>bdd spec - bdd CLI Manual</title>
+        <title>bdd spec - bdd Harness Manual</title>
 
 
         <!-- Custom HTML head -->
 
-        <meta name="description" content="The complete, searchable reference for the bdd command-line tool: every command, subcommand, and flag, with in-depth examples.">
+        <meta name="description" content="The complete, searchable reference for the bdd harness: every command, subcommand, and flag, with in-depth examples.">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff">
 
@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-8826377a.js";
+            window.path_to_searchindex_js = "../searchindex-aaad9ee5.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9d4e1520.js"></script>
@@ -137,7 +137,7 @@
                         </button>
                     </div>
 
-                    <h1 class="menu-title">bdd CLI Manual</h1>
+                    <h1 class="menu-title">bdd Harness Manual</h1>
 
                     <div class="right-buttons">
                         <a href="../print.html" title="Print this book" aria-label="Print this book">
@@ -193,7 +193,8 @@ merged view of the whole tree.</p>
 Commands: list, show, draft, validate, refine, reword, set-feature, mark-implemented, include
 </code></pre>
 <p>MCP tool equivalents: <code>list_requirements</code>, <code>get_requirement</code>,
-<code>validate_spec</code>, <code>refine_requirement</code>, <code>requirement_mark_implemented</code>.</p>
+<code>validate_spec</code>, <code>refine_requirement</code>, <code>requirement_reword</code>,
+<code>requirement_mark_implemented</code>.</p>
 <hr>
 <h2 id="bdd-spec-list"><a class="header" href="#bdd-spec-list">bdd spec list</a></h2>
 <p>List every requirement with its id, title, status, and the spec file
@@ -240,7 +241,7 @@ hint.</p>
 <hr>
 <h2 id="bdd-spec-draft"><a class="header" href="#bdd-spec-draft">bdd spec draft</a></h2>
 <p>Interactively draft a requirement. Human input drives the spec — the
-CLI never invents requirements. The draft is validated and
+harness never invents requirements. The draft is validated and
 quality-gated in a loop until it is clean, then staged.</p>
 <pre><code class="language-bash">bdd spec draft
 </code></pre>
@@ -399,6 +400,11 @@ bdd spec reword REQ-007 \
   --criterion 'Given the input "1\n2,3", when add is called, then the result is 6' \
   --criterion 'Given an empty string "", when add is called, then the result is 0'
 </code></pre>
+<p>Over MCP this is <code>requirement_reword</code> (arguments <code>id</code>, <code>title</code>, <code>story</code>,
+<code>acceptance_criteria</code>). It is how an agent repairs whatever <code>validate_spec</code>
+or <code>refine_requirement</code> reported: the spec file’s JSON escaping and
+indentation differ from what the read tools return, so a hand-written
+string replacement against <code>requirements.json</code> will not match.</p>
 <hr>
 <h2 id="bdd-spec-set-feature"><a class="header" href="#bdd-spec-set-feature">bdd spec set-feature</a></h2>
 <p>Point a requirement at the feature file that was actually written

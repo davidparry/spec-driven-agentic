@@ -19,7 +19,7 @@ Requires a resolved model (configured with
 [`bdd model use`](model.md#bdd-model-use), passed with `--model`, or
 the session default when Ollama has installed models). Without one the
 command is refused — implementing stays in your hands. The model this
-CLI is developed and run against is `qwen3.8-flash-next:125b-mlx`; your
+harness is developed and run against is `qwen3.8-flash-next:125b-mlx`; your
 mileage will vary with a different model, especially one trained for
 work other than development.
 
@@ -81,7 +81,7 @@ Next: changes commit && test - then implement REQ-001 again if the bar stays RED
 
 In every one of these lines the command itself — `changes commit &&
 test`, `implement REQ-001`, `spec mark-implemented REQ-001 && changes
-commit` — is printed in green, the CLI's marker for text meant to be
+commit` — is printed in green, the harness's marker for text meant to be
 copied and pasted.
 
 ## The preflight
@@ -147,7 +147,7 @@ Anything else in the reply is dropped. A reply with no usable update
 fails with `The model's reply held no usable file update.` — nothing
 is staged, and you implement by hand instead.
 
-The implementation prompt is the largest call the CLI makes, so a
+The implementation prompt is the largest call the harness makes, so a
 local model can need minutes to answer. The generation timeout
 defaults to 300 seconds; if you see `no reply within ...s`, raise
 `timeout_seconds` under `[llm]` in `.bdd.toml` (see
@@ -196,7 +196,7 @@ requirement to inherit.
 
 `run_tests` during this command sees the **working tree**, not the
 unstaged patch sitting in `.bdd-staged/`. Commit (or apply) before you
-trust the bar. If the model requests `command_run`, the CLI asks you to
+trust the bar. If the model requests `command_run`, the harness asks you to
 confirm first; piped or CI stdin declines and never hangs.
 
 ## See also

@@ -55,7 +55,7 @@ history cannot be saved, the shell says so and exits normally.
 ## Model announcement at startup
 
 The first prompt is preceded by one line describing the session's
-model. This CLI is developed and run against
+model. This harness is developed and run against
 `qwen3.8-flash-next:125b-mlx`; your mileage will vary with a different
 model, especially one trained for work other than development. See
 [Getting started](getting-started.md#local-llm-ollama) and

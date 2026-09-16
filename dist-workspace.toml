@@ -1,10 +1,10 @@
 # Release pipeline configuration for dist (cargo-dist).
-# The Cargo workspace lives in cli/, not at the repo root, so the member
+# The Cargo workspace lives in harness/, not at the repo root, so the member
 # uses the `cargo:` form to point at it. dist generates
 # .github/workflows/release.yml while reading crate metadata from
-# cli/Cargo.toml.
+# harness/Cargo.toml.
 [workspace]
-members = ["cargo:cli/"]
+members = ["cargo:harness/"]
 
 # Config for 'dist'
 [dist]
@@ -20,7 +20,7 @@ targets = ["aarch64-apple-darwin", "aarch64-unknown-linux-gnu", "x86_64-apple-da
 install-path = "CARGO_HOME"
 # Whether to install an updater program
 install-updater = false
-# Update the stable channel before building: cli/rust-toolchain.toml pins
+# Update the stable channel before building: harness/rust-toolchain.toml pins
 # channel = "stable", and the runners' preinstalled stable can lag behind
 # the rust-version the crate requires
 rust-toolchain-version = "stable"
@@ -28,5 +28,5 @@ rust-toolchain-version = "stable"
 # Publish the uninstaller next to the installer; it reads the install
 # receipt and removes exactly what the installer put down
 [[dist.extra-artifacts]]
-artifacts = ["bdd-cli-uninstaller.sh"]
-build = ["cp", "scripts/bdd-cli-uninstaller.sh", "bdd-cli-uninstaller.sh"]
+artifacts = ["bdd-harness-uninstaller.sh"]
+build = ["cp", "scripts/bdd-harness-uninstaller.sh", "bdd-harness-uninstaller.sh"]

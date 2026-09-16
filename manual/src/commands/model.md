@@ -1,19 +1,19 @@
 # bdd model
 
-LLM model discovery and selection. The CLI talks to a local
+LLM model discovery and selection. The harness talks to a local
 [Ollama](https://ollama.com) — no cloud calls, no tokens — and uses
 the model only to *polish* deterministic templates in the generation
 commands. Everything works without a model; generation just stays at
 template quality.
 
-The model this CLI is developed and run against is
+The model this harness is developed and run against is
 `qwen3.8-flash-next:125b-mlx`. Pull it with
 `ollama pull qwen3.8-flash-next:125b-mlx`, then persist the choice with
 `bdd model use qwen3.8-flash-next:125b-mlx`. Your mileage will vary with
 other models: a stronger coding model may improve drafts and
 implementations; a model trained for chat, general knowledge, or work
 other than development will typically produce weaker specs, steps,
-tests, and production code. The CLI does not require this specific
+tests, and production code. The harness does not require this specific
 model — it uses whatever you configure, or the first model Ollama has
 installed.
 

@@ -2,7 +2,7 @@
 
 Detect the project's languages, build system, BDD framework, and —
 critically — whether each language's runtime is actually installed.
-The CLI only executes tests when the runtime is present, so `inspect`
+The harness only executes tests when the runtime is present, so `inspect`
 tells you up front what will run and what will refuse.
 
 ```text
@@ -56,7 +56,7 @@ A Java project without Maven on the PATH:
       "bddFramework": "cucumber-jvm",
       "runtime": "mvn",
       "runtimePresent": false,
-      "note": "Install Maven (and a JDK) to execute tests; the CLI reports, it never installs."
+      "note": "Install Maven (and a JDK) to execute tests; the harness reports, it never installs."
     }
   ],
   "nextStep": "Install the missing runtime before 'bdd test'; authoring commands still work."

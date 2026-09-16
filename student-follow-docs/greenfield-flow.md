@@ -124,5 +124,6 @@ The poms, the Cucumber runner, and the MCP config are never touched again —
 which is exactly why this workshop ships them pre-built: they are the part
 of a greenfield with no lesson in it.
 
-To drive that loop with the `bdd` CLI instead of the Java MCP hour, see
-[cli-path.md](cli-path.md).
+To drive that loop with the `bdd` runner instead of the Cursor hour, see
+[harness-path.md](harness-path.md); to drive it with a free local agent, see
+[pi-path.md](pi-path.md). All three call the same `bdd mcp serve`.

@@ -4,24 +4,23 @@
 #   start  Cut a NEW branch from trunk for this run (workshop-run-<timestamp>).
 #          Every run gets its own branch; never rehearse or present on trunk.
 #
-#   check  After the exercises, compare this working tree against the
-#          completed workshop's `complete` branch in the reference repo and
-#          report PASS/FAIL per artifact. The run is only a pass when every
+#   check  After the exercises, grade this working tree artifact by artifact
+#          and report PASS/FAIL for each. Every check is graded on the run's
+#          own terms — the deterministic validator and refiner for wording,
+#          the requirement's own acceptance criteria for coverage — never
+#          against one recorded solution. The run is only a pass when every
 #          check is green.
 #
-# Reference repo: $COMPLETE_REPO (default: this repo — the complete branch is
-# resolved locally or from origin/complete). Base branch for `start`:
-# $BASE_BRANCH (default trunk).
+# Base branch for `start`: $BASE_BRANCH (default trunk).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-COMPLETE_REPO="${COMPLETE_REPO:-$ROOT}"
 BASE_BRANCH="${BASE_BRANCH:-trunk}"
 
 usage() {
     echo "usage: $0 start|check"
     echo "  start  cut a new workshop-run-<timestamp> branch from ${BASE_BRANCH}"
-    echo "  check  diff the end state against ${COMPLETE_REPO} (complete branch)"
+    echo "  check  grade the end state against the spec's acceptance criteria"
     exit 2
 }
 
@@ -50,23 +49,10 @@ cmd_check() {
         echo "FAIL: refusing to check on '$branch' - run the workshop on a branch cut from trunk (scripts/verify-workshop-run.sh start)."
         exit 1
     fi
-    local complete_ref=""
-    for ref in complete origin/complete; do
-        if git -C "$COMPLETE_REPO" rev-parse --verify "$ref" >/dev/null 2>&1; then
-            complete_ref="$ref"
-            break
-        fi
-    done
-    if [ -z "$complete_ref" ]; then
-        echo "FAIL: no 'complete' or 'origin/complete' branch in reference repo $COMPLETE_REPO (set COMPLETE_REPO to a clone that has one)."
-        exit 1
-    fi
-    ROOT="$ROOT" COMPLETE_REPO="$COMPLETE_REPO" COMPLETE_REF="$complete_ref" python3 - <<'PY'
+    ROOT="$ROOT" python3 - <<'PY'
 import json, os, re, subprocess, sys
 
 root = os.environ["ROOT"]
-ref_repo = os.environ["COMPLETE_REPO"]
-ref_branch = os.environ["COMPLETE_REF"]
 SPEC = "requirements/requirements.json"
 FEATURE = "kata/src/test/resources/features/string_calculator.feature"
 TEST = "kata/src/test/java/com/davidparry/workshop/kata/StringCalculatorTest.java"
@@ -75,12 +61,8 @@ def local(path):
     with open(os.path.join(root, path)) as f:
         return f.read()
 
-def reference(path):
-    return subprocess.run(["git", "-C", ref_repo, "show", f"{ref_branch}:{path}"],
-                          capture_output=True, text=True, check=True).stdout
-
 def bdd(*args):
-    """Ask the bdd CLI, so Exercise 1 is graded by the same deterministic
+    """Ask the bdd harness, so Exercise 1 is graded by the same deterministic
     validator and refiner the workshop tools use. None when bdd is missing
     or did not answer with JSON."""
     try:
@@ -126,6 +108,12 @@ if r7 is not None:
            'no criterion mentions the "//" declaration Exercise 1 asks for')
 
 # ---- Exercise 2: REQ-003 taken to green ---------------------------------
+# Graded like Exercise 1: the scenarios and the unit test have to cover
+# REQ-003's own acceptance criteria, in whatever words the run chose. A
+# recorded solution cannot be the bar here either - `bdd unittest generate`
+# names one method per criterion, so no harness-driven run would ever
+# reproduce a hand-written method name. Status `implemented` already carries
+# the green bar, since mark-implemented refuses off GREEN.
 r3 = req(spec, "REQ-003")
 report(r3 is not None and r3.get("status") == "implemented",
        "REQ-003 status is 'implemented' in the spec",
@@ -146,38 +134,63 @@ def scenario_blocks(text, tag):
             i += 1
     return blocks
 
-mine = scenario_blocks(local(FEATURE), "@REQ-003")
-theirs = scenario_blocks(reference(FEATURE), "@REQ-003")
-report(sorted(mine) == sorted(theirs) and len(mine) == 2,
-       f"@REQ-003 scenarios match the complete branch ({len(mine)} found, 2 expected)",
-       "scenario text differs or count is wrong")
+def covers(block, criterion):
+    """A scenario or test covers a criterion when it feeds the same input
+    literals in and lands on the same expected value. Everything else -
+    scenario names, method names, assertion style - is the author's."""
+    inputs = re.findall(r'"([^"]*)"', criterion)
+    if not all(f'"{value}"' in block for value in inputs):
+        return False
+    outcome = re.findall(r"-?\d+", re.split(r"(?i)\bthen\b", criterion)[-1])
+    return not outcome or re.search(rf"(?<!\d){outcome[-1]}(?!\d)", block) is not None
 
-def extract_method(text, name):
-    lines = text.splitlines()
-    for i, line in enumerate(lines):
-        if name + "(" in line:
-            start = i
-            while start > 0 and lines[start - 1].strip().startswith("@"):
-                start -= 1
-            depth, j = 0, i
-            while j < len(lines):
-                depth += lines[j].count("{") - lines[j].count("}")
-                if depth == 0 and "{" in "".join(lines[start:j + 1]):
-                    return "\n".join(l.rstrip() for l in lines[start:j + 1])
-                j += 1
-    return None
+criteria = r3.get("acceptanceCriteria", []) if r3 else []
+scenarios = scenario_blocks(local(FEATURE), "@REQ-003")
+uncovered = [c for c in criteria if not any(covers(s, c) for s in scenarios)]
+report(bool(criteria) and bool(scenarios) and not uncovered,
+       f"@REQ-003 scenarios cover every acceptance criterion "
+       f"({len(scenarios)} tagged, {len(criteria)} criteria)",
+       "REQ-003 carries no acceptance criteria to cover" if not criteria
+       else "no scenario is tagged @REQ-003" if not scenarios
+       else "no scenario covers: " + "; ".join(uncovered))
 
-m_mine = extract_method(local(TEST), "twoCommaSeparatedNumbersAreSummed")
-m_ref = extract_method(reference(TEST), "twoCommaSeparatedNumbersAreSummed")
-report(m_mine is not None and m_mine == m_ref,
-       "REQ-003 unit test matches the complete branch",
-       "method missing or text differs")
+def test_methods(text):
+    """Every @Test in a Java test class - annotations, signature and body -
+    cut at the method's own closing brace, so a trailing comment that names
+    a requirement is not mistaken for a test of it."""
+    methods = []
+    for part in re.split(r"(?=^[ \t]*@Test\b)", text, flags=re.M)[1:]:
+        lines, depth, opened = part.splitlines(), 0, False
+        for i, line in enumerate(lines):
+            depth += line.count("{") - line.count("}")
+            opened = opened or "{" in line
+            if opened and depth <= 0:
+                part = "\n".join(lines[:i + 1])
+                break
+        methods.append(part)
+    return methods
+
+def body(method):
+    """The method without its annotations: a @DisplayName that quotes the
+    criterion must not pass for an assertion of it."""
+    return "\n".join(l for l in method.splitlines() if not l.strip().startswith("@"))
+
+unit = [m for m in test_methods(local(TEST)) if "REQ-003" in m]
+unasserted = [c for c in criteria if not any(covers(body(m), c) for m in unit)]
+placeholder = [m for m in unit if 'fail("TODO' in m]
+report(bool(criteria) and bool(unit) and not unasserted and not placeholder,
+       f"REQ-003 unit test asserts every acceptance criterion "
+       f"({len(unit)} @Test naming REQ-003)",
+       "REQ-003 carries no acceptance criteria to assert" if not criteria
+       else "no @Test names REQ-003 - the file groups tests by requirement id" if not unit
+       else 'a generated fail("TODO ...") placeholder is still there' if placeholder
+       else "nothing asserts: " + "; ".join(unasserted))
 
 print()
 if fail:
-    print("Run does NOT match the complete branch - see FAIL lines above.")
+    print("Run is NOT complete - see FAIL lines above.")
 else:
-    print("Run matches the complete branch. Clean up with:")
+    print("Run covers both exercises. Clean up with:")
     print("  git checkout trunk && git branch -D <this-run-branch>")
 sys.exit(fail)
 PY

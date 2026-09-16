@@ -1,7 +1,8 @@
 # Turn Off the Wi-Fi: Spec-Driven Development That Delivers on a Local Model
 
-A conference session built on this repository. Everything it demonstrates is
-here, runs locally, and is open source under AGPL-3.0.
+A conference session built on this repository. Everything it demonstrates runs
+locally and is open source: this repository under AGPL-3.0, and the two pieces
+it starts from — [pi](https://pi.dev) and its MCP extension — under MIT.
 
 **Speaker:** David Parry ·
 [davidparry.com](https://davidparry.com) ·
@@ -17,28 +18,49 @@ model." That answer costs you your budget, your code's confidentiality, and
 your ability to reproduce a result six months from now.
 
 There is a better answer, and Java developers have had it for twenty years:
-write the specification first, and make the tests the contract.
+write the specification first, and make the tests the contract. This session
+builds up to it in three moves, each one starting from something you can
+install for free this afternoon.
 
-This session walks through a working, open-source pipeline where a requirements
-catalog — not a chat transcript — is the source of truth. One MCP server
-(`bdd mcp serve`, 25 tools) exposes a deliberately locked-down set: no
-"write this file," no open shell. Cursor sees every tool, including staging.
-The agent must validate a requirement's structure, survive a wording
-review that rejects ambiguity like *should*, *handles*, and *properly*, turn the
-accepted criteria into a tagged Gherkin scenario and a JUnit test **through
-those tools**, watch it go red, then make it green. A state machine refuses
-to let it refactor on a red bar, and every write lands in a staging area a
-human reviews. `requirement_mark_implemented` is GREEN-gated.
+**We start with [pi](https://pi.dev)** — a minimal, MIT-licensed coding agent
+that talks to [Ollama](https://ollama.com) out of the box. `ollama pull`, point
+pi at the model, and you have an agent writing code on your laptop with no
+account, no key, and no network. That is the whole on-ramp, and it is genuinely
+good. It is also, by its author's explicit design, *loose*: pi ships eight
+built-in tools — including `bash`, `write`, and `edit` — and its README states
+the philosophy in four words, **"No permission popups."** There is no plan
+mode, no phase gate, no staging area. On a frontier model you can live with
+that, because you are the review. On `qwen3.8-flash-next:125b-mlx` you watch it
+fix a failing build by editing the test.
 
-Here is the part worth your hour: once that discipline lives in the server
-instead of in a prompt, model capability stops being the variable that
-decides quality. We run the identical **contracts** twice — once with a
-frontier agent in Cursor (all 25 tools), once with
-`qwen3.8-flash-next:125b-mlx` on the laptop on stage through Ollama and the
-CLI's per-command profiles (3–7 tools) — and compare the diffs. Then we look at
-what makes the local model hold up: JSON-only response contracts,
-one-finding-at-a-time correction, validate-and-retry that feeds the invalid
-reply back, and deterministic templates as the floor when generation fails.
+**Second move: keep pi, take the tools away.** pi deliberately has no MCP in
+core — a third-party extension adds it — so we install that extension, register
+this repo's server (`bdd mcp serve`, 25 tools), and launch pi with
+`--no-builtin-tools`. Now the same local model, in the same loose host, has no
+shell and no file writes: only a set of typed tools that make it validate a
+requirement's structure, survive a wording review that rejects ambiguity like
+*should*, *handles*, and *properly*, turn the accepted criteria into a tagged
+Gherkin scenario and a JUnit test **through those tools**, watch it go red, then
+make it green. A state machine refuses to let it refactor on a red bar. Every
+write lands in a staging area a human reviews. `requirement_mark_implemented`
+is GREEN-gated. The behavior change is dramatic, and nothing about the model
+changed.
+
+**Third move, and the point of the hour: that is still not enough.** `-nbt` is
+a flag on one run. Nothing persists it, nothing sequences the work, and the
+host still decides when to call what. So the same tools get a harness around
+them — per-command profiles that hand a generating command three to seven tools
+and nothing else, a requirements catalog rather than a chat transcript as the
+source of truth, and Cucumber as the executable spec, because Gherkin has been
+an agreed contract between business and code for twenty years and did not need
+inventing. Once the discipline lives in the tooling instead of in a prompt,
+model capability stops being the variable that decides quality. We run the
+identical **contracts** twice — once with a frontier agent in Cursor (all 25
+tools), once with `qwen3.8-flash-next:125b-mlx` on the laptop on stage — and
+compare the diffs. Then we look at what makes the local model hold up:
+JSON-only response contracts, one-finding-at-a-time correction,
+validate-and-retry that feeds the invalid reply back, and deterministic
+templates as the floor when generation fails.
 
 Then comes the segment most talks skip: **Where This Breaks.** Real failures
 this project hit — format drift, fixing the wrong file, silently dropping a
@@ -46,14 +68,20 @@ criterion, looping on an attempt that already failed — each with the
 deterministic check that now catches it, and an honest account of where a
 frontier model is still the right call.
 
-The server and CLI were built this way themselves: every tool has a numbered
-requirement, a Cucumber scenario, and a test that fails the build when spec and
-scenarios drift apart.
+The harness and its server were built this way themselves: every tool has a
+numbered requirement, a Cucumber scenario, and a test that fails the build
+when spec and scenarios drift apart.
 
-To prove the point, the demo runs with the Wi-Fi switched off.
+Every layer is free and open source, and every layer runs on your hardware. To
+prove the point, the demo runs with the Wi-Fi switched off.
 
 ## What attendees leave with
 
+- A free, offline agent setup they can install the same afternoon: pi plus
+  Ollama, no account and no key, and a clear-eyed read on what that gets them
+  and what it does not.
+- The one-flag demonstration that tool surface, not model size, is the lever:
+  the same local model in the same host, with and without `--no-builtin-tools`.
 - A pattern for MCP servers that **enforce a workflow** instead of handing
   agents filesystem access.
 - The deterministic validation layer that lets a local model produce output you
@@ -79,7 +107,8 @@ failure the project actually hit; each is now caught by a deterministic check.
 | Refactoring on red | Offered to "clean up" while tests were failing | The TDD state machine refuses the transition from any phase but GREEN |
 | Premature completion | Marked a requirement implemented with nothing proving it | `requirement_mark_implemented` requires GREEN plus a scenario tagged with the requirement ID |
 | Right process, wrong requirement | Asked for "the next pending id", took the requirement it had just drafted to green instead — correct discipline, every gate satisfied, an hour spent on work nobody asked for | Nothing in the loop, and that is the point: the phase gates police *how* the agent works, never *what it works on*. The prompt names the id, and the end-of-run verifier grades that id by name |
-| Tool-calling drift | Local model invented a tool, skipped staging, or called `command_run` without waiting | Per-command profiles (`bdd tools profiles`) offer 3–7 tools; `[tool_rules]` in `cli/prompts/prompts.toml`; CLI `command_run` asks the human to confirm |
+| Tool-calling drift | Local model invented a tool, skipped staging, or called `command_run` without waiting | Per-command profiles (`bdd tools profiles`) hand the generating commands 3–7 tools and the read-only `bdd ask` 12; `[tool_rules]` in `harness/prompts/prompts.toml`; the harness's `command_run` asks the human to confirm |
+| Fixing the test instead of the code | Given a shell and a writable test file, the local model made the bar green by deleting the assertion | Nothing in a loose host — pi has no permission popups by design. The harness has no shell and no file-write tool at all: scenarios and tests are typed mutations that land in staging, and `run_tests` is the only thing that can report a bar |
 
 Where a frontier model is still the better call, and where a human still has to
 be on the review, is stated plainly rather than skipped.
@@ -95,8 +124,9 @@ or LLM experience required; comfort with JUnit and Cucumber is assumed.
 
 | Format | What it covers |
 | --- | --- |
-| **Conference session** (50 minutes) | The full narrative above, with the live frontier-versus-local comparison and the *Where This Breaks* segment. |
-| **Hands-on workshop** | Attendees run the loop on their own machines against a local model: draft a requirement, refine it until the wording review is clean, take it through RED, GREEN, and REFACTOR. Companion material is the [workshop follow-along](student-follow-along.md); the [CLI path](student-follow-docs/cli-path.md) covers attendees who prefer the terminal to an IDE. |
+| **Conference session** (50 minutes) | The full narrative above — pi on Ollama, pi with its built-ins taken away, then the harness — with the live frontier-versus-local comparison and the *Where This Breaks* segment. |
+| **Short session** (30 minutes) | The same three acts, demo-driven, with no hands-on segment: pi free and offline, the one-flag change to `pi --no-builtin-tools`, then the spec-specific runner taken from requirement to green — plus *Where This Breaks*. Deck cut: [`slides/index.html?30`](slides/index.html), published at [/talk30/](https://davidparry.github.io/spec-driven-agentic/talk30/). |
+| **Hands-on workshop** | Attendees run the loop on their own machines against a local model: draft a requirement, refine it until the wording review is clean, take it through RED, GREEN, and REFACTOR. Companion material is the [workshop follow-along](student-follow-along.md); the [pi path](student-follow-docs/pi-path.md) is the free, no-IDE on-ramp, and the [harness path](student-follow-docs/harness-path.md) covers attendees who prefer the terminal to an IDE. |
 
 ## Technical requirements
 
@@ -104,23 +134,27 @@ or LLM experience required; comfort with JUnit and Cucumber is assumed.
 - **No conference network needed.** The entire demo runs locally against
   Ollama, which is the thesis rather than a convenience.
 - Stack on stage: Java 21, Maven, the `bdd` binary (`bdd mcp serve`), Cucumber-JVM 7, JUnit 5,
-  Ollama running `qwen3.8-flash-next:125b-mlx`. The bundled `smoke-test.jar` is an MCP-server **smoke test**.
-- For the workshop format: attendees need **`bdd` on PATH**, Java 21, Maven, git, Cursor (or
-  Claude), and — to run fully offline — Ollama with `qwen3.8-flash-next:125b-mlx` pulled ahead of
-  time. The [CLI path](student-follow-docs/cli-path.md) is the Wi-Fi-off alternative.
+  Ollama running `qwen3.8-flash-next:125b-mlx`, and [pi](https://pi.dev) with the
+  `pi-mcp-extension` package for the first two acts. The bundled `smoke-test.jar` is an
+  MCP-server **smoke test**.
+- For the workshop format: attendees need **`bdd` on PATH**, Java 21, Maven, git, and an MCP
+  host — Cursor, Claude, or pi with `pi-mcp-extension` — and, to run fully offline, Ollama with
+  `qwen3.8-flash-next:125b-mlx` pulled ahead of time. The [pi path](student-follow-docs/pi-path.md)
+  and the [harness path](student-follow-docs/harness-path.md) are the Wi-Fi-off alternatives.
 
 ## What is on stage, in this repo
 
 | Shown live | Where it lives |
 | --- | --- |
-| The 22-tool MCP server enforcing the loop | `cli/src/mcp.rs` (`bdd mcp serve`) |
-| The deterministic structure and wording reviews | `cli/src/domain/` (spec validator, requirement refiner) |
-| The state machine that refuses a red-bar refactor | `cli/src/domain/tdd.rs` (`TddStateMachine`) |
+| The free on-ramp: pi on Ollama, then pi with `--no-builtin-tools` against this server | [`.pi/mcp.json`](.pi/mcp.json), [`student-follow-docs/pi-path.md`](student-follow-docs/pi-path.md) |
+| The 25-tool MCP server enforcing the loop | `harness/src/mcp.rs` (`bdd mcp serve`) |
+| The deterministic structure and wording reviews | `harness/src/domain/` (spec validator, requirement refiner) |
+| The state machine that refuses a red-bar refactor | `harness/src/domain/tdd.rs` (`TddStateMachine`) |
 | The requirements catalog that drives everything | `requirements/requirements.json` |
 | Gherkin and JUnit generated from the spec | `kata/` |
-| The offline CLI: same server, scoped profiles on `qwen3.8-flash-next:125b-mlx` | [`cli/README.md`](cli/README.md), [`student-follow-docs/cli-path.md`](student-follow-docs/cli-path.md) |
-| Every prompt sent to the model, in one auditable file | `cli/prompts/prompts.toml` |
-| The slide deck | [`slides/index.html`](slides/index.html) |
+| The offline harness: same server, scoped profiles on `qwen3.8-flash-next:125b-mlx` | [`harness/README.md`](harness/README.md), [`student-follow-docs/harness-path.md`](student-follow-docs/harness-path.md) |
+| Every prompt sent to the model, in one auditable file | `harness/prompts/prompts.toml` |
+| The slide deck — one file, two cuts ([`?30`](slides/index.html) selects the short one) | [`slides/index.html`](slides/index.html) |
 
 ## Booking
 

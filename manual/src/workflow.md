@@ -1,6 +1,6 @@
 # The workflow: spec → RED → GREEN → REFACTOR
 
-The CLI enforces a two-altitude test discipline driven by a validated
+The harness enforces a two-altitude test discipline driven by a validated
 spec. Understanding the phases makes every command's `nextStep` field
 self-explanatory.
 

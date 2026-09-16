@@ -22,11 +22,13 @@ GITHUB = "https://github.com/davidparry/tdd-bdd-agentic/blob/trunk/"
 
 SITE_PATHS = {
     "student-follow-along.md": "../workshop/",
-    "cli/README.md": "../cli/",
+    "harness/README.md": "../harness/",
     "speaking.md": "../speaking/",
     "student-follow-docs/setup-mcp.md": "../setup/",
     "student-follow-docs/greenfield-flow.md": "../greenfield/",
+    "student-follow-docs/pi-path.md": "../pi/",
     "slides/index.html": "../talk/",
+    "slides/index.html?30": "../talk30/",
 }
 
 PAGES = [
@@ -37,10 +39,10 @@ PAGES = [
         "description": "Step-by-step companion for the 60-minute bdd workshop.",
     },
     {
-        "src": "cli/README.md",
-        "dest": "cli/index.html",
-        "title": "bdd CLI",
-        "description": "Spec-driven BDD/TDD CLI with an embedded MCP server.",
+        "src": "harness/README.md",
+        "dest": "harness/index.html",
+        "title": "bdd harness",
+        "description": "Spec-driven BDD/TDD harness with an embedded MCP server.",
     },
     {
         "src": "speaking.md",
@@ -59,6 +61,12 @@ PAGES = [
         "dest": "greenfield/index.html",
         "title": "Greenfield flow",
         "description": "The order files would be created in a true greenfield spec-first project.",
+    },
+    {
+        "src": "student-follow-docs/pi-path.md",
+        "dest": "pi/index.html",
+        "title": "The pi path",
+        "description": "Drive the spec-driven server from pi, a free MIT-licensed agent on a local Ollama model.",
     },
 ]
 
@@ -132,13 +140,17 @@ def copy_static() -> None:
         shutil.rmtree(SITE)
     (SITE / "assets").mkdir(parents=True)
     (SITE / "talk").mkdir()
+    (SITE / "talk30").mkdir()
     shutil.copy2(DOCS / "index.html", SITE / "index.html")
     for item in (DOCS / "assets").iterdir():
         if item.name == "page.template.html":
             continue
         shutil.copy2(item, SITE / "assets" / item.name)
+    # One deck, two cuts: the same file picks its track from the URL, so /talk/
+    # serves the 60-minute workshop and /talk30/ the 30-minute session.
     shutil.copy2(ROOT / "slides" / "index.html", SITE / "talk" / "index.html")
-    # The CLI manual is an mdBook committed pre-built (mdbook build manual).
+    shutil.copy2(ROOT / "slides" / "index.html", SITE / "talk30" / "index.html")
+    # The harness manual is an mdBook committed pre-built (mdbook build manual).
     shutil.copytree(DOCS / "manual", SITE / "manual")
     (SITE / ".nojekyll").write_text("", encoding="utf-8")
 

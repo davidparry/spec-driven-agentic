@@ -1,9 +1,10 @@
 # bdd ask
 
-Ask the local model a question with the **ask** tool profile: the ten
+Ask the local model a question with the **ask** tool profile: the twelve
 read-only workflow tools (spec, TDD state, inspect, features, staged
-changes). The model may look things up; it cannot stage, commit, or
-mark a requirement implemented.
+changes). It is the widest profile the harness attaches, because reading
+costs nothing — a generating command gets 3–7 tools instead. The model may
+look things up; it cannot stage, commit, or mark a requirement implemented.
 
 ```text
 Usage: bdd ask [OPTIONS] [TASK]...

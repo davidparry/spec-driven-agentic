@@ -3,12 +3,12 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>bdd mcp - bdd CLI Manual</title>
+        <title>bdd mcp - bdd Harness Manual</title>
 
 
         <!-- Custom HTML head -->
 
-        <meta name="description" content="The complete, searchable reference for the bdd command-line tool: every command, subcommand, and flag, with in-depth examples.">
+        <meta name="description" content="The complete, searchable reference for the bdd harness: every command, subcommand, and flag, with in-depth examples.">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff">
 
@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-8826377a.js";
+            window.path_to_searchindex_js = "../searchindex-aaad9ee5.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9d4e1520.js"></script>
@@ -137,7 +137,7 @@
                         </button>
                     </div>
 
-                    <h1 class="menu-title">bdd CLI Manual</h1>
+                    <h1 class="menu-title">bdd Harness Manual</h1>
 
                     <div class="right-buttons">
                         <a href="../print.html" title="Print this book" aria-label="Print this book">
@@ -181,7 +181,7 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="bdd-mcp"><a class="header" href="#bdd-mcp">bdd mcp</a></h1>
-<p>The workshop MCP server. This is the same workflow the CLI offers a
+<p>The workshop MCP server. This is the same workflow the harness offers a
 human, exposed to AI agents as typed tools over the Model Context
 Protocol. Cursor, Claude, the bundled <code>smoke-test.jar</code>, and <code>bdd mcp call</code> all talk to this process.</p>
 <pre><code class="language-text">Usage: bdd mcp [OPTIONS] &lt;COMMAND&gt;
@@ -195,17 +195,21 @@ Commands:
 serves spec-driven TDD and BDD tools; the requirements spec is the
 source of truth; website
 https://davidparry.github.io/spec-driven-agentic/; icon
-https://davidparry.github.io/spec-driven-agentic/assets/bdd-cli-mark.png). Frozen seven-tool
+https://davidparry.github.io/spec-driven-agentic/assets/bdd-harness-mark.png). Frozen seven-tool
 <strong>reply shapes</strong> are owned by
-<code>cli/tests/mcp_conformance.rs</code> and smoke-test’s <code>ToolPlan</code> — not by a
+<code>harness/tests/mcp_conformance.rs</code> and smoke-test’s <code>ToolPlan</code> — not by a
 separate Java server.</p>
 <p>The server is stdio only: JSON-RPC on stdin/stdout. Cursor, Claude,
-Inspector, and <code>smoke-test.jar</code> launch it as a child process. It prefers
-protocol <code>2026-07-28</code>: no <code>initialize</code> handshake. <code>bdd mcp call</code> and
+Inspector, <code>pi</code> (through <code>pi-mcp-extension</code>), and <code>smoke-test.jar</code> launch it
+as a child process.</p>
+<p><strong>The lifecycle is dual-era, and both eras work.</strong> The server prefers
+<code>2026-07-28</code>, where there is no <code>initialize</code> handshake: <code>bdd mcp call</code> and
 <code>bdd mcp tools</code> open a session with <code>server/discover</code> and per-request
-<code>_meta</code>. The Java smoke walkthrough starts at <code>tools/list</code> (it does not
-call <code>initialize</code>). A host that still sends <code>initialize</code> is answered by
-rmcp for compatibility; this project’s own Rust clients do not.</p>
+<code>_meta</code>, and the Java smoke walkthrough starts straight at <code>tools/list</code>. A
+host that still sends the classic <code>initialize</code> with protocol <code>2025-11-25</code>
+gets a normal handshake reply — that path is live, not a fallback stub,
+which is why <code>.cursor/mcp.json</code> can set <code>"protocolEra": "auto"</code> and let the
+host pick. This project’s own Rust clients use the newer era.</p>
 <hr>
 <h2 id="bdd-mcp-serve"><a class="header" href="#bdd-mcp-serve">bdd mcp serve</a></h2>
 <p>Serve the MCP tools over stdio. The process reads JSON-RPC on stdin
@@ -225,9 +229,16 @@ equivalent):</p>
   }
 }
 </code></pre>
-<p>Cursor sees <strong>all 24 tools</strong>, including staging. CLI commands that
-call a model attach a <strong>narrower profile</strong> (<code>bdd tools profiles</code>) —
-typically 3–7 tools — so a local model is not offered commit or
+<p>Any MCP host can drive this server. <a href="https://pi.dev">pi</a> has no MCP in core,
+so it needs the <code>pi-mcp-extension</code> package; the repo ships a ready
+<a href="https://github.com/davidparry/tdd-bdd-agentic/blob/trunk/.pi/mcp.json"><code>.pi/mcp.json</code></a>,
+and <code>pi -nbt</code> disables pi’s own <code>bash</code>/<code>write</code>/<code>edit</code> so these tools are all
+the model gets. The bridge registers them as <code>mcp_&lt;server&gt;_&lt;tool&gt;</code>, so
+<code>run_tests</code> arrives as <code>mcp_spec_driven_server_run_tests</code>.</p>
+<p>Cursor sees <strong>all 25 tools</strong>, including staging, and so does <code>pi -nbt</code>.
+Harness commands that call a model attach a <strong>narrower profile</strong>
+(<code>bdd tools profiles</code>) — 3–7 tools for a generating command, 12 for the
+read-only <code>bdd ask</code> — so a local model is not offered commit or
 mark-implemented.</p>
 <h2 id="bdd-mcp-tools"><a class="header" href="#bdd-mcp-tools">bdd mcp tools</a></h2>
 <p>List the built-in tools over one throwaway session. Default is an
@@ -246,16 +257,17 @@ bdd mcp call run_tests --stdio
 <p><code>--arg key=value</code> is always a string unless the value parses as JSON.
 <code>--args '{"id":"REQ-003"}'</code> merges a JSON object.</p>
 <h2 id="the-tools-served"><a class="header" href="#the-tools-served">The tools served</a></h2>
-<p>Twenty-four tools in three groups. There is no <code>spec_draft</code> or
-<code>implement</code> MCP tool: Cursor writes <code>requirements.json</code> and production
-Java; Gherkin, steps, unit-test scaffolds, mark-implemented, and
-staging go through tools. Generation over MCP is <strong>template-only</strong>
-(<code>source: "template"</code>).</p>
+<p>Twenty-five tools in three groups. There is no <code>spec_draft</code> or
+<code>implement</code> MCP tool: a <strong>new</strong> requirement is still drafted by the
+human (<code>bdd spec draft</code>) and Cursor writes production Java. Rewording an
+existing requirement, Gherkin, steps, unit-test scaffolds,
+mark-implemented, and staging all go through tools. Generation over MCP
+is <strong>template-only</strong> (<code>source: "template"</code>).</p>
 <h3 id="frozen-seven-reply-shapes-stay"><a class="header" href="#frozen-seven-reply-shapes-stay">Frozen seven (reply shapes stay)</a></h3>
 <div class="table-wrapper">
 <table>
 <thead>
-<tr><th>MCP tool</th><th>CLI equivalent</th></tr>
+<tr><th>MCP tool</th><th>Harness equivalent</th></tr>
 </thead>
 <tbody>
 <tr><td><code>list_requirements</code></td><td><a href="spec.html#bdd-spec-list"><code>bdd spec list</code></a></td></tr>
@@ -272,13 +284,14 @@ staging go through tools. Generation over MCP is <strong>template-only</strong>
 <div class="table-wrapper">
 <table>
 <thead>
-<tr><th>MCP tool</th><th>CLI equivalent</th></tr>
+<tr><th>MCP tool</th><th>Harness equivalent</th></tr>
 </thead>
 <tbody>
 <tr><td><code>feature_list</code> / <code>feature_read</code> / <code>feature_create</code></td><td><a href="feature.html"><code>bdd feature</code></a></td></tr>
 <tr><td><code>scenario_add</code> / <code>scenario_update</code> / <code>scenario_delete</code></td><td><a href="scenario.html"><code>bdd scenario</code></a></td></tr>
 <tr><td><code>changes_show</code> / <code>changes_commit</code> / <code>changes_discard</code></td><td><a href="changes.html"><code>bdd changes</code></a></td></tr>
 <tr><td><code>changes_validate</code></td><td><a href="validate.html"><code>bdd validate</code></a> (staged-wins; frozen <code>validate_spec</code> stays on disk)</td></tr>
+<tr><td><code>requirement_reword</code></td><td><a href="spec.html#bdd-spec-reword"><code>bdd spec reword</code></a> (the repair path for <code>validate_spec</code> and <code>refine_requirement</code> findings; never hand-edit the spec file)</td></tr>
 <tr><td><code>requirement_mark_implemented</code></td><td><a href="spec.html#bdd-spec-mark-implemented"><code>bdd spec mark-implemented</code></a></td></tr>
 <tr><td><code>step_definitions_find</code></td><td><a href="steps.html#bdd-steps-missing"><code>bdd steps missing</code></a></td></tr>
 <tr><td><code>step_definition_create</code></td><td><a href="steps.html#bdd-steps-generate"><code>bdd steps generate</code></a> (template only)</td></tr>
@@ -290,7 +303,7 @@ staging go through tools. Generation over MCP is <strong>template-only</strong>
 <div class="table-wrapper">
 <table>
 <thead>
-<tr><th>MCP tool</th><th>CLI equivalent</th></tr>
+<tr><th>MCP tool</th><th>Harness equivalent</th></tr>
 </thead>
 <tbody>
 <tr><td><code>project_root</code></td><td><code>--root</code> (the absolute directory this process was started with)</td></tr>
@@ -321,8 +334,8 @@ directory, and no argument may be an absolute path or contain
 <code>..</code> — the command cannot name anything outside the root.</li>
 <li><strong>RED bar only.</strong> Commands run only during the implementation
 phase. Off a RED bar the tool refuses and points at <code>run_tests</code>.</li>
-<li><strong>Human confirm on the CLI.</strong> When <code>bdd implement</code> offers
-<code>command_run</code>, the CLI asks before spawning. Piped/CI stdin
+<li><strong>Human confirm on the harness.</strong> When <code>bdd implement</code> offers
+<code>command_run</code>, the harness asks before spawning. Piped/CI stdin
 declines; it never hangs.</li>
 <li><strong>Timeout and output cap.</strong> A hard timeout (default and maximum
 300 seconds) kills a hung process; each output stream is truncated
@@ -347,7 +360,7 @@ with a <code>nextStep</code> that teaches the correct move.
 <code>requirement_mark_implemented</code> is GREEN-gated and needs a tagged
 scenario.</li>
 <li><strong>State survives.</strong> The phase machine lives on disk, so a
-reconnecting agent (or a human taking over in the CLI) continues
+reconnecting agent (or a human taking over in the harness) continues
 from the same place.</li>
 </ul>
 <h2 id="flags"><a class="header" href="#flags">Flags</a></h2>

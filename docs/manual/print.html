@@ -3,13 +3,13 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>bdd CLI Manual</title>
+        <title>bdd Harness Manual</title>
         <meta name="robots" content="noindex">
 
 
         <!-- Custom HTML head -->
 
-        <meta name="description" content="The complete, searchable reference for the bdd command-line tool: every command, subcommand, and flag, with in-depth examples.">
+        <meta name="description" content="The complete, searchable reference for the bdd harness: every command, subcommand, and flag, with in-depth examples.">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff">
 
@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "searchindex-8826377a.js";
+            window.path_to_searchindex_js = "searchindex-aaad9ee5.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-9d4e1520.js"></script>
@@ -138,7 +138,7 @@
                         </button>
                     </div>
 
-                    <h1 class="menu-title">bdd CLI Manual</h1>
+                    <h1 class="menu-title">bdd Harness Manual</h1>
 
                     <div class="right-buttons">
                         <a href="print.html" title="Print this book" aria-label="Print this book">
@@ -186,7 +186,7 @@
 of truth, and the discipline is enforced by tooling, not by
 convention. The root file is a <a href="#the-requirements-format">catalog</a> that may
 include child spec files, so the backlog scales past one file while
-one entry point stays fixed. The CLI validates the spec’s structure,
+one entry point stays fixed. The harness validates the spec’s structure,
 quality-gates its wording, turns approved requirements into tagged
 Gherkin scenarios, runs the tests through your project’s own build
 tool, and tracks the persistent RED/GREEN/REFACTOR phase between
@@ -213,7 +213,7 @@ interactive. Every reply carries a <code>nextStep</code> field that says what
 to do next — the same guidance an AI agent receives over MCP.</li>
 <li>Names in parentheses in help text, like <code>(run_tests)</code>, are the
 matching MCP tool names — frozen contracts kept by
-<code>cli/tests/mcp_conformance.rs</code> and smoke-test <code>ToolPlan</code>.</li>
+<code>harness/tests/mcp_conformance.rs</code> and smoke-test <code>ToolPlan</code>.</li>
 </ul>
 <h2 id="supported-languages"><a class="header" href="#supported-languages">Supported languages</a></h2>
 <div class="table-wrapper">
@@ -230,11 +230,11 @@ matching MCP tool names — frozen contracts kept by
 </tbody>
 </table>
 </div>
-<p>The CLI only ever <em>executes</em> when the language’s runtime is present;
+<p>The harness only ever <em>executes</em> when the language’s runtime is present;
 it reports a structured <code>runtime_missing</code> refusal otherwise and never
 installs anything.</p>
 <p>LLM-backed generation uses local <a href="https://ollama.com">Ollama</a>. The
-model this CLI is developed and run against is
+model this harness is developed and run against is
 <code>qwen3.8-flash-next:125b-mlx</code> — see <a href="#getting-started">Getting started</a>
 and <a href="#bdd-model"><code>bdd model</code></a>. Your mileage will vary with
 other models, especially those not trained for development work.</p>
@@ -245,16 +245,16 @@ other models, especially those not trained for development work.</p>
 <a href="https://github.com/davidparry/tdd-bdd-agentic/releases/latest">latest release</a>
 (macOS Apple Silicon and Intel, Linux x86_64 and arm64, Windows
 x86_64), or build from source:</p>
-<pre><code class="language-bash">cd cli
+<pre><code class="language-bash">cd harness
 cargo build --release
 ./target/release/bdd --help
 </code></pre>
 <p>The shell installer places the binary in <code>$CARGO_HOME/bin</code> (usually
 <code>~/.cargo/bin/bdd</code>) and writes an install receipt to
-<code>~/.config/bdd-cli/bdd-cli-receipt.json</code>.</p>
+<code>~/.config/bdd-harness/bdd-harness-receipt.json</code>.</p>
 <h2 id="local-llm-ollama"><a class="header" href="#local-llm-ollama">Local LLM (Ollama)</a></h2>
 <p>LLM-backed generation uses a local <a href="https://ollama.com">Ollama</a>
-instance. The model this CLI is developed and run against is
+instance. The model this harness is developed and run against is
 <code>qwen3.8-flash-next:125b-mlx</code>:</p>
 <pre><code class="language-bash">ollama pull qwen3.8-flash-next:125b-mlx
 bdd model use qwen3.8-flash-next:125b-mlx
@@ -263,7 +263,7 @@ bdd model use qwen3.8-flash-next:125b-mlx
 may draft, generate, and implement better; a model trained for chat,
 general knowledge, or work other than development will typically
 produce weaker specs, step definitions, tests, and production code.
-Without a reachable model the CLI still runs — generation falls back
+Without a reachable model the harness still runs — generation falls back
 to deterministic templates.</p>
 <h2 id="your-first-session"><a class="header" href="#your-first-session">Your first session</a></h2>
 <p>Run bare <code>bdd</code> in a terminal. You get the help, the banner with the
@@ -272,7 +272,7 @@ version, the model status, and an interactive prompt:</p>
 
   ╭──────────────────────────────────╮
   │                                  ▼
-  │    &gt; bdd  v0.2.5                 │
+  │    &gt; bdd  v0.4.0                 │
   │    spec → RED → GREEN → REFACTOR │
   ▲                                  │
   ╰──────────────────────────────────╯
@@ -307,10 +307,10 @@ bdd spec mark-implemented REQ-001 &amp;&amp; bdd changes commit
 <p>This repository’s String Calculator workshop can be finished with the
 same commands. The kata-specific recipe (paths under <code>kata/</code>, draft
 REQ-007, then REQ-003…007 to implemented) is
-<a href="#this-workshops-string-calculator-cli">This workshop’s String Calculator</a>.</p>
+<a href="#this-workshops-string-calculator-harness">This workshop’s String Calculator</a>.</p>
 <h2 id="working-against-an-existing-project"><a class="header" href="#working-against-an-existing-project">Working against an existing project</a></h2>
 <p>Every command takes <code>--root</code> (see <a href="#global-flags">Global flags</a>), so
-you can point the CLI at any project:</p>
+you can point the harness at any project:</p>
 <pre><code class="language-bash">bdd --root ~/code/my-kata inspect
 bdd --root ~/code/my-kata spec validate
 </code></pre>
@@ -321,7 +321,7 @@ them anywhere on the command line.</p>
 <h2 id="--root-root"><a class="header" href="#--root-root"><code>--root &lt;ROOT&gt;</code></a></h2>
 <p>The project root — the directory where <code>requirements/requirements.json</code>
 (the root of the <a href="#the-requirements-format">spec catalog</a>) and <code>.bdd.toml</code>
-live, and the base for every relative path the CLI reads or writes.
+live, and the base for every relative path the harness reads or writes.
 Defaults to the current directory. MCP clients that cannot see argv can
 call <code>project_root</code> to read the same directory as an absolute path.</p>
 <pre><code class="language-bash">bdd --root ~/code/calculator spec list
@@ -360,7 +360,7 @@ tail -f .bdd-log/bdd.log.$(date +%F)      # watch the diagnostics live
 </code></pre>
 <p>The <code>RUST_LOG</code> environment variable overrides both the default and
 <code>--debug</code> with per-module directives, e.g.
-<code>RUST_LOG=bdd_cli::adapters=trace bdd test</code>.</p>
+<code>RUST_LOG=bdd_harness::adapters=trace bdd test</code>.</p>
 <h2 id="--retry-n"><a class="header" href="#--retry-n"><code>--retry &lt;N&gt;</code></a></h2>
 <p>How many times to try a model call when the reply fails validation
 (not a JSON array of requirements, not a complete rewording object,
@@ -448,7 +448,7 @@ commands and <kbd>Ctrl</kbd>+<kbd>R</kbd> for reverse search. If the
 history cannot be saved, the shell says so and exits normally.</p>
 <h2 id="model-announcement-at-startup"><a class="header" href="#model-announcement-at-startup">Model announcement at startup</a></h2>
 <p>The first prompt is preceded by one line describing the session’s
-model. This CLI is developed and run against
+model. This harness is developed and run against
 <code>qwen3.8-flash-next:125b-mlx</code>; your mileage will vary with a different
 model, especially one trained for work other than development. See
 <a href="#local-llm-ollama">Getting started</a> and
@@ -488,7 +488,7 @@ anything else declines and the shell carries on:</p>
 help and exits instead of opening the shell.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="the-workflow-spec--red--green--refactor"><a class="header" href="#the-workflow-spec--red--green--refactor">The workflow: spec → RED → GREEN → REFACTOR</a></h1>
-<p>The CLI enforces a two-altitude test discipline driven by a validated
+<p>The harness enforces a two-altitude test discipline driven by a validated
 spec. Understanding the phases makes every command’s <code>nextStep</code> field
 self-explanatory.</p>
 <h2 id="the-spec-is-the-entry-point"><a class="header" href="#the-spec-is-the-entry-point">The spec is the entry point</a></h2>
@@ -684,11 +684,15 @@ backlog. Split it the day it stops fitting in your head.</p>
 <li><a href="#the-workflow-spec--red--green--refactor">The workflow</a> — where the spec drives the loop.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="this-workshops-string-calculator-cli"><a class="header" href="#this-workshops-string-calculator-cli">This workshop’s String Calculator (CLI)</a></h1>
-<p>The 60-minute class uses Cursor and the Java MCP server. The same
-kata can be finished with <code>bdd</code> instead. The student recipe — install,
-branch, draft REQ-007, then drive REQ-003…007 to <code>implemented</code> — lives
-in <a href="../../../student-follow-docs/cli-path.html">student-follow-docs/cli-path.md</a>.</p>
+<h1 id="this-workshops-string-calculator-harness"><a class="header" href="#this-workshops-string-calculator-harness">This workshop’s String Calculator (harness)</a></h1>
+<p>The 60-minute class uses Cursor against <code>bdd mcp serve</code> — one Rust binary
+that is both the harness and the MCP server. (The Java module in the repo
+is a smoke-test <em>client</em> of that server, not a server of its own.) The same
+kata can be finished with <code>bdd</code> commands instead, or with a free local agent
+through the <a href="../../../student-follow-docs/pi-path.html">pi path</a>. The student
+recipe — install, branch, draft REQ-007, then drive REQ-003…007 to
+<code>implemented</code> — lives in
+<a href="../../../student-follow-docs/harness-path.html">student-follow-docs/harness-path.md</a>.</p>
 <p>Do not edit <a href="../../../student-follow-along.html">student-follow-along.md</a>
 for this path. Do not implement the kata on <code>trunk</code>.</p>
 <p>Kata files <code>bdd</code> must reuse (not parallel <code>Req00NTest</code> / <code>Kata.java</code>
@@ -754,7 +758,7 @@ a transaction before committing it.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="bdd-init"><a class="header" href="#bdd-init">bdd init</a></h1>
 <p>Scaffold build files, a Cucumber runner, an empty requirements spec,
-and the CLI’s configuration in the project root. Existing files are
+and the harness’s configuration in the project root. Existing files are
 never overwritten — they are reported as skipped.</p>
 <pre><code class="language-text">Usage: bdd init [OPTIONS]
 </code></pre>
@@ -779,7 +783,7 @@ never overwritten — they are reported as skipped.</p>
 the root of the <a href="#the-requirements-format">spec catalog</a>: split the backlog
 into included files later with
 <a href="#bdd-spec-include"><code>bdd spec include add</code></a>.</li>
-<li><code>.bdd.toml</code> — the CLI configuration (LLM, timeouts, per-command
+<li><code>.bdd.toml</code> — the harness configuration (LLM, timeouts, per-command
 tool profiles). <code>bdd init</code> writes <code>[tools.profiles]</code> with the tools
 each LLM-backed command offers the model (the code defaults, listed
 for reference). Other keys are commented with their defaults.</li>
@@ -842,7 +846,7 @@ bdd init --language rust --name "String Calculator"
   "nextStep": "Draft your first requirement with 'bdd spec draft', then 'bdd spec validate'."
 }
 </code></pre>
-<p>Omit <code>--language</code> and the CLI prompts with the supported list; an
+<p>Omit <code>--language</code> and the harness prompts with the supported list; an
 unrecognized answer re-prompts.</p>
 <h2 id="notes"><a class="header" href="#notes">Notes</a></h2>
 <ul>
@@ -1071,7 +1075,7 @@ continue.</p>
 <code>cargo</code>) — the orchestrator refuses to fake a test run.</li>
 <li>An LLM is optional: with no reachable Ollama model the generation
 steps fall back to deterministic templates you edit yourself. The
-model this CLI is developed and run against is
+model this harness is developed and run against is
 <code>qwen3.8-flash-next:125b-mlx</code> (<code>ollama pull qwen3.8-flash-next:125b-mlx</code>).
 Your mileage will vary with other models, especially those not
 trained for development work.</li>
@@ -1095,7 +1099,8 @@ merged view of the whole tree.</p>
 Commands: list, show, draft, validate, refine, reword, set-feature, mark-implemented, include
 </code></pre>
 <p>MCP tool equivalents: <code>list_requirements</code>, <code>get_requirement</code>,
-<code>validate_spec</code>, <code>refine_requirement</code>, <code>requirement_mark_implemented</code>.</p>
+<code>validate_spec</code>, <code>refine_requirement</code>, <code>requirement_reword</code>,
+<code>requirement_mark_implemented</code>.</p>
 <hr>
 <h2 id="bdd-spec-list"><a class="header" href="#bdd-spec-list">bdd spec list</a></h2>
 <p>List every requirement with its id, title, status, and the spec file
@@ -1142,7 +1147,7 @@ hint.</p>
 <hr>
 <h2 id="bdd-spec-draft"><a class="header" href="#bdd-spec-draft">bdd spec draft</a></h2>
 <p>Interactively draft a requirement. Human input drives the spec — the
-CLI never invents requirements. The draft is validated and
+harness never invents requirements. The draft is validated and
 quality-gated in a loop until it is clean, then staged.</p>
 <pre><code class="language-bash">bdd spec draft
 </code></pre>
@@ -1301,6 +1306,11 @@ bdd spec reword REQ-007 \
   --criterion 'Given the input "1\n2,3", when add is called, then the result is 6' \
   --criterion 'Given an empty string "", when add is called, then the result is 0'
 </code></pre>
+<p>Over MCP this is <code>requirement_reword</code> (arguments <code>id</code>, <code>title</code>, <code>story</code>,
+<code>acceptance_criteria</code>). It is how an agent repairs whatever <code>validate_spec</code>
+or <code>refine_requirement</code> reported: the spec file’s JSON escaping and
+indentation differ from what the read tools return, so a hand-written
+string replacement against <code>requirements.json</code> will not match.</p>
 <hr>
 <h2 id="bdd-spec-set-feature"><a class="header" href="#bdd-spec-set-feature">bdd spec set-feature</a></h2>
 <p>Point a requirement at the feature file that was actually written
@@ -1383,7 +1393,7 @@ Includes must be <code>.json</code> files inside the spec directory.</p>
 <h1 id="bdd-inspect"><a class="header" href="#bdd-inspect">bdd inspect</a></h1>
 <p>Detect the project’s languages, build system, BDD framework, and —
 critically — whether each language’s runtime is actually installed.
-The CLI only executes tests when the runtime is present, so <code>inspect</code>
+The harness only executes tests when the runtime is present, so <code>inspect</code>
 tells you up front what will run and what will refuse.</p>
 <pre><code class="language-text">Usage: bdd inspect [OPTIONS]
 </code></pre>
@@ -1429,7 +1439,7 @@ tells you up front what will run and what will refuse.</p>
       "bddFramework": "cucumber-jvm",
       "runtime": "mvn",
       "runtimePresent": false,
-      "note": "Install Maven (and a JDK) to execute tests; the CLI reports, it never installs."
+      "note": "Install Maven (and a JDK) to execute tests; the harness reports, it never installs."
     }
   ],
   "nextStep": "Install the missing runtime before 'bdd test'; authoring commands still work."
@@ -1785,7 +1795,7 @@ tree, and the next test run is the real validator.</p>
 <a href="#bdd-model-use"><code>bdd model use</code></a>, passed with <code>--model</code>, or
 the session default when Ollama has installed models). Without one the
 command is refused — implementing stays in your hands. The model this
-CLI is developed and run against is <code>qwen3.8-flash-next:125b-mlx</code>; your
+harness is developed and run against is <code>qwen3.8-flash-next:125b-mlx</code>; your
 mileage will vary with a different model, especially one trained for
 work other than development.</p>
 <pre><code class="language-bash">bdd test                 # a fresh RED bar records the failure details
@@ -1829,7 +1839,7 @@ or red
 asked) declines and prints the next command in plain words instead:</p>
 <pre><code class="language-text">Next: changes commit &amp;&amp; test - then implement REQ-001 again if the bar stays RED.
 </code></pre>
-<p>In every one of these lines the command itself — <code>changes commit &amp;&amp; test</code>, <code>implement REQ-001</code>, <code>spec mark-implemented REQ-001 &amp;&amp; changes commit</code> — is printed in green, the CLI’s marker for text meant to be
+<p>In every one of these lines the command itself — <code>changes commit &amp;&amp; test</code>, <code>implement REQ-001</code>, <code>spec mark-implemented REQ-001 &amp;&amp; changes commit</code> — is printed in green, the harness’s marker for text meant to be
 copied and pasted.</p>
 <h2 id="the-preflight"><a class="header" href="#the-preflight">The preflight</a></h2>
 <p>Before anything goes to the model, the command surveys the
@@ -1893,7 +1903,7 @@ ecosystem convention:</li>
 <p>Anything else in the reply is dropped. A reply with no usable update
 fails with <code>The model's reply held no usable file update.</code> — nothing
 is staged, and you implement by hand instead.</p>
-<p>The implementation prompt is the largest call the CLI makes, so a
+<p>The implementation prompt is the largest call the harness makes, so a
 local model can need minutes to answer. The generation timeout
 defaults to 300 seconds; if you see <code>no reply within ...s</code>, raise
 <code>timeout_seconds</code> under <code>[llm]</code> in <code>.bdd.toml</code> (see
@@ -1932,7 +1942,7 @@ test run goes GREEN — a closed loop leaves no history for the next
 requirement to inherit.</p>
 <p><code>run_tests</code> during this command sees the <strong>working tree</strong>, not the
 unstaged patch sitting in <code>.bdd-staged/</code>. Commit (or apply) before you
-trust the bar. If the model requests <code>command_run</code>, the CLI asks you to
+trust the bar. If the model requests <code>command_run</code>, the harness asks you to
 confirm first; piped or CI stdin declines and never hangs.</p>
 <h2 id="see-also-8"><a class="header" href="#see-also-8">See also</a></h2>
 <ul>
@@ -2040,7 +2050,7 @@ project’s own toolchain:</p>
 </div>
 <p>If the runtime is missing, the command <strong>refuses instead of
 pretending</strong>:</p>
-<pre><code class="language-text">Error: runtime_missing: mvn is not installed. Install Maven (and a JDK) to run tests; the CLI reports, it never installs.
+<pre><code class="language-text">Error: runtime_missing: mvn is not installed. Install Maven (and a JDK) to run tests; the harness reports, it never installs.
 </code></pre>
 <h2 id="examples-3"><a class="header" href="#examples-3">Examples</a></h2>
 <p>A failing run — the phase moves to RED:</p>
@@ -2205,7 +2215,7 @@ am I in the whole loop and what do I do now”.</p>
 <h2 id="how-the-next-step-is-chosen"><a class="header" href="#how-the-next-step-is-chosen">How the next step is chosen</a></h2>
 <p>The priority order mirrors the loop itself:</p>
 <ol>
-<li><strong>Staged changes wait</strong> — nothing the CLI authors touches the
+<li><strong>Staged changes wait</strong> — nothing the harness authors touches the
 working tree until you apply it, so an unapplied implementation
 attempt (or scenario, or spec edit) always comes first:
 <code>bdd changes show</code>, then <code>bdd changes commit</code>, then <code>bdd test</code>.</li>
@@ -2304,7 +2314,7 @@ half of TDD that “make it pass” alone never captures.</p>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="bdd-changes"><a class="header" href="#bdd-changes">bdd changes</a></h1>
-<p>Staged-transaction management. Every file mutation the CLI authors
+<p>Staged-transaction management. Every file mutation the harness authors
 lands in <code>.bdd-staged/</code> first (see <a href="#staged-changes">Staged changes</a>);
 these subcommands are how you review, apply, or drop the transaction.</p>
 <pre><code class="language-text">Usage: bdd changes [OPTIONS] &lt;COMMAND&gt;
@@ -2391,19 +2401,19 @@ bdd test                         # honest RED
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="bdd-model"><a class="header" href="#bdd-model">bdd model</a></h1>
-<p>LLM model discovery and selection. The CLI talks to a local
+<p>LLM model discovery and selection. The harness talks to a local
 <a href="https://ollama.com">Ollama</a> — no cloud calls, no tokens — and uses
 the model only to <em>polish</em> deterministic templates in the generation
 commands. Everything works without a model; generation just stays at
 template quality.</p>
-<p>The model this CLI is developed and run against is
+<p>The model this harness is developed and run against is
 <code>qwen3.8-flash-next:125b-mlx</code>. Pull it with
 <code>ollama pull qwen3.8-flash-next:125b-mlx</code>, then persist the choice with
 <code>bdd model use qwen3.8-flash-next:125b-mlx</code>. Your mileage will vary with
 other models: a stronger coding model may improve drafts and
 implementations; a model trained for chat, general knowledge, or work
 other than development will typically produce weaker specs, steps,
-tests, and production code. The CLI does not require this specific
+tests, and production code. The harness does not require this specific
 model — it uses whatever you configure, or the first model Ollama has
 installed.</p>
 <pre><code class="language-text">Usage: bdd model [OPTIONS] &lt;COMMAND&gt;
@@ -2498,7 +2508,7 @@ output is validated before it can stage.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="bdd-config"><a class="header" href="#bdd-config">bdd config</a></h1>
-<p>Print every configuration key the CLI uses and whether the value is a
+<p>Print every configuration key the harness uses and whether the value is a
 code <strong>default</strong> or was read from the project file (<code>.bdd.toml</code>).</p>
 <pre><code class="language-text">Usage: bdd config [OPTIONS]
 </code></pre>
@@ -2567,7 +2577,7 @@ override a value for one run and are not written to the file.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="bdd-mcp"><a class="header" href="#bdd-mcp">bdd mcp</a></h1>
-<p>The workshop MCP server. This is the same workflow the CLI offers a
+<p>The workshop MCP server. This is the same workflow the harness offers a
 human, exposed to AI agents as typed tools over the Model Context
 Protocol. Cursor, Claude, the bundled <code>smoke-test.jar</code>, and <code>bdd mcp call</code> all talk to this process.</p>
 <pre><code class="language-text">Usage: bdd mcp [OPTIONS] &lt;COMMAND&gt;
@@ -2581,17 +2591,21 @@ Commands:
 serves spec-driven TDD and BDD tools; the requirements spec is the
 source of truth; website
 https://davidparry.github.io/spec-driven-agentic/; icon
-https://davidparry.github.io/spec-driven-agentic/assets/bdd-cli-mark.png). Frozen seven-tool
+https://davidparry.github.io/spec-driven-agentic/assets/bdd-harness-mark.png). Frozen seven-tool
 <strong>reply shapes</strong> are owned by
-<code>cli/tests/mcp_conformance.rs</code> and smoke-test’s <code>ToolPlan</code> — not by a
+<code>harness/tests/mcp_conformance.rs</code> and smoke-test’s <code>ToolPlan</code> — not by a
 separate Java server.</p>
 <p>The server is stdio only: JSON-RPC on stdin/stdout. Cursor, Claude,
-Inspector, and <code>smoke-test.jar</code> launch it as a child process. It prefers
-protocol <code>2026-07-28</code>: no <code>initialize</code> handshake. <code>bdd mcp call</code> and
+Inspector, <code>pi</code> (through <code>pi-mcp-extension</code>), and <code>smoke-test.jar</code> launch it
+as a child process.</p>
+<p><strong>The lifecycle is dual-era, and both eras work.</strong> The server prefers
+<code>2026-07-28</code>, where there is no <code>initialize</code> handshake: <code>bdd mcp call</code> and
 <code>bdd mcp tools</code> open a session with <code>server/discover</code> and per-request
-<code>_meta</code>. The Java smoke walkthrough starts at <code>tools/list</code> (it does not
-call <code>initialize</code>). A host that still sends <code>initialize</code> is answered by
-rmcp for compatibility; this project’s own Rust clients do not.</p>
+<code>_meta</code>, and the Java smoke walkthrough starts straight at <code>tools/list</code>. A
+host that still sends the classic <code>initialize</code> with protocol <code>2025-11-25</code>
+gets a normal handshake reply — that path is live, not a fallback stub,
+which is why <code>.cursor/mcp.json</code> can set <code>"protocolEra": "auto"</code> and let the
+host pick. This project’s own Rust clients use the newer era.</p>
 <hr>
 <h2 id="bdd-mcp-serve"><a class="header" href="#bdd-mcp-serve">bdd mcp serve</a></h2>
 <p>Serve the MCP tools over stdio. The process reads JSON-RPC on stdin
@@ -2611,9 +2625,16 @@ equivalent):</p>
   }
 }
 </code></pre>
-<p>Cursor sees <strong>all 24 tools</strong>, including staging. CLI commands that
-call a model attach a <strong>narrower profile</strong> (<code>bdd tools profiles</code>) —
-typically 3–7 tools — so a local model is not offered commit or
+<p>Any MCP host can drive this server. <a href="https://pi.dev">pi</a> has no MCP in core,
+so it needs the <code>pi-mcp-extension</code> package; the repo ships a ready
+<a href="https://github.com/davidparry/tdd-bdd-agentic/blob/trunk/.pi/mcp.json"><code>.pi/mcp.json</code></a>,
+and <code>pi -nbt</code> disables pi’s own <code>bash</code>/<code>write</code>/<code>edit</code> so these tools are all
+the model gets. The bridge registers them as <code>mcp_&lt;server&gt;_&lt;tool&gt;</code>, so
+<code>run_tests</code> arrives as <code>mcp_spec_driven_server_run_tests</code>.</p>
+<p>Cursor sees <strong>all 25 tools</strong>, including staging, and so does <code>pi -nbt</code>.
+Harness commands that call a model attach a <strong>narrower profile</strong>
+(<code>bdd tools profiles</code>) — 3–7 tools for a generating command, 12 for the
+read-only <code>bdd ask</code> — so a local model is not offered commit or
 mark-implemented.</p>
 <h2 id="bdd-mcp-tools"><a class="header" href="#bdd-mcp-tools">bdd mcp tools</a></h2>
 <p>List the built-in tools over one throwaway session. Default is an
@@ -2632,16 +2653,17 @@ bdd mcp call run_tests --stdio
 <p><code>--arg key=value</code> is always a string unless the value parses as JSON.
 <code>--args '{"id":"REQ-003"}'</code> merges a JSON object.</p>
 <h2 id="the-tools-served"><a class="header" href="#the-tools-served">The tools served</a></h2>
-<p>Twenty-four tools in three groups. There is no <code>spec_draft</code> or
-<code>implement</code> MCP tool: Cursor writes <code>requirements.json</code> and production
-Java; Gherkin, steps, unit-test scaffolds, mark-implemented, and
-staging go through tools. Generation over MCP is <strong>template-only</strong>
-(<code>source: "template"</code>).</p>
+<p>Twenty-five tools in three groups. There is no <code>spec_draft</code> or
+<code>implement</code> MCP tool: a <strong>new</strong> requirement is still drafted by the
+human (<code>bdd spec draft</code>) and Cursor writes production Java. Rewording an
+existing requirement, Gherkin, steps, unit-test scaffolds,
+mark-implemented, and staging all go through tools. Generation over MCP
+is <strong>template-only</strong> (<code>source: "template"</code>).</p>
 <h3 id="frozen-seven-reply-shapes-stay"><a class="header" href="#frozen-seven-reply-shapes-stay">Frozen seven (reply shapes stay)</a></h3>
 <div class="table-wrapper">
 <table>
 <thead>
-<tr><th>MCP tool</th><th>CLI equivalent</th></tr>
+<tr><th>MCP tool</th><th>Harness equivalent</th></tr>
 </thead>
 <tbody>
 <tr><td><code>list_requirements</code></td><td><a href="#bdd-spec-list"><code>bdd spec list</code></a></td></tr>
@@ -2658,13 +2680,14 @@ staging go through tools. Generation over MCP is <strong>template-only</strong>
 <div class="table-wrapper">
 <table>
 <thead>
-<tr><th>MCP tool</th><th>CLI equivalent</th></tr>
+<tr><th>MCP tool</th><th>Harness equivalent</th></tr>
 </thead>
 <tbody>
 <tr><td><code>feature_list</code> / <code>feature_read</code> / <code>feature_create</code></td><td><a href="#bdd-feature"><code>bdd feature</code></a></td></tr>
 <tr><td><code>scenario_add</code> / <code>scenario_update</code> / <code>scenario_delete</code></td><td><a href="#bdd-scenario"><code>bdd scenario</code></a></td></tr>
 <tr><td><code>changes_show</code> / <code>changes_commit</code> / <code>changes_discard</code></td><td><a href="#bdd-changes"><code>bdd changes</code></a></td></tr>
 <tr><td><code>changes_validate</code></td><td><a href="#bdd-validate"><code>bdd validate</code></a> (staged-wins; frozen <code>validate_spec</code> stays on disk)</td></tr>
+<tr><td><code>requirement_reword</code></td><td><a href="#bdd-spec-reword"><code>bdd spec reword</code></a> (the repair path for <code>validate_spec</code> and <code>refine_requirement</code> findings; never hand-edit the spec file)</td></tr>
 <tr><td><code>requirement_mark_implemented</code></td><td><a href="#bdd-spec-mark-implemented"><code>bdd spec mark-implemented</code></a></td></tr>
 <tr><td><code>step_definitions_find</code></td><td><a href="#bdd-steps-missing"><code>bdd steps missing</code></a></td></tr>
 <tr><td><code>step_definition_create</code></td><td><a href="#bdd-steps-generate"><code>bdd steps generate</code></a> (template only)</td></tr>
@@ -2676,7 +2699,7 @@ staging go through tools. Generation over MCP is <strong>template-only</strong>
 <div class="table-wrapper">
 <table>
 <thead>
-<tr><th>MCP tool</th><th>CLI equivalent</th></tr>
+<tr><th>MCP tool</th><th>Harness equivalent</th></tr>
 </thead>
 <tbody>
 <tr><td><code>project_root</code></td><td><code>--root</code> (the absolute directory this process was started with)</td></tr>
@@ -2707,8 +2730,8 @@ directory, and no argument may be an absolute path or contain
 <code>..</code> — the command cannot name anything outside the root.</li>
 <li><strong>RED bar only.</strong> Commands run only during the implementation
 phase. Off a RED bar the tool refuses and points at <code>run_tests</code>.</li>
-<li><strong>Human confirm on the CLI.</strong> When <code>bdd implement</code> offers
-<code>command_run</code>, the CLI asks before spawning. Piped/CI stdin
+<li><strong>Human confirm on the harness.</strong> When <code>bdd implement</code> offers
+<code>command_run</code>, the harness asks before spawning. Piped/CI stdin
 declines; it never hangs.</li>
 <li><strong>Timeout and output cap.</strong> A hard timeout (default and maximum
 300 seconds) kills a hung process; each output stream is truncated
@@ -2733,7 +2756,7 @@ with a <code>nextStep</code> that teaches the correct move.
 <code>requirement_mark_implemented</code> is GREEN-gated and needs a tagged
 scenario.</li>
 <li><strong>State survives.</strong> The phase machine lives on disk, so a
-reconnecting agent (or a human taking over in the CLI) continues
+reconnecting agent (or a human taking over in the harness) continues
 from the same place.</li>
 </ul>
 <h2 id="flags-8"><a class="header" href="#flags-8">Flags</a></h2>
@@ -2775,20 +2798,29 @@ Commands:
   servers   Registered mcp.json servers and parse problems
 </code></pre>
 <pre><code class="language-bash">bdd tools profiles
-# spec-draft          4  list_requirements, get_requirement, validate_spec, refine_requirement
+# spec-draft          4  get_requirement, list_requirements, refine_requirement, validate_spec
+# spec-reword         3  get_requirement, refine_requirement, validate_spec
+# steps-generate      4  feature_list, feature_read, project_inspect, step_definitions_find
+# unittest-generate   4  feature_read, get_requirement, project_inspect, step_definitions_find
+# implement-advice    5  changes_show, changes_validate, feature_list, get_tdd_state, validate_spec
 # implement           7  get_requirement, feature_read, …, command_run, changes_show
 # status              7  project_root, list_requirements, …, changes_show, changes_validate
+# ask                12  the read-only set: everything above that only reads
 
 bdd tools list --for status          # exactly those seven
 bdd tools list --offline             # built-ins only; never connects
 bdd tools enable self__validate_spec --for status
 bdd tools servers
 </code></pre>
+<p>A command that generates or implements is handed <strong>3–7</strong> tools — the ones
+its current step can legitimately use, and nothing else. Only the read-only
+<code>ask</code> gets 12. Compare that with the <strong>25</strong> a general host such as Cursor or
+<code>pi -nbt</code> sees: same server, same tools, different amount of rope.</p>
 <p><code>--for</code> accepts: <code>spec-draft</code>, <code>spec-reword</code>, <code>steps-generate</code>,
 <code>unittest-generate</code>, <code>implement-advice</code>, <code>implement</code>, <code>status</code>, <code>ask</code>.
 Omitting it lists those names and exits nonzero.</p>
 <p>Default profiles contain no staging or commit tools. The only mutation
-a CLI-side model may request is <code>command_run</code> on the <code>implement</code>
+a harness-side model may request is <code>command_run</code> on the <code>implement</code>
 profile, and that call still asks the human to confirm.</p>
 <p>External tools are namespaced <code>server__tool</code>. A name in config that is
 not in the catalog is a warning, not a hard failure.</p>
@@ -2826,16 +2858,17 @@ origin when you need to be explicit:</p>
 </tbody>
 </table>
 </div>
-<p><code>builtin</code> is reserved for the CLI’s own tools. <code>bdd init</code> writes
+<p><code>builtin</code> is reserved for the harness’s own tools. <code>bdd init</code> writes
 <code>.bdd.toml</code> with every key and a live <code>[tools.profiles]</code> list for each
 caller. <a href="#bdd-config"><code>bdd config</code></a> prints the resolved set and whether
 each value is a default or came from the file.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="bdd-ask"><a class="header" href="#bdd-ask">bdd ask</a></h1>
-<p>Ask the local model a question with the <strong>ask</strong> tool profile: the ten
+<p>Ask the local model a question with the <strong>ask</strong> tool profile: the twelve
 read-only workflow tools (spec, TDD state, inspect, features, staged
-changes). The model may look things up; it cannot stage, commit, or
-mark a requirement implemented.</p>
+changes). It is the widest profile the harness attaches, because reading
+costs nothing — a generating command gets 3–7 tools instead. The model may
+look things up; it cannot stage, commit, or mark a requirement implemented.</p>
 <pre><code class="language-text">Usage: bdd ask [OPTIONS] [TASK]...
 </code></pre>
 <pre><code class="language-bash">bdd ask "which pending requirement should we implement next?"

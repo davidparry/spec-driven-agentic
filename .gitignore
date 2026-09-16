@@ -35,7 +35,7 @@ target/
 .qodo/
 
 # Copy produced at the repo root by `dist build` (extra-artifacts)
-/bdd-cli-uninstaller.sh
+/bdd-harness-uninstaller.sh
 
 # GitHub Pages build output
 _site/
@@ -44,10 +44,10 @@ _site/
 # Cached LLM responses; safe to delete at any time
 .bdd-cache/
 
-# Diagnostic logs written by the bdd CLI; safe to delete at any time
+# Diagnostic logs written by the bdd harness; safe to delete at any time
 .bdd-log/
 
-# TDD phase log and staged mutations written by the bdd CLI
+# TDD phase log and staged mutations written by the bdd harness
 .bdd-state.json
 .bdd-staged/
 

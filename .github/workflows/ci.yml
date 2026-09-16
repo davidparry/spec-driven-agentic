@@ -4,8 +4,8 @@
 #   - build-and-test: smoke-test verify (JaCoCo 100%, SpotBugs, PMD) and
 #     `mvn -f kata/pom.xml test`. Does not require the bdd binary, so a
 #     missing Rust build cannot look like a JaCoCo failure.
-#   - cli: bdd tests, clippy, fmt, coverage, and the release binary.
-#   - smoke-test-live: needs cli; drives smoke-test.jar against that binary.
+#   - harness: bdd tests, clippy, fmt, coverage, and the release binary.
+#   - smoke-test-live: needs harness; drives smoke-test.jar against that binary.
 #   - class-completeness / workshop-start: branch guards as before.
 name: CI
 
@@ -52,14 +52,14 @@ jobs:
             **/target/pmd.xml
             **/target/site/pmd.html
 
-  cli:
-    name: bdd CLI (tests, clippy, fmt, coverage)
+  harness:
+    name: bdd harness (tests, clippy, fmt, coverage)
     runs-on: ubuntu-latest
     permissions:
       contents: write
     defaults:
       run:
-        working-directory: cli
+        working-directory: harness
     steps:
       - uses: actions/checkout@v4
 
@@ -71,7 +71,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: cli
+          workspaces: harness
 
       - name: Tests (unit + cucumber)
         run: cargo test
@@ -89,7 +89,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bdd-linux
-          path: cli/target/release/bdd
+          path: harness/target/release/bdd
 
       - name: Coverage
         id: coverage
@@ -100,7 +100,7 @@ jobs:
             | jq -r '.data[0].totals.lines.percent * 10 | round / 10')
           echo "percent=$PCT" >> "$GITHUB_OUTPUT"
           if awk "BEGIN { exit !($PCT < $GATE) }"; then
-            echo "::error::CLI line coverage is ${PCT}% (required ${GATE}%). Tests, clippy, and fmt already passed; this job fails on the coverage gate only."
+            echo "::error::Harness line coverage is ${PCT}% (required ${GATE}%). Tests, clippy, and fmt already passed; this job fails on the coverage gate only."
             exit 1
           fi
 
@@ -112,7 +112,7 @@ jobs:
           if awk "BEGIN { exit !($PCT >= 95) }"; then COLOR=brightgreen
           elif awk "BEGIN { exit !($PCT >= 85) }"; then COLOR=green
           else COLOR=orange; fi
-          printf '{"schemaVersion":1,"label":"cli coverage","message":"%s%% lines","color":"%s"}\n' \
+          printf '{"schemaVersion":1,"label":"harness coverage","message":"%s%% lines","color":"%s"}\n' \
             "$PCT" "$COLOR" > /tmp/coverage.json
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -120,12 +120,12 @@ jobs:
           git rm -rf --quiet .
           cp /tmp/coverage.json coverage.json
           git add coverage.json
-          git commit -m "cli coverage badge: ${PCT}% lines"
+          git commit -m "harness coverage badge: ${PCT}% lines"
           git push --force origin badges
 
   smoke-test-live:
     name: smoke-test live against bdd
-    needs: cli
+    needs: harness
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

@@ -1,4 +1,4 @@
-# bdd CLI configuration.
+# bdd harness configuration.
 #
 # Keys left commented use the defaults shown. Uncomment to override.
 # [tools.profiles] is the tools each command offers the model.

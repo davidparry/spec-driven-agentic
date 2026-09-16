@@ -31,7 +31,7 @@ public final class TddAgent {
         Path bdd = BddBinary.onPath();
         if (bdd == null) {
             System.out.println("bdd was not found on PATH.");
-            System.out.println("Install it: cargo install --path cli");
+            System.out.println("Install it: cargo install --path harness");
             System.out.println("Or add the directory that contains bdd to PATH.");
             System.exit(1);
         }

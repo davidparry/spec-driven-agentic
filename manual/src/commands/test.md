@@ -35,7 +35,7 @@ If the runtime is missing, the command **refuses instead of
 pretending**:
 
 ```text
-Error: runtime_missing: mvn is not installed. Install Maven (and a JDK) to run tests; the CLI reports, it never installs.
+Error: runtime_missing: mvn is not installed. Install Maven (and a JDK) to run tests; the harness reports, it never installs.
 ```
 
 ## Examples

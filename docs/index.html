@@ -4,27 +4,29 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>bdd — The new Specification-Driven Development in the AI era</title>
-  <meta name="description" content="bdd is a native CLI for Specification-Driven Development in the AI era: spec → Gherkin → RED → GREEN → REFACTOR, with an embedded MCP server. Also a 60-minute hands-on workshop.">
+  <meta name="description" content="bdd is a native harness for Specification-Driven Development in the AI era: spec → Gherkin → RED → GREEN → REFACTOR, with an embedded MCP server. Also a 60-minute hands-on workshop.">
   <meta property="og:title" content="bdd — The new Specification-Driven Development in the AI era">
-  <meta property="og:description" content="A native CLI for spec → Gherkin → RED → GREEN → REFACTOR, with an embedded MCP server.">
-  <meta property="og:image" content="https://davidparry.github.io/spec-driven-agentic/assets/bdd-cli-mark.png">
-  <link rel="icon" href="assets/bdd-cli-mark.png" type="image/png">
-  <link rel="apple-touch-icon" href="assets/bdd-cli-mark.png">
+  <meta property="og:description" content="A native harness for spec → Gherkin → RED → GREEN → REFACTOR, with an embedded MCP server.">
+  <meta property="og:image" content="https://davidparry.github.io/spec-driven-agentic/assets/bdd-harness-mark.png">
+  <link rel="icon" href="assets/bdd-harness-mark.png" type="image/png">
+  <link rel="apple-touch-icon" href="assets/bdd-harness-mark.png">
   <link rel="stylesheet" href="assets/site.css">
 </head>
 <body>
   <header class="site-header">
     <div class="wrap">
       <a class="brand" href="./">
-        <img src="assets/bdd-cli-mark.png" alt="">
+        <img src="assets/bdd-harness-mark.png" alt="">
         bdd
       </a>
       <nav class="nav">
         <a href="talk/">Talk</a>
+        <a href="talk30/">Talk 30</a>
         <a href="workshop/">Workshop</a>
+        <a href="pi/">pi path</a>
         <a href="speaking/">Speaking</a>
         <a href="https://davidparry.com/blog/2026/08/07/spec-first-was-always-right-agents-just-made-it-fast/">Write-up</a>
-        <a href="cli/">CLI</a>
+        <a href="harness/">Harness</a>
         <a href="manual/">Manual</a>
         <a href="setup/">Setup</a>
       </nav>
@@ -37,14 +39,14 @@
         <div>
           <h1>bdd</h1>
           <p class="tagline">The new Specification-Driven Development in the AI era</p>
-          <p class="lede">A native CLI — and a 60-minute workshop — for spec → Gherkin → RED → GREEN → REFACTOR. The requirements spec is the source of truth. The human owns intent. The agent iterates. The tools refuse a red-bar refactor.</p>
+          <p class="lede">A native harness — and a 60-minute workshop — for spec → Gherkin → RED → GREEN → REFACTOR. The requirements spec is the source of truth. The human owns intent. The agent iterates. The tools refuse a red-bar refactor.</p>
           <div class="badges">
             <span class="badge red">RED</span>
             <span class="badge green">GREEN</span>
             <span class="badge refactor">REFACTOR</span>
           </div>
         </div>
-        <img src="assets/bdd-cli-mark.png" alt="The bdd CLI mark: a terminal prompt wrapping a spec in a red-to-green cycle.">
+        <img src="assets/bdd-harness-mark.png" alt="The bdd harness mark: a terminal prompt wrapping a spec in a red-to-green cycle.">
       </section>
 
       <section id="install">
@@ -53,21 +55,21 @@
           <div class="install-block">
             <p>macOS and Linux</p>
             <div class="cmd">
-              <pre id="cmd-sh">curl --proto '=https' --tlsv1.2 -LsSf https://github.com/davidparry/tdd-bdd-agentic/releases/latest/download/bdd-cli-installer.sh | sh</pre>
+              <pre id="cmd-sh">curl --proto '=https' --tlsv1.2 -LsSf https://github.com/davidparry/tdd-bdd-agentic/releases/latest/download/bdd-harness-installer.sh | sh</pre>
               <button type="button" data-copy="#cmd-sh">Copy</button>
             </div>
           </div>
           <div class="install-block">
             <p>Windows (PowerShell)</p>
             <div class="cmd">
-              <pre id="cmd-ps">powershell -ExecutionPolicy Bypass -c "irm https://github.com/davidparry/tdd-bdd-agentic/releases/latest/download/bdd-cli-installer.ps1 | iex"</pre>
+              <pre id="cmd-ps">powershell -ExecutionPolicy Bypass -c "irm https://github.com/davidparry/tdd-bdd-agentic/releases/latest/download/bdd-harness-installer.ps1 | iex"</pre>
               <button type="button" data-copy="#cmd-ps">Copy</button>
             </div>
           </div>
           <div class="install-block" style="margin-bottom:0">
             <p>Uninstall</p>
             <div class="cmd">
-              <pre id="cmd-un">curl -LsSf https://github.com/davidparry/tdd-bdd-agentic/releases/latest/download/bdd-cli-uninstaller.sh | sh -s -- -y</pre>
+              <pre id="cmd-un">curl -LsSf https://github.com/davidparry/tdd-bdd-agentic/releases/latest/download/bdd-harness-uninstaller.sh | sh -s -- -y</pre>
               <button type="button" data-copy="#cmd-un">Copy</button>
             </div>
           </div>
@@ -89,28 +91,28 @@
             <tbody>
               <tr>
                 <td>Apple Silicon macOS</td>
-                <td><a href="https://github.com/davidparry/tdd-bdd-agentic/releases/latest/download/bdd-cli-aarch64-apple-darwin.tar.xz"><code>bdd-cli-aarch64-apple-darwin.tar.xz</code></a></td>
-                <td><a href="https://github.com/davidparry/tdd-bdd-agentic/releases/latest/download/bdd-cli-aarch64-apple-darwin.tar.xz.sha256">sha256</a></td>
+                <td><a href="https://github.com/davidparry/tdd-bdd-agentic/releases/latest/download/bdd-harness-aarch64-apple-darwin.tar.xz"><code>bdd-harness-aarch64-apple-darwin.tar.xz</code></a></td>
+                <td><a href="https://github.com/davidparry/tdd-bdd-agentic/releases/latest/download/bdd-harness-aarch64-apple-darwin.tar.xz.sha256">sha256</a></td>
               </tr>
               <tr>
                 <td>Intel macOS</td>
-                <td><a href="https://github.com/davidparry/tdd-bdd-agentic/releases/latest/download/bdd-cli-x86_64-apple-darwin.tar.xz"><code>bdd-cli-x86_64-apple-darwin.tar.xz</code></a></td>
-                <td><a href="https://github.com/davidparry/tdd-bdd-agentic/releases/latest/download/bdd-cli-x86_64-apple-darwin.tar.xz.sha256">sha256</a></td>
+                <td><a href="https://github.com/davidparry/tdd-bdd-agentic/releases/latest/download/bdd-harness-x86_64-apple-darwin.tar.xz"><code>bdd-harness-x86_64-apple-darwin.tar.xz</code></a></td>
+                <td><a href="https://github.com/davidparry/tdd-bdd-agentic/releases/latest/download/bdd-harness-x86_64-apple-darwin.tar.xz.sha256">sha256</a></td>
               </tr>
               <tr>
                 <td>x64 Windows</td>
-                <td><a href="https://github.com/davidparry/tdd-bdd-agentic/releases/latest/download/bdd-cli-x86_64-pc-windows-msvc.zip"><code>bdd-cli-x86_64-pc-windows-msvc.zip</code></a></td>
-                <td><a href="https://github.com/davidparry/tdd-bdd-agentic/releases/latest/download/bdd-cli-x86_64-pc-windows-msvc.zip.sha256">sha256</a></td>
+                <td><a href="https://github.com/davidparry/tdd-bdd-agentic/releases/latest/download/bdd-harness-x86_64-pc-windows-msvc.zip"><code>bdd-harness-x86_64-pc-windows-msvc.zip</code></a></td>
+                <td><a href="https://github.com/davidparry/tdd-bdd-agentic/releases/latest/download/bdd-harness-x86_64-pc-windows-msvc.zip.sha256">sha256</a></td>
               </tr>
               <tr>
                 <td>ARM64 Linux</td>
-                <td><a href="https://github.com/davidparry/tdd-bdd-agentic/releases/latest/download/bdd-cli-aarch64-unknown-linux-gnu.tar.xz"><code>bdd-cli-aarch64-unknown-linux-gnu.tar.xz</code></a></td>
-                <td><a href="https://github.com/davidparry/tdd-bdd-agentic/releases/latest/download/bdd-cli-aarch64-unknown-linux-gnu.tar.xz.sha256">sha256</a></td>
+                <td><a href="https://github.com/davidparry/tdd-bdd-agentic/releases/latest/download/bdd-harness-aarch64-unknown-linux-gnu.tar.xz"><code>bdd-harness-aarch64-unknown-linux-gnu.tar.xz</code></a></td>
+                <td><a href="https://github.com/davidparry/tdd-bdd-agentic/releases/latest/download/bdd-harness-aarch64-unknown-linux-gnu.tar.xz.sha256">sha256</a></td>
               </tr>
               <tr>
                 <td>x64 Linux</td>
-                <td><a href="https://github.com/davidparry/tdd-bdd-agentic/releases/latest/download/bdd-cli-x86_64-unknown-linux-gnu.tar.xz"><code>bdd-cli-x86_64-unknown-linux-gnu.tar.xz</code></a></td>
-                <td><a href="https://github.com/davidparry/tdd-bdd-agentic/releases/latest/download/bdd-cli-x86_64-unknown-linux-gnu.tar.xz.sha256">sha256</a></td>
+                <td><a href="https://github.com/davidparry/tdd-bdd-agentic/releases/latest/download/bdd-harness-x86_64-unknown-linux-gnu.tar.xz"><code>bdd-harness-x86_64-unknown-linux-gnu.tar.xz</code></a></td>
+                <td><a href="https://github.com/davidparry/tdd-bdd-agentic/releases/latest/download/bdd-harness-x86_64-unknown-linux-gnu.tar.xz.sha256">sha256</a></td>
               </tr>
             </tbody>
           </table>
@@ -154,8 +156,12 @@
         <h2>Learn the loop</h2>
         <div class="cards">
           <a class="card" href="talk/">
-            <strong>Talk</strong>
-            <span>The 60-minute reveal.js deck. Open it and present.</span>
+            <strong>Talk — 60 min</strong>
+            <span>The full workshop deck, with both hands-on exercises. Open it and present.</span>
+          </a>
+          <a class="card" href="talk30/">
+            <strong>Talk — 30 min</strong>
+            <span>The same deck, demo-driven cut: three acts plus Where This Breaks.</span>
           </a>
           <a class="card" href="workshop/">
             <strong>Workshop</strong>
@@ -169,9 +175,13 @@
             <strong>Write-up</strong>
             <span>Spec-first was always right. Agents just made it fast.</span>
           </a>
-          <a class="card" href="cli/">
-            <strong>CLI</strong>
+          <a class="card" href="harness/">
+            <strong>Harness</strong>
             <span>How bdd automates the same loop the class teaches.</span>
+          </a>
+          <a class="card" href="pi/">
+            <strong>The pi path</strong>
+            <span>Free and offline: an MIT agent on a local model, driving the same server.</span>
           </a>
           <a class="card" href="setup/">
             <strong>MCP setup</strong>

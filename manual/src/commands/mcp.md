@@ -1,6 +1,6 @@
 # bdd mcp
 
-The workshop MCP server. This is the same workflow the CLI offers a
+The workshop MCP server. This is the same workflow the harness offers a
 human, exposed to AI agents as typed tools over the Model Context
 Protocol. Cursor, Claude, the bundled `smoke-test.jar`, and `bdd mcp
 call` all talk to this process.
@@ -18,18 +18,23 @@ Wire identity is `spec-driven-server` / `1.0.0` (title `Spec Driven`:
 serves spec-driven TDD and BDD tools; the requirements spec is the
 source of truth; website
 https://davidparry.github.io/spec-driven-agentic/; icon
-https://davidparry.github.io/spec-driven-agentic/assets/bdd-cli-mark.png). Frozen seven-tool
+https://davidparry.github.io/spec-driven-agentic/assets/bdd-harness-mark.png). Frozen seven-tool
 **reply shapes** are owned by
-`cli/tests/mcp_conformance.rs` and smoke-test's `ToolPlan` — not by a
+`harness/tests/mcp_conformance.rs` and smoke-test's `ToolPlan` — not by a
 separate Java server.
 
 The server is stdio only: JSON-RPC on stdin/stdout. Cursor, Claude,
-Inspector, and `smoke-test.jar` launch it as a child process. It prefers
-protocol `2026-07-28`: no `initialize` handshake. `bdd mcp call` and
+Inspector, `pi` (through `pi-mcp-extension`), and `smoke-test.jar` launch it
+as a child process.
+
+**The lifecycle is dual-era, and both eras work.** The server prefers
+`2026-07-28`, where there is no `initialize` handshake: `bdd mcp call` and
 `bdd mcp tools` open a session with `server/discover` and per-request
-`_meta`. The Java smoke walkthrough starts at `tools/list` (it does not
-call `initialize`). A host that still sends `initialize` is answered by
-rmcp for compatibility; this project's own Rust clients do not.
+`_meta`, and the Java smoke walkthrough starts straight at `tools/list`. A
+host that still sends the classic `initialize` with protocol `2025-11-25`
+gets a normal handshake reply — that path is live, not a fallback stub,
+which is why `.cursor/mcp.json` can set `"protocolEra": "auto"` and let the
+host pick. This project's own Rust clients use the newer era.
 
 ---
 
@@ -58,9 +63,17 @@ equivalent):
 }
 ```
 
-Cursor sees **all 25 tools**, including staging. CLI commands that
-call a model attach a **narrower profile** (`bdd tools profiles`) —
-typically 3–7 tools — so a local model is not offered commit or
+Any MCP host can drive this server. [pi](https://pi.dev) has no MCP in core,
+so it needs the `pi-mcp-extension` package; the repo ships a ready
+[`.pi/mcp.json`](https://github.com/davidparry/tdd-bdd-agentic/blob/trunk/.pi/mcp.json),
+and `pi -nbt` disables pi's own `bash`/`write`/`edit` so these tools are all
+the model gets. The bridge registers them as `mcp_<server>_<tool>`, so
+`run_tests` arrives as `mcp_spec_driven_server_run_tests`.
+
+Cursor sees **all 25 tools**, including staging, and so does `pi -nbt`.
+Harness commands that call a model attach a **narrower profile**
+(`bdd tools profiles`) — 3–7 tools for a generating command, 12 for the
+read-only `bdd ask` — so a local model is not offered commit or
 mark-implemented.
 
 ## bdd mcp tools
@@ -99,7 +112,7 @@ is **template-only** (`source: "template"`).
 
 ### Frozen seven (reply shapes stay)
 
-| MCP tool | CLI equivalent |
+| MCP tool | Harness equivalent |
 | --- | --- |
 | `list_requirements` | [`bdd spec list`](spec.md#bdd-spec-list) |
 | `get_requirement` | [`bdd spec show`](spec.md#bdd-spec-show) |
@@ -111,7 +124,7 @@ is **template-only** (`source: "template"`).
 
 ### Authoring and staging
 
-| MCP tool | CLI equivalent |
+| MCP tool | Harness equivalent |
 | --- | --- |
 | `feature_list` / `feature_read` / `feature_create` | [`bdd feature`](feature.md) |
 | `scenario_add` / `scenario_update` / `scenario_delete` | [`bdd scenario`](scenario.md) |
@@ -125,7 +138,7 @@ is **template-only** (`source: "template"`).
 
 ### Inspect
 
-| MCP tool | CLI equivalent |
+| MCP tool | Harness equivalent |
 | --- | --- |
 | `project_root` | `--root` (the absolute directory this process was started with) |
 | `project_inspect` | [`bdd inspect`](inspect.md) |
@@ -154,8 +167,8 @@ guardrails, checked before anything spawns:
   `..` — the command cannot name anything outside the root.
 - **RED bar only.** Commands run only during the implementation
   phase. Off a RED bar the tool refuses and points at `run_tests`.
-- **Human confirm on the CLI.** When `bdd implement` offers
-  `command_run`, the CLI asks before spawning. Piped/CI stdin
+- **Human confirm on the harness.** When `bdd implement` offers
+  `command_run`, the harness asks before spawning. Piped/CI stdin
   declines; it never hangs.
 - **Timeout and output cap.** A hard timeout (default and maximum
   300 seconds) kills a hung process; each output stream is truncated
@@ -182,7 +195,7 @@ bar.
   `requirement_mark_implemented` is GREEN-gated and needs a tagged
   scenario.
 - **State survives.** The phase machine lives on disk, so a
-  reconnecting agent (or a human taking over in the CLI) continues
+  reconnecting agent (or a human taking over in the harness) continues
   from the same place.
 
 ## Flags

@@ -3,7 +3,7 @@
   STEP 0 — Launch the server
 ========================================================================
 The client starts bdd mcp serve as a child process and talks JSON-RPC 2.0 over stdin/stdout.
-Command: /Users/davidparry/code/github/tdd-bdd-agentic/cli/target/debug/bdd mcp serve --root /Users/davidparry/code/github/tdd-bdd-agentic
+Command: /Users/davidparry/code/github/tdd-bdd-agentic/harness/target/debug/bdd mcp serve --root /Users/davidparry/code/github/tdd-bdd-agentic
 
 ========================================================================
   STEP 1 — tools/list (discovery)

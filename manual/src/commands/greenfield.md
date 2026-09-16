@@ -256,7 +256,7 @@ continue.
   `cargo`) — the orchestrator refuses to fake a test run.
 - An LLM is optional: with no reachable Ollama model the generation
   steps fall back to deterministic templates you edit yourself. The
-  model this CLI is developed and run against is
+  model this harness is developed and run against is
   `qwen3.8-flash-next:125b-mlx` (`ollama pull qwen3.8-flash-next:125b-mlx`).
   Your mileage will vary with other models, especially those not
   trained for development work.

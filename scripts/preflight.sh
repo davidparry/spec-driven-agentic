@@ -38,22 +38,22 @@ BDD=""
 if command -v bdd >/dev/null 2>&1; then
     BDD="$(command -v bdd)"
     ok "bdd on PATH ($BDD — $($BDD --version 2>/dev/null | head -1))"
-elif [ -x "$ROOT/cli/target/release/bdd" ]; then
-    BDD="$ROOT/cli/target/release/bdd"
-    ok "cli/target/release/bdd present"
-elif [ -x "$ROOT/cli/target/debug/bdd" ]; then
-    BDD="$ROOT/cli/target/debug/bdd"
-    ok "cli/target/debug/bdd present"
+elif [ -x "$ROOT/harness/target/release/bdd" ]; then
+    BDD="$ROOT/harness/target/release/bdd"
+    ok "harness/target/release/bdd present"
+elif [ -x "$ROOT/harness/target/debug/bdd" ]; then
+    BDD="$ROOT/harness/target/debug/bdd"
+    ok "harness/target/debug/bdd present"
 elif command -v cargo >/dev/null 2>&1; then
-    if cargo build --release --manifest-path cli/Cargo.toml >/tmp/preflight-bdd.log 2>&1; then
-        BDD="$ROOT/cli/target/release/bdd"
+    if cargo build --release --manifest-path harness/Cargo.toml >/tmp/preflight-bdd.log 2>&1; then
+        BDD="$ROOT/harness/target/release/bdd"
         ok "cargo build --release produced bdd"
     else
         bad "could not build bdd" "see /tmp/preflight-bdd.log — install Rust or a GitHub-release binary"
     fi
 else
     bad "bdd not on PATH and cargo not installed" \
-        "cargo install --path cli  (or download a release binary and put it on PATH)"
+        "cargo install --path harness  (or download a release binary and put it on PATH)"
 fi
 
 # 4. MCP-server smoke-test jar + standalone kata
@@ -122,4 +122,4 @@ if [ "$FAIL" -gt 0 ]; then
 fi
 echo "Ready. Remaining manual steps: open the slides once, confirm the"
 echo "spec-driven-server server shows green in Cursor's MCP settings, clear the agent chat."
-echo "Local-model / CLI demo: ollama list should include qwen3.8-flash-next:125b-mlx."
+echo "Local-model / harness demo: ollama list should include qwen3.8-flash-next:125b-mlx."

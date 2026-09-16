@@ -1,8 +1,8 @@
 # Setting up the `spec-driven-server` MCP server in your agent
 
 The ready-to-run server entry lives in [config/mcp.json](../config/mcp.json).
-Put **`bdd` on PATH** first (`cargo install --path cli`, a GitHub release
-binary, or `cli/target/release/bdd`), then register the server with your
+Put **`bdd` on PATH** first (`cargo install --path harness`, a GitHub release
+binary, or `harness/target/release/bdd`), then register the server with your
 client of choice below. One thing to know before you copy:
 `${workspaceFolder}` is a Cursor variable — every other client needs it
 replaced with the **absolute path** to your repo clone.
@@ -13,8 +13,8 @@ The server itself is always the same command, whatever the client:
 bdd mcp serve --root /absolute/path/to/tdd-bdd-agentic
 ```
 
-Cursor and the bundled `smoke-test.jar` both speak to this process over
-stdio and see **all 25 tools**, including staging.
+Cursor, `pi -nbt`, and the bundled `smoke-test.jar` all speak to this process
+over stdio and see **all 25 tools**, including staging.
 
 ---
 
@@ -37,6 +37,27 @@ terminal where `bdd --version` works, or put the absolute path to the
 binary in `command`.
 
 - Docs: [Cursor — Model Context Protocol](https://cursor.com/docs/mcp)
+
+## pi
+
+[pi](https://pi.dev) has no MCP client in core — that is a stated design
+choice — so add one, then start pi with its own `bash`/`write`/`edit`
+switched off:
+
+```bash
+pi install npm:pi-mcp-extension
+cd /path/to/tdd-bdd-agentic && pi -nbt
+```
+
+This repo ships [`.pi/mcp.json`](../.pi/mcp.json) with the server already
+registered. Its `args` carry no `--root`, so **launch pi from the repository
+root**. Trust the project when pi asks (or pass `--approve`), then check
+`/mcp`. The bridge prefixes tool names: `run_tests` arrives as
+`mcp_spec_driven_server_run_tests`.
+
+Full walkthrough, including the local-model setup: [the pi path](pi-path.md).
+
+- Docs: [pi.dev](https://pi.dev) · [pi-mcp-extension](https://github.com/irahardianto/pi-mcp-extension)
 
 ## Claude Desktop
 
@@ -75,7 +96,7 @@ command = "bdd"
 args = ["mcp", "serve", "--root", "/absolute/path/to/tdd-bdd-agentic"]
 ```
 
-Or use the CLI: `codex mcp add spec-driven-server -- bdd mcp serve --root "$PWD"`.
+Or use the harness: `codex mcp add spec-driven-server -- bdd mcp serve --root "$PWD"`.
 
 - Docs: [Codex — Model Context Protocol](https://developers.openai.com/codex/mcp)
 

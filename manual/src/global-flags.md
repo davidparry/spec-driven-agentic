@@ -7,7 +7,7 @@ them anywhere on the command line.
 
 The project root — the directory where `requirements/requirements.json`
 (the root of the [spec catalog](spec-format.md)) and `.bdd.toml`
-live, and the base for every relative path the CLI reads or writes.
+live, and the base for every relative path the harness reads or writes.
 Defaults to the current directory. MCP clients that cannot see argv can
 call `project_root` to read the same directory as an absolute path.
 
@@ -59,7 +59,7 @@ tail -f .bdd-log/bdd.log.$(date +%F)      # watch the diagnostics live
 
 The `RUST_LOG` environment variable overrides both the default and
 `--debug` with per-module directives, e.g.
-`RUST_LOG=bdd_cli::adapters=trace bdd test`.
+`RUST_LOG=bdd_harness::adapters=trace bdd test`.
 
 ## `--retry <N>`
 

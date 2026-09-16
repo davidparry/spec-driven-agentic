@@ -3,12 +3,12 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>bdd model - bdd CLI Manual</title>
+        <title>bdd model - bdd Harness Manual</title>
 
 
         <!-- Custom HTML head -->
 
-        <meta name="description" content="The complete, searchable reference for the bdd command-line tool: every command, subcommand, and flag, with in-depth examples.">
+        <meta name="description" content="The complete, searchable reference for the bdd harness: every command, subcommand, and flag, with in-depth examples.">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff">
 
@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-8826377a.js";
+            window.path_to_searchindex_js = "../searchindex-aaad9ee5.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9d4e1520.js"></script>
@@ -137,7 +137,7 @@
                         </button>
                     </div>
 
-                    <h1 class="menu-title">bdd CLI Manual</h1>
+                    <h1 class="menu-title">bdd Harness Manual</h1>
 
                     <div class="right-buttons">
                         <a href="../print.html" title="Print this book" aria-label="Print this book">
@@ -181,19 +181,19 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="bdd-model"><a class="header" href="#bdd-model">bdd model</a></h1>
-<p>LLM model discovery and selection. The CLI talks to a local
+<p>LLM model discovery and selection. The harness talks to a local
 <a href="https://ollama.com">Ollama</a> — no cloud calls, no tokens — and uses
 the model only to <em>polish</em> deterministic templates in the generation
 commands. Everything works without a model; generation just stays at
 template quality.</p>
-<p>The model this CLI is developed and run against is
+<p>The model this harness is developed and run against is
 <code>qwen3.8-flash-next:125b-mlx</code>. Pull it with
 <code>ollama pull qwen3.8-flash-next:125b-mlx</code>, then persist the choice with
 <code>bdd model use qwen3.8-flash-next:125b-mlx</code>. Your mileage will vary with
 other models: a stronger coding model may improve drafts and
 implementations; a model trained for chat, general knowledge, or work
 other than development will typically produce weaker specs, steps,
-tests, and production code. The CLI does not require this specific
+tests, and production code. The harness does not require this specific
 model — it uses whatever you configure, or the first model Ollama has
 installed.</p>
 <pre><code class="language-text">Usage: bdd model [OPTIONS] &lt;COMMAND&gt;

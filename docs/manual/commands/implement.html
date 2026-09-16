@@ -3,12 +3,12 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>bdd implement - bdd CLI Manual</title>
+        <title>bdd implement - bdd Harness Manual</title>
 
 
         <!-- Custom HTML head -->
 
-        <meta name="description" content="The complete, searchable reference for the bdd command-line tool: every command, subcommand, and flag, with in-depth examples.">
+        <meta name="description" content="The complete, searchable reference for the bdd harness: every command, subcommand, and flag, with in-depth examples.">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff">
 
@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-8826377a.js";
+            window.path_to_searchindex_js = "../searchindex-aaad9ee5.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9d4e1520.js"></script>
@@ -137,7 +137,7 @@
                         </button>
                     </div>
 
-                    <h1 class="menu-title">bdd CLI Manual</h1>
+                    <h1 class="menu-title">bdd Harness Manual</h1>
 
                     <div class="right-buttons">
                         <a href="../print.html" title="Print this book" aria-label="Print this book">
@@ -197,7 +197,7 @@ tree, and the next test run is the real validator.</p>
 <a href="model.html#bdd-model-use"><code>bdd model use</code></a>, passed with <code>--model</code>, or
 the session default when Ollama has installed models). Without one the
 command is refused — implementing stays in your hands. The model this
-CLI is developed and run against is <code>qwen3.8-flash-next:125b-mlx</code>; your
+harness is developed and run against is <code>qwen3.8-flash-next:125b-mlx</code>; your
 mileage will vary with a different model, especially one trained for
 work other than development.</p>
 <pre><code class="language-bash">bdd test                 # a fresh RED bar records the failure details
@@ -241,7 +241,7 @@ or red
 asked) declines and prints the next command in plain words instead:</p>
 <pre><code class="language-text">Next: changes commit &amp;&amp; test - then implement REQ-001 again if the bar stays RED.
 </code></pre>
-<p>In every one of these lines the command itself — <code>changes commit &amp;&amp; test</code>, <code>implement REQ-001</code>, <code>spec mark-implemented REQ-001 &amp;&amp; changes commit</code> — is printed in green, the CLI’s marker for text meant to be
+<p>In every one of these lines the command itself — <code>changes commit &amp;&amp; test</code>, <code>implement REQ-001</code>, <code>spec mark-implemented REQ-001 &amp;&amp; changes commit</code> — is printed in green, the harness’s marker for text meant to be
 copied and pasted.</p>
 <h2 id="the-preflight"><a class="header" href="#the-preflight">The preflight</a></h2>
 <p>Before anything goes to the model, the command surveys the
@@ -305,7 +305,7 @@ ecosystem convention:</li>
 <p>Anything else in the reply is dropped. A reply with no usable update
 fails with <code>The model's reply held no usable file update.</code> — nothing
 is staged, and you implement by hand instead.</p>
-<p>The implementation prompt is the largest call the CLI makes, so a
+<p>The implementation prompt is the largest call the harness makes, so a
 local model can need minutes to answer. The generation timeout
 defaults to 300 seconds; if you see <code>no reply within ...s</code>, raise
 <code>timeout_seconds</code> under <code>[llm]</code> in <code>.bdd.toml</code> (see
@@ -344,7 +344,7 @@ test run goes GREEN — a closed loop leaves no history for the next
 requirement to inherit.</p>
 <p><code>run_tests</code> during this command sees the <strong>working tree</strong>, not the
 unstaged patch sitting in <code>.bdd-staged/</code>. Commit (or apply) before you
-trust the bar. If the model requests <code>command_run</code>, the CLI asks you to
+trust the bar. If the model requests <code>command_run</code>, the harness asks you to
 confirm first; piped or CI stdin declines and never hangs.</p>
 <h2 id="see-also"><a class="header" href="#see-also">See also</a></h2>
 <ul>

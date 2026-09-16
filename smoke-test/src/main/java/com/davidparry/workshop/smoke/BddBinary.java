@@ -5,9 +5,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 /**
- * Resolves the installed {@code bdd} CLI the same way a shell does: the
+ * Resolves the installed {@code bdd} harness the same way a shell does: the
  * first executable named {@code bdd} on {@code PATH}. The smoke jar does
- * not look under {@code cli/target}.
+ * not look under {@code harness/target}.
  */
 public final class BddBinary {
 

@@ -9,7 +9,7 @@
     <version>1.0.0</version>
     <packaging>pom</packaging>
 
-    <name>TDD, BDD and Spec-Driven Development in the Agentic Era - MCP Workshop</name>
+    <name>Spec-Driven with Harness - TDD and BDD in the Agentic Era</name>
     <description>
         A 60-minute hands-on workshop: drive a spec-driven development
         workflow spanning SDD, BDD, and TDD. The MCP server is `bdd mcp serve`;

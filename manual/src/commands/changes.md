@@ -1,6 +1,6 @@
 # bdd changes
 
-Staged-transaction management. Every file mutation the CLI authors
+Staged-transaction management. Every file mutation the harness authors
 lands in `.bdd-staged/` first (see [Staged changes](../staged-changes.md));
 these subcommands are how you review, apply, or drop the transaction.
 
