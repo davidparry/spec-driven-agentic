@@ -3,12 +3,12 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>bdd model - bdd Harness Manual</title>
+        <title>spec model - spec Harness Manual</title>
 
 
         <!-- Custom HTML head -->
 
-        <meta name="description" content="The complete, searchable reference for the bdd harness: every command, subcommand, and flag, with in-depth examples.">
+        <meta name="description" content="The complete, searchable reference for the spec harness: every command, subcommand, and flag, with in-depth examples.">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff">
 
@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-aaad9ee5.js";
+            window.path_to_searchindex_js = "../searchindex-5959f77b.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-9d4e1520.js"></script>
+        <script src="../toc-372d77fe.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -137,7 +137,7 @@
                         </button>
                     </div>
 
-                    <h1 class="menu-title">bdd Harness Manual</h1>
+                    <h1 class="menu-title">spec Harness Manual</h1>
 
                     <div class="right-buttons">
                         <a href="../print.html" title="Print this book" aria-label="Print this book">
@@ -180,7 +180,7 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="bdd-model"><a class="header" href="#bdd-model">bdd model</a></h1>
+                        <h1 id="spec-model"><a class="header" href="#spec-model">spec model</a></h1>
 <p>LLM model discovery and selection. The harness talks to a local
 <a href="https://ollama.com">Ollama</a> — no cloud calls, no tokens — and uses
 the model only to <em>polish</em> deterministic templates in the generation
@@ -189,14 +189,14 @@ template quality.</p>
 <p>The model this harness is developed and run against is
 <code>qwen3.8-flash-next:125b-mlx</code>. Pull it with
 <code>ollama pull qwen3.8-flash-next:125b-mlx</code>, then persist the choice with
-<code>bdd model use qwen3.8-flash-next:125b-mlx</code>. Your mileage will vary with
+<code>spec model use qwen3.8-flash-next:125b-mlx</code>. Your mileage will vary with
 other models: a stronger coding model may improve drafts and
 implementations; a model trained for chat, general knowledge, or work
 other than development will typically produce weaker specs, steps,
 tests, and production code. The harness does not require this specific
 model — it uses whatever you configure, or the first model Ollama has
 installed.</p>
-<pre><code class="language-text">Usage: bdd model [OPTIONS] &lt;COMMAND&gt;
+<pre><code class="language-text">Usage: spec model [OPTIONS] &lt;COMMAND&gt;
 
 Commands: list, current, use
 </code></pre>
@@ -204,18 +204,18 @@ Commands: list, current, use
 <p>Highest priority first:</p>
 <ol>
 <li><strong><code>--model</code> flag</strong> — this invocation only, never persisted.</li>
-<li><strong>Configuration</strong> — the <code>model</code> key in <code>.bdd.toml</code> under the
-project root, written by <code>bdd model use</code>.</li>
+<li><strong>Configuration</strong> — the <code>model</code> key in <code>.spec.toml</code> under the
+project root, written by <code>spec model use</code>.</li>
 <li><strong>Discovery</strong> — the first model installed in Ollama, as a
 session-only default. Nothing is written to disk.</li>
 </ol>
 <p>If Ollama is unreachable or has no models, LLM-backed generation falls
 back to deterministic templates.</p>
 <hr>
-<h2 id="bdd-model-list"><a class="header" href="#bdd-model-list">bdd model list</a></h2>
+<h2 id="spec-model-list"><a class="header" href="#spec-model-list">spec model list</a></h2>
 <p>List the models installed in Ollama, marking the one that would
 currently be used.</p>
-<pre><code class="language-bash">bdd model list
+<pre><code class="language-bash">spec model list
 </code></pre>
 <pre><code class="language-text">Models available in Ollama:
 * qwen3.8-flash-next:125b-mlx   (configured)
@@ -226,34 +226,34 @@ currently be used.</p>
 default. If Ollama is down, the command fails with exit status 1 and
 says the provider is unreachable.</p>
 <hr>
-<h2 id="bdd-model-current"><a class="header" href="#bdd-model-current">bdd model current</a></h2>
+<h2 id="spec-model-current"><a class="header" href="#spec-model-current">spec model current</a></h2>
 <p>Show the resolved model and where it came from.</p>
-<pre><code class="language-bash">bdd model current
+<pre><code class="language-bash">spec model current
 </code></pre>
 <pre><code class="language-text">Configured model: qwen3.8-flash-next:125b-mlx
 </code></pre>
 <p>With nothing configured but models installed, the first one is the
 session default and the output tells you it is not saved:</p>
-<pre><code class="language-text">Model set for this session: qwen3.8-flash-next:125b-mlx (not saved - keep it with: bdd model use qwen3.8-flash-next:125b-mlx).
+<pre><code class="language-text">Model set for this session: qwen3.8-flash-next:125b-mlx (not saved - keep it with: spec model use qwen3.8-flash-next:125b-mlx).
 </code></pre>
 <p>The same announcement appears when the
 <a href="../interactive-shell.html">interactive shell</a> starts.</p>
 <hr>
-<h2 id="bdd-model-use"><a class="header" href="#bdd-model-use">bdd model use</a></h2>
+<h2 id="spec-model-use"><a class="header" href="#spec-model-use">spec model use</a></h2>
 <p>Persist a model choice in the project’s configuration.</p>
-<pre><code class="language-text">Usage: bdd model use [OPTIONS] &lt;MODEL_NAME&gt;
+<pre><code class="language-text">Usage: spec model use [OPTIONS] &lt;MODEL_NAME&gt;
 </code></pre>
-<pre><code class="language-bash">bdd model use qwen3.8-flash-next:125b-mlx
+<pre><code class="language-bash">spec model use qwen3.8-flash-next:125b-mlx
 </code></pre>
 <pre><code class="language-text">Configured model: qwen3.8-flash-next:125b-mlx
-Written to /Users/you/code/calculator/.bdd.toml
+Written to /Users/you/code/calculator/.spec.toml
 </code></pre>
 <p>The choice is validated against Ollama’s installed models — a name
 Ollama does not have is rejected rather than silently saved.</p>
 <h2 id="the-llm-configuration-block"><a class="header" href="#the-llm-configuration-block">The [llm] configuration block</a></h2>
-<p>Everything model-related lives under <code>[llm]</code> in <code>.bdd.toml</code>:</p>
+<p>Everything model-related lives under <code>[llm]</code> in <code>.spec.toml</code>:</p>
 <pre><code class="language-toml">[llm]
-model = "qwen3.8-flash-next:125b-mlx"     # persisted by bdd model use
+model = "qwen3.8-flash-next:125b-mlx"     # persisted by spec model use
 endpoint = "http://localhost:11434"   # the Ollama endpoint
 timeout_seconds = 300                 # generation timeout (default 300)
 cache_ttl_seconds = 600               # response cache TTL; 0 disables
@@ -282,8 +282,8 @@ it explicitly (<code>no reply within 300s ... set timeout_seconds under [llm]</c
 <h2 id="see-also"><a class="header" href="#see-also">See also</a></h2>
 <ul>
 <li><a href="../global-flags.html">Global flags</a> — the <code>--model</code> override.</li>
-<li><a href="config.html"><code>bdd config</code></a> — dump every key and where it came from.</li>
-<li><a href="steps.html#source-template-or-llm"><code>bdd steps generate</code></a> — how LLM
+<li><a href="config.html"><code>spec config</code></a> — dump every key and where it came from.</li>
+<li><a href="steps.html#source-template-or-llm"><code>spec steps generate</code></a> — how LLM
 output is validated before it can stage.</li>
 </ul>
 

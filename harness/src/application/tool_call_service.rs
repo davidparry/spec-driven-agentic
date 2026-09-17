@@ -1,4 +1,4 @@
-//! `bdd mcp call`: one throwaway session, one tools/call, print, exit.
+//! `spec mcp call`: one throwaway session, one tools/call, print, exit.
 
 use crate::domain::tools::{ToolDefinition, arguments_object, find, missing_required};
 use crate::ports::{ToolBroker, ToolError};

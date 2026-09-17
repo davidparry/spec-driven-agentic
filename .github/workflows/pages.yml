@@ -1,4 +1,4 @@
-# GitHub Pages: assemble the bdd site and deploy on every push to trunk.
+# GitHub Pages: assemble the spec site and deploy on every push to trunk.
 name: Pages
 
 on:

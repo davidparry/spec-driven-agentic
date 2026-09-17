@@ -3,12 +3,12 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>bdd greenfield - bdd Harness Manual</title>
+        <title>spec greenfield - spec Harness Manual</title>
 
 
         <!-- Custom HTML head -->
 
-        <meta name="description" content="The complete, searchable reference for the bdd harness: every command, subcommand, and flag, with in-depth examples.">
+        <meta name="description" content="The complete, searchable reference for the spec harness: every command, subcommand, and flag, with in-depth examples.">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff">
 
@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-aaad9ee5.js";
+            window.path_to_searchindex_js = "../searchindex-5959f77b.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-9d4e1520.js"></script>
+        <script src="../toc-372d77fe.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -137,7 +137,7 @@
                         </button>
                     </div>
 
-                    <h1 class="menu-title">bdd Harness Manual</h1>
+                    <h1 class="menu-title">spec Harness Manual</h1>
 
                     <div class="right-buttons">
                         <a href="../print.html" title="Print this book" aria-label="Print this book">
@@ -180,13 +180,13 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="bdd-greenfield"><a class="header" href="#bdd-greenfield">bdd greenfield</a></h1>
+                        <h1 id="spec-greenfield"><a class="header" href="#spec-greenfield">spec greenfield</a></h1>
 <p>Run the full orchestrated loop from an empty directory to an
 implemented requirement, with exactly <strong>two human gates</strong>: approving
 the spec wording, and approving the generated tests before they run.
 Everything else — scaffolding, validation, scenario authoring, step
 generation, test execution, phase tracking — is automated.</p>
-<pre><code class="language-text">Usage: bdd greenfield [OPTIONS]
+<pre><code class="language-text">Usage: spec greenfield [OPTIONS]
 </code></pre>
 <h2 id="flags"><a class="header" href="#flags">Flags</a></h2>
 <div class="table-wrapper">
@@ -203,7 +203,7 @@ generation, test execution, phase tracking — is automated.</p>
 </div>
 <h2 id="the-orchestrated-flow"><a class="header" href="#the-orchestrated-flow">The orchestrated flow</a></h2>
 <pre><code class="language-text"> 1. inspect / init      scaffold if the root is empty (asks for language)
-                        and records the choice in .bdd-memory.json
+                        and records the choice in .spec-memory.json
  2. describe            you describe what to build in plain words; the
                         model splits it into requirement proposals
  3. accept + wizard     you accept all listed proposals, or a
@@ -223,7 +223,7 @@ generation, test execution, phase tracking — is automated.</p>
  9. test → GREEN        loop back to 8 while failing
 10. refactor            optional; only offered on GREEN
 11. mark implemented    Saving status spinner until requirements.json
-                        is written; then the bdd&gt; prompt for the next
+                        is written; then the spec&gt; prompt for the next
                         command
 </code></pre>
 <h2 id="the-description-driven-wizard"><a class="header" href="#the-description-driven-wizard">The description-driven wizard</a></h2>
@@ -258,7 +258,7 @@ straight into <code>requirements.json</code> (the root of the
 <code>REQ-###</code> id — you can open that file as soon as you hit Enter.
 You then pick which stored requirement to review and refine first.
 The others wait as pending requirements — reword them any time with
-<code>bdd spec reword</code>.
+<code>spec reword</code>.
 Nothing is accepted silently: every field passes through your hands,
 and the validate + refine gates still run on whatever you accept.</p>
 <p>Drafting falls back to the classic manual prompts whenever the
@@ -312,9 +312,9 @@ like this — model failures, missing runtimes, hand-offs back to manual
 work — print in red so they stand out from the loop’s narration. Without a
 model, <kbd>Enter</kbd> just reruns the tests.</p>
 <p>Typing <code>stop</code> pauses the run; a paused project continues with the
-standalone <a href="implement.html"><code>bdd implement</code></a> command, which runs the
+standalone <a href="implement.html"><code>spec implement</code></a> command, which runs the
 same attempt from the persisted failure details:</p>
-<pre><code class="language-bash">bdd implement REQ-001 &amp;&amp; bdd changes commit &amp;&amp; bdd test
+<pre><code class="language-bash">spec implement REQ-001 &amp;&amp; spec changes commit &amp;&amp; spec test
 </code></pre>
 <h2 id="rewording-loop-details"><a class="header" href="#rewording-loop-details">Rewording loop details</a></h2>
 <p>When validation or refinement finds problems, each finding is printed
@@ -371,7 +371,7 @@ refactor, mark-implemented — and offers the remaining pending rows,
 until nothing is pending or you type <code>n</code>. <code>nextStep</code> says how to
 continue later.</p>
 <p>The JSON reply then prints, and on a real terminal a one-shot
-<code>bdd greenfield</code> keeps the session open at the <code>bdd&gt;</code> prompt so you can
+<code>spec greenfield</code> keeps the session open at the <code>spec&gt;</code> prompt so you can
 run <code>spec list</code>, <code>greenfield</code>, or any other command without relaunching.</p>
 <h2 id="reply"><a class="header" href="#reply">Reply</a></h2>
 <p>The final JSON reply summarizes where the run ended:</p>
@@ -400,7 +400,7 @@ trained for development work.</li>
 <h2 id="see-also"><a class="header" href="#see-also">See also</a></h2>
 <ul>
 <li><a href="../workflow.html">The workflow</a> — the same rhythm, step by step.</li>
-<li><a href="model.html"><code>bdd model</code></a> — pick which model powers generation.</li>
+<li><a href="model.html"><code>spec model</code></a> — pick which model powers generation.</li>
 </ul>
 
                     </main>

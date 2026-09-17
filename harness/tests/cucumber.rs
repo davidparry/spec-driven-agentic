@@ -8,77 +8,77 @@ use std::sync::{Arc, Mutex};
 use cucumber::gherkin::Step;
 use cucumber::{World, given, then, when};
 
-use bdd_harness::adapters::config::{TomlToolStore, inspect_config};
-use bdd_harness::adapters::fs_project::FsProjectFiles;
-use bdd_harness::adapters::fs_scaffold::FsScaffoldWriter;
-use bdd_harness::adapters::fs_sources::FsSourceFiles;
-use bdd_harness::adapters::fs_spec::{FsFeatureFiles, FsSpecRepository};
-use bdd_harness::adapters::fs_staging::FsChangeStore;
-use bdd_harness::adapters::fs_state::FsStateStore;
-use bdd_harness::adapters::gherkin_features::GherkinFeatureCatalog;
-use bdd_harness::adapters::mcp_client::McpToolBroker;
-use bdd_harness::adapters::mcp_config::FsMcpRegistry;
-use bdd_harness::adapters::runners::cargo::parse_cargo_output;
-use bdd_harness::adapters::runners::cucumber_js::parse_json_report;
-use bdd_harness::adapters::runners::dotnet::parse_trx;
-use bdd_harness::adapters::runners::maven::{MavenRunner, parse_surefire_xml};
-use bdd_harness::adapters::tool_cache::CachedDiscovery;
-use bdd_harness::application::DEFAULT_LLM_ATTEMPTS;
-use bdd_harness::application::agent_service::{
+use spec_harness::adapters::config::{TomlToolStore, inspect_config};
+use spec_harness::adapters::fs_project::FsProjectFiles;
+use spec_harness::adapters::fs_scaffold::FsScaffoldWriter;
+use spec_harness::adapters::fs_sources::FsSourceFiles;
+use spec_harness::adapters::fs_spec::{FsFeatureFiles, FsSpecRepository};
+use spec_harness::adapters::fs_staging::FsChangeStore;
+use spec_harness::adapters::fs_state::FsStateStore;
+use spec_harness::adapters::gherkin_features::GherkinFeatureCatalog;
+use spec_harness::adapters::mcp_client::McpToolBroker;
+use spec_harness::adapters::mcp_config::FsMcpRegistry;
+use spec_harness::adapters::runners::cargo::parse_cargo_output;
+use spec_harness::adapters::runners::cucumber_js::parse_json_report;
+use spec_harness::adapters::runners::dotnet::parse_trx;
+use spec_harness::adapters::runners::maven::{MavenRunner, parse_surefire_xml};
+use spec_harness::adapters::tool_cache::CachedDiscovery;
+use spec_harness::application::DEFAULT_LLM_ATTEMPTS;
+use spec_harness::application::agent_service::{
     Agent, AgentConfig, DEFAULT_MAX_ROUNDS, NullPrompter,
 };
-use bdd_harness::application::change_service::{ChangeService, ChangesReport};
-use bdd_harness::application::generation_service::{
+use spec_harness::application::change_service::{ChangeService, ChangesReport};
+use spec_harness::application::generation_service::{
     GenerationReport, GenerationService, MissingStepsReport, ResolvedLlm,
 };
-use bdd_harness::application::implement_service::{
+use spec_harness::application::implement_service::{
     ImplementService, ImplementationReport, ReadinessReport,
 };
-use bdd_harness::application::init_service::{InitReport, InitService};
-use bdd_harness::application::inspect_service::{InspectService, InspectionReport};
-use bdd_harness::application::memory_service::MemoryAwareConversation;
-use bdd_harness::application::model_service::{
+use spec_harness::application::init_service::{InitReport, InitService};
+use spec_harness::application::inspect_service::{InspectService, InspectionReport};
+use spec_harness::application::memory_service::MemoryAwareConversation;
+use spec_harness::application::model_service::{
     ModelResolution, ModelService, ModelSource, SessionModel,
 };
-use bdd_harness::application::scenario_service::ScenarioService;
-use bdd_harness::application::spec_mutation_service::{
+use spec_harness::application::scenario_service::ScenarioService;
+use spec_harness::application::spec_mutation_service::{
     DraftReport, IncludeReport, ListedRequirement, SpecMutationService,
 };
-use bdd_harness::application::spec_service::{
+use spec_harness::application::spec_service::{
     EnrichedRequirement, ProjectLayout, RefinementReport, RequirementSummary, SpecService,
     ValidationReport,
 };
-use bdd_harness::application::status_service::{StatusReport, StatusService};
-use bdd_harness::application::tdd_service::{
+use spec_harness::application::status_service::{StatusReport, StatusService};
+use spec_harness::application::tdd_service::{
     RefactorReport, StateReport, TddError, TddService, TestReport,
 };
-use bdd_harness::application::tool_call_service::ToolCallService;
-use bdd_harness::application::tool_service::{self, ToolService};
-use bdd_harness::domain::CONFIG_FILE;
-use bdd_harness::domain::feature::{FeatureDoc, FeatureSummary};
-use bdd_harness::domain::language::detect_languages;
-use bdd_harness::domain::mcp_registry::{RegistryLoad, ServerSpec, parse_registry};
-use bdd_harness::domain::model::{Requirement, Spec, TestRunSummary};
-use bdd_harness::domain::tdd::{
+use spec_harness::application::tool_call_service::ToolCallService;
+use spec_harness::application::tool_service::{self, ToolService};
+use spec_harness::domain::CONFIG_FILE;
+use spec_harness::domain::feature::{FeatureDoc, FeatureSummary};
+use spec_harness::domain::language::detect_languages;
+use spec_harness::domain::mcp_registry::{RegistryLoad, ServerSpec, parse_registry};
+use spec_harness::domain::model::{Requirement, Spec, TestRunSummary};
+use spec_harness::domain::tdd::{
     ImplementAttempt, StateEntry, TddPhase, TddSnapshot, TddStateMachine,
 };
-use bdd_harness::domain::tool_profile::{Caller, ProfileOverrides, default_profile, resolve};
-use bdd_harness::domain::tools::{
+use spec_harness::domain::tool_profile::{Caller, ProfileOverrides, default_profile, resolve};
+use spec_harness::domain::tools::{
     ChatMessage, ChatTurn, TOOL_REPLY_CAP, ToolCall, ToolDefinition, ToolOrigin, ToolOutcome,
     text_turn,
 };
-use bdd_harness::greenfield::{
+use spec_harness::greenfield::{
     DynLlm, Greenfield, GreenfieldReport, RunnerFactory, project_memory_service,
     refresh_project_memory,
 };
-use bdd_harness::mcp::{WorkflowServer, builtin_tool_definitions};
-use bdd_harness::ports::{
+use spec_harness::mcp::{WorkflowServer, builtin_tool_definitions};
+use spec_harness::ports::{
     ChangeStore, FeatureCatalog, FeatureError, FeatureFiles, InteractiveShell, LlmConversation,
     LlmError, McpRegistrySource, ModelCatalog, ModelInfo, ModelStore, ProjectFiles, PromptError,
     Prompter, RunnerError, RuntimeProbe, ShellError, ShellLine, SpecError, SpecRepository,
     StateStore, TestFilter, TestRunner, ToolBroker, ToolDiscovery, ToolError,
 };
-use bdd_harness::repl::{Ending, ShellSummary, offer_greenfield, run_shell};
+use spec_harness::repl::{Ending, ShellSummary, offer_greenfield, run_shell};
 
 const SPEC_PATH: &str = "requirements/requirements.json";
 
@@ -90,7 +90,7 @@ enum QueuedTurn {
 }
 
 #[derive(Debug, Default, World)]
-struct BddWorld {
+struct SpecWorld {
     spec: Spec,
     existing_features: HashSet<String>,
     feature_tags: HashMap<String, HashSet<String>>,
@@ -166,7 +166,7 @@ struct BddWorld {
     session_opened: bool,
     merged_args: Option<serde_json::Value>,
     listed_mcp_tools: Vec<String>,
-    listed_config: Option<bdd_harness::domain::config_report::ConfigReport>,
+    listed_config: Option<spec_harness::domain::config_report::ConfigReport>,
     agent_tools: Vec<String>,
     agent_queue: Vec<QueuedTurn>,
     agent_broker: HashMap<String, Result<(String, bool), String>>,
@@ -180,7 +180,7 @@ struct BddWorld {
     agent_told: Vec<String>,
     agent_offered: Vec<String>,
     oversized_tool: bool,
-    registry: Option<bdd_harness::domain::mcp_registry::RegistryLoad>,
+    registry: Option<spec_harness::domain::mcp_registry::RegistryLoad>,
     config_text: Option<String>,
 }
 
@@ -269,7 +269,7 @@ fn base_requirement(id: &str) -> Requirement {
     }
 }
 
-impl BddWorld {
+impl SpecWorld {
     fn spec_service(&self) -> SpecService<InMemorySpec, InMemoryFeatures> {
         let mut spec = self.spec.clone();
         if spec.project.trim().is_empty() {
@@ -321,7 +321,7 @@ impl BddWorld {
     fn language_report(
         &self,
         language: &str,
-    ) -> &bdd_harness::application::inspect_service::LanguageReport {
+    ) -> &spec_harness::application::inspect_service::LanguageReport {
         self.inspection()
             .languages
             .iter()
@@ -340,7 +340,7 @@ impl BddWorld {
         GherkinFeatureCatalog::new(self.project_root())
     }
 
-    fn scenario_doc(&self, name: &str) -> &bdd_harness::domain::feature::ScenarioDoc {
+    fn scenario_doc(&self, name: &str) -> &spec_harness::domain::feature::ScenarioDoc {
         self.feature_doc
             .as_ref()
             .expect("a feature was read")
@@ -354,18 +354,18 @@ impl BddWorld {
 // ---- spec validation steps -------------------------------------------------
 
 #[given(regex = r#"^a valid pending requirement "([^"]+)"$"#)]
-fn a_valid_pending_requirement(world: &mut BddWorld, id: String) {
+fn a_valid_pending_requirement(world: &mut SpecWorld, id: String) {
     world.spec.requirements.push(base_requirement(&id));
     world.existing_features.insert(FEATURE_FILE.into());
 }
 
 #[given(regex = r#"^another valid pending requirement with the same id "([^"]+)"$"#)]
-fn a_duplicate_requirement(world: &mut BddWorld, id: String) {
+fn a_duplicate_requirement(world: &mut SpecWorld, id: String) {
     world.spec.requirements.push(base_requirement(&id));
 }
 
 #[given(regex = r#"^a pending requirement "([^"]+)" with criterion "(.+)"$"#)]
-fn a_pending_requirement_with_criterion(world: &mut BddWorld, id: String, criterion: String) {
+fn a_pending_requirement_with_criterion(world: &mut SpecWorld, id: String, criterion: String) {
     let mut requirement = base_requirement(&id);
     requirement.acceptance_criteria = vec![criterion];
     world.spec.requirements.push(requirement);
@@ -375,14 +375,14 @@ fn a_pending_requirement_with_criterion(world: &mut BddWorld, id: String, criter
 #[given(
     regex = r#"^a valid pending requirement "([^"]+)" whose feature file is missing from disk$"#
 )]
-fn a_requirement_with_missing_feature_file(world: &mut BddWorld, id: String) {
+fn a_requirement_with_missing_feature_file(world: &mut SpecWorld, id: String) {
     world.spec.requirements.push(base_requirement(&id));
 }
 
 #[given(
     regex = r#"^an implemented requirement "([^"]+)" whose feature file is missing from disk$"#
 )]
-fn an_implemented_requirement_with_missing_feature_file(world: &mut BddWorld, id: String) {
+fn an_implemented_requirement_with_missing_feature_file(world: &mut SpecWorld, id: String) {
     let mut requirement = base_requirement(&id);
     requirement.status = "implemented".into();
     world.spec.requirements.push(requirement);
@@ -391,7 +391,7 @@ fn an_implemented_requirement_with_missing_feature_file(world: &mut BddWorld, id
 #[given(
     regex = r#"^an implemented requirement "([^"]+)" with no scenario tagged in its feature file$"#
 )]
-fn an_implemented_requirement_untagged(world: &mut BddWorld, id: String) {
+fn an_implemented_requirement_untagged(world: &mut SpecWorld, id: String) {
     let mut requirement = base_requirement(&id);
     requirement.status = "implemented".into();
     world.spec.requirements.push(requirement);
@@ -401,7 +401,7 @@ fn an_implemented_requirement_untagged(world: &mut BddWorld, id: String) {
 #[given(
     regex = r#"^an implemented requirement "([^"]+)" with a scenario tagged in its feature file$"#
 )]
-fn an_implemented_requirement_tagged(world: &mut BddWorld, id: String) {
+fn an_implemented_requirement_tagged(world: &mut SpecWorld, id: String) {
     let mut requirement = base_requirement(&id);
     requirement.status = "implemented".into();
     world.spec.requirements.push(requirement);
@@ -414,23 +414,23 @@ fn an_implemented_requirement_tagged(world: &mut BddWorld, id: String) {
 }
 
 #[when("the spec is validated")]
-fn the_spec_is_validated(world: &mut BddWorld) {
+fn the_spec_is_validated(world: &mut SpecWorld) {
     world.validation = Some(world.spec_service().validate_spec());
 }
 
 #[then("the spec is valid")]
-fn the_spec_is_valid(world: &mut BddWorld) {
+fn the_spec_is_valid(world: &mut SpecWorld) {
     let report = world.validation();
     assert!(report.valid, "expected valid, issues: {:?}", report.issues);
 }
 
 #[then("the spec is invalid")]
-fn the_spec_is_invalid(world: &mut BddWorld) {
+fn the_spec_is_invalid(world: &mut SpecWorld) {
     assert!(!world.validation().valid, "expected the spec to be invalid");
 }
 
 #[then(regex = r#"^an issue is "(.+)"$"#)]
-fn an_issue_is(world: &mut BddWorld, expected: String) {
+fn an_issue_is(world: &mut SpecWorld, expected: String) {
     let issues = &world.validation().issues;
     assert!(
         issues.contains(&expected),
@@ -439,7 +439,7 @@ fn an_issue_is(world: &mut BddWorld, expected: String) {
 }
 
 #[then("the next step advises writing the Gherkin scenario")]
-fn next_step_advises_scenario(world: &mut BddWorld) {
+fn next_step_advises_scenario(world: &mut SpecWorld) {
     assert!(
         world
             .validation()
@@ -449,7 +449,7 @@ fn next_step_advises_scenario(world: &mut BddWorld) {
 }
 
 #[then("the next step advises requirement_reword and re-validating")]
-fn next_step_advises_fixing(world: &mut BddWorld) {
+fn next_step_advises_fixing(world: &mut SpecWorld) {
     let next_step = &world.validation().next_step;
     assert!(next_step.contains("requirement_reword"), "{next_step}");
     assert!(next_step.contains("validate_spec again"), "{next_step}");
@@ -458,7 +458,7 @@ fn next_step_advises_fixing(world: &mut BddWorld) {
 // ---- refinement steps --------------------------------------------------------
 
 #[given(regex = r#"^a requirement "([^"]+)" with story "(.+)"$"#)]
-fn a_requirement_with_story(world: &mut BddWorld, id: String, story: String) {
+fn a_requirement_with_story(world: &mut SpecWorld, id: String, story: String) {
     let mut requirement = base_requirement(&id);
     requirement.story = story;
     requirement.acceptance_criteria.clear();
@@ -467,7 +467,7 @@ fn a_requirement_with_story(world: &mut BddWorld, id: String, story: String) {
 }
 
 #[given(regex = r#"^the requirement has criterion "(.+)"$"#)]
-fn the_requirement_has_criterion(world: &mut BddWorld, criterion: String) {
+fn the_requirement_has_criterion(world: &mut SpecWorld, criterion: String) {
     world
         .spec
         .requirements
@@ -478,7 +478,7 @@ fn the_requirement_has_criterion(world: &mut BddWorld, criterion: String) {
 }
 
 #[when(regex = r#"^the requirement "([^"]+)" is refined$"#)]
-fn the_requirement_is_refined(world: &mut BddWorld, id: String) {
+fn the_requirement_is_refined(world: &mut SpecWorld, id: String) {
     world.refinement = Some(
         world
             .spec_service()
@@ -488,7 +488,7 @@ fn the_requirement_is_refined(world: &mut BddWorld, id: String) {
 }
 
 #[then("the requirement is clean")]
-fn the_requirement_is_clean(world: &mut BddWorld) {
+fn the_requirement_is_clean(world: &mut SpecWorld) {
     let report = world.refinement();
     assert!(
         report.clean,
@@ -498,18 +498,18 @@ fn the_requirement_is_clean(world: &mut BddWorld) {
 }
 
 #[then("the requirement is not clean")]
-fn the_requirement_is_not_clean(world: &mut BddWorld) {
+fn the_requirement_is_not_clean(world: &mut SpecWorld) {
     assert!(!world.refinement().clean, "expected findings");
 }
 
 #[then(regex = r"^there are (\d+) findings$")]
-fn there_are_n_findings(world: &mut BddWorld, count: usize) {
+fn there_are_n_findings(world: &mut SpecWorld, count: usize) {
     let findings = &world.refinement().findings;
     assert_eq!(findings.len(), count, "findings: {findings:?}");
 }
 
 #[then(regex = r#"^a finding is "(.+)"$"#)]
-fn a_finding_is(world: &mut BddWorld, expected: String) {
+fn a_finding_is(world: &mut SpecWorld, expected: String) {
     let findings = &world.refinement().findings;
     assert!(
         findings.contains(&expected),
@@ -518,7 +518,7 @@ fn a_finding_is(world: &mut BddWorld, expected: String) {
 }
 
 #[then("the next step advises confirming the wording with the developer")]
-fn next_step_advises_confirming(world: &mut BddWorld) {
+fn next_step_advises_confirming(world: &mut SpecWorld) {
     assert!(
         world
             .refinement()
@@ -528,7 +528,7 @@ fn next_step_advises_confirming(world: &mut BddWorld) {
 }
 
 #[then("the next step advises requirement_reword and iterating")]
-fn next_step_advises_rewording(world: &mut BddWorld) {
+fn next_step_advises_rewording(world: &mut SpecWorld) {
     let next_step = &world.refinement().next_step;
     assert!(next_step.contains("requirement_reword"), "{next_step}");
     assert!(
@@ -540,13 +540,13 @@ fn next_step_advises_rewording(world: &mut BddWorld) {
 // ---- TDD state machine steps ----------------------------------------------
 
 #[given("a fresh TDD session")]
-fn a_fresh_tdd_session(world: &mut BddWorld) {
+fn a_fresh_tdd_session(world: &mut SpecWorld) {
     world.tdd = TddStateMachine::new();
     world.refactor_error = None;
 }
 
 #[when("a failing test run is recorded")]
-fn a_failing_run(world: &mut BddWorld) {
+fn a_failing_run(world: &mut SpecWorld) {
     world.tdd.record_test_run(TestRunSummary {
         tests: 8,
         failures: 2,
@@ -556,7 +556,7 @@ fn a_failing_run(world: &mut BddWorld) {
 }
 
 #[when("a passing test run is recorded")]
-fn a_passing_run(world: &mut BddWorld) {
+fn a_passing_run(world: &mut SpecWorld) {
     world.tdd.record_test_run(TestRunSummary {
         tests: 8,
         ..Default::default()
@@ -564,7 +564,7 @@ fn a_passing_run(world: &mut BddWorld) {
 }
 
 #[when(regex = r#"^a refactor is started with note "(.+)"$"#)]
-fn a_refactor_with_note(world: &mut BddWorld, note: String) {
+fn a_refactor_with_note(world: &mut SpecWorld, note: String) {
     world
         .tdd
         .start_refactor(Some(&note))
@@ -572,27 +572,27 @@ fn a_refactor_with_note(world: &mut BddWorld, note: String) {
 }
 
 #[when("a refactor is attempted")]
-fn a_refactor_is_attempted(world: &mut BddWorld) {
+fn a_refactor_is_attempted(world: &mut SpecWorld) {
     world.refactor_error = world.tdd.start_refactor(Some("attempt")).err();
 }
 
 #[then(regex = r#"^the phase is "([^"]+)"$"#)]
-fn the_phase_is(world: &mut BddWorld, phase: String) {
+fn the_phase_is(world: &mut SpecWorld, phase: String) {
     assert_eq!(world.tdd.phase().to_string(), phase);
 }
 
 #[then(regex = r#"^the suggestion is "(.+)"$"#)]
-fn the_suggestion_is(world: &mut BddWorld, suggestion: String) {
+fn the_suggestion_is(world: &mut SpecWorld, suggestion: String) {
     assert_eq!(world.tdd.suggestion(), suggestion);
 }
 
 #[then(regex = r#"^the refactor log contains "(.+)"$"#)]
-fn the_refactor_log_contains(world: &mut BddWorld, note: String) {
+fn the_refactor_log_contains(world: &mut SpecWorld, note: String) {
     assert!(world.tdd.refactor_log().contains(&note));
 }
 
 #[then(regex = r#"^the refactor is refused with a message containing "(.+)"$"#)]
-fn the_refactor_is_refused(world: &mut BddWorld, fragment: String) {
+fn the_refactor_is_refused(world: &mut SpecWorld, fragment: String) {
     let error = world
         .refactor_error
         .as_ref()
@@ -606,12 +606,12 @@ fn the_refactor_is_refused(world: &mut BddWorld, fragment: String) {
 // ---- model selection steps ---------------------------------------------------
 
 #[given(regex = r#"^the configured model is "([^"]+)"$"#)]
-fn the_configured_model_is(world: &mut BddWorld, model: String) {
+fn the_configured_model_is(world: &mut SpecWorld, model: String) {
     world.configured_model = Some(model);
 }
 
 #[given(regex = r#"^Ollama has models "([^"]+)"$"#)]
-fn ollama_has_models(world: &mut BddWorld, names: String) {
+fn ollama_has_models(world: &mut SpecWorld, names: String) {
     let models = names
         .split(',')
         .map(|name| ModelInfo {
@@ -624,32 +624,32 @@ fn ollama_has_models(world: &mut BddWorld, names: String) {
 }
 
 #[given("Ollama has no models")]
-fn ollama_has_no_models(world: &mut BddWorld) {
+fn ollama_has_no_models(world: &mut SpecWorld) {
     world.catalog = Some(Ok(vec![]));
 }
 
 #[given("Ollama is unreachable")]
-fn ollama_is_unreachable(world: &mut BddWorld) {
+fn ollama_is_unreachable(world: &mut SpecWorld) {
     world.catalog = Some(Err(LlmError("connection refused".into())));
 }
 
 #[when(regex = r#"^the model is resolved with flag "([^"]+)"$"#)]
-fn resolved_with_flag(world: &mut BddWorld, flag: String) {
+fn resolved_with_flag(world: &mut SpecWorld, flag: String) {
     world.resolution = Some(world.model_service().resolve(Some(&flag)));
 }
 
 #[when("the model is resolved without a flag")]
-fn resolved_without_flag(world: &mut BddWorld) {
+fn resolved_without_flag(world: &mut SpecWorld) {
     world.resolution = Some(world.model_service().resolve(None));
 }
 
 #[when(regex = r#"^the model "([^"]+)" is chosen$"#)]
-fn the_model_is_chosen(world: &mut BddWorld, model: String) {
+fn the_model_is_chosen(world: &mut SpecWorld, model: String) {
     world.choice = Some(world.model_service().choose(&model));
 }
 
 #[then(regex = r#"^the model resolves to "([^"]+)" from the flag$"#)]
-fn resolves_from_flag(world: &mut BddWorld, model: String) {
+fn resolves_from_flag(world: &mut SpecWorld, model: String) {
     assert_eq!(
         world.resolution(),
         &ModelResolution::Resolved {
@@ -660,7 +660,7 @@ fn resolves_from_flag(world: &mut BddWorld, model: String) {
 }
 
 #[then(regex = r#"^the model resolves to "([^"]+)" from configuration$"#)]
-fn resolves_from_config(world: &mut BddWorld, model: String) {
+fn resolves_from_config(world: &mut SpecWorld, model: String) {
     assert_eq!(
         world.resolution(),
         &ModelResolution::Resolved {
@@ -671,7 +671,7 @@ fn resolves_from_config(world: &mut BddWorld, model: String) {
 }
 
 #[then(regex = r#"^the model resolves to "([^"]+)" as the only installed model$"#)]
-fn resolves_only_installed(world: &mut BddWorld, model: String) {
+fn resolves_only_installed(world: &mut SpecWorld, model: String) {
     assert_eq!(
         world.resolution(),
         &ModelResolution::Resolved {
@@ -682,11 +682,11 @@ fn resolves_only_installed(world: &mut BddWorld, model: String) {
 }
 
 #[when("the session model status is checked")]
-fn session_model_status_checked(world: &mut BddWorld) {
+fn session_model_status_checked(world: &mut SpecWorld) {
     world.session_model = Some(world.model_service().session_model(None));
 }
 
-impl BddWorld {
+impl SpecWorld {
     fn session_model(&self) -> &SessionModel {
         self.session_model
             .as_ref()
@@ -695,7 +695,7 @@ impl BddWorld {
 }
 
 #[then(regex = r#"^the session is ready with model "([^"]+)"$"#)]
-fn session_ready_with_model(world: &mut BddWorld, expected: String) {
+fn session_ready_with_model(world: &mut SpecWorld, expected: String) {
     let SessionModel::Ready { model, .. } = world.session_model() else {
         panic!("expected Ready, got {:?}", world.session_model());
     };
@@ -703,12 +703,12 @@ fn session_ready_with_model(world: &mut BddWorld, expected: String) {
 }
 
 #[then("the session reports that no models are installed")]
-fn session_reports_no_models(world: &mut BddWorld) {
+fn session_reports_no_models(world: &mut SpecWorld) {
     assert_eq!(world.session_model(), &SessionModel::NoModels);
 }
 
 #[then(regex = r#"^the session reports the provider is down with "(.+)"$"#)]
-fn session_reports_provider_down(world: &mut BddWorld, fragment: String) {
+fn session_reports_provider_down(world: &mut SpecWorld, fragment: String) {
     let SessionModel::ProviderDown(error) = world.session_model() else {
         panic!("expected ProviderDown, got {:?}", world.session_model());
     };
@@ -719,7 +719,7 @@ fn session_reports_provider_down(world: &mut BddWorld, fragment: String) {
 }
 
 #[then(regex = r#"^the model resolves to "([^"]+)" as the session default$"#)]
-fn resolves_session_default(world: &mut BddWorld, model: String) {
+fn resolves_session_default(world: &mut SpecWorld, model: String) {
     assert_eq!(
         world.resolution(),
         &ModelResolution::Resolved {
@@ -730,12 +730,12 @@ fn resolves_session_default(world: &mut BddWorld, model: String) {
 }
 
 #[then("no model choice is persisted")]
-fn no_model_choice_persisted(world: &mut BddWorld) {
+fn no_model_choice_persisted(world: &mut SpecWorld) {
     assert_eq!(*world.persisted_model.lock().unwrap(), None);
 }
 
 #[then(regex = r#"^resolution is unavailable with a message containing "(.+)"$"#)]
-fn resolution_unavailable(world: &mut BddWorld, fragment: String) {
+fn resolution_unavailable(world: &mut SpecWorld, fragment: String) {
     let ModelResolution::Unavailable(message) = world.resolution() else {
         panic!("expected Unavailable, got {:?}", world.resolution());
     };
@@ -746,7 +746,7 @@ fn resolution_unavailable(world: &mut BddWorld, fragment: String) {
 }
 
 #[then(regex = r#"^the choice is rejected with a message containing "(.+)"$"#)]
-fn choice_rejected(world: &mut BddWorld, fragment: String) {
+fn choice_rejected(world: &mut SpecWorld, fragment: String) {
     let error = match world.choice.as_ref().expect("a model was chosen") {
         Err(error) => &error.0,
         Ok(()) => panic!("expected the choice to be rejected"),
@@ -758,29 +758,29 @@ fn choice_rejected(world: &mut BddWorld, fragment: String) {
 }
 
 #[then(regex = r#"^the persisted model is "([^"]+)"$"#)]
-fn the_persisted_model_is(world: &mut BddWorld, model: String) {
+fn the_persisted_model_is(world: &mut SpecWorld, model: String) {
     assert_eq!(*world.persisted_model.lock().unwrap(), Some(model));
 }
 
 // ---- project inspection steps ------------------------------------------------
 
 #[given(regex = r#"^the project contains "([^"]+)"$"#)]
-fn the_project_contains(world: &mut BddWorld, marker: String) {
+fn the_project_contains(world: &mut SpecWorld, marker: String) {
     world.project_markers.insert(marker);
 }
 
 #[given(regex = r#"^the project contains a file with extension "([^"]+)"$"#)]
-fn the_project_contains_extension(world: &mut BddWorld, extension: String) {
+fn the_project_contains_extension(world: &mut SpecWorld, extension: String) {
     world.project_extensions.insert(extension);
 }
 
 #[given(regex = r#"^the runtime "([^"]+)" is installed with version "([^"]+)"$"#)]
-fn the_runtime_is_installed(world: &mut BddWorld, command: String, version: String) {
+fn the_runtime_is_installed(world: &mut SpecWorld, command: String, version: String) {
     world.runtimes.insert(command, version);
 }
 
 #[when("the project is inspected")]
-fn the_project_is_inspected(world: &mut BddWorld) {
+fn the_project_is_inspected(world: &mut SpecWorld) {
     let service = InspectService::new(
         InMemoryProject {
             markers: world.project_markers.clone(),
@@ -795,7 +795,7 @@ fn the_project_is_inspected(world: &mut BddWorld) {
     regex = r#"^the language "([^"]+)" is detected with framework "([^"]+)" and runtime "([^"]+)"$"#
 )]
 fn the_language_is_detected(
-    world: &mut BddWorld,
+    world: &mut SpecWorld,
     language: String,
     framework: String,
     runtime: String,
@@ -806,32 +806,32 @@ fn the_language_is_detected(
 }
 
 #[then(regex = r"^exactly (\d+) languages? (?:is|are) detected$")]
-fn exactly_n_languages(world: &mut BddWorld, count: usize) {
+fn exactly_n_languages(world: &mut SpecWorld, count: usize) {
     let languages = &world.inspection().languages;
     assert_eq!(languages.len(), count, "detected: {languages:?}");
 }
 
 #[then("no languages are detected")]
-fn no_languages_detected(world: &mut BddWorld) {
+fn no_languages_detected(world: &mut SpecWorld) {
     assert!(world.inspection().languages.is_empty());
 }
 
 #[then(regex = r#"^the runtime for "([^"]+)" is present with version "([^"]+)"$"#)]
-fn the_runtime_is_present(world: &mut BddWorld, language: String, version: String) {
+fn the_runtime_is_present(world: &mut SpecWorld, language: String, version: String) {
     let report = world.language_report(&language);
     assert!(report.runtime_present);
     assert_eq!(report.runtime_version.as_deref(), Some(version.as_str()));
 }
 
 #[then(regex = r#"^the runtime for "([^"]+)" is missing$"#)]
-fn the_runtime_is_missing(world: &mut BddWorld, language: String) {
+fn the_runtime_is_missing(world: &mut SpecWorld, language: String) {
     let report = world.language_report(&language);
     assert!(!report.runtime_present);
     assert_eq!(report.runtime_version, None);
 }
 
 #[then(regex = r#"^the note for "([^"]+)" contains "(.+)"$"#)]
-fn the_note_contains(world: &mut BddWorld, language: String, fragment: String) {
+fn the_note_contains(world: &mut SpecWorld, language: String, fragment: String) {
     let note = world
         .language_report(&language)
         .note
@@ -841,7 +841,7 @@ fn the_note_contains(world: &mut BddWorld, language: String, fragment: String) {
 }
 
 #[then("the next step says all runtimes are present")]
-fn next_step_all_present(world: &mut BddWorld) {
+fn next_step_all_present(world: &mut SpecWorld) {
     assert!(
         world
             .inspection()
@@ -851,7 +851,7 @@ fn next_step_all_present(world: &mut BddWorld) {
 }
 
 #[then("the next step says some runtimes are missing")]
-fn next_step_some_missing(world: &mut BddWorld) {
+fn next_step_some_missing(world: &mut SpecWorld) {
     assert!(
         world
             .inspection()
@@ -861,7 +861,7 @@ fn next_step_some_missing(world: &mut BddWorld) {
 }
 
 #[then(regex = r#"^the next step lists "(.+)"$"#)]
-fn next_step_lists(world: &mut BddWorld, fragment: String) {
+fn next_step_lists(world: &mut SpecWorld, fragment: String) {
     let next_step = &world.inspection().next_step;
     assert!(
         next_step.contains(&fragment),
@@ -893,7 +893,7 @@ impl Prompter for ScriptedPrompter {
     }
 }
 
-impl BddWorld {
+impl SpecWorld {
     fn change_store(&mut self) -> FsChangeStore {
         FsChangeStore::new(self.project_root())
     }
@@ -914,19 +914,19 @@ impl BddWorld {
         &mut self,
     ) -> SpecMutationService<
         FsSpecRepository,
-        bdd_harness::wiring::OverlayFeatures,
+        spec_harness::wiring::OverlayFeatures,
         FsChangeStore,
         FsStateStore,
     > {
         let root = self.project_root();
-        bdd_harness::wiring::mutation_service(&root, DEFAULT_LLM_ATTEMPTS)
+        spec_harness::wiring::mutation_service(&root, DEFAULT_LLM_ATTEMPTS)
     }
 
     fn real_scenario_service(
         &mut self,
-    ) -> ScenarioService<FsChangeStore, bdd_harness::wiring::OverlayFeatures> {
+    ) -> ScenarioService<FsChangeStore, spec_harness::wiring::OverlayFeatures> {
         let root = self.project_root();
-        bdd_harness::wiring::scenario_service(&root)
+        spec_harness::wiring::scenario_service(&root)
     }
 
     fn write_working_spec(&mut self, spec: &Spec) {
@@ -977,7 +977,7 @@ impl BddWorld {
             .content(path)
             .unwrap()
             .unwrap_or_else(|| panic!("{path} is not staged"));
-        bdd_harness::domain::feature::parse(path, &content).unwrap()
+        spec_harness::domain::feature::parse(path, &content).unwrap()
     }
 
     fn changes_report(&self) -> &ChangesReport {
@@ -1010,7 +1010,7 @@ fn unescape(text: &str) -> String {
 // ---- staged changes steps ---------------------------------------------------
 
 #[given(regex = r#"^the feature file "([^"]+)" is created named "([^"]+)" via staging$"#)]
-fn feature_created_via_staging(world: &mut BddWorld, path: String, name: String) {
+fn feature_created_via_staging(world: &mut SpecWorld, path: String, name: String) {
     world
         .real_scenario_service()
         .create_feature(&path, &name)
@@ -1018,7 +1018,7 @@ fn feature_created_via_staging(world: &mut BddWorld, path: String, name: String)
 }
 
 #[given(regex = r#"^raw content is staged at "([^"]+)":$"#)]
-fn raw_content_staged(world: &mut BddWorld, path: String, step: &Step) {
+fn raw_content_staged(world: &mut SpecWorld, path: String, step: &Step) {
     let content = step.docstring.as_deref().unwrap().trim_start_matches('\n');
     world.change_store().stage(&path, content, "raw").unwrap();
 }
@@ -1026,7 +1026,7 @@ fn raw_content_staged(world: &mut BddWorld, path: String, step: &Step) {
 #[given(
     regex = r#"^a working spec whose requirement "([^"]+)" is "([^"]+)" with feature file "([^"]+)"$"#
 )]
-fn working_spec_with_status(world: &mut BddWorld, id: String, status: String, feature: String) {
+fn working_spec_with_status(world: &mut SpecWorld, id: String, status: String, feature: String) {
     let mut requirement = base_requirement(&id);
     requirement.status = status;
     requirement.feature_file = Some(feature);
@@ -1038,32 +1038,32 @@ fn working_spec_with_status(world: &mut BddWorld, id: String, status: String, fe
 }
 
 #[when("the staged changes are shown")]
-fn staged_changes_shown(world: &mut BddWorld) {
+fn staged_changes_shown(world: &mut SpecWorld) {
     world.changes_report = Some(world.real_change_service().show().unwrap());
 }
 
 #[when("the staged changes are committed")]
-fn staged_changes_committed(world: &mut BddWorld) {
+fn staged_changes_committed(world: &mut SpecWorld) {
     world.changes_report = Some(world.real_change_service().commit().unwrap());
 }
 
 #[when("the staged changes are discarded")]
-fn staged_changes_discarded(world: &mut BddWorld) {
+fn staged_changes_discarded(world: &mut SpecWorld) {
     world.changes_report = Some(world.real_change_service().discard().unwrap());
 }
 
 #[when("the staged changes are validated")]
-fn staged_changes_validated(world: &mut BddWorld) {
+fn staged_changes_validated(world: &mut SpecWorld) {
     world.staged_validation = Some(world.real_change_service().validate().unwrap());
 }
 
 #[then(regex = r"^(\d+) staged changes? (?:is|are) reported$")]
-fn n_staged_changes(world: &mut BddWorld, count: usize) {
+fn n_staged_changes(world: &mut SpecWorld, count: usize) {
     assert_eq!(world.changes_report().changes.len(), count);
 }
 
 #[then(regex = r#"^a staged "([^"]+)" of "([^"]+)" is listed$"#)]
-fn staged_change_listed(world: &mut BddWorld, action: String, path: String) {
+fn staged_change_listed(world: &mut SpecWorld, action: String, path: String) {
     let report = world.changes_report();
     assert!(
         report
@@ -1076,25 +1076,25 @@ fn staged_change_listed(world: &mut BddWorld, action: String, path: String) {
 }
 
 #[then(regex = r#"^the changes next step starts with "(.+)"$"#)]
-fn changes_next_step(world: &mut BddWorld, prefix: String) {
+fn changes_next_step(world: &mut SpecWorld, prefix: String) {
     let next = &world.changes_report().next_step;
     assert!(next.starts_with(&prefix), "next step: {next}");
 }
 
 #[then(regex = r#"^the working tree file "([^"]+)" does not exist$"#)]
-fn working_tree_file_missing(world: &mut BddWorld, path: String) {
+fn working_tree_file_missing(world: &mut SpecWorld, path: String) {
     assert!(!world.project_root().join(path).exists());
 }
 
 #[then(regex = r#"^the working tree file "([^"]+)" contains "(.+)"$"#)]
-fn working_tree_file_contains(world: &mut BddWorld, path: String, expected: String) {
+fn working_tree_file_contains(world: &mut SpecWorld, path: String, expected: String) {
     let content = std::fs::read_to_string(world.project_root().join(&path))
         .unwrap_or_else(|e| panic!("{path}: {e}"));
     assert!(content.contains(&expected), "content: {content}");
 }
 
 #[then(regex = r"^the staged validation is (valid|invalid)$")]
-fn staged_validation_verdict(world: &mut BddWorld, verdict: String) {
+fn staged_validation_verdict(world: &mut SpecWorld, verdict: String) {
     let report = world
         .staged_validation
         .as_ref()
@@ -1108,7 +1108,7 @@ fn staged_validation_verdict(world: &mut BddWorld, verdict: String) {
 }
 
 #[then(regex = r#"^a staged validation issue contains "(.+)"$"#)]
-fn staged_validation_issue(world: &mut BddWorld, fragment: String) {
+fn staged_validation_issue(world: &mut SpecWorld, fragment: String) {
     let report = world
         .staged_validation
         .as_ref()
@@ -1121,7 +1121,7 @@ fn staged_validation_issue(world: &mut BddWorld, fragment: String) {
 }
 
 #[then(regex = r#"^the staged validation next step starts with "(.+)"$"#)]
-fn staged_validation_next_step(world: &mut BddWorld, prefix: String) {
+fn staged_validation_next_step(world: &mut SpecWorld, prefix: String) {
     let next = &world
         .staged_validation
         .as_ref()
@@ -1133,7 +1133,7 @@ fn staged_validation_next_step(world: &mut BddWorld, prefix: String) {
 // ---- spec mutation steps ----------------------------------------------------
 
 #[given(regex = r#"^a working spec with the pending requirement "([^"]+)"$"#)]
-fn working_spec_pending(world: &mut BddWorld, id: String) {
+fn working_spec_pending(world: &mut SpecWorld, id: String) {
     let mut requirement = base_requirement(&id);
     requirement.feature_file = None;
     world.write_working_spec(&Spec {
@@ -1144,12 +1144,12 @@ fn working_spec_pending(world: &mut BddWorld, id: String) {
 }
 
 #[given("the developer will answer:")]
-fn developer_will_answer(world: &mut BddWorld, step: &Step) {
+fn developer_will_answer(world: &mut SpecWorld, step: &Step) {
     world.prompt_answers = docstring_lines(step);
 }
 
 #[when("a requirement is drafted")]
-fn requirement_drafted(world: &mut BddWorld) {
+fn requirement_drafted(world: &mut SpecWorld) {
     let mut prompter = ScriptedPrompter {
         answers: world.prompt_answers.drain(..).collect(),
         transcript: Vec::new(),
@@ -1160,7 +1160,7 @@ fn requirement_drafted(world: &mut BddWorld) {
 }
 
 #[when("a requirement is drafted with the model's help")]
-fn requirement_drafted_assisted(world: &mut BddWorld) {
+fn requirement_drafted_assisted(world: &mut SpecWorld) {
     let mut prompter = ScriptedPrompter {
         answers: world.prompt_answers.drain(..).collect(),
         transcript: Vec::new(),
@@ -1176,20 +1176,20 @@ fn requirement_drafted_assisted(world: &mut BddWorld) {
 }
 
 #[then(regex = r#"^the draft is staged as "([^"]+)"$"#)]
-fn draft_staged_as(world: &mut BddWorld, id: String) {
+fn draft_staged_as(world: &mut SpecWorld, id: String) {
     let report = world.draft_report.as_ref().expect("a draft report");
     assert!(report.staged, "report: {report:?}");
     assert_eq!(report.id, id);
 }
 
 #[then("the draft is not staged")]
-fn draft_not_staged(world: &mut BddWorld) {
+fn draft_not_staged(world: &mut SpecWorld) {
     let report = world.draft_report.as_ref().expect("a draft report");
     assert!(!report.staged, "report: {report:?}");
 }
 
 #[then(regex = r#"^the staged requirement "([^"]+)" has (\d+) criteria$"#)]
-fn staged_requirement_criteria_count(world: &mut BddWorld, id: String, count: usize) {
+fn staged_requirement_criteria_count(world: &mut SpecWorld, id: String, count: usize) {
     let staged = world.staged_spec();
     let requirement = staged
         .requirements
@@ -1205,13 +1205,13 @@ fn staged_requirement_criteria_count(world: &mut BddWorld, id: String, count: us
 }
 
 #[then(regex = r"^the draft reports (\d+) open findings?$")]
-fn draft_reports_open_findings(world: &mut BddWorld, count: usize) {
+fn draft_reports_open_findings(world: &mut SpecWorld, count: usize) {
     let report = world.draft_report.as_ref().expect("a draft report");
     assert_eq!(report.findings.len(), count, "report: {report:?}");
 }
 
 #[then(regex = r#"^a reported draft finding contains "(.+)"$"#)]
-fn reported_draft_finding_contains(world: &mut BddWorld, fragment: String) {
+fn reported_draft_finding_contains(world: &mut SpecWorld, fragment: String) {
     let report = world.draft_report.as_ref().expect("a draft report");
     assert!(
         report.findings.iter().any(|f| f.contains(&fragment)),
@@ -1220,22 +1220,22 @@ fn reported_draft_finding_contains(world: &mut BddWorld, fragment: String) {
 }
 
 #[then(regex = r"^the staged spec has (\d+) requirements$")]
-fn staged_spec_requirement_count(world: &mut BddWorld, count: usize) {
+fn staged_spec_requirement_count(world: &mut SpecWorld, count: usize) {
     assert_eq!(world.staged_spec().requirements.len(), count);
 }
 
 #[then(regex = r"^the working spec has (\d+) requirements$")]
-fn working_spec_requirement_count(world: &mut BddWorld, count: usize) {
+fn working_spec_requirement_count(world: &mut SpecWorld, count: usize) {
     assert_eq!(world.working_spec().requirements.len(), count);
 }
 
 #[then("nothing is staged at the spec path")]
-fn nothing_staged_at_spec_path(world: &mut BddWorld) {
+fn nothing_staged_at_spec_path(world: &mut SpecWorld) {
     assert_eq!(world.change_store().content(SPEC_PATH).unwrap(), None);
 }
 
 #[then(regex = r#"^the developer was told a finding containing "(.+)"$"#)]
-fn developer_told_finding(world: &mut BddWorld, fragment: String) {
+fn developer_told_finding(world: &mut SpecWorld, fragment: String) {
     assert!(
         world
             .prompt_transcript
@@ -1247,7 +1247,7 @@ fn developer_told_finding(world: &mut BddWorld, fragment: String) {
 }
 
 #[then(regex = r#"^the developer was told a finding containing "(.+)" (\d+) times$"#)]
-fn developer_told_finding_n_times(world: &mut BddWorld, fragment: String, count: usize) {
+fn developer_told_finding_n_times(world: &mut SpecWorld, fragment: String, count: usize) {
     let actual = world
         .prompt_transcript
         .iter()
@@ -1257,7 +1257,7 @@ fn developer_told_finding_n_times(world: &mut BddWorld, fragment: String, count:
 }
 
 #[then(regex = r#"^the developer was asked "(.+)"$"#)]
-fn developer_was_asked(world: &mut BddWorld, question: String) {
+fn developer_was_asked(world: &mut SpecWorld, question: String) {
     assert!(
         world.prompt_transcript.iter().any(|l| l == &question),
         "question {question:?} not in transcript: {:#?}",
@@ -1266,7 +1266,7 @@ fn developer_was_asked(world: &mut BddWorld, question: String) {
 }
 
 #[given(regex = r#"^the persisted TDD phase is "([^"]+)"$"#)]
-fn persisted_tdd_phase(world: &mut BddWorld, phase: String) {
+fn persisted_tdd_phase(world: &mut SpecWorld, phase: String) {
     let phase = match phase.as_str() {
         "GREEN" => TddPhase::Green,
         "RED" => TddPhase::Red,
@@ -1279,12 +1279,12 @@ fn persisted_tdd_phase(world: &mut BddWorld, phase: String) {
 }
 
 #[when(regex = r#"^requirement "([^"]+)" is marked implemented$"#)]
-fn requirement_marked_implemented(world: &mut BddWorld, id: String) {
+fn requirement_marked_implemented(world: &mut SpecWorld, id: String) {
     world.real_mutation_service().mark_implemented(&id).unwrap();
 }
 
 #[when(regex = r#"^marking requirement "([^"]+)" implemented fails$"#)]
-fn marking_implemented_fails(world: &mut BddWorld, id: String) {
+fn marking_implemented_fails(world: &mut SpecWorld, id: String) {
     let error = world
         .real_mutation_service()
         .mark_implemented(&id)
@@ -1293,21 +1293,21 @@ fn marking_implemented_fails(world: &mut BddWorld, id: String) {
 }
 
 #[then(regex = r#"^the staged spec shows "([^"]+)" as "([^"]+)"$"#)]
-fn staged_spec_shows_status(world: &mut BddWorld, id: String, status: String) {
+fn staged_spec_shows_status(world: &mut SpecWorld, id: String, status: String) {
     let spec = world.staged_spec();
     let requirement = spec.requirements.iter().find(|r| r.id == id).unwrap();
     assert_eq!(requirement.status, status);
 }
 
 #[then(regex = r#"^the staged spec names "([^"]+)" as the feature file of "([^"]+)"$"#)]
-fn staged_spec_names_feature_file(world: &mut BddWorld, feature: String, id: String) {
+fn staged_spec_names_feature_file(world: &mut SpecWorld, feature: String, id: String) {
     let spec = world.staged_spec();
     let requirement = spec.requirements.iter().find(|r| r.id == id).unwrap();
     assert_eq!(requirement.feature_file.as_deref(), Some(feature.as_str()));
 }
 
 #[then(regex = r#"^the mutation error is "(.+)"$"#)]
-fn mutation_error_is(world: &mut BddWorld, expected: String) {
+fn mutation_error_is(world: &mut SpecWorld, expected: String) {
     assert_eq!(
         world.mutation_error.as_deref(),
         Some(unescape(&expected).as_str())
@@ -1315,7 +1315,7 @@ fn mutation_error_is(world: &mut BddWorld, expected: String) {
 }
 
 #[then(regex = r#"^the mutation error contains "(.+)"$"#)]
-fn mutation_error_contains(world: &mut BddWorld, fragment: String) {
+fn mutation_error_contains(world: &mut SpecWorld, fragment: String) {
     let error = world.mutation_error.as_deref().expect("a mutation error");
     assert!(error.contains(&fragment), "error: {error}");
 }
@@ -1323,12 +1323,12 @@ fn mutation_error_contains(world: &mut BddWorld, fragment: String) {
 // ---- spec catalog include steps ---------------------------------------------
 
 #[given(regex = r#"^the spec file "([^"]+)" lists the include "([^"]+)"$"#)]
-fn spec_file_lists_include(world: &mut BddWorld, path: String, entry: String) {
+fn spec_file_lists_include(world: &mut SpecWorld, path: String, entry: String) {
     world.upsert_spec_file(&path, |spec| spec.includes.push(entry));
 }
 
 #[given(regex = r#"^the spec file "([^"]+)" holds the pending requirement "([^"]+)"$"#)]
-fn spec_file_holds_requirement(world: &mut BddWorld, path: String, id: String) {
+fn spec_file_holds_requirement(world: &mut SpecWorld, path: String, id: String) {
     let mut requirement = base_requirement(&id);
     requirement.feature_file = None;
     world.upsert_spec_file(&path, |spec| spec.requirements.push(requirement));
@@ -1336,7 +1336,7 @@ fn spec_file_holds_requirement(world: &mut BddWorld, path: String, id: String) {
 
 #[given(regex = r#"^the spec file "([^"]+)" is included in the catalog$"#)]
 #[when(regex = r#"^the spec file "([^"]+)" is included in the catalog$"#)]
-fn spec_file_included_in_catalog(world: &mut BddWorld, path: String) {
+fn spec_file_included_in_catalog(world: &mut SpecWorld, path: String) {
     world.include_report = Some(
         world
             .real_mutation_service()
@@ -1346,7 +1346,7 @@ fn spec_file_included_in_catalog(world: &mut BddWorld, path: String) {
 }
 
 #[then(regex = r#"^the include of "([^"]+)" under "([^"]+)" is staged as created$"#)]
-fn include_staged_as_created(world: &mut BddWorld, file: String, parent: String) {
+fn include_staged_as_created(world: &mut SpecWorld, file: String, parent: String) {
     let report = world.include_report.as_ref().expect("an include report");
     assert!(report.staged && report.created, "report: {report:?}");
     assert_eq!(report.file, file);
@@ -1354,7 +1354,7 @@ fn include_staged_as_created(world: &mut BddWorld, file: String, parent: String)
 }
 
 #[then(regex = r#"^the staged spec lists the include "([^"]+)"$"#)]
-fn staged_spec_lists_include(world: &mut BddWorld, entry: String) {
+fn staged_spec_lists_include(world: &mut SpecWorld, entry: String) {
     let spec = world.staged_spec();
     assert!(
         spec.includes.contains(&entry),
@@ -1364,12 +1364,12 @@ fn staged_spec_lists_include(world: &mut BddWorld, entry: String) {
 }
 
 #[then(regex = r#"^the staged spec file "([^"]+)" has (\d+) requirements$"#)]
-fn staged_spec_file_requirement_count(world: &mut BddWorld, path: String, count: usize) {
+fn staged_spec_file_requirement_count(world: &mut SpecWorld, path: String, count: usize) {
     assert_eq!(world.staged_spec_file(&path).requirements.len(), count);
 }
 
 #[then(regex = r#"^the staged spec file "([^"]+)" shows "([^"]+)" as "([^"]+)"$"#)]
-fn staged_spec_file_shows_status(world: &mut BddWorld, path: String, id: String, status: String) {
+fn staged_spec_file_shows_status(world: &mut SpecWorld, path: String, id: String, status: String) {
     let spec = world.staged_spec_file(&path);
     let requirement = spec
         .requirements
@@ -1380,18 +1380,18 @@ fn staged_spec_file_shows_status(world: &mut BddWorld, path: String, id: String,
 }
 
 #[when("the requirements are listed with their files")]
-fn requirements_listed_with_files(world: &mut BddWorld) {
+fn requirements_listed_with_files(world: &mut SpecWorld) {
     world.listed_requirements = Some(world.real_mutation_service().list_requirements().unwrap());
 }
 
 #[then(regex = r"^(\d+) requirements are listed with files$")]
-fn n_requirements_listed_with_files(world: &mut BddWorld, count: usize) {
+fn n_requirements_listed_with_files(world: &mut SpecWorld, count: usize) {
     let listed = world.listed_requirements.as_ref().expect("a listing");
     assert_eq!(listed.len(), count, "listed: {listed:?}");
 }
 
 #[then(regex = r#"^requirement "([^"]+)" is listed from "([^"]+)"$"#)]
-fn requirement_listed_from(world: &mut BddWorld, id: String, file: String) {
+fn requirement_listed_from(world: &mut SpecWorld, id: String, file: String) {
     let listed = world.listed_requirements.as_ref().expect("a listing");
     let row = listed
         .iter()
@@ -1401,7 +1401,7 @@ fn requirement_listed_from(world: &mut BddWorld, id: String, file: String) {
 }
 
 #[when(regex = r#"^a requirement titled "([^"]+)" is drafted into "([^"]+)" with:$"#)]
-fn requirement_drafted_into(world: &mut BddWorld, title: String, file: String, step: &Step) {
+fn requirement_drafted_into(world: &mut SpecWorld, title: String, file: String, step: &Step) {
     let mut lines = docstring_lines(step);
     let story = lines.remove(0);
     world.draft_report = Some(
@@ -1413,7 +1413,7 @@ fn requirement_drafted_into(world: &mut BddWorld, title: String, file: String, s
 }
 
 #[when(regex = r#"^drafting a requirement titled "([^"]+)" into "([^"]+)" fails with:$"#)]
-fn drafting_into_fails(world: &mut BddWorld, title: String, file: String, step: &Step) {
+fn drafting_into_fails(world: &mut SpecWorld, title: String, file: String, step: &Step) {
     let mut lines = docstring_lines(step);
     let story = lines.remove(0);
     let error = world
@@ -1424,7 +1424,7 @@ fn drafting_into_fails(world: &mut BddWorld, title: String, file: String, step: 
 }
 
 #[when(regex = r#"^the feature "([^"]+)" named "([^"]+)" is created$"#)]
-fn feature_is_created(world: &mut BddWorld, path: String, name: String) {
+fn feature_is_created(world: &mut SpecWorld, path: String, name: String) {
     world
         .real_scenario_service()
         .create_feature(&path, &name)
@@ -1432,7 +1432,7 @@ fn feature_is_created(world: &mut BddWorld, path: String, name: String) {
 }
 
 #[then(regex = r#"^staged content at "([^"]+)" equals:$"#)]
-fn staged_content_equals(world: &mut BddWorld, path: String, step: &Step) {
+fn staged_content_equals(world: &mut SpecWorld, path: String, step: &Step) {
     let expected = step.docstring.as_deref().unwrap().trim_matches('\n');
     let actual = world
         .change_store()
@@ -1444,7 +1444,7 @@ fn staged_content_equals(world: &mut BddWorld, path: String, step: &Step) {
 
 #[given(regex = r#"^scenario "([^"]+)" for "([^"]+)" is added to "([^"]+)" with steps:$"#)]
 #[when(regex = r#"^scenario "([^"]+)" for "([^"]+)" is added to "([^"]+)" with steps:$"#)]
-fn scenario_added(world: &mut BddWorld, name: String, req: String, path: String, step: &Step) {
+fn scenario_added(world: &mut SpecWorld, name: String, req: String, path: String, step: &Step) {
     world
         .real_scenario_service()
         .add_scenario(&path, &req, &name, docstring_lines(step))
@@ -1452,7 +1452,7 @@ fn scenario_added(world: &mut BddWorld, name: String, req: String, path: String,
 }
 
 #[when(regex = r#"^adding scenario "([^"]+)" for "([^"]+)" to "([^"]+)" fails with steps:$"#)]
-fn scenario_add_fails(world: &mut BddWorld, name: String, req: String, path: String, step: &Step) {
+fn scenario_add_fails(world: &mut SpecWorld, name: String, req: String, path: String, step: &Step) {
     let error = world
         .real_scenario_service()
         .add_scenario(&path, &req, &name, docstring_lines(step))
@@ -1461,7 +1461,7 @@ fn scenario_add_fails(world: &mut BddWorld, name: String, req: String, path: Str
 }
 
 #[when(regex = r#"^scenario "([^"]+)" in "([^"]+)" is updated with steps:$"#)]
-fn scenario_updated(world: &mut BddWorld, name: String, path: String, step: &Step) {
+fn scenario_updated(world: &mut SpecWorld, name: String, path: String, step: &Step) {
     world
         .real_scenario_service()
         .update_scenario(&path, &name, docstring_lines(step), None)
@@ -1469,7 +1469,7 @@ fn scenario_updated(world: &mut BddWorld, name: String, path: String, step: &Ste
 }
 
 #[when(regex = r#"^scenario "([^"]+)" is deleted from "([^"]+)"$"#)]
-fn scenario_deleted(world: &mut BddWorld, name: String, path: String) {
+fn scenario_deleted(world: &mut SpecWorld, name: String, path: String) {
     world
         .real_scenario_service()
         .delete_scenario(&path, &name)
@@ -1477,21 +1477,21 @@ fn scenario_deleted(world: &mut BddWorld, name: String, path: String) {
 }
 
 #[then(regex = r#"^the staged feature "([^"]+)" has scenario "([^"]+)" tagged "([^"]+)"$"#)]
-fn staged_feature_scenario_tagged(world: &mut BddWorld, path: String, name: String, tag: String) {
+fn staged_feature_scenario_tagged(world: &mut SpecWorld, path: String, name: String, tag: String) {
     let doc = world.staged_feature(&path);
     let scenario = doc.scenarios.iter().find(|s| s.name == name).unwrap();
     assert!(scenario.tags.contains(&tag), "tags: {:?}", scenario.tags);
 }
 
 #[then(regex = r#"^the staged feature "([^"]+)" scenario "([^"]+)" has (\d+) steps$"#)]
-fn staged_feature_scenario_steps(world: &mut BddWorld, path: String, name: String, count: usize) {
+fn staged_feature_scenario_steps(world: &mut SpecWorld, path: String, name: String, count: usize) {
     let doc = world.staged_feature(&path);
     let scenario = doc.scenarios.iter().find(|s| s.name == name).unwrap();
     assert_eq!(scenario.steps.len(), count, "steps: {:?}", scenario.steps);
 }
 
 #[then(regex = r#"^the staged feature "([^"]+)" has (\d+) scenarios$"#)]
-fn staged_feature_scenario_count(world: &mut BddWorld, path: String, count: usize) {
+fn staged_feature_scenario_count(world: &mut SpecWorld, path: String, count: usize) {
     assert_eq!(world.staged_feature(&path).scenarios.len(), count);
 }
 
@@ -1506,7 +1506,7 @@ impl TestRunner for ScriptedTestRunner {
     }
 }
 
-impl BddWorld {
+impl SpecWorld {
     fn tdd_service(&mut self) -> TddService<FsStateStore> {
         TddService::new(FsStateStore::new(self.project_root()))
     }
@@ -1529,27 +1529,27 @@ fn docstring(step: &Step) -> String {
 }
 
 #[given("the Surefire report:")]
-fn surefire_report(world: &mut BddWorld, step: &Step) {
+fn surefire_report(world: &mut SpecWorld, step: &Step) {
     world.parsed_run = Some(parse_surefire_xml(&docstring(step)).unwrap());
 }
 
 #[given("the TRX report:")]
-fn trx_report(world: &mut BddWorld, step: &Step) {
+fn trx_report(world: &mut SpecWorld, step: &Step) {
     world.parsed_run = Some(parse_trx(&docstring(step)).unwrap());
 }
 
 #[given("the cucumber-js report:")]
-fn cucumber_js_report(world: &mut BddWorld, step: &Step) {
+fn cucumber_js_report(world: &mut SpecWorld, step: &Step) {
     world.parsed_run = Some(parse_json_report(&docstring(step)).unwrap());
 }
 
 #[given("the cargo test output:")]
-fn cargo_test_output(world: &mut BddWorld, step: &Step) {
+fn cargo_test_output(world: &mut SpecWorld, step: &Step) {
     world.parsed_run = Some(parse_cargo_output(&docstring(step)).expect("a test summary"));
 }
 
 #[then(regex = r"^the parsed run has (\d+) tests, (\d+) failures, (\d+) errors, (\d+) skipped$")]
-fn parsed_run_counts(world: &mut BddWorld, tests: u32, failures: u32, errors: u32, skipped: u32) {
+fn parsed_run_counts(world: &mut SpecWorld, tests: u32, failures: u32, errors: u32, skipped: u32) {
     let run = world.parsed_run();
     assert_eq!(
         (run.tests, run.failures, run.errors, run.skipped),
@@ -1559,14 +1559,14 @@ fn parsed_run_counts(world: &mut BddWorld, tests: u32, failures: u32, errors: u3
 }
 
 #[then(regex = r#"^a parsed failure detail is "(.+)"$"#)]
-fn parsed_failure_detail_is(world: &mut BddWorld, expected: String) {
+fn parsed_failure_detail_is(world: &mut SpecWorld, expected: String) {
     let expected = unescape(&expected);
     let details = &world.parsed_run().failure_details;
     assert!(details.contains(&expected), "details: {details:?}");
 }
 
 #[then(regex = r#"^a parsed failure detail contains "(.+)"$"#)]
-fn parsed_failure_detail_contains(world: &mut BddWorld, fragment: String) {
+fn parsed_failure_detail_contains(world: &mut SpecWorld, fragment: String) {
     let details = &world.parsed_run().failure_details;
     assert!(
         details.iter().any(|d| d.contains(&fragment)),
@@ -1575,7 +1575,7 @@ fn parsed_failure_detail_contains(world: &mut BddWorld, fragment: String) {
 }
 
 #[given(regex = r#"^a Maven project whose build prints "(.+)" and fails$"#)]
-fn maven_project_failing_build(world: &mut BddWorld, message: String) {
+fn maven_project_failing_build(world: &mut SpecWorld, message: String) {
     let root = world.project_root();
     let mut runtimes = HashMap::new();
     runtimes.insert("mvn".to_string(), "Apache Maven 3.9.9".to_string());
@@ -1588,24 +1588,24 @@ fn maven_project_failing_build(world: &mut BddWorld, message: String) {
 }
 
 #[when("the Maven tests are run")]
-fn maven_tests_are_run(_world: &mut BddWorld) {
+fn maven_tests_are_run(_world: &mut SpecWorld) {
     // The run happened in the Given so its outcome is the parsed run.
 }
 
 #[given(regex = r#"^a Maven project on a machine without "([^"]+)"$"#)]
-fn maven_without_runtime(world: &mut BddWorld, _runtime: String) {
+fn maven_without_runtime(world: &mut SpecWorld, _runtime: String) {
     let root = world.project_root();
     let runner = MavenRunner::new(root, InMemoryRuntimes(HashMap::new()));
     world.runner_refusal = Some(runner.run(&TestFilter::default()).unwrap_err());
 }
 
 #[when("running the Maven tests is refused")]
-fn running_maven_refused(world: &mut BddWorld) {
+fn running_maven_refused(world: &mut SpecWorld) {
     assert!(world.runner_refusal.is_some());
 }
 
 #[then(regex = r#"^the refusal names runtime "([^"]+)"$"#)]
-fn refusal_names_runtime(world: &mut BddWorld, expected: String) {
+fn refusal_names_runtime(world: &mut SpecWorld, expected: String) {
     match world.runner_refusal() {
         RunnerError::RuntimeMissing { runtime, .. } => assert_eq!(runtime, &expected),
         other => panic!("unexpected: {other:?}"),
@@ -1613,7 +1613,7 @@ fn refusal_names_runtime(world: &mut BddWorld, expected: String) {
 }
 
 #[then(regex = r#"^the refusal hint is "(.+)"$"#)]
-fn refusal_hint_is(world: &mut BddWorld, expected: String) {
+fn refusal_hint_is(world: &mut SpecWorld, expected: String) {
     match world.runner_refusal() {
         RunnerError::RuntimeMissing { hint, .. } => assert_eq!(hint, &expected),
         other => panic!("unexpected: {other:?}"),
@@ -1621,7 +1621,7 @@ fn refusal_hint_is(world: &mut BddWorld, expected: String) {
 }
 
 #[given(regex = r"^the test suite will report (\d+) tests with (\d+) failures$")]
-fn test_suite_will_report(world: &mut BddWorld, tests: u32, failures: u32) {
+fn test_suite_will_report(world: &mut SpecWorld, tests: u32, failures: u32) {
     world.scripted_run = Some(Ok(TestRunSummary {
         tests,
         failures,
@@ -1630,13 +1630,13 @@ fn test_suite_will_report(world: &mut BddWorld, tests: u32, failures: u32) {
 }
 
 #[given(regex = r#"^the test runner reports runtime "([^"]+)" missing with hint "(.+)"$"#)]
-fn test_runner_reports_runtime_missing(world: &mut BddWorld, runtime: String, hint: String) {
+fn test_runner_reports_runtime_missing(world: &mut SpecWorld, runtime: String, hint: String) {
     world.scripted_run = Some(Err(RunnerError::RuntimeMissing { runtime, hint }));
 }
 
 #[given("the tests are run")]
 #[when("the tests are run")]
-fn the_tests_are_run(world: &mut BddWorld) {
+fn the_tests_are_run(world: &mut SpecWorld) {
     let runner = ScriptedTestRunner(world.scripted_run.clone().expect("a scripted run"));
     let report = world
         .tdd_service()
@@ -1646,7 +1646,7 @@ fn the_tests_are_run(world: &mut BddWorld) {
 }
 
 #[when("running the tests is refused")]
-fn running_the_tests_is_refused(world: &mut BddWorld) {
+fn running_the_tests_is_refused(world: &mut SpecWorld) {
     let runner = ScriptedTestRunner(world.scripted_run.clone().expect("a scripted run"));
     let error = world
         .tdd_service()
@@ -1661,7 +1661,7 @@ fn running_the_tests_is_refused(world: &mut BddWorld) {
 }
 
 #[then(regex = r#"^the test reply phase is "([^"]+)"$"#)]
-fn test_reply_phase(world: &mut BddWorld, phase: String) {
+fn test_reply_phase(world: &mut SpecWorld, phase: String) {
     assert_eq!(
         world.test_report.as_ref().expect("a test reply").phase,
         phase
@@ -1669,18 +1669,18 @@ fn test_reply_phase(world: &mut BddWorld, phase: String) {
 }
 
 #[then(regex = r#"^the test reply next step starts with "(.+)"$"#)]
-fn test_reply_next_step(world: &mut BddWorld, prefix: String) {
+fn test_reply_next_step(world: &mut SpecWorld, prefix: String) {
     let next = &world.test_report.as_ref().expect("a test reply").next_step;
     assert!(next.starts_with(&prefix), "next step: {next}");
 }
 
 #[when("the TDD state is read in a fresh invocation")]
-fn tdd_state_read_fresh(world: &mut BddWorld) {
+fn tdd_state_read_fresh(world: &mut SpecWorld) {
     world.state_report = Some(world.tdd_service().state().unwrap());
 }
 
 #[then(regex = r#"^the persisted phase is "([^"]+)"$"#)]
-fn persisted_phase_is(world: &mut BddWorld, phase: String) {
+fn persisted_phase_is(world: &mut SpecWorld, phase: String) {
     assert_eq!(
         world.state_report.as_ref().expect("a state reply").phase,
         phase
@@ -1688,7 +1688,7 @@ fn persisted_phase_is(world: &mut BddWorld, phase: String) {
 }
 
 #[then(regex = r#"^the state next step is "(.+)"$"#)]
-fn state_next_step_is(world: &mut BddWorld, expected: String) {
+fn state_next_step_is(world: &mut SpecWorld, expected: String) {
     assert_eq!(
         world
             .state_report
@@ -1700,13 +1700,13 @@ fn state_next_step_is(world: &mut BddWorld, expected: String) {
 }
 
 #[then(regex = r"^the persisted last run counts (\d+) tests and (\d+) failures$")]
-fn persisted_last_run_counts(world: &mut BddWorld, tests: u32, failures: u32) {
+fn persisted_last_run_counts(world: &mut SpecWorld, tests: u32, failures: u32) {
     let last = &world.state_report.as_ref().expect("a state reply").last_run;
     assert_eq!((last.tests, last.failures), (tests, failures));
 }
 
 #[then(regex = r#"^the persisted refactor log contains "(.+)"$"#)]
-fn persisted_refactor_log_contains(world: &mut BddWorld, note: String) {
+fn persisted_refactor_log_contains(world: &mut SpecWorld, note: String) {
     let log = &world
         .state_report
         .as_ref()
@@ -1716,12 +1716,12 @@ fn persisted_refactor_log_contains(world: &mut BddWorld, note: String) {
 }
 
 #[when(regex = r#"^a persisted refactor is started with note "(.+)"$"#)]
-fn persisted_refactor_started(world: &mut BddWorld, note: String) {
+fn persisted_refactor_started(world: &mut SpecWorld, note: String) {
     world.refactor_report = Some(world.tdd_service().refactor(Some(&note)).unwrap());
 }
 
 #[when(regex = r#"^starting a refactor with note "(.+)" fails$"#)]
-fn refactor_start_fails(world: &mut BddWorld, note: String) {
+fn refactor_start_fails(world: &mut SpecWorld, note: String) {
     match world.tdd_service().refactor(Some(&note)).unwrap_err() {
         TddError::Other(message) => world.tdd_error = Some(message),
         other => panic!("unexpected: {other:?}"),
@@ -1729,7 +1729,7 @@ fn refactor_start_fails(world: &mut BddWorld, note: String) {
 }
 
 #[then(regex = r#"^the refactor reply phase is "([^"]+)"$"#)]
-fn refactor_reply_phase(world: &mut BddWorld, phase: String) {
+fn refactor_reply_phase(world: &mut SpecWorld, phase: String) {
     assert_eq!(
         world
             .refactor_report
@@ -1741,12 +1741,12 @@ fn refactor_reply_phase(world: &mut BddWorld, phase: String) {
 }
 
 #[then(regex = r#"^the TDD error is "(.+)"$"#)]
-fn tdd_error_is(world: &mut BddWorld, expected: String) {
+fn tdd_error_is(world: &mut SpecWorld, expected: String) {
     assert_eq!(world.tdd_error.as_deref(), Some(expected.as_str()));
 }
 
 #[then(regex = r"^the persisted state log holds (\d+) entr(?:y|ies)$")]
-fn persisted_state_log_holds(world: &mut BddWorld, count: usize) {
+fn persisted_state_log_holds(world: &mut SpecWorld, count: usize) {
     let snapshot = FsStateStore::new(world.project_root()).load().unwrap();
     assert_eq!(
         snapshot.entries.len(),
@@ -1757,7 +1757,7 @@ fn persisted_state_log_holds(world: &mut BddWorld, count: usize) {
 }
 
 #[then("every persisted state entry has a timestamp")]
-fn every_persisted_entry_has_a_timestamp(world: &mut BddWorld) {
+fn every_persisted_entry_has_a_timestamp(world: &mut SpecWorld) {
     let snapshot = FsStateStore::new(world.project_root()).load().unwrap();
     assert!(
         !snapshot.entries.is_empty(),
@@ -1773,7 +1773,7 @@ fn every_persisted_entry_has_a_timestamp(world: &mut BddWorld) {
 }
 
 #[then("the persisted state file carries interpretation instructions")]
-fn persisted_state_file_carries_instructions(world: &mut BddWorld) {
+fn persisted_state_file_carries_instructions(world: &mut SpecWorld) {
     let snapshot = FsStateStore::new(world.project_root()).load().unwrap();
     assert!(
         snapshot.instructions.contains("three most recent entries"),
@@ -1783,13 +1783,13 @@ fn persisted_state_file_carries_instructions(world: &mut BddWorld) {
 }
 
 #[then(regex = r"^the state reply holds (\d+) entries?$")]
-fn state_reply_holds_entries(world: &mut BddWorld, count: usize) {
+fn state_reply_holds_entries(world: &mut SpecWorld, count: usize) {
     let report = world.state_report.as_ref().expect("a state reply");
     assert_eq!(report.entries.len(), count, "entries: {:?}", report.entries);
 }
 
 #[then("the state reply carries interpretation instructions")]
-fn state_reply_carries_instructions(world: &mut BddWorld) {
+fn state_reply_carries_instructions(world: &mut SpecWorld) {
     let report = world.state_report.as_ref().expect("a state reply");
     assert!(
         report.instructions.contains("three most recent entries"),
@@ -1801,7 +1801,7 @@ fn state_reply_carries_instructions(world: &mut BddWorld) {
 // ---- feature reading steps ---------------------------------------------------
 
 #[given(regex = r#"^a project feature file "([^"]+)" containing:$"#)]
-fn a_project_feature_file(world: &mut BddWorld, path: String, step: &Step) {
+fn a_project_feature_file(world: &mut SpecWorld, path: String, step: &Step) {
     let content = step
         .docstring
         .clone()
@@ -1812,12 +1812,12 @@ fn a_project_feature_file(world: &mut BddWorld, path: String, step: &Step) {
 }
 
 #[when("the features are listed")]
-fn the_features_are_listed(world: &mut BddWorld) {
+fn the_features_are_listed(world: &mut SpecWorld) {
     world.feature_list = Some(world.feature_catalog().list().expect("listing succeeds"));
 }
 
 #[when(regex = r#"^the feature "([^"]+)" is read$"#)]
-fn the_feature_is_read(world: &mut BddWorld, path: String) {
+fn the_feature_is_read(world: &mut SpecWorld, path: String) {
     world.feature_doc = Some(
         world
             .feature_catalog()
@@ -1827,23 +1827,23 @@ fn the_feature_is_read(world: &mut BddWorld, path: String) {
 }
 
 #[when(regex = r#"^reading the feature "([^"]+)" fails$"#)]
-fn reading_the_feature_fails(world: &mut BddWorld, path: String) {
+fn reading_the_feature_fails(world: &mut SpecWorld, path: String) {
     world.feature_error = Some(world.feature_catalog().read(&path).unwrap_err());
 }
 
 #[when("listing the features fails")]
-fn listing_the_features_fails(world: &mut BddWorld) {
+fn listing_the_features_fails(world: &mut SpecWorld) {
     world.feature_error = Some(world.feature_catalog().list().unwrap_err());
 }
 
 #[then(regex = r"^(\d+) features? (?:is|are) listed$")]
-fn n_features_listed(world: &mut BddWorld, count: usize) {
+fn n_features_listed(world: &mut SpecWorld, count: usize) {
     let list = world.feature_list.as_ref().expect("features were listed");
     assert_eq!(list.len(), count, "listed: {list:?}");
 }
 
 #[then(regex = r#"^the listing shows "([^"]+)" named "([^"]+)" with (\d+) scenarios$"#)]
-fn the_listing_shows(world: &mut BddWorld, path: String, name: String, scenarios: usize) {
+fn the_listing_shows(world: &mut SpecWorld, path: String, name: String, scenarios: usize) {
     let list = world.feature_list.as_ref().expect("features were listed");
     let summary = list
         .iter()
@@ -1854,19 +1854,19 @@ fn the_listing_shows(world: &mut BddWorld, path: String, name: String, scenarios
 }
 
 #[then(regex = r#"^the feature is tagged "([^"]+)"$"#)]
-fn the_feature_is_tagged(world: &mut BddWorld, tag: String) {
+fn the_feature_is_tagged(world: &mut SpecWorld, tag: String) {
     let doc = world.feature_doc.as_ref().expect("a feature was read");
     assert!(doc.tags.contains(&tag), "tags: {:?}", doc.tags);
 }
 
 #[then(regex = r#"^scenario "([^"]+)" is tagged "([^"]+)"$"#)]
-fn scenario_is_tagged(world: &mut BddWorld, name: String, tag: String) {
+fn scenario_is_tagged(world: &mut SpecWorld, name: String, tag: String) {
     let scenario = world.scenario_doc(&name);
     assert!(scenario.tags.contains(&tag), "tags: {:?}", scenario.tags);
 }
 
 #[then(regex = r#"^scenario "([^"]+)" has step "(.+)"$"#)]
-fn scenario_has_step(world: &mut BddWorld, name: String, step_text: String) {
+fn scenario_has_step(world: &mut SpecWorld, name: String, step_text: String) {
     let scenario = world.scenario_doc(&name);
     assert!(
         scenario.steps.contains(&step_text),
@@ -1876,20 +1876,20 @@ fn scenario_has_step(world: &mut BddWorld, name: String, step_text: String) {
 }
 
 #[then(regex = r#"^the feature carries the tags "([^"]+)"$"#)]
-fn the_feature_carries_the_tags(world: &mut BddWorld, tags: String) {
+fn the_feature_carries_the_tags(world: &mut SpecWorld, tags: String) {
     let expected: Vec<String> = tags.split(", ").map(String::from).collect();
     let doc = world.feature_doc.as_ref().expect("a feature was read");
     assert_eq!(doc.all_tags(), expected);
 }
 
 #[then(regex = r#"^the feature error is "(.+)"$"#)]
-fn the_feature_error_is(world: &mut BddWorld, expected: String) {
+fn the_feature_error_is(world: &mut SpecWorld, expected: String) {
     let error = world.feature_error.as_ref().expect("an error was captured");
     assert_eq!(error.0, expected);
 }
 
 #[then(regex = r#"^the feature error contains "(.+)"$"#)]
-fn the_feature_error_contains(world: &mut BddWorld, fragment: String) {
+fn the_feature_error_contains(world: &mut SpecWorld, fragment: String) {
     let error = world.feature_error.as_ref().expect("an error was captured");
     assert!(
         error.0.contains(&fragment),
@@ -1914,7 +1914,7 @@ impl LlmConversation for ScriptedLlm {
     }
 }
 
-impl BddWorld {
+impl SpecWorld {
     fn generation_service(
         &mut self,
         with_model: bool,
@@ -2013,12 +2013,12 @@ impl BddWorld {
 }
 
 #[given("a Java project marker")]
-fn a_java_project_marker(world: &mut BddWorld) {
+fn a_java_project_marker(world: &mut SpecWorld) {
     std::fs::write(world.project_root().join("pom.xml"), "<project/>").unwrap();
 }
 
 #[given(regex = r#"^a project source file "([^"]+)" containing:$"#)]
-fn a_project_source_file(world: &mut BddWorld, path: String, step: &Step) {
+fn a_project_source_file(world: &mut SpecWorld, path: String, step: &Step) {
     let content = step.docstring.clone().expect("a docstring");
     let absolute = world.project_root().join(&path);
     std::fs::create_dir_all(absolute.parent().expect("a parent dir")).unwrap();
@@ -2026,7 +2026,7 @@ fn a_project_source_file(world: &mut BddWorld, path: String, step: &Step) {
 }
 
 #[given("the model will reply:")]
-fn the_model_will_reply(world: &mut BddWorld, step: &Step) {
+fn the_model_will_reply(world: &mut SpecWorld, step: &Step) {
     world.llm_reply = Some(
         step.docstring
             .clone()
@@ -2037,12 +2037,12 @@ fn the_model_will_reply(world: &mut BddWorld, step: &Step) {
 }
 
 #[when("missing steps are reported")]
-fn missing_steps_are_reported(world: &mut BddWorld) {
+fn missing_steps_are_reported(world: &mut SpecWorld) {
     world.missing_report = Some(world.generation_service(false).steps_missing().unwrap());
 }
 
 #[when(regex = r#"^step definitions are generated (with|without) (?:the|a) model$"#)]
-fn step_definitions_are_generated(world: &mut BddWorld, mode: String) {
+fn step_definitions_are_generated(world: &mut SpecWorld, mode: String) {
     let report = world
         .generation_service(mode == "with")
         .steps_generate(&mut NullPrompter)
@@ -2051,7 +2051,7 @@ fn step_definitions_are_generated(world: &mut BddWorld, mode: String) {
 }
 
 #[when("generating step definitions fails")]
-fn generating_step_definitions_fails(world: &mut BddWorld) {
+fn generating_step_definitions_fails(world: &mut SpecWorld) {
     world.generation_error = Some(
         world
             .generation_service(false)
@@ -2062,7 +2062,7 @@ fn generating_step_definitions_fails(world: &mut BddWorld) {
 }
 
 #[when(regex = r#"^a unit test is generated for "([^"]+)" without a model$"#)]
-fn a_unit_test_is_generated(world: &mut BddWorld, req_id: String) {
+fn a_unit_test_is_generated(world: &mut SpecWorld, req_id: String) {
     let report = world
         .generation_service(false)
         .unittest_generate(&mut NullPrompter, &req_id)
@@ -2071,7 +2071,7 @@ fn a_unit_test_is_generated(world: &mut BddWorld, req_id: String) {
 }
 
 #[given(regex = r#"^a persisted RED run failing with "(.+)"$"#)]
-fn persisted_red_run(world: &mut BddWorld, detail: String) {
+fn persisted_red_run(world: &mut SpecWorld, detail: String) {
     FsStateStore::new(world.project_root())
         .save(&TddSnapshot::with(StateEntry {
             timestamp: "1970-01-01T00:00:00Z".into(),
@@ -2088,8 +2088,8 @@ fn persisted_red_run(world: &mut BddWorld, detail: String) {
 }
 
 #[when(regex = r#"^an implementation is generated for "([^"]+)" with the model$"#)]
-fn implementation_generated(world: &mut BddWorld, req_id: String) {
-    // Mirrors the bdd implement command: the brief is the persisted
+fn implementation_generated(world: &mut SpecWorld, req_id: String) {
+    // Mirrors the spec implement command: the brief is the persisted
     // failures plus prior attempts, and the attempt is logged after.
     let tdd = TddService::new(FsStateStore::new(world.project_root()));
     let brief = tdd.implementation_brief(&req_id).unwrap();
@@ -2114,8 +2114,8 @@ fn implementation_generated(world: &mut BddWorld, req_id: String) {
 }
 
 #[when(regex = r#"^implement readiness is checked for "([^"]+)"$"#)]
-fn implement_readiness_checked(world: &mut BddWorld, req_id: String) {
-    // Mirrors the bdd implement preflight: the phase and the failures
+fn implement_readiness_checked(world: &mut SpecWorld, req_id: String) {
+    // Mirrors the spec implement preflight: the phase and the failures
     // come from the persisted state, exactly as the command reads them.
     let tdd = TddService::new(FsStateStore::new(world.project_root()));
     let phase = tdd.state().unwrap().phase;
@@ -2129,7 +2129,7 @@ fn implement_readiness_checked(world: &mut BddWorld, req_id: String) {
 }
 
 #[when(regex = r#"^the model is asked for implement advice on "([^"]+)"$"#)]
-fn implement_advice_asked(world: &mut BddWorld, req_id: String) {
+fn implement_advice_asked(world: &mut SpecWorld, req_id: String) {
     let tdd = TddService::new(FsStateStore::new(world.project_root()));
     let phase = tdd.state().unwrap().phase;
     let brief = tdd.implementation_brief(&req_id).unwrap();
@@ -2142,13 +2142,13 @@ fn implement_advice_asked(world: &mut BddWorld, req_id: String) {
 }
 
 #[then(regex = r#"^the implement readiness is (ready|not ready)$"#)]
-fn implement_readiness_is(world: &mut BddWorld, state: String) {
+fn implement_readiness_is(world: &mut SpecWorld, state: String) {
     let report = world.readiness_report.as_ref().expect("a readiness report");
     assert_eq!(report.ready, state == "ready", "report: {report:?}");
 }
 
 #[then(regex = r#"^a readiness finding contains "(.+)"$"#)]
-fn readiness_finding_contains(world: &mut BddWorld, fragment: String) {
+fn readiness_finding_contains(world: &mut SpecWorld, fragment: String) {
     let report = world.readiness_report.as_ref().expect("a readiness report");
     assert!(
         report.findings.iter().any(|f| f.contains(&fragment)),
@@ -2158,7 +2158,7 @@ fn readiness_finding_contains(world: &mut BddWorld, fragment: String) {
 }
 
 #[then(regex = r#"^the readiness next step contains "(.+)"$"#)]
-fn readiness_next_step_contains(world: &mut BddWorld, fragment: String) {
+fn readiness_next_step_contains(world: &mut SpecWorld, fragment: String) {
     let report = world.readiness_report.as_ref().expect("a readiness report");
     assert!(
         report.next_step.contains(&fragment),
@@ -2168,7 +2168,7 @@ fn readiness_next_step_contains(world: &mut BddWorld, fragment: String) {
 }
 
 #[then(regex = r#"^the readiness asset "([^"]+)" is (present|missing)$"#)]
-fn readiness_asset_is(world: &mut BddWorld, path: String, state: String) {
+fn readiness_asset_is(world: &mut SpecWorld, path: String, state: String) {
     let report = world.readiness_report.as_ref().expect("a readiness report");
     let asset = report
         .assets
@@ -2179,13 +2179,13 @@ fn readiness_asset_is(world: &mut BddWorld, path: String, state: String) {
 }
 
 #[then(regex = r#"^the implement advice is "(.+)"$"#)]
-fn implement_advice_is(world: &mut BddWorld, advice: String) {
+fn implement_advice_is(world: &mut SpecWorld, advice: String) {
     assert_eq!(world.implement_advice.as_deref(), Some(advice.as_str()));
 }
 
 #[when("the project status is checked")]
-fn project_status_checked(world: &mut BddWorld) {
-    // Mirrors the bdd status command: the phase comes from the
+fn project_status_checked(world: &mut SpecWorld) {
+    // Mirrors the spec status command: the phase comes from the
     // persisted state, everything else from the working tree.
     let tdd = TddService::new(FsStateStore::new(world.project_root()));
     let phase = tdd.state().unwrap().phase;
@@ -2193,7 +2193,7 @@ fn project_status_checked(world: &mut BddWorld) {
 }
 
 #[then(regex = r#"^the status next step contains "(.+)"$"#)]
-fn status_next_step_contains(world: &mut BddWorld, fragment: String) {
+fn status_next_step_contains(world: &mut SpecWorld, fragment: String) {
     let report = world.status_report.as_ref().expect("a status report");
     assert!(
         report.next_step.contains(&fragment),
@@ -2203,7 +2203,7 @@ fn status_next_step_contains(world: &mut BddWorld, fragment: String) {
 }
 
 #[then(regex = r#"^the status lists (\d+) staged files? and (\d+) requirements?$"#)]
-fn status_lists(world: &mut BddWorld, staged: usize, requirements: usize) {
+fn status_lists(world: &mut SpecWorld, staged: usize, requirements: usize) {
     let report = world.status_report.as_ref().expect("a status report");
     assert_eq!(report.staged.len(), staged, "staged: {:?}", report.staged);
     assert_eq!(
@@ -2215,7 +2215,7 @@ fn status_lists(world: &mut BddWorld, staged: usize, requirements: usize) {
 }
 
 #[then(regex = r#"^the status of "([^"]+)" holds (\d+) findings?$"#)]
-fn status_of_requirement(world: &mut BddWorld, req_id: String, count: usize) {
+fn status_of_requirement(world: &mut SpecWorld, req_id: String, count: usize) {
     let report = world.status_report.as_ref().expect("a status report");
     let entry = report
         .requirements
@@ -2233,7 +2233,7 @@ fn status_of_requirement(world: &mut BddWorld, req_id: String, count: usize) {
 #[when(
     regex = r#"^generating an implementation for "([^"]+)" (with|without) (?:the|a) model fails$"#
 )]
-fn implementation_generation_fails(world: &mut BddWorld, req_id: String, mode: String) {
+fn implementation_generation_fails(world: &mut SpecWorld, req_id: String, mode: String) {
     world.generation_error = Some(
         world
             .implement_service(mode == "with")
@@ -2244,7 +2244,7 @@ fn implementation_generation_fails(world: &mut BddWorld, req_id: String, mode: S
 }
 
 #[then(regex = r#"^the persisted attempt log holds (\d+) attempts? for "([^"]+)"$"#)]
-fn persisted_attempt_log_holds(world: &mut BddWorld, count: usize, req_id: String) {
+fn persisted_attempt_log_holds(world: &mut SpecWorld, count: usize, req_id: String) {
     let snapshot = FsStateStore::new(world.project_root()).load().unwrap();
     let attempts: Vec<_> = snapshot
         .attempt_log()
@@ -2255,7 +2255,7 @@ fn persisted_attempt_log_holds(world: &mut BddWorld, count: usize, req_id: Strin
 }
 
 #[then(regex = r#"^the implementation staged "([^"]+)" from the model$"#)]
-fn implementation_staged(world: &mut BddWorld, target: String) {
+fn implementation_staged(world: &mut SpecWorld, target: String) {
     let report = world
         .implementation_report
         .as_ref()
@@ -2270,7 +2270,7 @@ fn implementation_staged(world: &mut BddWorld, target: String) {
 }
 
 #[when(regex = r#"^generating a unit test for "([^"]+)" fails$"#)]
-fn generating_a_unit_test_fails(world: &mut BddWorld, req_id: String) {
+fn generating_a_unit_test_fails(world: &mut SpecWorld, req_id: String) {
     world.generation_error = Some(
         world
             .generation_service(false)
@@ -2281,25 +2281,25 @@ fn generating_a_unit_test_fails(world: &mut BddWorld, req_id: String) {
 }
 
 #[then(regex = r#"^the missing report names language "([^"]+)" and framework "([^"]+)"$"#)]
-fn missing_report_names(world: &mut BddWorld, language: String, framework: String) {
+fn missing_report_names(world: &mut SpecWorld, language: String, framework: String) {
     assert_eq!(world.missing_report().language, language);
     assert_eq!(world.missing_report().framework, framework);
 }
 
 #[then(regex = r"^(\d+) steps? (?:is|are) missing$")]
-fn n_steps_missing(world: &mut BddWorld, count: usize) {
+fn n_steps_missing(world: &mut SpecWorld, count: usize) {
     let missing = &world.missing_report().missing;
     assert_eq!(missing.len(), count, "missing: {missing:?}");
 }
 
 #[then("no steps are missing")]
-fn no_steps_missing(world: &mut BddWorld) {
+fn no_steps_missing(world: &mut SpecWorld) {
     let missing = &world.missing_report().missing;
     assert!(missing.is_empty(), "missing: {missing:?}");
 }
 
 #[then(regex = r#"^a missing "([^"]+)" step is "(.+)"$"#)]
-fn a_missing_step_is(world: &mut BddWorld, keyword: String, text: String) {
+fn a_missing_step_is(world: &mut SpecWorld, keyword: String, text: String) {
     let text = unescape(&text);
     let missing = &world.missing_report().missing;
     assert!(
@@ -2311,13 +2311,13 @@ fn a_missing_step_is(world: &mut BddWorld, keyword: String, text: String) {
 }
 
 #[then(regex = r#"^the missing next step mentions "(.+)"$"#)]
-fn missing_next_step_mentions(world: &mut BddWorld, fragment: String) {
+fn missing_next_step_mentions(world: &mut SpecWorld, fragment: String) {
     let next_step = &world.missing_report().next_step;
     assert!(next_step.contains(&fragment), "next step: {next_step}");
 }
 
 #[then(regex = r#"^the generation is staged at "([^"]+)" from "([^"]+)"$"#)]
-fn generation_staged_at(world: &mut BddWorld, target: String, source: String) {
+fn generation_staged_at(world: &mut SpecWorld, target: String, source: String) {
     let report = world.generation_report();
     assert_eq!(report.target, target);
     assert_eq!(report.source, source);
@@ -2325,7 +2325,7 @@ fn generation_staged_at(world: &mut BddWorld, target: String, source: String) {
 }
 
 #[then(regex = r#"^the staged file "([^"]+)" contains "(.+)"$"#)]
-fn staged_file_contains(world: &mut BddWorld, path: String, fragment: String) {
+fn staged_file_contains(world: &mut SpecWorld, path: String, fragment: String) {
     let fragment = unescape(&fragment);
     let content = world
         .change_store()
@@ -2336,7 +2336,7 @@ fn staged_file_contains(world: &mut BddWorld, path: String, fragment: String) {
 }
 
 #[then(regex = r#"^the staged file "([^"]+)" defines "(.+)" exactly once$"#)]
-fn staged_file_defines_once(world: &mut BddWorld, path: String, fragment: String) {
+fn staged_file_defines_once(world: &mut SpecWorld, path: String, fragment: String) {
     let fragment = unescape(&fragment);
     let content = world
         .change_store()
@@ -2347,12 +2347,12 @@ fn staged_file_defines_once(world: &mut BddWorld, path: String, fragment: String
 }
 
 #[then(regex = r#"^the working tree has no file "([^"]+)"$"#)]
-fn working_tree_has_no_file(world: &mut BddWorld, path: String) {
+fn working_tree_has_no_file(world: &mut SpecWorld, path: String) {
     assert!(!world.project_root().join(&path).exists());
 }
 
 #[then(regex = r#"^the generation error is "(.+)"$"#)]
-fn generation_error_is(world: &mut BddWorld, expected: String) {
+fn generation_error_is(world: &mut SpecWorld, expected: String) {
     assert_eq!(world.generation_error.as_deref(), Some(expected.as_str()));
 }
 
@@ -2372,7 +2372,7 @@ impl TestRunner for QueuedRunner {
 }
 
 #[given("an empty working spec")]
-fn an_empty_working_spec(world: &mut BddWorld) {
+fn an_empty_working_spec(world: &mut SpecWorld) {
     world.write_working_spec(&Spec {
         project: "Kata".into(),
         requirements: Vec::new(),
@@ -2381,7 +2381,7 @@ fn an_empty_working_spec(world: &mut BddWorld) {
 }
 
 #[given("the greenfield test runs will report:")]
-fn greenfield_runs_will_report(world: &mut BddWorld, step: &Step) {
+fn greenfield_runs_will_report(world: &mut SpecWorld, step: &Step) {
     let counts =
         regex::Regex::new(r#"^(\d+) tests and (\d+) failures(?: detailed "(.+)")?$"#).unwrap();
     let missing = regex::Regex::new(r#"^runtime "([^"]+)" missing with hint "(.+)"$"#).unwrap();
@@ -2414,17 +2414,17 @@ fn greenfield_runs_will_report(world: &mut BddWorld, step: &Step) {
 }
 
 #[given(regex = r#"^no test runner is detectable because "(.+)"$"#)]
-fn no_test_runner_detectable(world: &mut BddWorld, message: String) {
+fn no_test_runner_detectable(world: &mut SpecWorld, message: String) {
     world.greenfield_factory_error = Some(message);
 }
 
 #[given("a greenfield model is resolved")]
-fn a_greenfield_model_is_resolved(world: &mut BddWorld) {
+fn a_greenfield_model_is_resolved(world: &mut SpecWorld) {
     world.greenfield_llm = true;
 }
 
 #[when("the greenfield loop runs")]
-fn the_greenfield_loop_runs(world: &mut BddWorld) {
+fn the_greenfield_loop_runs(world: &mut SpecWorld) {
     let root = world.project_root();
     let runs = Arc::new(Mutex::new(std::collections::VecDeque::from(
         std::mem::take(&mut world.greenfield_runs),
@@ -2454,7 +2454,7 @@ fn the_greenfield_loop_runs(world: &mut BddWorld) {
     }
 }
 
-impl BddWorld {
+impl SpecWorld {
     fn greenfield_report(&self) -> &GreenfieldReport {
         self.greenfield_report
             .as_ref()
@@ -2463,25 +2463,25 @@ impl BddWorld {
 }
 
 #[then(regex = r#"^the greenfield run completes with phase "([^"]+)"$"#)]
-fn greenfield_completes_with_phase(world: &mut BddWorld, phase: String) {
+fn greenfield_completes_with_phase(world: &mut SpecWorld, phase: String) {
     let report = world.greenfield_report();
     assert!(report.completed, "report: {report:?}");
     assert_eq!(report.phase.as_deref(), Some(phase.as_str()));
 }
 
 #[then("the greenfield run is not completed")]
-fn greenfield_not_completed(world: &mut BddWorld) {
+fn greenfield_not_completed(world: &mut SpecWorld) {
     assert!(!world.greenfield_report().completed);
 }
 
 #[then(regex = r#"^the greenfield next step starts with "(.+)"$"#)]
-fn greenfield_next_step(world: &mut BddWorld, prefix: String) {
+fn greenfield_next_step(world: &mut SpecWorld, prefix: String) {
     let next = &world.greenfield_report().next_step;
     assert!(next.starts_with(&prefix), "next step: {next}");
 }
 
 #[then(regex = r#"^the greenfield phase is "([^"]+)"$"#)]
-fn greenfield_phase_is(world: &mut BddWorld, phase: String) {
+fn greenfield_phase_is(world: &mut SpecWorld, phase: String) {
     assert_eq!(
         world.greenfield_report().phase.as_deref(),
         Some(phase.as_str())
@@ -2489,7 +2489,7 @@ fn greenfield_phase_is(world: &mut BddWorld, phase: String) {
 }
 
 #[then(regex = r#"^the greenfield error is "(.+)"$"#)]
-fn greenfield_error_is(world: &mut BddWorld, expected: String) {
+fn greenfield_error_is(world: &mut SpecWorld, expected: String) {
     assert_eq!(world.greenfield_error.as_deref(), Some(expected.as_str()));
 }
 
@@ -2519,7 +2519,7 @@ impl InteractiveShell for ScriptedShell {
 }
 
 #[given("the shell will read:")]
-fn shell_will_read(world: &mut BddWorld, step: &Step) {
+fn shell_will_read(world: &mut SpecWorld, step: &Step) {
     world.shell_script = docstring_lines(step)
         .into_iter()
         .map(|line| match line.as_str() {
@@ -2531,7 +2531,7 @@ fn shell_will_read(world: &mut BddWorld, step: &Step) {
 }
 
 #[when("the interactive shell runs")]
-fn interactive_shell_runs(world: &mut BddWorld) {
+fn interactive_shell_runs(world: &mut SpecWorld) {
     let mut shell = ScriptedShell {
         script: world.shell_script.drain(..).collect(),
         told: Vec::new(),
@@ -2546,7 +2546,7 @@ fn interactive_shell_runs(world: &mut BddWorld) {
 }
 
 #[when("the greenfield offer runs")]
-fn greenfield_offer_runs(world: &mut BddWorld) {
+fn greenfield_offer_runs(world: &mut SpecWorld) {
     let mut shell = ScriptedShell {
         script: world.shell_script.drain(..).collect(),
         told: Vec::new(),
@@ -2559,7 +2559,7 @@ fn greenfield_offer_runs(world: &mut BddWorld) {
 }
 
 #[then("nothing was dispatched")]
-fn nothing_was_dispatched(world: &mut BddWorld) {
+fn nothing_was_dispatched(world: &mut SpecWorld) {
     assert!(
         world.shell_dispatched.is_empty(),
         "dispatched: {:?}",
@@ -2568,7 +2568,7 @@ fn nothing_was_dispatched(world: &mut BddWorld) {
 }
 
 #[then(regex = r#"^the shell dispatched "(.+)"$"#)]
-fn shell_dispatched(world: &mut BddWorld, tokens: String) {
+fn shell_dispatched(world: &mut SpecWorld, tokens: String) {
     let expected: Vec<String> = tokens.split('|').map(String::from).collect();
     assert!(
         world.shell_dispatched.contains(&expected),
@@ -2578,7 +2578,7 @@ fn shell_dispatched(world: &mut BddWorld, tokens: String) {
 }
 
 #[then(regex = r#"^the shell ended by "(exit|Ctrl\+C|end of input)" after (\d+) commands?$"#)]
-fn shell_ended_by(world: &mut BddWorld, ending: String, commands: usize) {
+fn shell_ended_by(world: &mut SpecWorld, ending: String, commands: usize) {
     let summary = world.shell_summary.as_ref().expect("a shell summary");
     let expected = match ending.as_str() {
         "exit" => Ending::Exit,
@@ -2590,12 +2590,12 @@ fn shell_ended_by(world: &mut BddWorld, ending: String, commands: usize) {
 }
 
 #[then("the session history was saved")]
-fn session_history_saved(world: &mut BddWorld) {
+fn session_history_saved(world: &mut SpecWorld) {
     assert_eq!(world.shell_saves, 1);
 }
 
 #[then(regex = r#"^the shell reported "(.+)"$"#)]
-fn shell_reported(world: &mut BddWorld, fragment: String) {
+fn shell_reported(world: &mut SpecWorld, fragment: String) {
     assert!(
         world.shell_told.iter().any(|m| m.contains(&fragment)),
         "told: {:?}",
@@ -2606,12 +2606,12 @@ fn shell_reported(world: &mut BddWorld, fragment: String) {
 // ---- spec reading -----------------------------------------------------------
 
 #[when("the requirements are listed")]
-fn the_requirements_are_listed(world: &mut BddWorld) {
+fn the_requirements_are_listed(world: &mut SpecWorld) {
     world.requirement_list = Some(world.spec_service().list_requirements().unwrap());
 }
 
 #[then(regex = r"^(\d+) requirements? (?:is|are) listed$")]
-fn n_requirements_listed(world: &mut BddWorld, count: usize) {
+fn n_requirements_listed(world: &mut SpecWorld, count: usize) {
     let list = world
         .requirement_list
         .as_ref()
@@ -2620,7 +2620,7 @@ fn n_requirements_listed(world: &mut BddWorld, count: usize) {
 }
 
 #[then(regex = r#"^the listing has "([^"]+)" titled "([^"]+)" with status "([^"]+)"$"#)]
-fn the_listing_has(world: &mut BddWorld, id: String, title: String, status: String) {
+fn the_listing_has(world: &mut SpecWorld, id: String, title: String, status: String) {
     let list = world
         .requirement_list
         .as_ref()
@@ -2632,16 +2632,16 @@ fn the_listing_has(world: &mut BddWorld, id: String, title: String, status: Stri
 }
 
 #[when(regex = r#"^the requirement "([^"]+)" is shown$"#)]
-fn the_requirement_is_shown(world: &mut BddWorld, id: String) {
+fn the_requirement_is_shown(world: &mut SpecWorld, id: String) {
     world.shown_requirement = Some(world.spec_service().get_requirement(&id).unwrap());
 }
 
 #[when(regex = r#"^showing the requirement "([^"]+)" fails$"#)]
-fn showing_the_requirement_fails(world: &mut BddWorld, id: String) {
+fn showing_the_requirement_fails(world: &mut SpecWorld, id: String) {
     world.spec_reading_error = Some(world.spec_service().get_requirement(&id).unwrap_err().0);
 }
 
-impl BddWorld {
+impl SpecWorld {
     fn shown_requirement(&self) -> &EnrichedRequirement {
         self.shown_requirement
             .as_ref()
@@ -2650,7 +2650,7 @@ impl BddWorld {
 }
 
 #[then(regex = r#"^the shown requirement has id "([^"]+)" and status "([^"]+)"$"#)]
-fn shown_requirement_id_status(world: &mut BddWorld, id: String, status: String) {
+fn shown_requirement_id_status(world: &mut SpecWorld, id: String, status: String) {
     let shown = world.shown_requirement();
     assert_eq!(shown.id, id);
     assert_eq!(shown.status, status);
@@ -2660,7 +2660,7 @@ fn shown_requirement_id_status(world: &mut BddWorld, id: String, status: String)
     regex = r#"^the shown requirement points at steps "([^"]+)", tests "([^"]+)", and production "([^"]+)"$"#
 )]
 fn shown_requirement_locations(
-    world: &mut BddWorld,
+    world: &mut SpecWorld,
     steps: String,
     tests: String,
     production: String,
@@ -2672,7 +2672,7 @@ fn shown_requirement_locations(
 }
 
 #[then(regex = r#"^the shown feature location is "([^"]+)"$"#)]
-fn shown_feature_location(world: &mut BddWorld, location: String) {
+fn shown_feature_location(world: &mut SpecWorld, location: String) {
     assert_eq!(
         world.shown_requirement().feature_location.as_deref(),
         Some(location.as_str())
@@ -2680,48 +2680,48 @@ fn shown_feature_location(world: &mut BddWorld, location: String) {
 }
 
 #[then(regex = r#"^the shown workflow hint mentions "(.+)"$"#)]
-fn shown_workflow_hint_mentions(world: &mut BddWorld, fragment: String) {
+fn shown_workflow_hint_mentions(world: &mut SpecWorld, fragment: String) {
     let hint = &world.shown_requirement().workflow_hint;
     assert!(hint.contains(&fragment), "hint: {hint}");
 }
 
 #[then(regex = r#"^the spec reading error is "(.+)"$"#)]
-fn spec_reading_error_is(world: &mut BddWorld, expected: String) {
+fn spec_reading_error_is(world: &mut SpecWorld, expected: String) {
     assert_eq!(world.spec_reading_error.as_deref(), Some(expected.as_str()));
 }
 
 // ---- project initialization ---------------------------------------------------
 
 #[given(regex = r#"^the working tree file "([^"]+)" already contains "(.+)"$"#)]
-fn working_tree_file_already_contains(world: &mut BddWorld, path: String, content: String) {
+fn working_tree_file_already_contains(world: &mut SpecWorld, path: String, content: String) {
     let absolute = world.project_root().join(&path);
     std::fs::create_dir_all(absolute.parent().unwrap()).unwrap();
     std::fs::write(absolute, content).unwrap();
 }
 
 #[when(regex = r#"^the project is initialized for "([^"]+)" named "([^"]+)"$"#)]
-fn the_project_is_initialized(world: &mut BddWorld, language: String, name: String) {
+fn the_project_is_initialized(world: &mut SpecWorld, language: String, name: String) {
     let language =
-        bdd_harness::greenfield::parse_language(&language).expect("a supported language");
+        spec_harness::greenfield::parse_language(&language).expect("a supported language");
     let service = InitService::new(FsScaffoldWriter::new(world.project_root()));
     world.init_report = Some(service.init(language, &name).unwrap());
 }
 
-impl BddWorld {
+impl SpecWorld {
     fn init_report(&self) -> &InitReport {
         self.init_report.as_ref().expect("an init report")
     }
 }
 
 #[then(regex = r#"^the init report shows language "([^"]+)" with framework "([^"]+)"$"#)]
-fn init_report_language_framework(world: &mut BddWorld, language: String, framework: String) {
+fn init_report_language_framework(world: &mut SpecWorld, language: String, framework: String) {
     let report = world.init_report();
     assert_eq!(report.language, language);
     assert_eq!(report.framework, framework);
 }
 
 #[then(regex = r"^(\d+) scaffold files are created and (\d+) (?:is|are) skipped$")]
-fn scaffold_files_created_and_skipped(world: &mut BddWorld, created: usize, skipped: usize) {
+fn scaffold_files_created_and_skipped(world: &mut SpecWorld, created: usize, skipped: usize) {
     let report = world.init_report();
     assert_eq!(
         report.created.len(),
@@ -2738,13 +2738,13 @@ fn scaffold_files_created_and_skipped(world: &mut BddWorld, created: usize, skip
 }
 
 #[then(regex = r#"^a skipped file is "([^"]+)"$"#)]
-fn a_skipped_file_is(world: &mut BddWorld, path: String) {
+fn a_skipped_file_is(world: &mut SpecWorld, path: String) {
     let skipped = &world.init_report().skipped;
     assert!(skipped.contains(&path), "skipped: {skipped:?}");
 }
 
 #[then(regex = r#"^the init next step mentions "(.+)"$"#)]
-fn init_next_step_mentions(world: &mut BddWorld, fragment: String) {
+fn init_next_step_mentions(world: &mut SpecWorld, fragment: String) {
     let next = &world.init_report().next_step;
     assert!(next.contains(&fragment), "next step: {next}");
 }
@@ -2752,18 +2752,18 @@ fn init_next_step_mentions(world: &mut BddWorld, fragment: String) {
 // ---- model listing ------------------------------------------------------------
 
 #[when("the models are listed")]
-fn the_models_are_listed(world: &mut BddWorld) {
+fn the_models_are_listed(world: &mut SpecWorld) {
     world.model_list = Some(world.model_service().list().unwrap());
 }
 
 #[then(regex = r"^(\d+) models? (?:is|are) listed$")]
-fn n_models_listed(world: &mut BddWorld, count: usize) {
+fn n_models_listed(world: &mut SpecWorld, count: usize) {
     let list = world.model_list.as_ref().expect("the models were listed");
     assert_eq!(list.len(), count, "listed: {list:?}");
 }
 
 #[then(regex = r#"^a listed model is "([^"]+)"$"#)]
-fn a_listed_model_is(world: &mut BddWorld, name: String) {
+fn a_listed_model_is(world: &mut SpecWorld, name: String) {
     let list = world.model_list.as_ref().expect("the models were listed");
     assert!(list.iter().any(|m| m.name == name), "listed: {list:?}");
 }
@@ -2784,7 +2784,7 @@ impl TestRunner for RecordingRunner {
 }
 
 #[when(regex = r#"^the tests are run filtered to feature "([^"]+)" and scenario "([^"]+)"$"#)]
-fn tests_run_with_filters(world: &mut BddWorld, feature: String, scenario: String) {
+fn tests_run_with_filters(world: &mut SpecWorld, feature: String, scenario: String) {
     let runner = RecordingRunner {
         result: world.scripted_run.clone().expect("a scripted run"),
         recorded: Arc::clone(&world.recorded_filter),
@@ -2797,7 +2797,7 @@ fn tests_run_with_filters(world: &mut BddWorld, feature: String, scenario: Strin
 }
 
 #[then(regex = r#"^the runner received feature "([^"]+)" and scenario "([^"]+)"$"#)]
-fn runner_received_filters(world: &mut BddWorld, feature: String, scenario: String) {
+fn runner_received_filters(world: &mut SpecWorld, feature: String, scenario: String) {
     let recorded = world.recorded_filter.lock().unwrap();
     let filter = recorded.as_ref().expect("the runner recorded a filter");
     assert_eq!(filter.feature.as_deref(), Some(feature.as_str()));
@@ -2807,19 +2807,19 @@ fn runner_received_filters(world: &mut BddWorld, feature: String, scenario: Stri
 // ---- project memory -----------------------------------------------------------
 
 #[when("the project memory is refreshed")]
-fn the_project_memory_is_refreshed(world: &mut BddWorld) {
+fn the_project_memory_is_refreshed(world: &mut SpecWorld) {
     refresh_project_memory(&world.project_root(), None);
 }
 
 #[when(regex = r#"^the project memory is refreshed for language "([^"]+)"$"#)]
-fn the_project_memory_is_refreshed_for_language(world: &mut BddWorld, language: String) {
+fn the_project_memory_is_refreshed_for_language(world: &mut SpecWorld, language: String) {
     let language =
-        bdd_harness::greenfield::parse_language(&language).expect("a supported language");
+        spec_harness::greenfield::parse_language(&language).expect("a supported language");
     refresh_project_memory(&world.project_root(), Some(language));
 }
 
 #[when(regex = r#"^a model call is made with system "(.+)"$"#)]
-fn a_model_call_is_made(world: &mut BddWorld, system: String) {
+fn a_model_call_is_made(world: &mut SpecWorld, system: String) {
     let brief = project_memory_service(world.project_root())
         .load()
         .expect("memory loads")
@@ -2833,7 +2833,7 @@ fn a_model_call_is_made(world: &mut BddWorld, system: String) {
             messages: &[ChatMessage],
             _tools: &[ToolDefinition],
         ) -> Result<ChatTurn, LlmError> {
-            let (system, _) = bdd_harness::domain::tools::system_and_user(messages);
+            let (system, _) = spec_harness::domain::tools::system_and_user(messages);
             *self.0.lock().unwrap() = Some(system);
             Ok(text_turn("ok"))
         }
@@ -2849,7 +2849,7 @@ fn a_model_call_is_made(world: &mut BddWorld, system: String) {
 }
 
 #[then(regex = r#"^the model system prompt contains "(.+)"$"#)]
-fn the_model_system_prompt_contains(world: &mut BddWorld, fragment: String) {
+fn the_model_system_prompt_contains(world: &mut SpecWorld, fragment: String) {
     let prompt = world
         .model_system_prompt
         .as_ref()
@@ -2908,7 +2908,7 @@ impl McpRegistrySource for EmptyRegistry {
     }
 }
 
-impl BddWorld {
+impl SpecWorld {
     fn profile_service(
         &mut self,
         offline: bool,
@@ -2944,7 +2944,7 @@ impl BddWorld {
 }
 
 #[when(regex = r#"^the tools for "([^"]+)" are listed offline$"#)]
-fn tools_for_listed_offline(world: &mut BddWorld, caller: String) {
+fn tools_for_listed_offline(world: &mut SpecWorld, caller: String) {
     let caller = Caller::parse(&caller).expect("caller");
     let service = world.profile_service(false, false);
     let catalog = service.catalog(false, true);
@@ -2956,7 +2956,7 @@ fn tools_for_listed_offline(world: &mut BddWorld, caller: String) {
 }
 
 #[when(regex = r#"^the tools for "([^"]+)" are listed with --tools "([^"]+)"$"#)]
-fn tools_for_listed_with_flag(world: &mut BddWorld, caller: String, flag: String) {
+fn tools_for_listed_with_flag(world: &mut SpecWorld, caller: String, flag: String) {
     let caller = Caller::parse(&caller).expect("caller");
     let mut overrides = ProfileOverrides::default();
     overrides
@@ -2968,7 +2968,7 @@ fn tools_for_listed_with_flag(world: &mut BddWorld, caller: String, flag: String
 }
 
 #[when("every default profile is inspected")]
-fn every_default_profile_is_inspected(world: &mut BddWorld) {
+fn every_default_profile_is_inspected(world: &mut SpecWorld) {
     world.profile_rows = Caller::ALL
         .into_iter()
         .map(|caller| {
@@ -2984,7 +2984,7 @@ fn every_default_profile_is_inspected(world: &mut BddWorld) {
 }
 
 #[when("the tool profiles are listed")]
-fn the_tool_profiles_are_listed(world: &mut BddWorld) {
+fn the_tool_profiles_are_listed(world: &mut SpecWorld) {
     let service = world.profile_service(false, false);
     let (views, problems) = service.profiles(true);
     world.tool_problems = problems;
@@ -2992,7 +2992,7 @@ fn the_tool_profiles_are_listed(world: &mut BddWorld) {
 }
 
 #[when("the tools are listed offline")]
-fn the_tools_are_listed_offline(world: &mut BddWorld) {
+fn the_tools_are_listed_offline(world: &mut SpecWorld) {
     let connects = Arc::new(Mutex::new(0usize));
     let service = ToolService::new(
         TomlToolStore::new(world.project_root().join(CONFIG_FILE)),
@@ -3009,7 +3009,7 @@ fn the_tools_are_listed_offline(world: &mut BddWorld) {
 }
 
 #[when("the tools are listed with discovery")]
-fn the_tools_are_listed_with_discovery(world: &mut BddWorld) {
+fn the_tools_are_listed_with_discovery(world: &mut SpecWorld) {
     let service = world.profile_service(false, true);
     let list = service.catalog(false, false);
     world.offered_tools = names_csv(&list.tools);
@@ -3018,7 +3018,7 @@ fn the_tools_are_listed_with_discovery(world: &mut BddWorld) {
 }
 
 #[when(regex = r#"^the tool catalog is refreshed$"#)]
-fn the_tool_catalog_is_refreshed(world: &mut BddWorld) {
+fn the_tool_catalog_is_refreshed(world: &mut SpecWorld) {
     let connects = Arc::new(Mutex::new(0usize));
     let inner = CountingDiscovery {
         connects: Arc::clone(&connects),
@@ -3026,7 +3026,7 @@ fn the_tool_catalog_is_refreshed(world: &mut BddWorld) {
     };
     let cache = CachedDiscovery::new(
         inner,
-        world.project_root().join(".bdd-cache").join("tools"),
+        world.project_root().join(".spec-cache").join("tools"),
         std::time::Duration::from_secs(86_400),
     );
     let load = FsMcpRegistry::new(world.project_root(), None).load();
@@ -3037,7 +3037,7 @@ fn the_tool_catalog_is_refreshed(world: &mut BddWorld) {
     if empty {
         let _ = cache.discover_fresh(&ServerSpec {
             name: "self".into(),
-            program: "bdd".into(),
+            program: "spec".into(),
             args: vec![],
             env: vec![],
         });
@@ -3046,7 +3046,7 @@ fn the_tool_catalog_is_refreshed(world: &mut BddWorld) {
 }
 
 #[given("the config file contains:")]
-fn the_config_file_contains(world: &mut BddWorld, step: &Step) {
+fn the_config_file_contains(world: &mut SpecWorld, step: &Step) {
     let content = step.docstring.clone().expect("a docstring");
     std::fs::write(
         world.project_root().join(CONFIG_FILE),
@@ -3056,12 +3056,12 @@ fn the_config_file_contains(world: &mut BddWorld, step: &Step) {
 }
 
 #[when("the configuration is listed")]
-fn the_configuration_is_listed(world: &mut BddWorld) {
-    let path = bdd_harness::adapters::config::config_path(&world.project_root());
+fn the_configuration_is_listed(world: &mut SpecWorld) {
+    let path = spec_harness::adapters::config::config_path(&world.project_root());
     world.listed_config = Some(inspect_config(&path));
 }
 
-fn listed_config(world: &BddWorld) -> &bdd_harness::domain::config_report::ConfigReport {
+fn listed_config(world: &SpecWorld) -> &spec_harness::domain::config_report::ConfigReport {
     world
         .listed_config
         .as_ref()
@@ -3069,30 +3069,30 @@ fn listed_config(world: &BddWorld) -> &bdd_harness::domain::config_report::Confi
 }
 
 #[then(regex = r#"^the config file status is "([^"]+)"$"#)]
-fn config_file_status_is(world: &mut BddWorld, expected: String) {
+fn config_file_status_is(world: &mut SpecWorld, expected: String) {
     assert_eq!(listed_config(world).file.display(), expected);
 }
 
 #[then(regex = r#"^the config file status contains "([^"]+)"$"#)]
-fn config_file_status_contains(world: &mut BddWorld, fragment: String) {
+fn config_file_status_contains(world: &mut SpecWorld, fragment: String) {
     let display = listed_config(world).file.display();
     assert!(display.contains(&fragment), "{display}");
 }
 
 #[then(regex = r#"^the config value "([^"]+)" is "([^"]+)" from default$"#)]
-fn config_value_from_default(world: &mut BddWorld, key: String, value: String) {
+fn config_value_from_default(world: &mut SpecWorld, key: String, value: String) {
     let setting = listed_config(world)
         .setting(&key)
         .unwrap_or_else(|| panic!("missing {key}"));
     assert_eq!(setting.value, value, "{key}");
     assert_eq!(
         setting.source,
-        bdd_harness::domain::config_report::ConfigSource::Default
+        spec_harness::domain::config_report::ConfigSource::Default
     );
 }
 
 #[then(regex = r#"^the config value "([^"]+)" is "([^"]+)" from the config file$"#)]
-fn config_value_from_file(world: &mut BddWorld, key: String, value: String) {
+fn config_value_from_file(world: &mut SpecWorld, key: String, value: String) {
     let setting = listed_config(world)
         .setting(&key)
         .unwrap_or_else(|| panic!("missing {key}"));
@@ -3100,7 +3100,7 @@ fn config_value_from_file(world: &mut BddWorld, key: String, value: String) {
     assert!(
         matches!(
             setting.source,
-            bdd_harness::domain::config_report::ConfigSource::File(_)
+            spec_harness::domain::config_report::ConfigSource::File(_)
         ),
         "{key} {:?}",
         setting.source
@@ -3108,19 +3108,19 @@ fn config_value_from_file(world: &mut BddWorld, key: String, value: String) {
 }
 
 #[then(regex = r#"^the config value "([^"]+)" is from default$"#)]
-fn config_key_is_from_default(world: &mut BddWorld, key: String) {
+fn config_key_is_from_default(world: &mut SpecWorld, key: String) {
     let setting = listed_config(world)
         .setting(&key)
         .unwrap_or_else(|| panic!("missing {key}"));
     assert_eq!(
         setting.source,
-        bdd_harness::domain::config_report::ConfigSource::Default,
+        spec_harness::domain::config_report::ConfigSource::Default,
         "{key}"
     );
 }
 
 #[when(regex = r#"^"([^"]+)" is enabled for "([^"]+)"$"#)]
-fn tool_is_enabled_for(world: &mut BddWorld, name: String, caller: String) {
+fn tool_is_enabled_for(world: &mut SpecWorld, name: String, caller: String) {
     match tool_service::parse_caller(Some(&caller)) {
         Ok(caller) => {
             let service = world.profile_service(false, false);
@@ -3134,17 +3134,17 @@ fn tool_is_enabled_for(world: &mut BddWorld, name: String, caller: String) {
 }
 
 #[when("tools enable is invoked without --for")]
-fn tools_enable_without_for(world: &mut BddWorld) {
+fn tools_enable_without_for(world: &mut SpecWorld) {
     world.tool_error = Some(tool_service::parse_caller(None).unwrap_err().0);
 }
 
 #[when(regex = r#"^"([^"]+)" is enabled for the unknown caller "([^"]+)"$"#)]
-fn tool_enabled_for_unknown(world: &mut BddWorld, _name: String, caller: String) {
+fn tool_enabled_for_unknown(world: &mut SpecWorld, _name: String, caller: String) {
     world.tool_error = Some(tool_service::parse_caller(Some(&caller)).unwrap_err().0);
 }
 
 #[when(regex = r#"^the tool "([^"]+)" is shown$"#)]
-fn the_tool_is_shown(world: &mut BddWorld, name: String) {
+fn the_tool_is_shown(world: &mut SpecWorld, name: String) {
     let service = world.profile_service(false, false);
     match service.show(&name) {
         Ok(tool) => {
@@ -3156,12 +3156,12 @@ fn the_tool_is_shown(world: &mut BddWorld, name: String) {
 }
 
 #[then(regex = r#"^the offered tools are "([^"]+)"$"#)]
-fn the_offered_tools_are(world: &mut BddWorld, expected: String) {
+fn the_offered_tools_are(world: &mut SpecWorld, expected: String) {
     assert_same_set(&world.offered_tools, &expected);
 }
 
 #[then(regex = r#"^the offered tools do not include "([^"]+)"$"#)]
-fn offered_tools_do_not_include(world: &mut BddWorld, name: String) {
+fn offered_tools_do_not_include(world: &mut SpecWorld, name: String) {
     assert!(
         !world.offered_tools.iter().any(|n| n == &name),
         "{:?}",
@@ -3170,7 +3170,7 @@ fn offered_tools_do_not_include(world: &mut BddWorld, name: String) {
 }
 
 #[then("no default profile offers a staging or commit tool")]
-fn no_default_profile_offers_staging(world: &mut BddWorld) {
+fn no_default_profile_offers_staging(world: &mut SpecWorld) {
     let forbidden = [
         "scenario_add",
         "scenario_update",
@@ -3191,7 +3191,7 @@ fn no_default_profile_offers_staging(world: &mut BddWorld) {
 }
 
 #[then("command_run appears only for implement")]
-fn command_run_only_implement(world: &mut BddWorld) {
+fn command_run_only_implement(world: &mut SpecWorld) {
     for (caller, tools) in &world.profile_rows {
         let has = tools.iter().any(|t| t == "command_run");
         assert_eq!(has, caller == "implement", "{caller}");
@@ -3199,7 +3199,7 @@ fn command_run_only_implement(world: &mut BddWorld) {
 }
 
 #[then(regex = r#"^a tool warning contains "([^"]+)"$"#)]
-fn a_tool_warning_contains(world: &mut BddWorld, fragment: String) {
+fn a_tool_warning_contains(world: &mut SpecWorld, fragment: String) {
     assert!(
         world.tool_unknown.iter().any(|u| u.contains(&fragment))
             || world.tool_problems.iter().any(|p| p.contains(&fragment)),
@@ -3210,30 +3210,30 @@ fn a_tool_warning_contains(world: &mut BddWorld, fragment: String) {
 }
 
 #[then(regex = r#"^the config file contains "([^"]+)"$"#)]
-fn config_file_contains(world: &mut BddWorld, fragment: String) {
+fn config_file_contains(world: &mut SpecWorld, fragment: String) {
     let text = std::fs::read_to_string(world.project_root().join(CONFIG_FILE)).unwrap();
     assert!(text.contains(&fragment), "{text}");
 }
 
 #[then(regex = r#"^the tool error contains "([^"]+)"$"#)]
-fn the_tool_error_contains(world: &mut BddWorld, fragment: String) {
+fn the_tool_error_contains(world: &mut SpecWorld, fragment: String) {
     let error = world.tool_error.as_ref().expect("a tool error");
     assert!(error.contains(&fragment), "{error}");
 }
 
 #[then(regex = r#"^the profile for "([^"]+)" offers "([^"]+)"$"#)]
-fn profile_for_offers(world: &mut BddWorld, caller: String, expected: String) {
+fn profile_for_offers(world: &mut SpecWorld, caller: String, expected: String) {
     let tools = world.profile_rows.get(&caller).expect("profile");
     assert_same_set(tools, &expected);
 }
 
 #[then("discovery did not connect")]
-fn discovery_did_not_connect(world: &mut BddWorld) {
+fn discovery_did_not_connect(world: &mut SpecWorld) {
     assert_eq!(world.discovery_connects, 0);
 }
 
 #[then("discovery connected")]
-fn discovery_connected(world: &mut BddWorld) {
+fn discovery_connected(world: &mut SpecWorld) {
     assert!(
         world.discovery_connects > 0,
         "connects={}",
@@ -3242,7 +3242,7 @@ fn discovery_connected(world: &mut BddWorld) {
 }
 
 #[then(regex = r#"^the tools listed offline include "([^"]+)"$"#)]
-fn tools_listed_offline_include(world: &mut BddWorld, name: String) {
+fn tools_listed_offline_include(world: &mut SpecWorld, name: String) {
     let service = world.profile_service(false, false);
     let list = service.catalog(false, true);
     assert!(
@@ -3253,7 +3253,7 @@ fn tools_listed_offline_include(world: &mut BddWorld, name: String) {
 }
 
 #[then(regex = r#"^the tools listed include "([^"]+)"$"#)]
-fn tools_listed_include(world: &mut BddWorld, name: String) {
+fn tools_listed_include(world: &mut SpecWorld, name: String) {
     assert!(
         world.offered_tools.iter().any(|n| n == &name),
         "{:?}",
@@ -3262,7 +3262,7 @@ fn tools_listed_include(world: &mut BddWorld, name: String) {
 }
 
 #[then(regex = r#"^a tool problem contains "([^"]+)"$"#)]
-fn a_tool_problem_contains(world: &mut BddWorld, fragment: String) {
+fn a_tool_problem_contains(world: &mut SpecWorld, fragment: String) {
     assert!(
         world.tool_problems.iter().any(|p| p.contains(&fragment)),
         "{:?}",
@@ -3273,22 +3273,22 @@ fn a_tool_problem_contains(world: &mut BddWorld, fragment: String) {
 // agent loop
 
 #[given(regex = r#"^the agent may use "([^"]+)"$"#)]
-fn the_agent_may_use(world: &mut BddWorld, names: String) {
+fn the_agent_may_use(world: &mut SpecWorld, names: String) {
     world.agent_tools = split_names(&names);
 }
 
 #[given(regex = r#"^the tool "([^"]+)" returns "([^"]+)"$"#)]
-fn the_tool_returns(world: &mut BddWorld, name: String, text: String) {
+fn the_tool_returns(world: &mut SpecWorld, name: String, text: String) {
     world.agent_broker.insert(name, Ok((text, false)));
 }
 
 #[given(regex = r#"^the tool "([^"]+)" fails with "([^"]+)"$"#)]
-fn the_tool_fails_with(world: &mut BddWorld, name: String, text: String) {
+fn the_tool_fails_with(world: &mut SpecWorld, name: String, text: String) {
     world.agent_broker.insert(name, Err(text));
 }
 
 #[given(regex = r#"^the tool "([^"]+)" returns a reply larger than the model cap$"#)]
-fn the_tool_returns_oversized(world: &mut BddWorld, name: String) {
+fn the_tool_returns_oversized(world: &mut SpecWorld, name: String) {
     world.oversized_tool = true;
     world
         .agent_broker
@@ -3296,52 +3296,52 @@ fn the_tool_returns_oversized(world: &mut BddWorld, name: String) {
 }
 
 #[given(regex = r#"^the model will call "([^"]+)"$"#)]
-fn the_model_will_call(world: &mut BddWorld, name: String) {
+fn the_model_will_call(world: &mut SpecWorld, name: String) {
     world.agent_queue.push(QueuedTurn::Call(name));
 }
 
 #[given(regex = r#"^then the model will call "([^"]+)"$"#)]
-fn then_the_model_will_call(world: &mut BddWorld, name: String) {
+fn then_the_model_will_call(world: &mut SpecWorld, name: String) {
     world.agent_queue.push(QueuedTurn::Call(name));
 }
 
 #[given(regex = r#"^the model will answer "([^"]+)"$"#)]
-fn the_model_will_answer(world: &mut BddWorld, text: String) {
+fn the_model_will_answer(world: &mut SpecWorld, text: String) {
     world.agent_queue.push(QueuedTurn::Answer(text));
 }
 
 #[given(regex = r#"^then the model will answer "([^"]+)"$"#)]
-fn then_the_model_will_answer(world: &mut BddWorld, text: String) {
+fn then_the_model_will_answer(world: &mut SpecWorld, text: String) {
     world.agent_queue.push(QueuedTurn::Answer(text));
 }
 
 #[given(regex = r#"^the model call will fail with "([^"]+)"$"#)]
-fn the_model_call_will_fail(world: &mut BddWorld, message: String) {
+fn the_model_call_will_fail(world: &mut SpecWorld, message: String) {
     world.agent_queue.push(QueuedTurn::Fail(message));
 }
 
 #[given("command_run requires confirmation")]
-fn command_run_requires_confirmation(world: &mut BddWorld) {
+fn command_run_requires_confirmation(world: &mut SpecWorld) {
     world.agent_confirm_tools.push("command_run".into());
 }
 
 #[given("the developer will confirm")]
-fn the_developer_will_confirm(world: &mut BddWorld) {
+fn the_developer_will_confirm(world: &mut SpecWorld) {
     world.agent_confirms.push("y".into());
 }
 
 #[given("the developer will decline")]
-fn the_developer_will_decline(world: &mut BddWorld) {
+fn the_developer_will_decline(world: &mut SpecWorld) {
     world.agent_confirms.push("n".into());
 }
 
 #[given(regex = r#"^the agent allows (\d+) attempts$"#)]
-fn the_agent_allows_attempts(world: &mut BddWorld, n: u32) {
+fn the_agent_allows_attempts(world: &mut SpecWorld, n: u32) {
     world.agent_attempts = n;
 }
 
 #[given(regex = r#"^the agent allows (\d+) tool round$"#)]
-fn the_agent_allows_rounds(world: &mut BddWorld, n: u32) {
+fn the_agent_allows_rounds(world: &mut SpecWorld, n: u32) {
     world.agent_max_rounds = n;
 }
 
@@ -3413,7 +3413,7 @@ impl Prompter for ConfirmingPrompter {
     }
 }
 
-fn run_agent(world: &mut BddWorld, user: &str, fail: bool, nonsure: bool) {
+fn run_agent(world: &mut SpecWorld, user: &str, fail: bool, nonsure: bool) {
     let tools: Vec<ToolDefinition> = world
         .agent_tools
         .iter()
@@ -3466,7 +3466,7 @@ fn run_agent(world: &mut BddWorld, user: &str, fail: bool, nonsure: bool) {
         confirms: world.agent_confirms.iter().cloned().collect(),
         told: Vec::new(),
     };
-    let prompt = bdd_harness::domain::prompts::RenderedPrompt {
+    let prompt = spec_harness::domain::prompts::RenderedPrompt {
         section: "ask".into(),
         system: "answer".into(),
         user: user.into(),
@@ -3493,33 +3493,33 @@ fn run_agent(world: &mut BddWorld, user: &str, fail: bool, nonsure: bool) {
 }
 
 #[when(regex = r#"^the agent is asked "([^"]+)"$"#)]
-fn the_agent_is_asked(world: &mut BddWorld, task: String) {
+fn the_agent_is_asked(world: &mut SpecWorld, task: String) {
     let nonsure = world.agent_nonsure;
     run_agent(world, &task, false, nonsure);
 }
 
 #[when(regex = r#"^the agent is asked "([^"]+)" requiring a non-empty non-sure reply$"#)]
-fn the_agent_is_asked_nonsure(world: &mut BddWorld, task: String) {
+fn the_agent_is_asked_nonsure(world: &mut SpecWorld, task: String) {
     run_agent(world, &task, false, true);
 }
 
 #[when(regex = r#"^asking the agent "([^"]+)" requiring a non-empty non-sure reply fails$"#)]
-fn asking_agent_nonsure_fails(world: &mut BddWorld, task: String) {
+fn asking_agent_nonsure_fails(world: &mut SpecWorld, task: String) {
     run_agent(world, &task, true, true);
 }
 
 #[when(regex = r#"^asking the agent "([^"]+)" fails$"#)]
-fn asking_the_agent_fails(world: &mut BddWorld, task: String) {
+fn asking_the_agent_fails(world: &mut SpecWorld, task: String) {
     run_agent(world, &task, true, false);
 }
 
 #[then(regex = r#"^the agent answer is "([^"]+)"$"#)]
-fn the_agent_answer_is(world: &mut BddWorld, expected: String) {
+fn the_agent_answer_is(world: &mut SpecWorld, expected: String) {
     assert_eq!(world.agent_answer.as_deref(), Some(expected.as_str()));
 }
 
 #[then(regex = r#"^the agent was told a line containing "([^"]+)"$"#)]
-fn agent_told_contains(world: &mut BddWorld, fragment: String) {
+fn agent_told_contains(world: &mut SpecWorld, fragment: String) {
     assert!(
         world.agent_told.iter().any(|l| l.contains(&fragment)),
         "{:?}",
@@ -3528,20 +3528,20 @@ fn agent_told_contains(world: &mut BddWorld, fragment: String) {
 }
 
 #[then(regex = r#"^the agent error contains "([^"]+)"$"#)]
-fn agent_error_contains(world: &mut BddWorld, fragment: String) {
+fn agent_error_contains(world: &mut SpecWorld, fragment: String) {
     let error = world.agent_error.as_ref().expect("an agent error");
     assert!(error.contains(&fragment), "{error}");
 }
 
 #[then(regex = r#"^the model was offered only "([^"]+)"$"#)]
-fn model_was_offered_only(world: &mut BddWorld, expected: String) {
+fn model_was_offered_only(world: &mut SpecWorld, expected: String) {
     assert_same_set(&world.agent_offered, &expected);
 }
 
 // mcp call
 
 fn catalog_and_broker(
-    world: &mut BddWorld,
+    world: &mut SpecWorld,
 ) -> (Vec<ToolDefinition>, McpToolBroker<WorkflowServer>) {
     let root = world.project_root();
     let broker = McpToolBroker::new(WorkflowServer::new(root), vec![]);
@@ -3549,7 +3549,7 @@ fn catalog_and_broker(
 }
 
 #[when(regex = r#"^mcp call "([^"]+)"$"#)]
-fn mcp_call_named(world: &mut BddWorld, name: String) {
+fn mcp_call_named(world: &mut SpecWorld, name: String) {
     let (catalog, broker) = catalog_and_broker(world);
     world.call_sessions += 1;
     world.session_opened = true;
@@ -3565,7 +3565,7 @@ fn mcp_call_named(world: &mut BddWorld, name: String) {
 }
 
 #[when(regex = r#"^mcp call "([^"]+)" with arg "([^"]+)"$"#)]
-fn mcp_call_with_arg(world: &mut BddWorld, name: String, pair: String) {
+fn mcp_call_with_arg(world: &mut SpecWorld, name: String, pair: String) {
     let (key, value) = pair.split_once('=').expect("id=value");
     let arguments = ToolCallService::merge_arguments(None, &[(key.into(), value.into())]).unwrap();
     let (catalog, broker) = catalog_and_broker(world);
@@ -3577,19 +3577,19 @@ fn mcp_call_with_arg(world: &mut BddWorld, name: String, pair: String) {
 }
 
 #[when(regex = r#"^mcp call "([^"]+)" as json$"#)]
-fn mcp_call_as_json(world: &mut BddWorld, name: String) {
+fn mcp_call_as_json(world: &mut SpecWorld, name: String) {
     mcp_call_named(world, name);
 }
 
 #[when(regex = r#"^mcp arguments are merged from args '([^']+)' and arg "([^"]+)"$"#)]
-fn mcp_arguments_merged(world: &mut BddWorld, base: String, pair: String) {
+fn mcp_arguments_merged(world: &mut SpecWorld, base: String, pair: String) {
     let (key, value) = pair.split_once('=').expect("k=v");
     world.merged_args =
         Some(ToolCallService::merge_arguments(Some(&base), &[(key.into(), value.into())]).unwrap());
 }
 
 #[when(regex = r#"^preparing mcp call "([^"]+)" fails$"#)]
-fn preparing_mcp_call_fails(world: &mut BddWorld, name: String) {
+fn preparing_mcp_call_fails(world: &mut SpecWorld, name: String) {
     world.session_opened = false;
     world.tool_error = Some(
         ToolCallService::prepare(&builtin_defs(), &name, &serde_json::json!({}))
@@ -3599,7 +3599,7 @@ fn preparing_mcp_call_fails(world: &mut BddWorld, name: String) {
 }
 
 #[when(regex = r#"^preparing mcp call "([^"]+)" with no arguments fails$"#)]
-fn preparing_mcp_call_missing_args(world: &mut BddWorld, name: String) {
+fn preparing_mcp_call_missing_args(world: &mut SpecWorld, name: String) {
     world.session_opened = false;
     world.tool_error = Some(
         ToolCallService::prepare(&builtin_defs(), &name, &serde_json::json!({}))
@@ -3609,7 +3609,7 @@ fn preparing_mcp_call_missing_args(world: &mut BddWorld, name: String) {
 }
 
 #[when("mcp tools are listed over the wire")]
-fn mcp_tools_listed(world: &mut BddWorld) {
+fn mcp_tools_listed(world: &mut SpecWorld) {
     let (_catalog, broker) = catalog_and_broker(world);
     world.call_sessions += 1;
     world.listed_mcp_tools = broker
@@ -3621,28 +3621,28 @@ fn mcp_tools_listed(world: &mut BddWorld) {
 }
 
 #[then(regex = r#"^the tool reply contains "([^"]+)"$"#)]
-fn tool_reply_contains(world: &mut BddWorld, fragment: String) {
+fn tool_reply_contains(world: &mut SpecWorld, fragment: String) {
     let text = world.call_content.as_ref().expect("a tool reply");
     assert!(text.contains(&fragment), "{text}");
 }
 
 #[then("the tool reply is an error")]
-fn tool_reply_is_error(world: &mut BddWorld) {
+fn tool_reply_is_error(world: &mut SpecWorld) {
     assert!(world.call_is_error);
 }
 
 #[then("no MCP session was opened")]
-fn no_mcp_session_opened(world: &mut BddWorld) {
+fn no_mcp_session_opened(world: &mut SpecWorld) {
     assert!(!world.session_opened);
 }
 
 #[then(regex = r#"^(\d+) MCP sessions were opened$"#)]
-fn n_mcp_sessions(world: &mut BddWorld, n: usize) {
+fn n_mcp_sessions(world: &mut SpecWorld, n: usize) {
     assert_eq!(world.call_sessions, n);
 }
 
 #[then(regex = r#"^the JSON envelope names tool "([^"]+)"$"#)]
-fn json_envelope_names_tool(world: &mut BddWorld, name: String) {
+fn json_envelope_names_tool(world: &mut SpecWorld, name: String) {
     assert_eq!(
         world.call_json.as_ref().unwrap()["tool"].as_str(),
         Some(name.as_str())
@@ -3650,23 +3650,23 @@ fn json_envelope_names_tool(world: &mut BddWorld, name: String) {
 }
 
 #[then("the JSON envelope isError is false")]
-fn json_envelope_not_error(world: &mut BddWorld) {
+fn json_envelope_not_error(world: &mut SpecWorld) {
     assert_eq!(world.call_json.as_ref().unwrap()["isError"], false);
 }
 
 #[then(regex = r#"^the merged arguments contain array "([^"]+)"$"#)]
-fn merged_contains_array(world: &mut BddWorld, key: String) {
+fn merged_contains_array(world: &mut SpecWorld, key: String) {
     let args = world.merged_args.as_ref().expect("merged");
     assert!(args[&key].is_array(), "{args}");
 }
 
 #[then(regex = r#"^the merged argument "([^"]+)" is "([^"]+)"$"#)]
-fn merged_argument_is(world: &mut BddWorld, key: String, value: String) {
+fn merged_argument_is(world: &mut SpecWorld, key: String, value: String) {
     assert_eq!(world.merged_args.as_ref().unwrap()[&key], value);
 }
 
 #[then(regex = r#"^(\d+) MCP tools are listed$"#)]
-fn n_mcp_tools_listed(world: &mut BddWorld, n: usize) {
+fn n_mcp_tools_listed(world: &mut SpecWorld, n: usize) {
     assert_eq!(
         world.listed_mcp_tools.len(),
         n,
@@ -3676,7 +3676,7 @@ fn n_mcp_tools_listed(world: &mut BddWorld, n: usize) {
 }
 
 #[then(regex = r#"^the listed MCP tools include "([^"]+)"$"#)]
-fn listed_mcp_include(world: &mut BddWorld, name: String) {
+fn listed_mcp_include(world: &mut SpecWorld, name: String) {
     assert!(
         world.listed_mcp_tools.iter().any(|n| n == &name),
         "{:?}",
@@ -3687,19 +3687,19 @@ fn listed_mcp_include(world: &mut BddWorld, name: String) {
 // mcp servers
 
 #[when("the MCP registry is loaded")]
-fn mcp_registry_loaded(world: &mut BddWorld) {
+fn mcp_registry_loaded(world: &mut SpecWorld) {
     world.registry = Some(FsMcpRegistry::new(world.project_root(), None).load());
 }
 
 #[when(regex = r#"^the MCP registry is loaded from "([^"]+)"$"#)]
-fn mcp_registry_loaded_from(world: &mut BddWorld, path: String) {
+fn mcp_registry_loaded_from(world: &mut SpecWorld, path: String) {
     let absolute = world.project_root().join(&path);
     world.registry =
         Some(FsMcpRegistry::new(world.project_root(), Some(absolute.display().to_string())).load());
 }
 
 #[given("the registry JSON:")]
-fn the_registry_json(world: &mut BddWorld, step: &Step) {
+fn the_registry_json(world: &mut SpecWorld, step: &Step) {
     world.config_text = Some(
         step.docstring
             .clone()
@@ -3710,14 +3710,14 @@ fn the_registry_json(world: &mut BddWorld, step: &Step) {
 }
 
 #[when("the registry JSON is parsed")]
-fn the_registry_json_is_parsed(world: &mut BddWorld) {
+fn the_registry_json_is_parsed(world: &mut SpecWorld) {
     let json = world.config_text.clone().expect("registry JSON");
     let root = world.project_root().display().to_string();
     world.registry = Some(parse_registry(&json, &root, &|_| None));
 }
 
 #[then(regex = r#"^the registry path contains "([^"]+)"$"#)]
-fn registry_path_contains(world: &mut BddWorld, fragment: String) {
+fn registry_path_contains(world: &mut SpecWorld, fragment: String) {
     let path = world
         .registry
         .as_ref()
@@ -3729,7 +3729,7 @@ fn registry_path_contains(world: &mut BddWorld, fragment: String) {
 }
 
 #[then(regex = r#"^the registry lists server "([^"]+)"$"#)]
-fn registry_lists_server(world: &mut BddWorld, name: String) {
+fn registry_lists_server(world: &mut SpecWorld, name: String) {
     let load = world.registry.as_ref().unwrap();
     assert!(
         load.servers.iter().any(|s| s.name == name),
@@ -3739,7 +3739,7 @@ fn registry_lists_server(world: &mut BddWorld, name: String) {
 }
 
 #[then(regex = r#"^the registry does not list server "([^"]+)"$"#)]
-fn registry_does_not_list(world: &mut BddWorld, name: String) {
+fn registry_does_not_list(world: &mut SpecWorld, name: String) {
     let load = world.registry.as_ref().unwrap();
     assert!(
         !load.servers.iter().any(|s| s.name == name),
@@ -3749,12 +3749,12 @@ fn registry_does_not_list(world: &mut BddWorld, name: String) {
 }
 
 #[then("the registry lists no servers")]
-fn registry_lists_none(world: &mut BddWorld) {
+fn registry_lists_none(world: &mut SpecWorld) {
     assert!(world.registry.as_ref().unwrap().servers.is_empty());
 }
 
 #[then("the registry has no problems")]
-fn registry_has_no_problems(world: &mut BddWorld) {
+fn registry_has_no_problems(world: &mut SpecWorld) {
     assert!(
         world.registry.as_ref().unwrap().problems.is_empty(),
         "{:?}",
@@ -3763,7 +3763,7 @@ fn registry_has_no_problems(world: &mut BddWorld) {
 }
 
 #[then(regex = r#"^a registry problem contains "([^"]+)"$"#)]
-fn registry_problem_contains(world: &mut BddWorld, fragment: String) {
+fn registry_problem_contains(world: &mut SpecWorld, fragment: String) {
     let load = world.registry.as_ref().unwrap();
     assert!(
         load.problems.iter().any(|p| p.contains(&fragment)),
@@ -3773,7 +3773,7 @@ fn registry_problem_contains(world: &mut BddWorld, fragment: String) {
 }
 
 #[then(regex = r#"^the registry server "([^"]+)" argument contains the workspace folder$"#)]
-fn registry_server_arg_contains_root(world: &mut BddWorld, name: String) {
+fn registry_server_arg_contains_root(world: &mut SpecWorld, name: String) {
     let args = world
         .registry
         .as_ref()
@@ -3789,7 +3789,7 @@ fn registry_server_arg_contains_root(world: &mut BddWorld, name: String) {
 }
 
 #[then(regex = r#"^a registry problem contains "([^"]+)" or the servers have distinct names$"#)]
-fn registry_duplicate_or_distinct(world: &mut BddWorld, fragment: String) {
+fn registry_duplicate_or_distinct(world: &mut SpecWorld, fragment: String) {
     let load = world.registry.as_ref().unwrap();
     let distinct = {
         let mut names: Vec<_> = load.servers.iter().map(|s| s.name.clone()).collect();
@@ -3805,5 +3805,5 @@ fn registry_duplicate_or_distinct(world: &mut BddWorld, fragment: String) {
 }
 
 fn main() {
-    futures::executor::block_on(BddWorld::run("tests/features"));
+    futures::executor::block_on(SpecWorld::run("tests/features"));
 }

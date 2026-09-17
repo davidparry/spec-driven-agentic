@@ -1,8 +1,8 @@
 # Setting up the `spec-driven-server` MCP server in your agent
 
 The ready-to-run server entry lives in [config/mcp.json](../config/mcp.json).
-Put **`bdd` on PATH** first (`cargo install --path harness`, a GitHub release
-binary, or `harness/target/release/bdd`), then register the server with your
+Put **`spec` on PATH** first (`cargo install --path harness`, a GitHub release
+binary, or `harness/target/release/spec`), then register the server with your
 client of choice below. One thing to know before you copy:
 `${workspaceFolder}` is a Cursor variable — every other client needs it
 replaced with the **absolute path** to your repo clone.
@@ -10,7 +10,7 @@ replaced with the **absolute path** to your repo clone.
 The server itself is always the same command, whatever the client:
 
 ```bash
-bdd mcp serve --root /absolute/path/to/tdd-bdd-agentic
+spec mcp serve --root /absolute/path/to/tdd-bdd-agentic
 ```
 
 Cursor, `pi -nbt`, and the bundled `smoke-test.jar` all speak to this process
@@ -32,8 +32,8 @@ right, or `Cmd+Shift+J` on macOS / `Ctrl+Shift+J` on Windows/Linux), go to
 with its status — `spec-driven-server` should show green, and toggling it off/on
 restarts it.
 
-If it stays red, `bdd` is not on PATH for GUI apps. Launch Cursor from a
-terminal where `bdd --version` works, or put the absolute path to the
+If it stays red, `spec` is not on PATH for GUI apps. Launch Cursor from a
+terminal where `spec --version` works, or put the absolute path to the
 binary in `command`.
 
 - Docs: [Cursor — Model Context Protocol](https://cursor.com/docs/mcp)
@@ -73,14 +73,14 @@ from `config/mcp.json` into `claude_desktop_config.json`, replacing
 
 This repo already ships [`.mcp.json`](../.mcp.json) (the project-scoped
 server list Claude Code reads) and [`.claude/settings.json`](../.claude/settings.json)
-(approves `spec-driven-server` after you trust the folder). `bdd` must be
+(approves `spec-driven-server` after you trust the folder). `spec` must be
 on PATH. In a Claude Code session, trust the workspace if prompted, then
 confirm with `/mcp`.
 
 To register the same server in another clone without those files:
 
 ```bash
-claude mcp add spec-driven-server --scope project -- bdd mcp serve --root "${CLAUDE_PROJECT_DIR:-$PWD}"
+claude mcp add spec-driven-server --scope project -- spec mcp serve --root "${CLAUDE_PROJECT_DIR:-$PWD}"
 ```
 
 - Docs: [Claude Code — MCP](https://code.claude.com/docs/en/mcp)
@@ -92,11 +92,11 @@ project's `.codex/config.toml`):
 
 ```toml
 [mcp_servers.spec-driven-server]
-command = "bdd"
+command = "spec"
 args = ["mcp", "serve", "--root", "/absolute/path/to/tdd-bdd-agentic"]
 ```
 
-Or use the harness: `codex mcp add spec-driven-server -- bdd mcp serve --root "$PWD"`.
+Or use the harness: `codex mcp add spec-driven-server -- spec mcp serve --root "$PWD"`.
 
 - Docs: [Codex — Model Context Protocol](https://developers.openai.com/codex/mcp)
 
@@ -110,7 +110,7 @@ Create `.vscode/mcp.json` in the project. Note VS Code's top-level key is
   "servers": {
     "spec-driven-server": {
       "type": "stdio",
-      "command": "bdd",
+      "command": "spec",
       "args": ["mcp", "serve", "--root", "${workspaceFolder}"]
     }
   }
@@ -127,7 +127,7 @@ config, with an absolute `--root`.
 ## Gemini CLI
 
 ```bash
-gemini mcp add spec-driven-server bdd -- mcp serve --root "$PWD"
+gemini mcp add spec-driven-server spec -- mcp serve --root "$PWD"
 ```
 
 - Docs: [Gemini CLI — MCP servers](https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-server.md)
@@ -135,5 +135,5 @@ gemini mcp add spec-driven-server bdd -- mcp serve --root "$PWD"
 ## MCP Inspector (backup)
 
 ```bash
-npx @modelcontextprotocol/inspector bdd mcp serve --root "$PWD"
+npx @modelcontextprotocol/inspector spec mcp serve --root "$PWD"
 ```

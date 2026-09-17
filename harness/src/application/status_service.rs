@@ -1,4 +1,4 @@
-//! `bdd status`: the workflow query aggregating the TDD phase, the
+//! `spec status`: the workflow query aggregating the TDD phase, the
 //! staging area, and every requirement's asset gaps into the one next
 //! step that moves the project toward all requirements implemented.
 //! The report itself is deterministic reading; when a model is
@@ -31,7 +31,7 @@ pub struct RequirementStatus {
     pub staged: bool,
 }
 
-/// Reply of `bdd status`: the TDD phase, what waits in staging, every
+/// Reply of `spec status`: the TDD phase, what waits in staging, every
 /// requirement's position, and the one next step that moves the
 /// project toward all requirements implemented.
 #[derive(Debug, Serialize, PartialEq, Eq)]
@@ -138,26 +138,26 @@ where
         }
         let next_step = if !staged.is_empty() {
             format!(
-                "{} staged file(s) await review - inspect with bdd changes show, \
-                 apply with bdd changes commit, then run bdd test.",
+                "{} staged file(s) await review - inspect with spec changes show, \
+                 apply with spec changes commit, then run spec test.",
                 staged.len()
             )
         } else if let Some(id) = in_flight {
             if phase == "GREEN" {
                 format!(
-                    "The bar is GREEN - close the loop: bdd spec mark-implemented \
-                     {id}, then bdd validate, then bdd changes commit."
+                    "The bar is GREEN - close the loop: spec mark-implemented \
+                     {id}, then spec changes validate, then spec changes commit."
                 )
             } else {
                 format!(
                     "{id} has every asset in place and the bar is {phase} - run \
-                     bdd test; on RED let the model try with bdd implement {id}."
+                     spec test; on RED let the model try with spec implement {id}."
                 )
             }
         } else if let Some(gap) = first_gap {
             gap
         } else {
-            "Every requirement is implemented. Draft the next one with bdd spec draft.".to_string()
+            "Every requirement is implemented. Draft the next one with spec draft.".to_string()
         };
         Ok(StatusReport {
             phase: phase.to_string(),
@@ -268,7 +268,7 @@ mod tests {
             "next step: {}",
             report.next_step
         );
-        assert!(report.next_step.contains("bdd changes commit"));
+        assert!(report.next_step.contains("spec changes commit"));
     }
 
     #[test]
@@ -276,18 +276,16 @@ mod tests {
         let service = service(vec![covered_steps_source(), unit_test_source()]);
         let report = service.status("GREEN").unwrap();
         assert!(
-            report
-                .next_step
-                .contains("bdd spec mark-implemented REQ-001"),
+            report.next_step.contains("spec mark-implemented REQ-001"),
             "next step: {}",
             report.next_step
         );
         assert!(
-            report.next_step.contains("then bdd validate"),
+            report.next_step.contains("then spec changes validate"),
             "validate is part of the chain: {}",
             report.next_step
         );
-        assert!(report.next_step.contains("then bdd changes commit"));
+        assert!(report.next_step.contains("then spec changes commit"));
         let by_id = |id: &str| report.requirements.iter().find(|r| r.id == id).unwrap();
         assert!(by_id("REQ-001").findings.is_empty(), "REQ-001 is in flight");
         assert!(!by_id("REQ-002").findings.is_empty(), "REQ-002 has gaps");
@@ -300,18 +298,18 @@ mod tests {
         let service = service(vec![covered_steps_source(), unit_test_source()]);
         let report = service.status("RED").unwrap();
         assert!(
-            report.next_step.contains("run bdd test"),
+            report.next_step.contains("run spec test"),
             "next step: {}",
             report.next_step
         );
-        assert!(report.next_step.contains("bdd implement REQ-001"));
+        assert!(report.next_step.contains("spec implement REQ-001"));
     }
 
     #[test]
     fn status_names_the_earliest_gap_when_nothing_is_in_flight() {
         let report = service(vec![]).status("START").unwrap();
         assert!(
-            report.next_step.contains("bdd steps generate"),
+            report.next_step.contains("spec steps generate"),
             "REQ-001's first gap leads: {}",
             report.next_step
         );
@@ -342,7 +340,7 @@ mod tests {
         let report = service.status("GREEN").unwrap();
         assert_eq!(
             report.next_step,
-            "Every requirement is implemented. Draft the next one with bdd spec draft."
+            "Every requirement is implemented. Draft the next one with spec draft."
         );
     }
 
@@ -372,7 +370,7 @@ mod tests {
         let service = service_with_llm(
             vec![],
             Some(FakeLlm::replying(
-                "Run bdd steps generate, then bdd changes commit.",
+                "Run spec steps generate, then spec changes commit.",
             )),
         );
         assert!(service.has_model());
@@ -393,7 +391,7 @@ mod tests {
             )
             .unwrap()
             .unwrap();
-        assert_eq!(advice, "Run bdd steps generate, then bdd changes commit.");
+        assert_eq!(advice, "Run spec steps generate, then spec changes commit.");
         let prompts = service.llm.as_ref().unwrap().chat().prompts.borrow();
         assert!(
             prompts[0].contains("THE LOOP FOR ONE REQUIREMENT"),

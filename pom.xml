@@ -12,7 +12,7 @@
     <name>Spec-Driven with Harness - TDD and BDD in the Agentic Era</name>
     <description>
         A 60-minute hands-on workshop: drive a spec-driven development
-        workflow spanning SDD, BDD, and TDD. The MCP server is `bdd mcp serve`;
+        workflow spanning SDD, BDD, and TDD. The MCP server is `spec mcp serve`;
         this reactor is the Java MCP-server smoke test (`smoke-test.jar`) plus the
         standalone kata.
     </description>

@@ -3,12 +3,12 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>bdd init - bdd Harness Manual</title>
+        <title>spec init - spec Harness Manual</title>
 
 
         <!-- Custom HTML head -->
 
-        <meta name="description" content="The complete, searchable reference for the bdd harness: every command, subcommand, and flag, with in-depth examples.">
+        <meta name="description" content="The complete, searchable reference for the spec harness: every command, subcommand, and flag, with in-depth examples.">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff">
 
@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-aaad9ee5.js";
+            window.path_to_searchindex_js = "../searchindex-5959f77b.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-9d4e1520.js"></script>
+        <script src="../toc-372d77fe.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -137,7 +137,7 @@
                         </button>
                     </div>
 
-                    <h1 class="menu-title">bdd Harness Manual</h1>
+                    <h1 class="menu-title">spec Harness Manual</h1>
 
                     <div class="right-buttons">
                         <a href="../print.html" title="Print this book" aria-label="Print this book">
@@ -180,11 +180,11 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="bdd-init"><a class="header" href="#bdd-init">bdd init</a></h1>
+                        <h1 id="spec-init"><a class="header" href="#spec-init">spec init</a></h1>
 <p>Scaffold build files, a Cucumber runner, an empty requirements spec,
 and the harness’s configuration in the project root. Existing files are
 never overwritten — they are reported as skipped.</p>
-<pre><code class="language-text">Usage: bdd init [OPTIONS]
+<pre><code class="language-text">Usage: spec init [OPTIONS]
 </code></pre>
 <h2 id="flags"><a class="header" href="#flags">Flags</a></h2>
 <div class="table-wrapper">
@@ -206,13 +206,13 @@ never overwritten — they are reported as skipped.</p>
 <li><code>requirements/requirements.json</code> — an empty, valid spec. It is also
 the root of the <a href="../spec-format.html">spec catalog</a>: split the backlog
 into included files later with
-<a href="spec.html#bdd-spec-include"><code>bdd spec include add</code></a>.</li>
-<li><code>.bdd.toml</code> — the harness configuration (LLM, timeouts, per-command
-tool profiles). <code>bdd init</code> writes <code>[tools.profiles]</code> with the tools
+<a href="spec.html#spec-include"><code>spec include add</code></a>.</li>
+<li><code>.spec.toml</code> — the harness configuration (LLM, timeouts, per-command
+tool profiles). <code>spec init</code> writes <code>[tools.profiles]</code> with the tools
 each LLM-backed command offers the model (the code defaults, listed
 for reference). Other keys are commented with their defaults.</li>
 </ul>
-<p>After scaffolding, <code>init</code> scans the new files into <code>.bdd-memory.json</code>
+<p>After scaffolding, <code>init</code> scans the new files into <code>.spec-memory.json</code>
 (language, BDD framework, libraries, layout). That file is committed
 with the project; it is refreshed again when a shell, MCP server, or
 LLM command starts. Every model system prompt then opens with that
@@ -235,25 +235,25 @@ brief.</p>
 <h2 id="examples"><a class="header" href="#examples">Examples</a></h2>
 <p>Scaffold a Rust kata in a fresh directory:</p>
 <pre><code class="language-bash">mkdir calculator &amp;&amp; cd calculator
-bdd init --language rust --name "String Calculator"
+spec init --language rust --name "String Calculator"
 </code></pre>
 <pre><code class="language-json">{
   "language": "rust",
   "framework": "cucumber-rs",
   "created": [
     "requirements/requirements.json",
-    ".bdd.toml",
+    ".spec.toml",
     "Cargo.toml",
     "src/lib.rs",
     "tests/cucumber.rs",
     "features/.gitkeep"
   ],
   "skipped": [],
-  "nextStep": "Draft your first requirement with 'bdd spec draft', then 'bdd spec validate'."
+  "nextStep": "Draft your first requirement with 'spec draft', then 'spec validate'."
 }
 </code></pre>
 <p>Re-running is safe — everything that already exists is skipped:</p>
-<pre><code class="language-bash">bdd init --language rust
+<pre><code class="language-bash">spec init --language rust
 </code></pre>
 <pre><code class="language-json">{
   "language": "rust",
@@ -261,13 +261,13 @@ bdd init --language rust --name "String Calculator"
   "created": [],
   "skipped": [
     "requirements/requirements.json",
-    ".bdd.toml",
+    ".spec.toml",
     "Cargo.toml",
     "src/lib.rs",
     "tests/cucumber.rs",
     "features/.gitkeep"
   ],
-  "nextStep": "Draft your first requirement with 'bdd spec draft', then 'bdd spec validate'."
+  "nextStep": "Draft your first requirement with 'spec draft', then 'spec validate'."
 }
 </code></pre>
 <p>Omit <code>--language</code> and the harness prompts with the supported list; an
@@ -278,13 +278,13 @@ unrecognized answer re-prompts.</p>
 protect in an empty project); everything after <code>init</code> goes through
 <a href="../staged-changes.html">staged changes</a>.</li>
 <li><code>init</code> does not install runtimes. Run
-<a href="inspect.html"><code>bdd inspect</code></a> to see whether the language’s runtime is
-present before expecting <code>bdd test</code> to execute.</li>
+<a href="inspect.html"><code>spec inspect</code></a> to see whether the language’s runtime is
+present before expecting <code>spec test</code> to execute.</li>
 </ul>
 <h2 id="see-also"><a class="header" href="#see-also">See also</a></h2>
 <ul>
-<li><a href="greenfield.html"><code>bdd greenfield</code></a> — runs <code>init</code> as its first move.</li>
-<li><a href="spec.html#bdd-spec-draft"><code>bdd spec draft</code></a> — the natural next step.</li>
+<li><a href="greenfield.html"><code>spec greenfield</code></a> — runs <code>init</code> as its first move.</li>
+<li><a href="spec.html#spec-draft"><code>spec draft</code></a> — the natural next step.</li>
 </ul>
 
                     </main>

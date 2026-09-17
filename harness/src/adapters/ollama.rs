@@ -36,7 +36,7 @@ pub(crate) fn describe(error: &reqwest::Error, timeout: Duration) -> String {
         return format!(
             "no reply within {}s - large prompts can outlast the timeout while \
              the model is still generating; set timeout_seconds under [llm] in \
-             .bdd.toml to wait longer",
+             .spec.toml to wait longer",
             timeout.as_secs()
         );
     }

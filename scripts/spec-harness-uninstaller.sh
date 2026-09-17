@@ -1,15 +1,15 @@
 #!/bin/sh
-# Uninstaller for bdd-harness.
+# Uninstaller for spec-harness.
 #
-# Reads the install receipt written by bdd-harness-installer.sh, removes the
+# Reads the install receipt written by spec-harness-installer.sh, removes the
 # installed binaries and the receipt, and reports anything it leaves behind.
 #
 # Usage:
-#   ./bdd-harness-uninstaller.sh        # asks for confirmation
-#   ./bdd-harness-uninstaller.sh -y     # no confirmation prompt
+#   ./spec-harness-uninstaller.sh        # asks for confirmation
+#   ./spec-harness-uninstaller.sh -y     # no confirmation prompt
 set -u
 
-APP_NAME="bdd-harness"
+APP_NAME="spec-harness"
 
 say() { echo "$1"; }
 err() {

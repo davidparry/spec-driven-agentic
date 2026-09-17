@@ -1,12 +1,12 @@
 Feature: The smoke test plans and sweeps all 25 MCP tools
-  The Java smoke test is an independent conformance harness against bdd mcp serve.
+  The Java smoke test is an independent conformance harness against spec mcp serve.
   ToolPlan is the data; ToolSweep is the driver; these scenarios are CLI-007
   through CLI-011 in executable form.
 
   @CLI-007
-  Scenario: ServerLaunch.bdd starts bdd mcp serve against the workshop root
-    When a bdd launch is built for root "/tmp/workshop" and binary "/usr/bin/bdd"
-    Then the launch program is "/usr/bin/bdd"
+  Scenario: ServerLaunch.spec starts spec mcp serve against the workshop root
+    When a spec launch is built for root "/tmp/workshop" and binary "/usr/bin/spec"
+    Then the launch program is "/usr/bin/spec"
     And the launch args are "mcp", "serve", "--root", "/tmp/workshop"
 
   @CLI-008

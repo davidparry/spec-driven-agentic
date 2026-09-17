@@ -5,19 +5,13 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::domain::STAGED_DIR;
 use crate::domain::feature::FeatureDoc;
 use crate::ports::{FeatureCatalog, FeatureError};
 use crate::workspace::feature_search_root;
 
 /// Directories that never contain authored feature files.
-const SKIPPED_DIRS: [&str; 6] = [
-    "target",
-    "node_modules",
-    "bin",
-    "obj",
-    ".git",
-    ".bdd-staged",
-];
+const SKIPPED_DIRS: [&str; 6] = ["target", "node_modules", "bin", "obj", ".git", STAGED_DIR];
 
 pub struct GherkinFeatureCatalog {
     root: PathBuf,

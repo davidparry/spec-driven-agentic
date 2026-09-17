@@ -279,7 +279,7 @@ pub struct ImplementAsset {
 
 /// The strict instructions for a workflow advice call: given the
 /// requirement, the preflight findings, the asset survey, and the last
-/// failures, the model says whether `bdd implement` can succeed right
+/// failures, the model says whether `spec implement` can succeed right
 /// now and names the exact next command to run. Rendered from the
 /// `[advice]` templates.
 pub fn advice_prompt(
@@ -1461,7 +1461,7 @@ io.cucumber.junit.platform.engine.UndefinedStepException: The step 'the result i
         let prompt = advice_prompt(
             Language::Java,
             &requirement(),
-            &["The unit test does not exist - run bdd unittest generate REQ-001.".into()],
+            &["The unit test does not exist - run spec unittest generate REQ-001.".into()],
             &assets,
             &["Req001Test.case: TODO: assert".into()],
         );
@@ -1483,7 +1483,7 @@ io.cucumber.junit.platform.engine.UndefinedStepException: The step 'the result i
         );
         assert!(prompt.user.contains("- Req001Test.case: TODO: assert"));
         assert!(prompt.system.contains("at most four short sentences"));
-        assert!(prompt.system.contains("bdd unittest generate <REQ-ID>"));
+        assert!(prompt.system.contains("spec unittest generate <REQ-ID>"));
         assert!(
             prompt.system.contains("THE LOOP FOR ONE REQUIREMENT"),
             "the workflow process briefs the advice call"

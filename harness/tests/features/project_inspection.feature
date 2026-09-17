@@ -1,5 +1,5 @@
 # Executable spec for project inspection — language detection from
-# marker files and runtime gating (the behavior of `bdd inspect`).
+# marker files and runtime gating (the behavior of `spec inspect`).
 Feature: Project inspection
   As a developer pointing the harness at a project
   I want its ecosystems detected and each runtime's presence reported

@@ -1,15 +1,15 @@
-# bdd harness configuration.
+# spec harness configuration.
 #
 # Keys left commented use the defaults shown. Uncomment to override.
 # [tools.profiles] is the tools each command offers the model.
 
 [llm]
-# Persisted by `bdd model use`. Flag `--model` wins for one run.
+# Persisted by `spec model use`. Flag `--model` wins for one run.
 model = "qwen3.8-flash-next:125b-mlx"
 endpoint = "http://localhost:11434"
 # Generation timeout; large prompts on local models can need more.
 timeout_seconds = 900
-# Identical requests reuse the cached response in .bdd-cache/
+# Identical requests reuse the cached response in .spec-cache/
 # for this many seconds; 0 disables the cache.
 cache_ttl_seconds = 600
 # How many times to try a model call when the reply fails
@@ -26,7 +26,7 @@ cache_ttl_seconds = 600
 # discovery_timeout_seconds = 10
 # How long one tool invocation may take.
 # call_timeout_seconds = 300
-# How long discovered mcp.json tool lists stay cached under .bdd-cache/tools/.
+# How long discovered mcp.json tool lists stay cached under .spec-cache/tools/.
 # cache_ttl_seconds = 86400
 # Optional path to an mcp.json (otherwise the usual candidates are tried).
 # mcp_config = "mcp.json"
@@ -40,25 +40,25 @@ cache_ttl_seconds = 600
 #   playwright:browser_navigate   — mcp.json server "playwright"
 #   playwright__browser_navigate  — same MCP tool (catalog name)
 #
-# Add an MCP server in mcp.json, then `bdd tools refresh`, then put
+# Add an MCP server in mcp.json, then `spec tools refresh`, then put
 # `server:tool` (or `server__tool`) on the command that should use it.
 
 [tools.profiles]
-# bdd spec draft
+# spec draft
 spec-draft = ["list_requirements", "get_requirement", "validate_spec", "refine_requirement"]
-# bdd spec reword
+# spec reword
 spec-reword = ["get_requirement", "validate_spec", "refine_requirement"]
-# bdd steps generate
+# spec steps generate
 steps-generate = ["project_inspect", "feature_list", "feature_read", "step_definitions_find"]
-# bdd unittest generate
+# spec unittest generate
 unittest-generate = ["project_inspect", "get_requirement", "feature_read", "step_definitions_find"]
-# bdd implement (preflight advice)
+# spec implement (preflight advice)
 implement-advice = ["get_tdd_state", "validate_spec", "feature_list", "changes_show", "changes_validate"]
-# bdd implement
+# spec implement
 implement = ["get_requirement", "feature_read", "step_definitions_find", "get_tdd_state", "run_tests", "command_run", "changes_show"]
-# bdd status
+# spec status
 status = ["project_root", "list_requirements", "get_requirement", "get_tdd_state", "validate_spec", "changes_show", "changes_validate"]
-# bdd ask
+# spec ask
 ask = ["project_root", "list_requirements", "get_requirement", "validate_spec", "refine_requirement", "get_tdd_state", "project_inspect", "feature_list", "feature_read", "step_definitions_find", "changes_show", "changes_validate"]
 # Extra tools attached on top of the default or profiles list.
 # [tools.enabled]

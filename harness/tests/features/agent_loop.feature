@@ -1,5 +1,5 @@
 Feature: The tool-calling agent loop
-  As a developer running an LLM-backed bdd command
+  As a developer running an LLM-backed spec command
   I want the model to look things up through its profile and retry invalid answers
   So that a tool result can change the answer without escaping the command's tools
 

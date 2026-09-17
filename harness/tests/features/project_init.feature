@@ -1,4 +1,4 @@
-# Executable spec for `bdd init` — the per-language scaffold that is
+# Executable spec for `spec init` — the per-language scaffold that is
 # safe to re-run because existing files are skipped, never overwritten.
 Feature: Project initialization
   As a developer starting a spec-driven project in an empty directory
@@ -11,11 +11,11 @@ Feature: Project initialization
     And 6 scaffold files are created and 0 are skipped
     And the working tree file "pom.xml" contains "string-calculator"
     And the working tree file "requirements/requirements.json" contains "String Calculator"
-    And the working tree file ".bdd.toml" contains "http://localhost:11434"
-    And the working tree file ".bdd.toml" contains "[tools.profiles]"
-    And the working tree file ".bdd.toml" contains "implement = ["
-    And the working tree file ".bdd.toml" contains "command_run"
-    And the init next step mentions "bdd spec draft"
+    And the working tree file ".spec.toml" contains "http://localhost:11434"
+    And the working tree file ".spec.toml" contains "[tools.profiles]"
+    And the working tree file ".spec.toml" contains "implement = ["
+    And the working tree file ".spec.toml" contains "command_run"
+    And the init next step mentions "spec draft"
 
   Scenario: A fresh directory gets the Rust scaffold
     When the project is initialized for "rust" named "String Calculator"

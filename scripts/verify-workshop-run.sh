@@ -37,7 +37,7 @@ cmd_start() {
     git checkout -b "$branch" "$BASE_BRANCH"
     echo
     echo "On new branch '$branch' (cut from ${BASE_BRANCH})."
-    echo "Next: bdd --version && scripts/preflight.sh, then run the exercises."
+    echo "Next: spec --version && scripts/preflight.sh, then run the exercises."
     echo "When done: scripts/verify-workshop-run.sh check"
 }
 
@@ -61,12 +61,12 @@ def local(path):
     with open(os.path.join(root, path)) as f:
         return f.read()
 
-def bdd(*args):
-    """Ask the bdd harness, so Exercise 1 is graded by the same deterministic
-    validator and refiner the workshop tools use. None when bdd is missing
+def harness(*args):
+    """Ask the spec harness, so Exercise 1 is graded by the same deterministic
+    validator and refiner the workshop tools use. None when spec is missing
     or did not answer with JSON."""
     try:
-        out = subprocess.run(["bdd", "spec", *args, "--root", root],
+        out = subprocess.run(["spec", *args, "--root", root],
                              capture_output=True, text=True, check=True).stdout
         return json.loads(out)
     except (OSError, subprocess.CalledProcessError, json.JSONDecodeError):
@@ -93,16 +93,16 @@ r7 = req(spec, "REQ-007")
 report(r7 is not None, "REQ-007 was drafted into the spec",
        "missing - Exercise 1 drafts it")
 
-validation = bdd("validate")
+validation = harness("validate")
 report(validation is not None and validation.get("valid") is True,
        "the spec is valid",
-       "; ".join(validation["issues"]) if validation else "bdd is not on PATH - see scripts/preflight.sh")
+       "; ".join(validation["issues"]) if validation else "spec is not on PATH - see scripts/preflight.sh")
 
 if r7 is not None:
-    refinement = bdd("refine", "REQ-007")
+    refinement = harness("refine", "REQ-007")
     report(refinement is not None and refinement.get("clean") is True,
            "REQ-007 wording is refine-clean",
-           "; ".join(refinement["findings"]) if refinement else "bdd is not on PATH - see scripts/preflight.sh")
+           "; ".join(refinement["findings"]) if refinement else "spec is not on PATH - see scripts/preflight.sh")
     report(any("//" in c for c in r7.get("acceptanceCriteria", [])),
            "REQ-007 covers the first-line delimiter declaration",
            'no criterion mentions the "//" declaration Exercise 1 asks for')
@@ -110,7 +110,7 @@ if r7 is not None:
 # ---- Exercise 2: REQ-003 taken to green ---------------------------------
 # Graded like Exercise 1: the scenarios and the unit test have to cover
 # REQ-003's own acceptance criteria, in whatever words the run chose. A
-# recorded solution cannot be the bar here either - `bdd unittest generate`
+# recorded solution cannot be the bar here either - `spec unittest generate`
 # names one method per criterion, so no harness-driven run would ever
 # reproduce a hand-written method name. Status `implemented` already carries
 # the green bar, since mark-implemented refuses off GREEN.

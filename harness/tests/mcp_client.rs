@@ -1,14 +1,14 @@
-//! Child-process success path: register `CARGO_BIN_EXE_bdd mcp serve` as
+//! Child-process success path: register `CARGO_BIN_EXE_spec mcp serve` as
 //! an external MCP server and list/call through [`McpToolBroker`].
 
 use std::fs;
 
-use bdd_harness::adapters::mcp_client::McpToolBroker;
-use bdd_harness::domain::mcp_registry::ServerSpec;
-use bdd_harness::mcp::WorkflowServer;
-use bdd_harness::ports::{ToolBroker, ToolDiscovery};
+use spec_harness::adapters::mcp_client::McpToolBroker;
+use spec_harness::domain::mcp_registry::ServerSpec;
+use spec_harness::mcp::WorkflowServer;
+use spec_harness::ports::{ToolBroker, ToolDiscovery};
 
-const BDD: &str = env!("CARGO_BIN_EXE_bdd");
+const SPEC: &str = env!("CARGO_BIN_EXE_spec");
 
 fn project() -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
@@ -24,7 +24,7 @@ fn project() -> tempfile::TempDir {
 fn self_spec(root: &std::path::Path) -> ServerSpec {
     ServerSpec {
         name: "self".into(),
-        program: BDD.into(),
+        program: SPEC.into(),
         args: vec![
             "mcp".into(),
             "serve".into(),

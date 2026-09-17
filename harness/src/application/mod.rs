@@ -26,7 +26,7 @@ use crate::ports::{LlmConversation, LlmError};
 
 /// How many times a model call is tried when the reply fails
 /// validation. Overridden by `--retry` or `[llm] retry` in
-/// `.bdd.toml`.
+/// `.spec.toml`.
 pub const DEFAULT_LLM_ATTEMPTS: u32 = DEFAULT_LLM_RETRY as u32;
 
 /// A model round trip that either never reached a reply, or whose

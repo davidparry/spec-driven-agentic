@@ -1,4 +1,4 @@
-//! The interactive shell loop behind bare `bdd`: read a line, split it
+//! The interactive shell loop behind bare `spec`: read a line, split it
 //! shell-style, hand the tokens to the command dispatcher, repeat.
 //! `exit`, `quit`, Ctrl+C, or Ctrl+D end the session; the history is
 //! saved on the way out so the next shell can resume it. The dispatcher
@@ -6,7 +6,7 @@
 
 use crate::ports::{InteractiveShell, ShellLine};
 
-pub const SHELL_PROMPT: &str = "bdd> ";
+pub const SHELL_PROMPT: &str = "spec> ";
 
 /// Why the session ended and how much happened - enough for the caller
 /// to say goodbye accurately and for tests to pin the loop's behavior.
@@ -47,14 +47,14 @@ pub fn offer_greenfield(shell: &mut dyn InteractiveShell, dispatch: &mut dyn FnM
             dispatch(vec!["greenfield".into()]);
         }
         _ => shell.tell(
-            "No problem - type greenfield any time, or spec draft to begin \
+            "No problem - type greenfield any time, or draft to begin \
              with the spec.",
         ),
     }
 }
 
 /// Run the shell until the session ends. Every non-empty line that is
-/// not `exit`/`quit` is tokenized and dispatched; a leading `bdd` token
+/// not `exit`/`quit` is tokenized and dispatched; a leading `spec` token
 /// is forgiven so pasted one-shot commands still work.
 pub fn run_shell(
     shell: &mut dyn InteractiveShell,
@@ -77,7 +77,7 @@ pub fn run_shell(
                 match shell_words::split(line) {
                     Err(error) => shell.tell(&format!("unreadable input - {error}")),
                     Ok(mut tokens) => {
-                        if tokens.first().map(String::as_str) == Some("bdd") {
+                        if tokens.first().map(String::as_str) == Some("spec") {
                             tokens.remove(0);
                         }
                         if tokens.is_empty() {
@@ -141,7 +141,7 @@ mod tests {
         fn save_session(&mut self) -> Result<(), ShellError> {
             self.saves += 1;
             if self.save_fails {
-                Err(ShellError(".bdd-history is not writable - boom".into()))
+                Err(ShellError(".spec-history is not writable - boom".into()))
             } else {
                 Ok(())
             }
@@ -155,7 +155,7 @@ mod tests {
     }
 
     #[test]
-    fn commands_run_without_the_bdd_prefix_until_exit() {
+    fn commands_run_without_the_spec_prefix_until_exit() {
         let mut shell = FakeShell::reading(vec![
             FakeShell::line("spec list"),
             FakeShell::line("state"),
@@ -169,7 +169,7 @@ mod tests {
                 ending: Ending::Exit
             }
         );
-        assert_eq!(dispatched, vec![vec!["spec", "list"], vec!["state"]]);
+        assert_eq!(dispatched, vec![vec!["list"], vec!["state"]]);
         assert_eq!(shell.saves, 1, "the session is saved on the way out");
         assert!(
             shell.prompts.iter().all(|p| p == SHELL_PROMPT),
@@ -245,14 +245,12 @@ mod tests {
     }
 
     #[test]
-    fn a_leading_bdd_token_is_forgiven() {
-        let mut shell = FakeShell::reading(vec![
-            FakeShell::line("bdd spec list"),
-            FakeShell::line("quit"),
-        ]);
+    fn a_leading_spec_token_is_forgiven() {
+        let mut shell =
+            FakeShell::reading(vec![FakeShell::line("spec list"), FakeShell::line("quit")]);
         let (summary, dispatched) = run(&mut shell);
         assert_eq!(summary.ending, Ending::Exit);
-        assert_eq!(dispatched, vec![vec!["spec", "list"]]);
+        assert_eq!(dispatched, vec![vec!["list"]]);
     }
 
     #[test]
@@ -278,11 +276,11 @@ mod tests {
     }
 
     #[test]
-    fn blank_lines_and_a_lone_bdd_are_skipped() {
+    fn blank_lines_and_a_lone_spec_are_skipped() {
         let mut shell = FakeShell::reading(vec![
             FakeShell::line(""),
             FakeShell::line("   "),
-            FakeShell::line("bdd"),
+            FakeShell::line("spec"),
             FakeShell::line("exit"),
         ]);
         let (summary, dispatched) = run(&mut shell);

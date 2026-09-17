@@ -1,10 +1,10 @@
-# bdd config
+# spec config
 
 Print every configuration key the harness uses and whether the value is a
-code **default** or was read from the project file (`.bdd.toml`).
+code **default** or was read from the project file (`.spec.toml`).
 
 ```text
-Usage: bdd config [OPTIONS]
+Usage: spec config [OPTIONS]
 ```
 
 ## Flags
@@ -23,26 +23,26 @@ supplied it. The first line is `file` and the path that was opened,
 `(unreadable)` when the file could not be used.
 
 When the file names no `llm.model`, Ollama is asked which model a run
-would actually use — the same order [`bdd model current`](model.md)
+would actually use — the same order [`spec model current`](model.md)
 follows — and that name is shown as `(discovered)`. Nothing is
-written; persist it with `bdd model use <name>`. A configured model
+written; persist it with `spec model use <name>`. A configured model
 skips the provider call, and an unreachable or empty Ollama leaves the
 key `(unset)`.
 
 The file is read from `--root` only; there is no search of parent
-directories. Run `bdd config` from the project root, or point
+directories. Run `spec config` from the project root, or point
 `--root` at it, or `file` reads `(none)` and every key is a default.
 
 ```bash
-bdd config
+spec config
 ```
 
 ```text
-file	/Users/you/code/calculator/.bdd.toml
-llm.model	qwen3.8-flash-next:125b-mlx	/Users/you/code/calculator/.bdd.toml
+file	/Users/you/code/calculator/.spec.toml
+llm.model	qwen3.8-flash-next:125b-mlx	/Users/you/code/calculator/.spec.toml
 llm.endpoint	http://localhost:11434	(default)
-llm.timeout_seconds	900	/Users/you/code/calculator/.bdd.toml
-llm.cache_ttl_seconds	600	/Users/you/code/calculator/.bdd.toml
+llm.timeout_seconds	900	/Users/you/code/calculator/.spec.toml
+llm.cache_ttl_seconds	600	/Users/you/code/calculator/.spec.toml
 llm.retry	3	(default)
 tools.max_rounds	12	(default)
 tools.confirm	command_run	(default)
@@ -54,7 +54,7 @@ tools.profiles.spec-draft	list_requirements, get_requirement, validate_spec, ref
 tools.profiles.implement	get_requirement, feature_read, …	(default)
 ```
 
-In a project that has never run `bdd model use`, the first row is the
+In a project that has never run `spec model use`, the first row is the
 name Ollama supplied:
 
 ```text
@@ -62,7 +62,7 @@ llm.model	qwen3:8b	(discovered)
 ```
 
 A `[tools.profiles]` list for a caller **replaces** that command's
-built-in tools and is attributed to the file. `bdd init` writes every
+built-in tools and is attributed to the file. `spec init` writes every
 caller's default list so those rows show as from the file. Callers not
 listed keep the code default. `[tools.enabled]` / `[tools.disabled]`
 rows appear only when those tables are set.
@@ -73,7 +73,7 @@ or has no models pulled.
 
 ## See also
 
-- [`bdd model`](model.md) — persist `llm.model`.
-- [`bdd tools`](tools.md) — per-command profiles and `mcp.json` tools.
+- [`spec model`](model.md) — persist `llm.model`.
+- [`spec tools`](tools.md) — per-command profiles and `mcp.json` tools.
 - [Global flags](../global-flags.md) — `--model`, `--retry`, `--tools`
   override a value for one run and are not written to the file.

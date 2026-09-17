@@ -1,7 +1,7 @@
 //! MCP client adapter: loopback duplex for built-in tools, child process
 //! for registered servers. Owns a tokio runtime and `block_on`s.
 //!
-//! Never construct this from inside `bdd mcp serve`. `block_on` panics
+//! Never construct this from inside `spec mcp serve`. `block_on` panics
 //! when a runtime is already running; if an MCP tool ever needed the
 //! agent, check `tokio::runtime::Handle::try_current()` first.
 
@@ -45,7 +45,7 @@ where
     call_timeout: Duration,
     sessions: Mutex<HashMap<SessionKey, RunningService<RoleClient, ()>>>,
     /// When set, built-in tools are invoked by spawning this command
-    /// (`bdd mcp call --stdio`) instead of the in-process duplex.
+    /// (`spec mcp call --stdio`) instead of the in-process duplex.
     self_stdio: Option<ServerSpec>,
 }
 
@@ -66,7 +66,7 @@ where
         if tokio::runtime::Handle::try_current().is_ok() {
             panic!(
                 "McpToolBroker must not be constructed on a tokio runtime \
-                 (never inside bdd mcp serve)"
+                 (never inside spec mcp serve)"
             );
         }
         Self {
@@ -326,13 +326,13 @@ mod tests {
     fn spawn_command_maps_program_args_and_env() {
         let spec = ServerSpec {
             name: "self".into(),
-            program: "bdd".into(),
+            program: "spec".into(),
             args: vec!["mcp".into(), "serve".into()],
             env: vec![("A".into(), "1".into())],
         };
         let cmd = spawn_command(&spec);
         let std = cmd.as_std();
-        assert_eq!(std.get_program(), "bdd");
+        assert_eq!(std.get_program(), "spec");
         let args: Vec<_> = std
             .get_args()
             .map(|a| a.to_string_lossy().into_owned())

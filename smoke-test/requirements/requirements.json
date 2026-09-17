@@ -1,6 +1,6 @@
 {
   "project": "MCP server smoke test",
-  "description": "The spec for the workshop's Java smoke test of bdd mcp serve. The module practices what the workshop teaches: these requirements are the source of truth, the tagged Cucumber scenarios are their executable form, and SpecCompletenessTest fails the build if the two drift apart.",
+  "description": "The spec for the workshop's Java smoke test of spec mcp serve. The module practices what the workshop teaches: these requirements are the source of truth, the tagged Cucumber scenarios are their executable form, and SpecCompletenessTest fails the build if the two drift apart.",
   "requirements": [
     {
       "id": "CLI-001",
@@ -68,11 +68,11 @@
     },
     {
       "id": "CLI-007",
-      "title": "The smoke test launches the bdd binary as the MCP server",
+      "title": "The smoke test launches the spec binary as the MCP server",
       "status": "implemented",
-      "story": "As a workshop attendee, I want the Java smoke test to start bdd mcp serve so that the walkthrough talks to the same server Cursor uses.",
+      "story": "As a workshop attendee, I want the Java smoke test to start spec mcp serve so that the walkthrough talks to the same server Cursor uses.",
       "acceptanceCriteria": [
-        "Given a workshop root and a bdd binary, when ServerLaunch.bdd is built, then the program is that binary and the args are mcp serve --root <root>"
+        "Given a workshop root and a spec binary, when ServerLaunch.spec is built, then the program is that binary and the args are mcp serve --root <root>"
       ],
       "featureFile": "smoke-test/src/test/resources/features/tool_sweep.feature"
     },

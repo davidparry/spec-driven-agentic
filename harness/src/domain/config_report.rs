@@ -291,8 +291,8 @@ mod tests {
         assert_eq!(ConfigSource::Default.display(), "(default)");
         assert_eq!(ConfigSource::Discovered.display(), "(discovered)");
         assert_eq!(
-            ConfigSource::File("/p/.bdd.toml".into()).display(),
-            "/p/.bdd.toml"
+            ConfigSource::File("/p/.spec.toml".into()).display(),
+            "/p/.spec.toml"
         );
     }
 
@@ -308,7 +308,7 @@ mod tests {
 
     #[test]
     fn a_configured_model_is_never_replaced_by_discovery() {
-        let path = "/p/.bdd.toml";
+        let path = "/p/.spec.toml";
         let present = PresentValues {
             model: Some("mine".into()),
             ..PresentValues::default()
@@ -338,7 +338,7 @@ mod tests {
 
     #[test]
     fn present_keys_are_attributed_to_the_file_path() {
-        let path = "/tmp/project/.bdd.toml";
+        let path = "/tmp/project/.spec.toml";
         let mut present = PresentValues {
             model: Some("mine".into()),
             timeout_seconds: Some(900),
@@ -378,7 +378,7 @@ mod tests {
     fn invalid_file_still_uses_defaults() {
         let report = build_report(
             ConfigFileStatus::Invalid {
-                path: "/tmp/.bdd.toml".into(),
+                path: "/tmp/.spec.toml".into(),
             },
             PresentValues::default(),
         );
@@ -393,7 +393,7 @@ mod tests {
     fn unreadable_file_still_uses_defaults() {
         let report = build_report(
             ConfigFileStatus::Unreadable {
-                path: "/tmp/.bdd.toml".into(),
+                path: "/tmp/.spec.toml".into(),
             },
             PresentValues::default(),
         );
@@ -412,13 +412,13 @@ mod tests {
         };
         let text = build_report(
             ConfigFileStatus::Present {
-                path: "/p/.bdd.toml".into(),
+                path: "/p/.spec.toml".into(),
             },
             present,
         )
         .to_string();
-        assert!(text.starts_with("file\t/p/.bdd.toml\n"));
-        assert!(text.contains("llm.model\tqwen\t/p/.bdd.toml\n"));
+        assert!(text.starts_with("file\t/p/.spec.toml\n"));
+        assert!(text.contains("llm.model\tqwen\t/p/.spec.toml\n"));
         assert!(text.contains(&format!(
             "llm.endpoint\t{DEFAULT_LLM_ENDPOINT}\t{DEFAULT}\n"
         )));

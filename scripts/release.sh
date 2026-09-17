@@ -1,5 +1,5 @@
 #!/bin/sh
-# Cut a bdd-harness release.
+# Cut a spec-harness release.
 #
 # Bumps the version in harness/Cargo.toml (patch by default, or the exact
 # version given as the first argument), syncs Cargo.lock, folds
@@ -19,7 +19,7 @@ if [ $# -ge 1 ]; then
 else
     NEXT=$(echo "$CURRENT" | awk -F. '{printf "%d.%d.%d", $1, $2, $3 + 1}')
 fi
-echo "bdd-harness $CURRENT -> $NEXT"
+echo "spec-harness $CURRENT -> $NEXT"
 
 echo "running the test suite first..."
 (cd harness && cargo test --quiet)

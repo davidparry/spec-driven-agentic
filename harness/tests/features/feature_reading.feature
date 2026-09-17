@@ -1,5 +1,5 @@
 # Executable spec for feature-file discovery and parsed reads — the
-# behavior of `bdd feature list` and `bdd feature show`.
+# behavior of `spec feature list` and `spec feature show`.
 Feature: Feature file reading
   As a developer or agent working from the spec
   I want feature files discovered and parsed into a plain structure

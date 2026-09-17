@@ -28,5 +28,5 @@ rust-toolchain-version = "stable"
 # Publish the uninstaller next to the installer; it reads the install
 # receipt and removes exactly what the installer put down
 [[dist.extra-artifacts]]
-artifacts = ["bdd-harness-uninstaller.sh"]
-build = ["cp", "scripts/bdd-harness-uninstaller.sh", "bdd-harness-uninstaller.sh"]
+artifacts = ["spec-harness-uninstaller.sh"]
+build = ["cp", "scripts/spec-harness-uninstaller.sh", "spec-harness-uninstaller.sh"]

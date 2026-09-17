@@ -3,12 +3,12 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>bdd spec - bdd Harness Manual</title>
+        <title>The requirements spec - spec Harness Manual</title>
 
 
         <!-- Custom HTML head -->
 
-        <meta name="description" content="The complete, searchable reference for the bdd harness: every command, subcommand, and flag, with in-depth examples.">
+        <meta name="description" content="The complete, searchable reference for the spec harness: every command, subcommand, and flag, with in-depth examples.">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff">
 
@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-aaad9ee5.js";
+            window.path_to_searchindex_js = "../searchindex-5959f77b.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-9d4e1520.js"></script>
+        <script src="../toc-372d77fe.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -137,7 +137,7 @@
                         </button>
                     </div>
 
-                    <h1 class="menu-title">bdd Harness Manual</h1>
+                    <h1 class="menu-title">spec Harness Manual</h1>
 
                     <div class="right-buttons">
                         <a href="../print.html" title="Print this book" aria-label="Print this book">
@@ -180,26 +180,27 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="bdd-spec"><a class="header" href="#bdd-spec">bdd spec</a></h1>
-<p>Requirements spec tools. The spec at
-<code>requirements/requirements.json</code> is the project’s source of truth;
-these subcommands read it, gate it, and mutate it (through the
+                        <h1 id="the-requirements-spec"><a class="header" href="#the-requirements-spec">The requirements spec</a></h1>
+<p>The spec at <code>requirements/requirements.json</code> is the project’s source of
+truth. These commands read it, gate it, and mutate it (through the
 <a href="../staged-changes.html">staging area</a>). The root file is a
 <a href="../spec-format.html#the-catalog-splitting-the-spec-across-files">catalog</a>:
-it may include child spec files, and every subcommand operates on the
+it may include child spec files, and every command here operates on the
 merged view of the whole tree.</p>
-<pre><code class="language-text">Usage: bdd spec [OPTIONS] &lt;COMMAND&gt;
-
-Commands: list, show, draft, validate, refine, reword, set-feature, mark-implemented, include
+<pre><code class="language-text">spec list             spec refine &lt;REQ_ID&gt;
+spec show &lt;REQ_ID&gt;    spec reword &lt;REQ_ID&gt;
+spec draft            spec set-feature &lt;REQ_ID&gt; --file &lt;FILE&gt;
+spec validate         spec mark-implemented &lt;REQ_ID&gt;
+                      spec include add &lt;PATH&gt;
 </code></pre>
 <p>MCP tool equivalents: <code>list_requirements</code>, <code>get_requirement</code>,
 <code>validate_spec</code>, <code>refine_requirement</code>, <code>requirement_reword</code>,
 <code>requirement_mark_implemented</code>.</p>
 <hr>
-<h2 id="bdd-spec-list"><a class="header" href="#bdd-spec-list">bdd spec list</a></h2>
+<h2 id="spec-list"><a class="header" href="#spec-list">spec list</a></h2>
 <p>List every requirement with its id, title, status, and the spec file
 it lives in — requirements from included files merge into one backlog.</p>
-<pre><code class="language-bash">bdd spec list
+<pre><code class="language-bash">spec list
 </code></pre>
 <pre><code class="language-json">[
   { "id": "REQ-001", "title": "Empty string returns zero", "status": "implemented",
@@ -212,12 +213,12 @@ it lives in — requirements from included files merge into one backlog.</p>
 </code></pre>
 <p>Use it to pick the next <code>pending</code> requirement to work on.</p>
 <hr>
-<h2 id="bdd-spec-show"><a class="header" href="#bdd-spec-show">bdd spec show</a></h2>
+<h2 id="spec-show"><a class="header" href="#spec-show">spec show</a></h2>
 <p>Show one requirement, enriched with file locations and a workflow
 hint.</p>
-<pre><code class="language-text">Usage: bdd spec show [OPTIONS] &lt;REQ_ID&gt;
+<pre><code class="language-text">Usage: spec show [OPTIONS] &lt;REQ_ID&gt;
 </code></pre>
-<pre><code class="language-bash">bdd spec show REQ-003
+<pre><code class="language-bash">spec show REQ-003
 </code></pre>
 <pre><code class="language-json">{
   "id": "REQ-003",
@@ -239,15 +240,15 @@ hint.</p>
 <pre><code class="language-text">Error: no requirement with id REQ-999
 </code></pre>
 <hr>
-<h2 id="bdd-spec-draft"><a class="header" href="#bdd-spec-draft">bdd spec draft</a></h2>
+<h2 id="spec-draft"><a class="header" href="#spec-draft">spec draft</a></h2>
 <p>Interactively draft a requirement. Human input drives the spec — the
 harness never invents requirements. The draft is validated and
 quality-gated in a loop until it is clean, then staged.</p>
-<pre><code class="language-bash">bdd spec draft
+<pre><code class="language-bash">spec draft
 </code></pre>
 <p>Non-interactive (no TTY). Repeat <code>--criterion</code> for each Given/When/Then
 line. The next free id is allocated; the draft is staged.</p>
-<pre><code class="language-bash">bdd spec draft \
+<pre><code class="language-bash">spec draft \
   --title "Newlines as delimiters" \
   --story "As a calculator user, I want newlines to separate numbers in addition to commas so that multi-line input just works." \
   --criterion 'Given the input "1\n2,3", when add is called, then the result is 6' \
@@ -255,14 +256,14 @@ line. The next free id is allocated; the draft is staged.</p>
 </code></pre>
 <p><code>--title</code>, <code>--story</code>, and at least one <code>--criterion</code> must be given
 together. Structural validate must pass; refine findings are reported
-in <code>nextStep</code> (<code>bdd spec reword &lt;id&gt;</code> to address them). A title or
+in <code>nextStep</code> (<code>spec reword &lt;id&gt;</code> to address them). A title or
 criterion that collides with an existing requirement warns but still
 stages.</p>
 <p>By default the draft lands in the root <code>requirements.json</code>. To draft
 into an included spec file instead, name it with <code>--file</code> (it must
 already be part of the catalog — see
-<a href="#bdd-spec-include"><code>bdd spec include</code></a>):</p>
-<pre><code class="language-bash">bdd spec draft --file requirements/core/arithmetic.json
+<a href="#spec-include"><code>spec include</code></a>):</p>
+<pre><code class="language-bash">spec draft --file requirements/core/arithmetic.json
 </code></pre>
 <p>Ids are allocated across the whole catalog, so a requirement drafted
 into a child file still gets the next free <code>REQ-nnn</code>.</p>
@@ -301,7 +302,7 @@ REQ-004 criterion 2 (leave blank to finish the criteria):
 <li><code>-</code> drops a prior criterion.</li>
 <li>New criteria can be appended after the priors.</li>
 </ul>
-<p>With a resolved model, <code>bdd spec draft</code> runs the same
+<p>With a resolved model, <code>spec draft</code> runs the same
 description-driven wizard as <a href="greenfield.html#the-description-driven-wizard">greenfield</a>,
 and findings are sent to the model first: the rewording prompts carry
 its corrected proposal instead of your raw prior answers, so
@@ -337,11 +338,11 @@ hands, and validate + refine rerun on whatever you accept.</p>
   "id": "REQ-004",
   "title": "Newlines act as delimiters",
   "staged": true,
-  "nextStep": "Review with 'bdd changes show', apply with 'bdd changes commit', then write the Gherkin scenario."
+  "nextStep": "Review with 'spec changes show', apply with 'spec changes commit', then write the Gherkin scenario."
 }
 </code></pre>
 <hr>
-<h2 id="bdd-spec-validate"><a class="header" href="#bdd-spec-validate">bdd spec validate</a></h2>
+<h2 id="spec-validate"><a class="header" href="#spec-validate">spec validate</a></h2>
 <p>Validate the whole spec on disk: JSON shape, required fields, unique
 ids, status values, and Given/When/Then phrasing of every criterion.
 The full include tree is validated as one catalog: missing included
@@ -349,13 +350,13 @@ files, include cycles, and duplicate ids across files are each one
 actionable issue (a cross-file duplicate names the file that declared
 the id first). Only the root document needs a <code>project</code> name, and the
 merged tree must hold at least one requirement.</p>
-<pre><code class="language-bash">bdd spec validate
+<pre><code class="language-bash">spec validate
 </code></pre>
 <p>Valid spec:</p>
 <pre><code class="language-json">{
   "valid": true,
   "issues": [],
-  "nextStep": "Pick a pending requirement with 'bdd spec list' and write its scenario."
+  "nextStep": "Pick a pending requirement with 'spec list' and write its scenario."
 }
 </code></pre>
 <p>Invalid spec (the command still exits 0 — the <em>report</em> carries the
@@ -369,13 +370,13 @@ verdict):</p>
 }
 </code></pre>
 <hr>
-<h2 id="bdd-spec-refine"><a class="header" href="#bdd-spec-refine">bdd spec refine</a></h2>
+<h2 id="spec-refine"><a class="header" href="#spec-refine">spec refine</a></h2>
 <p>Review one requirement’s wording for quality: vague words, missing
 actor or benefit in the story, compound criteria, non-concrete
 outcomes, happy-path-only criteria.</p>
-<pre><code class="language-text">Usage: bdd spec refine [OPTIONS] &lt;REQ_ID&gt;
+<pre><code class="language-text">Usage: spec refine [OPTIONS] &lt;REQ_ID&gt;
 </code></pre>
-<pre><code class="language-bash">bdd spec refine REQ-004
+<pre><code class="language-bash">spec refine REQ-004
 </code></pre>
 <pre><code class="language-json">{
   "id": "REQ-004",
@@ -390,11 +391,11 @@ outcomes, happy-path-only criteria.</p>
 <p>Refine until <code>"clean": true</code>, then have the developer approve the
 wording — that approval is the first human gate of the workflow.</p>
 <hr>
-<h2 id="bdd-spec-reword"><a class="header" href="#bdd-spec-reword">bdd spec reword</a></h2>
+<h2 id="spec-reword"><a class="header" href="#spec-reword">spec reword</a></h2>
 <p>Reword an existing backlog item (staged). Interactive wizard is the
 same refine → reword loop as draft. Flags skip the wizard:</p>
-<pre><code class="language-bash">bdd spec reword REQ-007
-bdd spec reword REQ-007 \
+<pre><code class="language-bash">spec reword REQ-007
+spec reword REQ-007 \
   --title "Newlines as delimiters" \
   --story "As a calculator user, I want newlines to separate numbers in addition to commas so that multi-line input just works." \
   --criterion 'Given the input "1\n2,3", when add is called, then the result is 6' \
@@ -406,30 +407,30 @@ or <code>refine_requirement</code> reported: the spec file’s JSON escaping and
 indentation differ from what the read tools return, so a hand-written
 string replacement against <code>requirements.json</code> will not match.</p>
 <hr>
-<h2 id="bdd-spec-set-feature"><a class="header" href="#bdd-spec-set-feature">bdd spec set-feature</a></h2>
+<h2 id="spec-set-feature"><a class="header" href="#spec-set-feature">spec set-feature</a></h2>
 <p>Point a requirement at the feature file that was actually written
 (staged). Used when a copied spec still names <code>kata/…</code> paths that do
-not exist on an extracted project. <code>bdd scenario add</code> already updates
+not exist on an extracted project. <code>spec scenario add</code> already updates
 <code>featureFile</code> when it is missing or stale.</p>
-<pre><code class="language-bash">bdd spec set-feature REQ-003 --file src/test/resources/features/string_calculator.feature
+<pre><code class="language-bash">spec set-feature REQ-003 --file src/test/resources/features/string_calculator.feature
 </code></pre>
 <hr>
-<h2 id="bdd-spec-mark-implemented"><a class="header" href="#bdd-spec-mark-implemented">bdd spec mark-implemented</a></h2>
+<h2 id="spec-mark-implemented"><a class="header" href="#spec-mark-implemented">spec mark-implemented</a></h2>
 <p>Flip a requirement’s status to <code>implemented</code> and record its
 <code>featureFile</code> — the feature carrying the <code>@REQ-...</code> tag — in the same
 staged edit, so the spec passes validation. The change is staged, not
 applied directly.</p>
-<pre><code class="language-text">Usage: bdd spec mark-implemented [OPTIONS] &lt;REQ_ID&gt;
+<pre><code class="language-text">Usage: spec mark-implemented [OPTIONS] &lt;REQ_ID&gt;
 </code></pre>
-<pre><code class="language-bash">bdd spec mark-implemented REQ-003
-bdd validate
-bdd changes commit
+<pre><code class="language-bash">spec mark-implemented REQ-003
+spec changes validate
+spec changes commit
 </code></pre>
 <pre><code class="language-json">{
   "id": "REQ-003",
   "status": "implemented",
   "staged": true,
-  "nextStep": "Review with changes show, run bdd validate (it checks the @REQ-003 scenario exists), then bdd changes commit."
+  "nextStep": "Review with changes show, run spec changes validate (it checks the @REQ-003 scenario exists), then spec changes commit."
 }
 </code></pre>
 <p>The command is gated twice:</p>
@@ -439,7 +440,7 @@ Do this only when the scenario and tests for the requirement are
 GREEN; it is the last move of the per-requirement rhythm.</li>
 <li><strong>Tagged scenario only</strong> — it refuses when no committed feature
 file carries a scenario tagged <code>@&lt;REQ_ID&gt;</code>; add one with
-<code>bdd scenario add</code> and apply it with <code>bdd changes commit</code> first.</li>
+<code>spec scenario add</code> and apply it with <code>spec changes commit</code> first.</li>
 </ul>
 <p>Re-running it on an already-implemented requirement is safe: on GREEN
 it backfills a missing <code>featureFile</code>, which is exactly the repair for
@@ -449,10 +450,10 @@ a spec that fails validation with
 requirement actually lives in — a requirement declared in an included
 file stages that file, never the root.</p>
 <hr>
-<h2 id="bdd-spec-include"><a class="header" href="#bdd-spec-include">bdd spec include</a></h2>
+<h2 id="spec-include"><a class="header" href="#spec-include">spec include</a></h2>
 <p>Manage the catalog’s included spec files
 (<a href="../spec-format.html#the-catalog-splitting-the-spec-across-files">format reference</a>).</p>
-<pre><code class="language-text">Usage: bdd spec include add [OPTIONS] &lt;PATH&gt;
+<pre><code class="language-text">Usage: spec include add [OPTIONS] &lt;PATH&gt;
 
 Options:
   --from &lt;FILE&gt;  The catalog document declaring the include (default: the root requirements.json)
@@ -460,19 +461,19 @@ Options:
 <p><code>add</code> stages two things: the include entry on the parent document,
 and — when the included file does not exist anywhere yet — an empty
 spec skeleton (<code>{ "requirements": [] }</code>) for it.</p>
-<pre><code class="language-bash">bdd spec include add requirements/core/arithmetic.json
+<pre><code class="language-bash">spec include add requirements/core/arithmetic.json
 </code></pre>
 <pre><code class="language-json">{
   "file": "requirements/core/arithmetic.json",
   "parent": "requirements/requirements.json",
   "created": true,
   "staged": true,
-  "nextStep": "Review with bdd changes show, apply with bdd changes commit, then draft into it with bdd spec draft --file."
+  "nextStep": "Review with spec changes show, apply with spec changes commit, then draft into it with spec draft --file."
 }
 </code></pre>
 <p>Nest deeper by including from a child instead of the root; the entry
 is written relative to that parent’s directory:</p>
-<pre><code class="language-bash">bdd spec include add requirements/core/edge-cases.json \
+<pre><code class="language-bash">spec include add requirements/core/edge-cases.json \
   --from requirements/core/arithmetic.json
 </code></pre>
 <p>Including a file that is already part of the catalog is a safe no-op.
@@ -481,7 +482,7 @@ Includes must be <code>.json</code> files inside the spec directory.</p>
 <ul>
 <li><a href="../spec-format.html">The requirements format</a> — every field of the spec, and the include catalog.</li>
 <li><a href="../workflow.html">The workflow</a> — where each subcommand fits.</li>
-<li><a href="changes.html"><code>bdd changes</code></a> — reviewing and applying staged spec mutations.</li>
+<li><a href="changes.html"><code>spec changes</code></a> — reviewing and applying staged spec mutations.</li>
 </ul>
 
                     </main>

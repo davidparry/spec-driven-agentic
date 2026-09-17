@@ -1,24 +1,24 @@
-# bdd feature
+# spec feature
 
 Feature discovery and creation. Feature files are the BDD altitude of
 the workflow: each requirement gets a scenario in one, tagged with its
 `@REQ-...` id.
 
 ```text
-Usage: bdd feature [OPTIONS] <COMMAND>
+Usage: spec feature [OPTIONS] <COMMAND>
 
 Commands: list, show, create
 ```
 
 ---
 
-## bdd feature list
+## spec feature list
 
 List every feature file under the root with its feature name and
 scenario count.
 
 ```bash
-bdd feature list
+spec feature list
 ```
 
 ```json
@@ -33,19 +33,19 @@ bdd feature list
 
 ---
 
-## bdd feature show
+## spec feature show
 
 Show one parsed feature file — its name, scenarios, tags, and steps —
 as structured JSON rather than raw text.
 
 ```text
-Usage: bdd feature show [OPTIONS] <PATH>
+Usage: spec feature show [OPTIONS] <PATH>
 ```
 
 The path is relative to `--root`:
 
 ```bash
-bdd feature show features/string_calculator.feature
+spec feature show features/string_calculator.feature
 ```
 
 ```json
@@ -70,14 +70,14 @@ A file that is not valid Gherkin fails with the parser's diagnosis.
 
 ---
 
-## bdd feature create
+## spec feature create
 
 Create a feature file. The file is **staged**, not written to the
-working tree — review with [`bdd changes show`](changes.md) and apply
-with `bdd changes commit`.
+working tree — review with [`spec changes show`](changes.md) and apply
+with `spec changes commit`.
 
 ```text
-Usage: bdd feature create [OPTIONS] --path <PATH> --name <NAME>
+Usage: spec feature create [OPTIONS] --path <PATH> --name <NAME>
 ```
 
 | Flag | Description |
@@ -86,9 +86,9 @@ Usage: bdd feature create [OPTIONS] --path <PATH> --name <NAME>
 | `--name <NAME>` | Feature name — the text after `Feature:`. |
 
 ```bash
-bdd feature create --path features/string_calculator.feature --name "String Calculator"
-bdd changes show
-bdd changes commit
+spec feature create --path features/string_calculator.feature --name "String Calculator"
+spec changes show
+spec changes commit
 ```
 
 The staged file contains the `Feature:` header ready for scenarios:
@@ -97,10 +97,10 @@ The staged file contains the `Feature:` header ready for scenarios:
 Feature: String Calculator
 ```
 
-Add scenarios with [`bdd scenario add`](scenario.md) — don't edit the
+Add scenarios with [`spec scenario add`](scenario.md) — don't edit the
 staged file by hand.
 
 ## See also
 
-- [`bdd scenario`](scenario.md) — populate features with tagged scenarios.
-- [`bdd validate`](validate.md) — parse-check all features, staged included.
+- [`spec scenario`](scenario.md) — populate features with tagged scenarios.
+- [`spec changes validate`](changes.md#spec-changes-validate) — parse-check all features, staged included.

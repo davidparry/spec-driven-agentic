@@ -3,12 +3,12 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>The interactive shell - bdd Harness Manual</title>
+        <title>The interactive shell - spec Harness Manual</title>
 
 
         <!-- Custom HTML head -->
 
-        <meta name="description" content="The complete, searchable reference for the bdd harness: every command, subcommand, and flag, with in-depth examples.">
+        <meta name="description" content="The complete, searchable reference for the spec harness: every command, subcommand, and flag, with in-depth examples.">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff">
 
@@ -35,10 +35,10 @@
             const path_to_root = "";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "searchindex-aaad9ee5.js";
+            window.path_to_searchindex_js = "searchindex-5959f77b.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-9d4e1520.js"></script>
+        <script src="toc-372d77fe.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -137,7 +137,7 @@
                         </button>
                     </div>
 
-                    <h1 class="menu-title">bdd Harness Manual</h1>
+                    <h1 class="menu-title">spec Harness Manual</h1>
 
                     <div class="right-buttons">
                         <a href="print.html" title="Print this book" aria-label="Print this book">
@@ -181,25 +181,25 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="the-interactive-shell"><a class="header" href="#the-interactive-shell">The interactive shell</a></h1>
-<p>Running <code>bdd</code> with no subcommand in a terminal opens a REPL. It prints
+<p>Running <code>spec</code> with no subcommand in a terminal opens a REPL. It prints
 the help once, shows the banner and the session’s model status, and
 then reads commands until you leave.</p>
-<pre><code class="language-text">bdd&gt; spec list
+<pre><code class="language-text">spec&gt; list
 [
   { "id": "REQ-001", "title": "Empty string returns zero", "status": "implemented" }
 ]
-bdd&gt; test --feature features/calculator.feature
+spec&gt; test --feature features/calculator.feature
 ...
-bdd&gt; exit
+spec&gt; exit
 </code></pre>
 <h2 id="behavior"><a class="header" href="#behavior">Behavior</a></h2>
 <ul>
-<li><strong>No prefix needed.</strong> Type <code>spec list</code>, not <code>bdd spec list</code>. A
-leading <code>bdd</code> is forgiven if you type it anyway.</li>
+<li><strong>No prefix needed.</strong> Type <code>list</code>, not <code>spec list</code>. A leading <code>spec</code>
+is forgiven if you type it anyway.</li>
 <li><strong>Inherited flags.</strong> Commands inherit the shell’s <code>--root</code>,
 <code>--model</code>, and <code>--retry</code> unless the line supplies its own:</li>
 </ul>
-<pre><code class="language-bash">bdd --root ~/code/calculator --model qwen3.8-flash-next:125b-mlx --retry 5
+<pre><code class="language-bash">spec --root ~/code/calculator --model qwen3.8-flash-next:125b-mlx --retry 5
 # every command in this shell now targets that root and model,
 # and retries invalid model replies up to 5 times
 </code></pre>
@@ -210,9 +210,9 @@ Unbalanced quotes report <code>unreadable input</code> and the shell continues.<
 <li><strong>Errors don’t kill the shell.</strong> A failing command prints its error
 and returns to the prompt.</li>
 <li><strong>Blank lines</strong> are ignored.</li>
-<li><strong>After <code>greenfield</code>.</strong> A one-shot <code>bdd greenfield</code> that finishes on
-a real terminal stays in this shell (the <code>bdd&gt;</code> prompt) so you can
-run <code>spec list</code>, <code>greenfield</code>, or anything else without relaunching.</li>
+<li><strong>After <code>greenfield</code>.</strong> A one-shot <code>spec greenfield</code> that finishes on
+a real terminal stays in this shell (the <code>spec&gt;</code> prompt) so you can
+run <code>list</code>, <code>greenfield</code>, or anything else without relaunching.</li>
 </ul>
 <h2 id="leaving"><a class="header" href="#leaving">Leaving</a></h2>
 <ul>
@@ -222,7 +222,7 @@ run <code>spec list</code>, <code>greenfield</code>, or anything else without re
 </ul>
 <p>On exit the shell prints a summary of how many commands ran.</p>
 <h2 id="session-history"><a class="header" href="#session-history">Session history</a></h2>
-<p>Line history is kept across sessions in <code>.bdd-history</code> under the
+<p>Line history is kept across sessions in <code>.spec-history</code> under the
 project root. Use <kbd>↑</kbd>/<kbd>↓</kbd> to recall previous
 commands and <kbd>Ctrl</kbd>+<kbd>R</kbd> for reverse search. If the
 history cannot be saved, the shell says so and exits normally.</p>
@@ -232,15 +232,15 @@ model. This harness is developed and run against
 <code>qwen3.8-flash-next:125b-mlx</code>; your mileage will vary with a different
 model, especially one trained for work other than development. See
 <a href="getting-started.html#local-llm-ollama">Getting started</a> and
-<a href="commands/model.html"><code>bdd model</code></a>.</p>
+<a href="commands/model.html"><code>spec model</code></a>.</p>
 <div class="table-wrapper">
 <table>
 <thead>
 <tr><th>Situation</th><th>Announcement</th></tr>
 </thead>
 <tbody>
-<tr><td>Configured in <code>.bdd.toml</code></td><td><code>Model set: qwen3.8-flash-next:125b-mlx (from configuration).</code></td></tr>
-<tr><td>No config, models installed</td><td><code>Model set for this session: qwen3.8-flash-next:125b-mlx (not saved - keep it with: bdd model use qwen3.8-flash-next:125b-mlx).</code></td></tr>
+<tr><td>Configured in <code>.spec.toml</code></td><td><code>Model set: qwen3.8-flash-next:125b-mlx (from configuration).</code></td></tr>
+<tr><td>No config, models installed</td><td><code>Model set for this session: qwen3.8-flash-next:125b-mlx (not saved - keep it with: spec model use qwen3.8-flash-next:125b-mlx).</code></td></tr>
 <tr><td>Ollama up, no models</td><td><code>Ollama is running but has no models - generation will use deterministic templates. For optimal results pull a coding model, e.g.: ollama pull qwen3.8-flash-next:125b-mlx (mileage varies with models not trained for development)</code></td></tr>
 <tr><td>Ollama unreachable</td><td><code>Ollama is not reachable - generation will use deterministic templates. Install it from https://ollama.com, start it, and pull a coding model, e.g.: ollama pull qwen3.8-flash-next:125b-mlx (mileage varies with models not trained for development)</code></td></tr>
 </tbody>
@@ -249,22 +249,22 @@ model, especially one trained for work other than development. See
 <h2 id="the-greenfield-nudge"><a class="header" href="#the-greenfield-nudge">The greenfield nudge</a></h2>
 <p>When all three signs of a brand-new project line up —</p>
 <ol>
-<li>this is the first shell session in the root (no <code>.bdd-history</code> yet),</li>
+<li>this is the first shell session in the root (no <code>.spec-history</code> yet),</li>
 <li>a model is ready, and</li>
 <li>there is no <code>requirements/requirements.json</code></li>
 </ol>
 <p>— the shell offers to start the loop before the first prompt. The same
-start refreshes <code>.bdd-memory.json</code> (language, libraries, layout) so
+start refreshes <code>.spec-memory.json</code> (language, libraries, layout) so
 later model calls in the session carry that brief.</p>
 <pre><code class="language-text">It appears you are in a greenfield - this project has no requirements/requirements.json yet.
 Start with the greenfield command now? [y/N]
 </code></pre>
-<p><code>y</code> runs <a href="commands/greenfield.html"><code>bdd greenfield</code></a> immediately;
+<p><code>y</code> runs <a href="commands/greenfield.html"><code>spec greenfield</code></a> immediately;
 anything else declines and the shell carries on:</p>
-<pre><code class="language-text">No problem - type greenfield any time, or spec draft to begin with the spec.
+<pre><code class="language-text">No problem - type greenfield any time, or draft to begin with the spec.
 </code></pre>
 <h2 id="when-there-is-no-terminal"><a class="header" href="#when-there-is-no-terminal">When there is no terminal</a></h2>
-<p>If stdin is not a terminal (piped input, CI), bare <code>bdd</code> prints the
+<p>If stdin is not a terminal (piped input, CI), bare <code>spec</code> prints the
 help and exits instead of opening the shell.</p>
 
                     </main>

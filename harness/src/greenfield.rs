@@ -1,4 +1,4 @@
-//! `bdd greenfield`: the orchestrated loop from an empty directory to an
+//! `spec greenfield`: the orchestrated loop from an empty directory to an
 //! implemented requirement. Exactly two human gates shape the run — the
 //! spec wording approval (inside `spec draft`) and the generated-test
 //! review before anything is committed. Everything else is derived from
@@ -51,7 +51,7 @@ pub fn project_memory_service(
     )
 }
 
-/// Scan the project and persist `.bdd-memory.json`. Failures are logged
+/// Scan the project and persist `.spec-memory.json`. Failures are logged
 /// and yield empty memory so a read-only root still runs.
 pub fn refresh_project_memory(root: &Path, chosen: Option<Language>) -> ProjectMemory {
     project_memory_service(root.to_path_buf())
@@ -134,7 +134,7 @@ pub fn parse_pending_pick(answer: &str, count: usize) -> Result<Option<usize>, &
 }
 
 /// Ask for a supported language until the answer parses - the one
-/// prompt loop shared by `bdd init` and the greenfield scaffold step.
+/// prompt loop shared by `spec init` and the greenfield scaffold step.
 pub fn prompt_language(prompter: &mut dyn Prompter) -> Result<Language, PromptError> {
     loop {
         let answer = prompter
@@ -210,7 +210,8 @@ impl Greenfield {
                 phase: None,
                 completed: false,
                 next_step:
-                    "Nothing was staged. Run bdd greenfield again when the wording is ready.".into(),
+                    "Nothing was staged. Run spec greenfield again when the wording is ready."
+                        .into(),
             });
         }
         self.commit()?;
@@ -223,8 +224,7 @@ impl Greenfield {
             let pending = self.pending_requirements()?;
             if pending.is_empty() {
                 report.next_step =
-                    "Every requirement is implemented. Draft the next one with bdd spec draft."
-                        .into();
+                    "Every requirement is implemented. Draft the next one with spec draft.".into();
                 break;
             }
             prompter.tell("Still pending in the spec:");
@@ -247,7 +247,7 @@ impl Greenfield {
                     feature: None,
                     phase: None,
                     completed: false,
-                    next_step: "Nothing was staged. Run bdd greenfield again when the \
+                    next_step: "Nothing was staged. Run spec greenfield again when the \
                                 wording is ready."
                         .into(),
                 });
@@ -312,7 +312,7 @@ impl Greenfield {
                 phase: None,
                 completed: false,
                 next_step: "Generation was discarded. Author the tests by hand or rerun \
-                            bdd greenfield."
+                            spec greenfield."
                     .into(),
             });
         }
@@ -344,8 +344,8 @@ impl Greenfield {
             let answer = prompter.ask(question).map_err(|e| e.to_string())?;
             if answer.eq_ignore_ascii_case("stop") {
                 let next_step = format!(
-                    "Paused on RED. Implement by hand or run bdd implement {req_id}, \
-                     then bdd test until GREEN, bdd refactor, and bdd spec \
+                    "Paused on RED. Implement by hand or run spec implement {req_id}, \
+                     then spec test until GREEN, spec refactor, and spec \
                      mark-implemented."
                 );
                 return Ok(GreenfieldReport {
@@ -404,7 +404,7 @@ impl Greenfield {
                     phase: Some(report.phase),
                     completed: false,
                     next_step: "The refactor broke the bar. Make the tests pass again, \
-                                then bdd spec mark-implemented."
+                                then spec mark-implemented."
                         .into(),
                 });
             }
@@ -507,7 +507,7 @@ impl Greenfield {
             feature: Some(feature),
             phase: None,
             completed: false,
-            next_step: "Authoring is complete. Install the runtime, then bdd test \
+            next_step: "Authoring is complete. Install the runtime, then spec test \
                         (expect RED), implement, and close the loop."
                 .into(),
         }

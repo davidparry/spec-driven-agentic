@@ -119,11 +119,9 @@ fn next_step(languages: &[LanguageReport], copy: InspectCopy) -> String {
     }
     if languages.iter().all(|l| l.runtime_present) {
         match copy {
-            InspectCopy::Cli => {
-                "All detected runtimes are present. Run bdd spec validate, then bdd spec \
+            InspectCopy::Cli => "All detected runtimes are present. Run spec validate, then spec \
                  show for a pending requirement to start the loop."
-                    .to_string()
-            }
+                .to_string(),
             InspectCopy::Mcp => {
                 "All detected runtimes are present. Call validate_spec, then get_requirement \
                  to start the loop."
@@ -186,7 +184,7 @@ mod tests {
                 .next_step
                 .starts_with("All detected runtimes are present.")
         );
-        assert!(report.next_step.contains("bdd spec validate"));
+        assert!(report.next_step.contains("spec validate"));
         assert!(
             service
                 .inspect_mcp()

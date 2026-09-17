@@ -11,18 +11,18 @@ import java.nio.file.Path;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-@EnabledIfSystemProperty(named = "bdd.binary", matches = ".+")
-class LiveBddServerTest {
+@EnabledIfSystemProperty(named = "spec.binary", matches = ".+")
+class LiveSpecServerTest {
 
     @TempDir
     Path project;
 
     @Test
-    @DisplayName("the live bdd binary serves exactly the 25 planned tools")
+    @DisplayName("the live spec binary serves exactly the 25 planned tools")
     void liveSweep() throws IOException {
         seedProject(project);
-        Path bdd = Path.of(System.getProperty("bdd.binary"));
-        try (SdkToolClient client = new SdkToolClient(project, bdd)) {
+        Path spec = Path.of(System.getProperty("spec.binary"));
+        try (SdkToolClient client = new SdkToolClient(project, spec)) {
             ToolSweep.SweepReport report = new ToolSweep().run(client, new Narrator(line -> {
             }), false);
             assertThat(report.discovered()).hasSize(25);

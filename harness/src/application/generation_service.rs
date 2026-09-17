@@ -24,7 +24,7 @@ use crate::ports::{
     ChangeStore, FeatureCatalog, LlmConversation, Prompter, SourceFiles, SpecRepository, ToolBroker,
 };
 
-/// Reply of `bdd steps missing`.
+/// Reply of `spec steps missing`.
 #[derive(Debug, Serialize, PartialEq, Eq)]
 pub struct MissingStepsReport {
     pub language: String,
@@ -34,7 +34,7 @@ pub struct MissingStepsReport {
     pub next_step: String,
 }
 
-/// Reply of `bdd steps generate` and `bdd unittest generate`.
+/// Reply of `spec steps generate` and `spec unittest generate`.
 #[derive(Debug, Serialize, PartialEq, Eq)]
 pub struct GenerationReport {
     pub target: String,
@@ -148,10 +148,10 @@ where
     pub fn steps_missing(&self) -> Result<MissingStepsReport, ServiceError> {
         let missing = find_missing_steps(&self.features, &self.sources, self.language)?;
         let next_step = if missing.is_empty() {
-            "Every step has a definition. Run bdd test to execute the suite.".to_string()
+            "Every step has a definition. Run spec test to execute the suite.".to_string()
         } else {
             format!(
-                "{} step(s) have no definition. Run bdd steps generate to stage pending definitions for them.",
+                "{} step(s) have no definition. Run spec steps generate to stage pending definitions for them.",
                 missing.len()
             )
         };
@@ -190,7 +190,7 @@ where
             staged: true,
             source,
             summary,
-            next_step: "Review with bdd changes show, apply with bdd changes commit, then run bdd test (expect RED)."
+            next_step: "Review with spec changes show, apply with spec changes commit, then run spec test (expect RED)."
                 .into(),
         })
     }
@@ -246,7 +246,7 @@ where
             staged: true,
             source,
             summary,
-            next_step: "Review the assertions (they are yours to sharpen), apply with bdd changes commit, then run bdd test (expect RED)."
+            next_step: "Review the assertions (they are yours to sharpen), apply with spec changes commit, then run spec test (expect RED)."
                 .into(),
         })
     }
@@ -343,7 +343,7 @@ mod tests {
         assert_eq!(report.missing.len(), 3);
         assert_eq!(
             report.next_step,
-            "3 step(s) have no definition. Run bdd steps generate to stage pending definitions for them."
+            "3 step(s) have no definition. Run spec steps generate to stage pending definitions for them."
         );
     }
 
@@ -358,7 +358,7 @@ mod tests {
         assert_eq!(report.missing, vec![]);
         assert_eq!(
             report.next_step,
-            "Every step has a definition. Run bdd test to execute the suite."
+            "Every step has a definition. Run spec test to execute the suite."
         );
     }
 

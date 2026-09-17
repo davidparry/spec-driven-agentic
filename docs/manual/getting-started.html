@@ -3,12 +3,12 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Getting started - bdd Harness Manual</title>
+        <title>Getting started - spec Harness Manual</title>
 
 
         <!-- Custom HTML head -->
 
-        <meta name="description" content="The complete, searchable reference for the bdd harness: every command, subcommand, and flag, with in-depth examples.">
+        <meta name="description" content="The complete, searchable reference for the spec harness: every command, subcommand, and flag, with in-depth examples.">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff">
 
@@ -35,10 +35,10 @@
             const path_to_root = "";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "searchindex-aaad9ee5.js";
+            window.path_to_searchindex_js = "searchindex-5959f77b.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-9d4e1520.js"></script>
+        <script src="toc-372d77fe.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -137,7 +137,7 @@
                         </button>
                     </div>
 
-                    <h1 class="menu-title">bdd Harness Manual</h1>
+                    <h1 class="menu-title">spec Harness Manual</h1>
 
                     <div class="right-buttons">
                         <a href="print.html" title="Print this book" aria-label="Print this book">
@@ -188,17 +188,17 @@
 x86_64), or build from source:</p>
 <pre><code class="language-bash">cd harness
 cargo build --release
-./target/release/bdd --help
+./target/release/spec --help
 </code></pre>
 <p>The shell installer places the binary in <code>$CARGO_HOME/bin</code> (usually
-<code>~/.cargo/bin/bdd</code>) and writes an install receipt to
-<code>~/.config/bdd-harness/bdd-harness-receipt.json</code>.</p>
+<code>~/.cargo/bin/spec</code>) and writes an install receipt to
+<code>~/.config/spec-harness/spec-harness-receipt.json</code>.</p>
 <h2 id="local-llm-ollama"><a class="header" href="#local-llm-ollama">Local LLM (Ollama)</a></h2>
 <p>LLM-backed generation uses a local <a href="https://ollama.com">Ollama</a>
 instance. The model this harness is developed and run against is
 <code>qwen3.8-flash-next:125b-mlx</code>:</p>
 <pre><code class="language-bash">ollama pull qwen3.8-flash-next:125b-mlx
-bdd model use qwen3.8-flash-next:125b-mlx
+spec model use qwen3.8-flash-next:125b-mlx
 </code></pre>
 <p>Your mileage will vary with a different model. A stronger coding model
 may draft, generate, and implement better; a model trained for chat,
@@ -207,43 +207,43 @@ produce weaker specs, step definitions, tests, and production code.
 Without a reachable model the harness still runs — generation falls back
 to deterministic templates.</p>
 <h2 id="your-first-session"><a class="header" href="#your-first-session">Your first session</a></h2>
-<p>Run bare <code>bdd</code> in a terminal. You get the help, the banner with the
+<p>Run bare <code>spec</code> in a terminal. You get the help, the banner with the
 version, the model status, and an interactive prompt:</p>
-<pre><code class="language-text">$ bdd
+<pre><code class="language-text">$ spec
 
   ╭──────────────────────────────────╮
   │                                  ▼
-  │    &gt; bdd  v0.4.0                 │
+  │    &gt; spec  v0.4.0                 │
   │    spec → RED → GREEN → REFACTOR │
   ▲                                  │
   ╰──────────────────────────────────╯
 
-Model set for this session: qwen3.8-flash-next:125b-mlx (not saved - keep it with: bdd model use qwen3.8-flash-next:125b-mlx).
-Interactive shell - type commands without the bdd prefix (e.g. spec list).
-bdd&gt;
+Model set for this session: qwen3.8-flash-next:125b-mlx (not saved - keep it with: spec model use qwen3.8-flash-next:125b-mlx).
+Interactive shell - type commands without the spec prefix (e.g. list).
+spec&gt;
 </code></pre>
 <h2 id="two-ways-to-begin-a-project"><a class="header" href="#two-ways-to-begin-a-project">Two ways to begin a project</a></h2>
 <p><strong>Guided, from zero</strong> — one command runs the whole loop with exactly
 two human gates (approving the spec wording and approving generated
 tests):</p>
 <pre><code class="language-bash">mkdir calculator &amp;&amp; cd calculator
-bdd greenfield
+spec greenfield
 </code></pre>
 <p><strong>Step by step</strong> — scaffold, then drive each phase yourself:</p>
-<pre><code class="language-bash">bdd init --language rust --name "String Calculator"
-bdd spec draft          # describe what to build in plain words; with a
+<pre><code class="language-bash">spec init --language rust --name "String Calculator"
+spec draft          # describe what to build in plain words; with a
                         # model resolved it proposes title, story, and
                         # criteria for you to edit (manual prompts otherwise)
-bdd spec validate       # structure gate
-bdd spec refine REQ-001 # wording gate
-bdd changes commit      # apply the staged spec
-bdd test                # expect RED
+spec validate       # structure gate
+spec refine REQ-001 # wording gate
+spec changes commit      # apply the staged spec
+spec test                # expect RED
 # ...implement...
-bdd test                # expect GREEN
-bdd refactor --note "extract parser"
-bdd test                # still GREEN
-bdd status              # confirm REQ-001 is ready to mark
-bdd spec mark-implemented REQ-001 &amp;&amp; bdd changes commit
+spec test                # expect GREEN
+spec refactor --note "extract parser"
+spec test                # still GREEN
+spec status              # confirm REQ-001 is ready to mark
+spec mark-implemented REQ-001 &amp;&amp; spec changes commit
 </code></pre>
 <p>This repository’s String Calculator workshop can be finished with the
 same commands. The kata-specific recipe (paths under <code>kata/</code>, draft
@@ -252,8 +252,8 @@ REQ-007, then REQ-003…007 to implemented) is
 <h2 id="working-against-an-existing-project"><a class="header" href="#working-against-an-existing-project">Working against an existing project</a></h2>
 <p>Every command takes <code>--root</code> (see <a href="global-flags.html">Global flags</a>), so
 you can point the harness at any project:</p>
-<pre><code class="language-bash">bdd --root ~/code/my-kata inspect
-bdd --root ~/code/my-kata spec validate
+<pre><code class="language-bash">spec --root ~/code/my-kata inspect
+spec --root ~/code/my-kata validate
 </code></pre>
 
                     </main>

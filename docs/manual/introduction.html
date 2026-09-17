@@ -3,12 +3,12 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Introduction - bdd Harness Manual</title>
+        <title>Introduction - spec Harness Manual</title>
 
 
         <!-- Custom HTML head -->
 
-        <meta name="description" content="The complete, searchable reference for the bdd harness: every command, subcommand, and flag, with in-depth examples.">
+        <meta name="description" content="The complete, searchable reference for the spec harness: every command, subcommand, and flag, with in-depth examples.">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff">
 
@@ -35,10 +35,10 @@
             const path_to_root = "";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "searchindex-aaad9ee5.js";
+            window.path_to_searchindex_js = "searchindex-5959f77b.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-9d4e1520.js"></script>
+        <script src="toc-372d77fe.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -137,7 +137,7 @@
                         </button>
                     </div>
 
-                    <h1 class="menu-title">bdd Harness Manual</h1>
+                    <h1 class="menu-title">spec Harness Manual</h1>
 
                     <div class="right-buttons">
                         <a href="print.html" title="Print this book" aria-label="Print this book">
@@ -181,7 +181,7 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="introduction"><a class="header" href="#introduction">Introduction</a></h1>
-<p><code>bdd</code> is one native binary for the whole spec-driven loop:</p>
+<p><code>spec</code> is one native binary for the whole spec-driven loop:</p>
 <pre><code class="language-text">spec → Gherkin scenario → RED → implement → GREEN → REFACTOR
 </code></pre>
 <p>The requirements spec (<code>requirements/requirements.json</code>) is the source
@@ -193,12 +193,12 @@ quality-gates its wording, turns approved requirements into tagged
 Gherkin scenarios, runs the tests through your project’s own build
 tool, and tracks the persistent RED/GREEN/REFACTOR phase between
 invocations. It also
-embeds an MCP server (<code>bdd mcp serve</code>) so AI agents can drive the same
+embeds an MCP server (<code>spec mcp serve</code>) so AI agents can drive the same
 workflow through typed tools — with no filesystem or shell escape
 hatches.</p>
 <h2 id="how-to-read-this-manual"><a class="header" href="#how-to-read-this-manual">How to read this manual</a></h2>
 <ul>
-<li><strong>Using bdd</strong> covers the concepts that span commands: the global
+<li><strong>Using spec</strong> covers the concepts that span commands: the global
 flags, the interactive shell, the workflow phases, and the staged
 changes model that protects your working tree.</li>
 <li><strong>Command reference</strong> documents every command, subcommand, and flag,
@@ -208,7 +208,7 @@ with realistic examples and the exact JSON reply shapes.</li>
 <h2 id="conventions"><a class="header" href="#conventions">Conventions</a></h2>
 <ul>
 <li>Commands are shown as you would type them in a shell. Inside the
-<a href="interactive-shell.html">interactive shell</a> the leading <code>bdd</code> is
+<a href="interactive-shell.html">interactive shell</a> the leading <code>spec</code> is
 optional.</li>
 <li>Replies are JSON on stdout unless a command is inherently
 interactive. Every reply carries a <code>nextStep</code> field that says what
@@ -238,7 +238,7 @@ installs anything.</p>
 <p>LLM-backed generation uses local <a href="https://ollama.com">Ollama</a>. The
 model this harness is developed and run against is
 <code>qwen3.8-flash-next:125b-mlx</code> — see <a href="getting-started.html">Getting started</a>
-and <a href="commands/model.html"><code>bdd model</code></a>. Your mileage will vary with
+and <a href="commands/model.html"><code>spec model</code></a>. Your mileage will vary with
 other models, especially those not trained for development work.</p>
 
                     </main>

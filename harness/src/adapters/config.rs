@@ -1,5 +1,5 @@
 //! TOML configuration adapter: the `[llm]` and `[tools]` blocks of
-//! `.bdd.toml` hold the persisted model choice, provider endpoint, and
+//! `.spec.toml` hold the persisted model choice, provider endpoint, and
 //! per-command tool profiles.
 
 use std::collections::BTreeMap;
@@ -17,7 +17,7 @@ use crate::domain::config_report::{
 use crate::domain::tool_profile::ProfileOverrides;
 use crate::ports::{LlmError, ModelStore, ToolError, ToolStore};
 
-/// `.bdd.toml` under this project root. Missing files stay this path so
+/// `.spec.toml` under this project root. Missing files stay this path so
 /// first writes create the current name.
 pub fn config_path(root: &Path) -> PathBuf {
     root.join(CONFIG_FILE)
@@ -64,7 +64,7 @@ pub fn read_table(path: &Path) -> Option<toml::Table> {
     }
 }
 
-/// Effective configuration for `bdd config`: each key and whether it is
+/// Effective configuration for `spec config`: each key and whether it is
 /// a code default or was read from this path.
 pub fn inspect_config(path: &Path) -> ConfigReport {
     match load_config(path) {
@@ -547,11 +547,11 @@ mod tests {
     }
 
     #[test]
-    fn config_path_is_always_bdd_toml() {
+    fn config_path_is_always_spec_toml() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         assert_eq!(config_path(root), root.join(CONFIG_FILE));
-        fs::write(root.join(".bdd-mcp.toml"), "[llm]\nmodel = \"legacy\"\n").unwrap();
+        fs::write(root.join(".spec-mcp.toml"), "[llm]\nmodel = \"legacy\"\n").unwrap();
         assert_eq!(config_path(root), root.join(CONFIG_FILE));
         fs::write(root.join(CONFIG_FILE), "[llm]\nmodel = \"new\"\n").unwrap();
         assert_eq!(config_path(root), root.join(CONFIG_FILE));

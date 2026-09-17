@@ -1,4 +1,4 @@
-//! Greenfield scaffolding: the per-language file set `bdd init` creates —
+//! Greenfield scaffolding: the per-language file set `spec init` creates —
 //! a build file, a Cucumber runner, an empty requirements spec, and the
 //! harness configuration. Pure text; writing is the adapter's job.
 
@@ -36,8 +36,8 @@ pub fn scaffold(language: Language, project_name: &str) -> Vec<ScaffoldFile> {
         },
         ScaffoldFile {
             path: ".gitignore".into(),
-            content: "# Cached LLM responses; safe to delete at any time.\n.bdd-cache/\n\
-                      # Diagnostic logs written by the bdd harness; safe to delete.\n.bdd-log/\n"
+            content: "# Cached LLM responses; safe to delete at any time.\n.spec-cache/\n\
+                      # Diagnostic logs written by the spec harness; safe to delete.\n.spec-log/\n"
                 .into(),
         },
     ];
@@ -51,24 +51,24 @@ pub fn scaffold(language: Language, project_name: &str) -> Vec<ScaffoldFile> {
     files
 }
 
-/// `.bdd.toml` with every key the harness reads. Scalar knobs stay
+/// `.spec.toml` with every key the harness reads. Scalar knobs stay
 /// commented at their defaults. `[tools.profiles]` is written live:
 /// each LLM-backed command and the tools that call offers the model.
 pub fn default_config_toml() -> String {
     format!(
         "\
-# bdd harness configuration.
+# spec harness configuration.
 #
 # Keys left commented use the defaults shown. Uncomment to override.
 # [tools.profiles] is the tools each command offers the model.
 
 [llm]
-# Persisted by `bdd model use`. Flag `--model` wins for one run.
+# Persisted by `spec model use`. Flag `--model` wins for one run.
 # model = \"{model}\"
 endpoint = \"{endpoint}\"
 # Generation timeout; large prompts on local models can need more.
 # timeout_seconds = {timeout}
-# Identical requests reuse the cached response in .bdd-cache/
+# Identical requests reuse the cached response in .spec-cache/
 # for this many seconds; 0 disables the cache.
 # cache_ttl_seconds = {llm_cache}
 # How many times to try a model call when the reply fails
@@ -85,7 +85,7 @@ endpoint = \"{endpoint}\"
 # discovery_timeout_seconds = {discovery}
 # How long one tool invocation may take.
 # call_timeout_seconds = {call}
-# How long discovered mcp.json tool lists stay cached under .bdd-cache/tools/.
+# How long discovered mcp.json tool lists stay cached under .spec-cache/tools/.
 # cache_ttl_seconds = {tools_cache}
 # Optional path to an mcp.json (otherwise the usual candidates are tried).
 # mcp_config = \"mcp.json\"
@@ -99,7 +99,7 @@ endpoint = \"{endpoint}\"
 #   playwright:browser_navigate   — mcp.json server \"playwright\"
 #   playwright__browser_navigate  — same MCP tool (catalog name)
 #
-# Add an MCP server in mcp.json, then `bdd tools refresh`, then put
+# Add an MCP server in mcp.json, then `spec tools refresh`, then put
 # `server:tool` (or `server__tool`) on the command that should use it.
 
 {profiles}\
@@ -467,7 +467,7 @@ mod tests {
             let table = toml
                 .content
                 .parse::<toml::Table>()
-                .expect("the scaffold .bdd.toml must be valid TOML");
+                .expect("the scaffold .spec.toml must be valid TOML");
             let profiles = table
                 .get("tools")
                 .and_then(|v| v.get("profiles"))
@@ -490,11 +490,11 @@ mod tests {
             }
             let gitignore = files.iter().find(|f| f.path == ".gitignore").unwrap();
             assert!(
-                gitignore.content.contains(".bdd-cache/"),
+                gitignore.content.contains(".spec-cache/"),
                 "{language:?}: the response cache must stay out of version control"
             );
             assert!(
-                gitignore.content.contains(".bdd-log/"),
+                gitignore.content.contains(".spec-log/"),
                 "{language:?}: the diagnostic logs must stay out of version control"
             );
         }

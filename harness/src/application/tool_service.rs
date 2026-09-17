@@ -151,7 +151,7 @@ pub fn parse_caller(raw: Option<&str>) -> Result<Caller, ToolError> {
     let names: Vec<&str> = Caller::ALL.iter().map(|c| c.key()).collect();
     let Some(raw) = raw else {
         return Err(ToolError(format!(
-            "bdd tools enable/disable requires --for <caller>. Valid callers: {}",
+            "spec tools enable/disable requires --for <caller>. Valid callers: {}",
             names.join(", ")
         )));
     };
@@ -245,7 +245,7 @@ mod tests {
                 path: Some("mcp.json".into()),
                 servers: vec![ServerSpec {
                     name: "self".into(),
-                    program: "bdd".into(),
+                    program: "spec".into(),
                     args: vec![],
                     env: vec![],
                 }],

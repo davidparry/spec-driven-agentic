@@ -3,7 +3,7 @@
 Every command that would write into your project — feature creation,
 scenario mutations, step-definition and unit-test generation, spec
 drafting, marking a requirement implemented — writes to a staging area
-instead: `.bdd-staged/` under the project root. Nothing touches your
+instead: `.spec-staged/` under the project root. Nothing touches your
 working tree until you commit the transaction.
 
 ## Why
@@ -18,21 +18,21 @@ working tree until you commit the transaction.
 ## The lifecycle
 
 ```bash
-bdd feature create --path features/calculator.feature --name "String Calculator"
-bdd changes show      # review: one staged "create"
-bdd changes commit    # apply to the working tree, clear the stage
+spec feature create --path features/calculator.feature --name "String Calculator"
+spec changes show      # review: one staged "create"
+spec changes commit    # apply to the working tree, clear the stage
 # or
-bdd changes discard   # drop everything staged, tree untouched
+spec changes discard   # drop everything staged, tree untouched
 ```
 
-`bdd changes show` lists each staged entry with its action and path:
+`spec changes show` lists each staged entry with its action and path:
 
 ```json
 {
   "changes": [
     { "action": "create", "path": "features/calculator.feature" }
   ],
-  "nextStep": "Review the staged changes, then 'bdd changes commit' to apply or 'bdd changes discard' to drop them."
+  "nextStep": "Review the staged changes, then 'spec changes commit' to apply or 'spec changes discard' to drop them."
 }
 ```
 
@@ -41,11 +41,11 @@ bdd changes discard   # drop everything staged, tree untouched
 | Writes to the stage | Writes directly |
 | --- | --- |
 | `feature create` | `init` (scaffolding a fresh project) |
-| `scenario add` / `update` / `delete` | `model use` (writes `.bdd.toml`) |
+| `scenario add` / `update` / `delete` | `model use` (writes `.spec.toml`) |
 | `steps generate` | `test` / `refactor` (phase state file) |
 | `unittest generate` | |
 | `spec draft` | |
 | `spec mark-implemented` | |
 
-Validation (`bdd validate`) checks staged Gherkin too, so you can gate
+Validation (`spec changes validate`) checks staged Gherkin too, so you can gate
 a transaction before committing it.

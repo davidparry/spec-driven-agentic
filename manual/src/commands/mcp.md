@@ -1,12 +1,12 @@
-# bdd mcp
+# spec mcp
 
 The workshop MCP server. This is the same workflow the harness offers a
 human, exposed to AI agents as typed tools over the Model Context
-Protocol. Cursor, Claude, the bundled `smoke-test.jar`, and `bdd mcp
+Protocol. Cursor, Claude, the bundled `smoke-test.jar`, and `spec mcp
 call` all talk to this process.
 
 ```text
-Usage: bdd mcp [OPTIONS] <COMMAND>
+Usage: spec mcp [OPTIONS] <COMMAND>
 
 Commands:
   serve  Serve the MCP tools over stdio
@@ -18,7 +18,7 @@ Wire identity is `spec-driven-server` / `1.0.0` (title `Spec Driven`:
 serves spec-driven TDD and BDD tools; the requirements spec is the
 source of truth; website
 https://davidparry.github.io/spec-driven-agentic/; icon
-https://davidparry.github.io/spec-driven-agentic/assets/bdd-harness-mark.png). Frozen seven-tool
+https://davidparry.github.io/spec-driven-agentic/assets/spec-harness-mark.png). Frozen seven-tool
 **reply shapes** are owned by
 `harness/tests/mcp_conformance.rs` and smoke-test's `ToolPlan` — not by a
 separate Java server.
@@ -28,8 +28,8 @@ Inspector, `pi` (through `pi-mcp-extension`), and `smoke-test.jar` launch it
 as a child process.
 
 **The lifecycle is dual-era, and both eras work.** The server prefers
-`2026-07-28`, where there is no `initialize` handshake: `bdd mcp call` and
-`bdd mcp tools` open a session with `server/discover` and per-request
+`2026-07-28`, where there is no `initialize` handshake: `spec mcp call` and
+`spec mcp tools` open a session with `server/discover` and per-request
 `_meta`, and the Java smoke walkthrough starts straight at `tools/list`. A
 host that still sends the classic `initialize` with protocol `2025-11-25`
 gets a normal handshake reply — that path is live, not a fallback stub,
@@ -38,7 +38,7 @@ host pick. This project's own Rust clients use the newer era.
 
 ---
 
-## bdd mcp serve
+## spec mcp serve
 
 Serve the MCP tools over stdio. The process reads JSON-RPC on stdin
 and writes replies on stdout, so an MCP client (Cursor, Claude
@@ -46,7 +46,7 @@ Desktop, `smoke-test.jar`) launches it as a child process — you
 normally never run it by hand.
 
 ```bash
-bdd mcp serve --root /path/to/project
+spec mcp serve --root /path/to/project
 ```
 
 Client configuration (Cursor's `mcp.json` shown; others are
@@ -56,7 +56,7 @@ equivalent):
 {
   "mcpServers": {
     "spec-driven-server": {
-      "command": "bdd",
+      "command": "spec",
       "args": ["mcp", "serve", "--root", "${workspaceFolder}"]
     }
   }
@@ -72,30 +72,30 @@ the model gets. The bridge registers them as `mcp_<server>_<tool>`, so
 
 Cursor sees **all 25 tools**, including staging, and so does `pi -nbt`.
 Harness commands that call a model attach a **narrower profile**
-(`bdd tools profiles`) — 3–7 tools for a generating command, 12 for the
-read-only `bdd ask` — so a local model is not offered commit or
+(`spec tools profiles`) — 3–7 tools for a generating command, 12 for the
+read-only `spec ask` — so a local model is not offered commit or
 mark-implemented.
 
-## bdd mcp tools
+## spec mcp tools
 
 List the built-in tools over one throwaway session. Default is an
-in-process loopback; `--stdio` spawns `bdd mcp serve` as a child
+in-process loopback; `--stdio` spawns `spec mcp serve` as a child
 (the same bytes Cursor would read).
 
 ```bash
-bdd mcp tools
-bdd mcp tools --stdio --json
+spec mcp tools
+spec mcp tools --stdio --json
 ```
 
-## bdd mcp call
+## spec mcp call
 
 Invoke one tool, print the result, exit. No narration, no tokens.
 
 ```bash
-bdd mcp call get_tdd_state
-bdd mcp call get_requirement --arg id=REQ-003
-bdd mcp call list_requirements --json
-bdd mcp call run_tests --stdio
+spec mcp call get_tdd_state
+spec mcp call get_requirement --arg id=REQ-003
+spec mcp call list_requirements --json
+spec mcp call run_tests --stdio
 ```
 
 `--arg key=value` is always a string unless the value parses as JSON.
@@ -105,7 +105,7 @@ bdd mcp call run_tests --stdio
 
 Twenty-five tools in three groups. There is no `spec_draft` or
 `implement` MCP tool: a **new** requirement is still drafted by the
-human (`bdd spec draft`) and Cursor writes production Java. Rewording an
+human (`spec draft`) and Cursor writes production Java. Rewording an
 existing requirement, Gherkin, steps, unit-test scaffolds,
 mark-implemented, and staging all go through tools. Generation over MCP
 is **template-only** (`source: "template"`).
@@ -114,34 +114,34 @@ is **template-only** (`source: "template"`).
 
 | MCP tool | Harness equivalent |
 | --- | --- |
-| `list_requirements` | [`bdd spec list`](spec.md#bdd-spec-list) |
-| `get_requirement` | [`bdd spec show`](spec.md#bdd-spec-show) |
-| `validate_spec` | [`bdd spec validate`](spec.md#bdd-spec-validate) |
-| `refine_requirement` | [`bdd spec refine`](spec.md#bdd-spec-refine) |
-| `run_tests` | [`bdd test`](test.md) |
-| `get_tdd_state` | [`bdd state`](state.md) |
-| `start_refactor` | [`bdd refactor`](refactor.md) |
+| `list_requirements` | [`spec list`](spec.md#spec-list) |
+| `get_requirement` | [`spec show`](spec.md#spec-show) |
+| `validate_spec` | [`spec validate`](spec.md#spec-validate) |
+| `refine_requirement` | [`spec refine`](spec.md#spec-refine) |
+| `run_tests` | [`spec test`](test.md) |
+| `get_tdd_state` | [`spec state`](state.md) |
+| `start_refactor` | [`spec refactor`](refactor.md) |
 
 ### Authoring and staging
 
 | MCP tool | Harness equivalent |
 | --- | --- |
-| `feature_list` / `feature_read` / `feature_create` | [`bdd feature`](feature.md) |
-| `scenario_add` / `scenario_update` / `scenario_delete` | [`bdd scenario`](scenario.md) |
-| `changes_show` / `changes_commit` / `changes_discard` | [`bdd changes`](changes.md) |
-| `changes_validate` | [`bdd validate`](validate.md) (staged-wins; frozen `validate_spec` stays on disk) |
-| `requirement_reword` | [`bdd spec reword`](spec.md#bdd-spec-reword) (the repair path for `validate_spec` and `refine_requirement` findings; never hand-edit the spec file) |
-| `requirement_mark_implemented` | [`bdd spec mark-implemented`](spec.md#bdd-spec-mark-implemented) |
-| `step_definitions_find` | [`bdd steps missing`](steps.md#bdd-steps-missing) |
-| `step_definition_create` | [`bdd steps generate`](steps.md#bdd-steps-generate) (template only) |
-| `unit_test_create` | [`bdd unittest generate`](unittest.md) (template only; arg is `req_id`) |
+| `feature_list` / `feature_read` / `feature_create` | [`spec feature`](feature.md) |
+| `scenario_add` / `scenario_update` / `scenario_delete` | [`spec scenario`](scenario.md) |
+| `changes_show` / `changes_commit` / `changes_discard` | [`spec changes`](changes.md) |
+| `changes_validate` | [`spec changes validate`](changes.md#spec-changes-validate) (staged-wins; frozen `validate_spec` stays on disk) |
+| `requirement_reword` | [`spec reword`](spec.md#spec-reword) (the repair path for `validate_spec` and `refine_requirement` findings; never hand-edit the spec file) |
+| `requirement_mark_implemented` | [`spec mark-implemented`](spec.md#spec-mark-implemented) |
+| `step_definitions_find` | [`spec steps missing`](steps.md#spec-steps-missing) |
+| `step_definition_create` | [`spec steps generate`](steps.md#spec-steps-generate) (template only) |
+| `unit_test_create` | [`spec unittest generate`](unittest.md) (template only; arg is `req_id`) |
 
 ### Inspect
 
 | MCP tool | Harness equivalent |
 | --- | --- |
 | `project_root` | `--root` (the absolute directory this process was started with) |
-| `project_inspect` | [`bdd inspect`](inspect.md) |
+| `project_inspect` | [`spec inspect`](inspect.md) |
 | `command_run` | — (MCP and the `implement` profile; see below) |
 
 ## command_run: the guarded command line
@@ -167,7 +167,7 @@ guardrails, checked before anything spawns:
   `..` — the command cannot name anything outside the root.
 - **RED bar only.** Commands run only during the implementation
   phase. Off a RED bar the tool refuses and points at `run_tests`.
-- **Human confirm on the harness.** When `bdd implement` offers
+- **Human confirm on the harness.** When `spec implement` offers
   `command_run`, the harness asks before spawning. Piped/CI stdin
   declines; it never hangs.
 - **Timeout and output cap.** A hard timeout (default and maximum
@@ -179,7 +179,7 @@ build tool can still run build scripts. What the policy makes
 unexpressible is running destructive binaries and reaching outside
 the project root.
 
-`run_tests` during `bdd implement` sees the **working tree**, not an
+`run_tests` during `spec implement` sees the **working tree**, not an
 unstaged patch. Commit (or apply staged files) before you trust the
 bar.
 
@@ -211,5 +211,5 @@ bar.
   is the wire). Diagnostics go to stderr.
 - One server serves one project root. Point different projects at
   different server entries.
-- Backup Inspector: `npx @modelcontextprotocol/inspector bdd mcp serve --root $PWD`.
-- See also [`bdd tools`](tools.md) and [`bdd ask`](ask.md).
+- Backup Inspector: `npx @modelcontextprotocol/inspector spec mcp serve --root $PWD`.
+- See also [`spec tools`](tools.md) and [`spec ask`](ask.md).

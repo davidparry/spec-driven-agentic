@@ -1,5 +1,5 @@
 //! Staging overlays: feature catalogs and source trees that see
-//! `.bdd-staged/` as if it were already committed. `bdd validate`
+//! `.spec-staged/` as if it were already committed. `spec changes validate`
 //! already overlays Gherkin; implement, status, and generation need
 //! the same view so a just-staged scenario or test counts as present.
 

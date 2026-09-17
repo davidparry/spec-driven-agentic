@@ -1,6 +1,6 @@
 Feature: Stateless MCP tool calls from the shell
   As a developer debugging a tool profile with no model in the loop
-  I want `bdd mcp call` to open one session, invoke one tool, print, and exit
+  I want `spec mcp call` to open one session, invoke one tool, print, and exit
   So that every served tool is reachable from a shell and failures do not kill it
 
   Background:

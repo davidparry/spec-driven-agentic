@@ -3,13 +3,13 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>bdd Harness Manual</title>
+        <title>spec Harness Manual</title>
         <meta name="robots" content="noindex">
 
 
         <!-- Custom HTML head -->
 
-        <meta name="description" content="The complete, searchable reference for the bdd harness: every command, subcommand, and flag, with in-depth examples.">
+        <meta name="description" content="The complete, searchable reference for the spec harness: every command, subcommand, and flag, with in-depth examples.">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff">
 
@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "searchindex-aaad9ee5.js";
+            window.path_to_searchindex_js = "searchindex-5959f77b.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-9d4e1520.js"></script>
+        <script src="toc-372d77fe.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -138,7 +138,7 @@
                         </button>
                     </div>
 
-                    <h1 class="menu-title">bdd Harness Manual</h1>
+                    <h1 class="menu-title">spec Harness Manual</h1>
 
                     <div class="right-buttons">
                         <a href="print.html" title="Print this book" aria-label="Print this book">
@@ -179,7 +179,7 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="introduction"><a class="header" href="#introduction">Introduction</a></h1>
-<p><code>bdd</code> is one native binary for the whole spec-driven loop:</p>
+<p><code>spec</code> is one native binary for the whole spec-driven loop:</p>
 <pre><code class="language-text">spec → Gherkin scenario → RED → implement → GREEN → REFACTOR
 </code></pre>
 <p>The requirements spec (<code>requirements/requirements.json</code>) is the source
@@ -191,12 +191,12 @@ quality-gates its wording, turns approved requirements into tagged
 Gherkin scenarios, runs the tests through your project’s own build
 tool, and tracks the persistent RED/GREEN/REFACTOR phase between
 invocations. It also
-embeds an MCP server (<code>bdd mcp serve</code>) so AI agents can drive the same
+embeds an MCP server (<code>spec mcp serve</code>) so AI agents can drive the same
 workflow through typed tools — with no filesystem or shell escape
 hatches.</p>
 <h2 id="how-to-read-this-manual"><a class="header" href="#how-to-read-this-manual">How to read this manual</a></h2>
 <ul>
-<li><strong>Using bdd</strong> covers the concepts that span commands: the global
+<li><strong>Using spec</strong> covers the concepts that span commands: the global
 flags, the interactive shell, the workflow phases, and the staged
 changes model that protects your working tree.</li>
 <li><strong>Command reference</strong> documents every command, subcommand, and flag,
@@ -206,7 +206,7 @@ with realistic examples and the exact JSON reply shapes.</li>
 <h2 id="conventions"><a class="header" href="#conventions">Conventions</a></h2>
 <ul>
 <li>Commands are shown as you would type them in a shell. Inside the
-<a href="#the-interactive-shell">interactive shell</a> the leading <code>bdd</code> is
+<a href="#the-interactive-shell">interactive shell</a> the leading <code>spec</code> is
 optional.</li>
 <li>Replies are JSON on stdout unless a command is inherently
 interactive. Every reply carries a <code>nextStep</code> field that says what
@@ -236,7 +236,7 @@ installs anything.</p>
 <p>LLM-backed generation uses local <a href="https://ollama.com">Ollama</a>. The
 model this harness is developed and run against is
 <code>qwen3.8-flash-next:125b-mlx</code> — see <a href="#getting-started">Getting started</a>
-and <a href="#bdd-model"><code>bdd model</code></a>. Your mileage will vary with
+and <a href="#spec-model"><code>spec model</code></a>. Your mileage will vary with
 other models, especially those not trained for development work.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="getting-started"><a class="header" href="#getting-started">Getting started</a></h1>
@@ -247,17 +247,17 @@ other models, especially those not trained for development work.</p>
 x86_64), or build from source:</p>
 <pre><code class="language-bash">cd harness
 cargo build --release
-./target/release/bdd --help
+./target/release/spec --help
 </code></pre>
 <p>The shell installer places the binary in <code>$CARGO_HOME/bin</code> (usually
-<code>~/.cargo/bin/bdd</code>) and writes an install receipt to
-<code>~/.config/bdd-harness/bdd-harness-receipt.json</code>.</p>
+<code>~/.cargo/bin/spec</code>) and writes an install receipt to
+<code>~/.config/spec-harness/spec-harness-receipt.json</code>.</p>
 <h2 id="local-llm-ollama"><a class="header" href="#local-llm-ollama">Local LLM (Ollama)</a></h2>
 <p>LLM-backed generation uses a local <a href="https://ollama.com">Ollama</a>
 instance. The model this harness is developed and run against is
 <code>qwen3.8-flash-next:125b-mlx</code>:</p>
 <pre><code class="language-bash">ollama pull qwen3.8-flash-next:125b-mlx
-bdd model use qwen3.8-flash-next:125b-mlx
+spec model use qwen3.8-flash-next:125b-mlx
 </code></pre>
 <p>Your mileage will vary with a different model. A stronger coding model
 may draft, generate, and implement better; a model trained for chat,
@@ -266,43 +266,43 @@ produce weaker specs, step definitions, tests, and production code.
 Without a reachable model the harness still runs — generation falls back
 to deterministic templates.</p>
 <h2 id="your-first-session"><a class="header" href="#your-first-session">Your first session</a></h2>
-<p>Run bare <code>bdd</code> in a terminal. You get the help, the banner with the
+<p>Run bare <code>spec</code> in a terminal. You get the help, the banner with the
 version, the model status, and an interactive prompt:</p>
-<pre><code class="language-text">$ bdd
+<pre><code class="language-text">$ spec
 
   ╭──────────────────────────────────╮
   │                                  ▼
-  │    &gt; bdd  v0.4.0                 │
+  │    &gt; spec  v0.4.0                 │
   │    spec → RED → GREEN → REFACTOR │
   ▲                                  │
   ╰──────────────────────────────────╯
 
-Model set for this session: qwen3.8-flash-next:125b-mlx (not saved - keep it with: bdd model use qwen3.8-flash-next:125b-mlx).
-Interactive shell - type commands without the bdd prefix (e.g. spec list).
-bdd&gt;
+Model set for this session: qwen3.8-flash-next:125b-mlx (not saved - keep it with: spec model use qwen3.8-flash-next:125b-mlx).
+Interactive shell - type commands without the spec prefix (e.g. list).
+spec&gt;
 </code></pre>
 <h2 id="two-ways-to-begin-a-project"><a class="header" href="#two-ways-to-begin-a-project">Two ways to begin a project</a></h2>
 <p><strong>Guided, from zero</strong> — one command runs the whole loop with exactly
 two human gates (approving the spec wording and approving generated
 tests):</p>
 <pre><code class="language-bash">mkdir calculator &amp;&amp; cd calculator
-bdd greenfield
+spec greenfield
 </code></pre>
 <p><strong>Step by step</strong> — scaffold, then drive each phase yourself:</p>
-<pre><code class="language-bash">bdd init --language rust --name "String Calculator"
-bdd spec draft          # describe what to build in plain words; with a
+<pre><code class="language-bash">spec init --language rust --name "String Calculator"
+spec draft          # describe what to build in plain words; with a
                         # model resolved it proposes title, story, and
                         # criteria for you to edit (manual prompts otherwise)
-bdd spec validate       # structure gate
-bdd spec refine REQ-001 # wording gate
-bdd changes commit      # apply the staged spec
-bdd test                # expect RED
+spec validate       # structure gate
+spec refine REQ-001 # wording gate
+spec changes commit      # apply the staged spec
+spec test                # expect RED
 # ...implement...
-bdd test                # expect GREEN
-bdd refactor --note "extract parser"
-bdd test                # still GREEN
-bdd status              # confirm REQ-001 is ready to mark
-bdd spec mark-implemented REQ-001 &amp;&amp; bdd changes commit
+spec test                # expect GREEN
+spec refactor --note "extract parser"
+spec test                # still GREEN
+spec status              # confirm REQ-001 is ready to mark
+spec mark-implemented REQ-001 &amp;&amp; spec changes commit
 </code></pre>
 <p>This repository’s String Calculator workshop can be finished with the
 same commands. The kata-specific recipe (paths under <code>kata/</code>, draft
@@ -311,21 +311,21 @@ REQ-007, then REQ-003…007 to implemented) is
 <h2 id="working-against-an-existing-project"><a class="header" href="#working-against-an-existing-project">Working against an existing project</a></h2>
 <p>Every command takes <code>--root</code> (see <a href="#global-flags">Global flags</a>), so
 you can point the harness at any project:</p>
-<pre><code class="language-bash">bdd --root ~/code/my-kata inspect
-bdd --root ~/code/my-kata spec validate
+<pre><code class="language-bash">spec --root ~/code/my-kata inspect
+spec --root ~/code/my-kata validate
 </code></pre>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="global-flags"><a class="header" href="#global-flags">Global flags</a></h1>
-<p>These flags are accepted by <code>bdd</code> itself and by every command. Place
+<p>These flags are accepted by <code>spec</code> itself and by every command. Place
 them anywhere on the command line.</p>
 <h2 id="--root-root"><a class="header" href="#--root-root"><code>--root &lt;ROOT&gt;</code></a></h2>
 <p>The project root — the directory where <code>requirements/requirements.json</code>
-(the root of the <a href="#the-requirements-format">spec catalog</a>) and <code>.bdd.toml</code>
+(the root of the <a href="#the-requirements-format">spec catalog</a>) and <code>.spec.toml</code>
 live, and the base for every relative path the harness reads or writes.
 Defaults to the current directory. MCP clients that cannot see argv can
 call <code>project_root</code> to read the same directory as an absolute path.</p>
-<pre><code class="language-bash">bdd --root ~/code/calculator spec list
-bdd spec list --root ~/code/calculator   # same thing
+<pre><code class="language-bash">spec --root ~/code/calculator list
+spec list --root ~/code/calculator   # same thing
 </code></pre>
 <p>In the <a href="#the-interactive-shell">interactive shell</a>, commands inherit the
 shell’s <code>--root</code> unless a line supplies its own.</p>
@@ -333,14 +333,14 @@ shell’s <code>--root</code> unless a line supplies its own.</p>
 <p>Override the LLM model for this invocation only. This wins over the
 configured model and over discovery, and is never written to
 configuration:</p>
-<pre><code class="language-bash">bdd --model qwen3.8-flash-next:125b-mlx steps generate
-bdd --model llama3:8b greenfield   # another model; mileage will vary
+<pre><code class="language-bash">spec --model qwen3.8-flash-next:125b-mlx steps generate
+spec --model llama3:8b greenfield   # another model; mileage will vary
 </code></pre>
-<p>Model resolution order (see <a href="#bdd-model">bdd model</a> for the
+<p>Model resolution order (see <a href="#spec-model">spec model</a> for the
 full story):</p>
 <ol>
 <li><code>--model</code> flag — this invocation only.</li>
-<li><code>model</code> in <code>.bdd.toml</code> — the persisted project choice.</li>
+<li><code>model</code> in <code>.spec.toml</code> — the persisted project choice.</li>
 <li>Discovery — the first installed Ollama model, session-only.</li>
 </ol>
 <h2 id="--debug"><a class="header" href="#--debug"><code>--debug</code></a></h2>
@@ -348,19 +348,19 @@ full story):</p>
 responses, cache hits and misses, resolved configuration, MCP tool
 calls, and test-runner activity. Without the flag only high-level
 lifecycle events (info and above) are logged.</p>
-<p>Diagnostics are written to daily-rolling files under <code>.bdd-log/</code> in
+<p>Diagnostics are written to daily-rolling files under <code>.spec-log/</code> in
 the project root (gitignored; safe to delete at any time) — stdout and
 stderr are never touched, so JSON output, the MCP stdio protocol, and
 user-facing messages stay clean either way. Log writes go through an
 in-memory queue drained by a worker thread, so logging never blocks
 the command. If the log directory cannot be created, diagnostics fall
 back to stderr.</p>
-<pre><code class="language-bash">bdd --debug implement REQ-003             # full prompts and replies in the log
-tail -f .bdd-log/bdd.log.$(date +%F)      # watch the diagnostics live
+<pre><code class="language-bash">spec --debug implement REQ-003             # full prompts and replies in the log
+tail -f .spec-log/spec.log.$(date +%F)      # watch the diagnostics live
 </code></pre>
 <p>The <code>RUST_LOG</code> environment variable overrides both the default and
 <code>--debug</code> with per-module directives, e.g.
-<code>RUST_LOG=bdd_harness::adapters=trace bdd test</code>.</p>
+<code>RUST_LOG=spec_harness::adapters=trace spec test</code>.</p>
 <h2 id="--retry-n"><a class="header" href="#--retry-n"><code>--retry &lt;N&gt;</code></a></h2>
 <p>How many times to try a model call when the reply fails validation
 (not a JSON array of requirements, not a complete rewording object,
@@ -368,19 +368,19 @@ not a usable file update, empty advice, and so on). Default is <strong>3</strong
 Each retry keeps the original prompt and appends the invalid reply
 plus the reason, so the model can correct itself. Transport failures
 (Ollama unreachable) are not retried.</p>
-<pre><code class="language-bash">bdd --retry 5 greenfield
-bdd spec draft --retry 1   # one attempt, then the usual fallback
+<pre><code class="language-bash">spec --retry 5 greenfield
+spec draft --retry 1   # one attempt, then the usual fallback
 </code></pre>
-<p><code>--retry</code> wins over <code>retry</code> under <code>[llm]</code> in <code>.bdd.toml</code>. A missing
+<p><code>--retry</code> wins over <code>retry</code> under <code>[llm]</code> in <code>.spec.toml</code>. A missing
 or zero config value uses the default of 3. In the interactive shell,
 commands inherit the shell’s <code>--retry</code> unless a line supplies its own.</p>
 <h2 id="--tools-names"><a class="header" href="#--tools-names"><code>--tools &lt;NAMES&gt;</code></a></h2>
 <p>Replace this command’s tool profile for one run with a comma-separated
 list of catalog names (<code>validate_spec</code>, <code>playwright:browser_navigate</code>,
 <code>builtin:run_tests</code>). Default profiles live in code and in
-<code>.bdd.toml</code>; see <a href="#bdd-tools"><code>bdd tools</code></a>. <a href="#bdd-config"><code>bdd config</code></a>
+<code>.spec.toml</code>; see <a href="#spec-tools"><code>spec tools</code></a>. <a href="#spec-config"><code>spec config</code></a>
 prints the resolved keys and their source.</p>
-<pre><code class="language-bash">bdd --tools list_requirements,get_requirement status
+<pre><code class="language-bash">spec --tools list_requirements,get_requirement status
 </code></pre>
 <h2 id="--max-rounds-n"><a class="header" href="#--max-rounds-n"><code>--max-rounds &lt;N&gt;</code></a></h2>
 <p>Override <code>[tools] max_rounds</code> for one run: how many tool-call rounds
@@ -401,25 +401,25 @@ model-required operation, unparseable arguments, and similar.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="the-interactive-shell"><a class="header" href="#the-interactive-shell">The interactive shell</a></h1>
-<p>Running <code>bdd</code> with no subcommand in a terminal opens a REPL. It prints
+<p>Running <code>spec</code> with no subcommand in a terminal opens a REPL. It prints
 the help once, shows the banner and the session’s model status, and
 then reads commands until you leave.</p>
-<pre><code class="language-text">bdd&gt; spec list
+<pre><code class="language-text">spec&gt; list
 [
   { "id": "REQ-001", "title": "Empty string returns zero", "status": "implemented" }
 ]
-bdd&gt; test --feature features/calculator.feature
+spec&gt; test --feature features/calculator.feature
 ...
-bdd&gt; exit
+spec&gt; exit
 </code></pre>
 <h2 id="behavior"><a class="header" href="#behavior">Behavior</a></h2>
 <ul>
-<li><strong>No prefix needed.</strong> Type <code>spec list</code>, not <code>bdd spec list</code>. A
-leading <code>bdd</code> is forgiven if you type it anyway.</li>
+<li><strong>No prefix needed.</strong> Type <code>list</code>, not <code>spec list</code>. A leading <code>spec</code>
+is forgiven if you type it anyway.</li>
 <li><strong>Inherited flags.</strong> Commands inherit the shell’s <code>--root</code>,
 <code>--model</code>, and <code>--retry</code> unless the line supplies its own:</li>
 </ul>
-<pre><code class="language-bash">bdd --root ~/code/calculator --model qwen3.8-flash-next:125b-mlx --retry 5
+<pre><code class="language-bash">spec --root ~/code/calculator --model qwen3.8-flash-next:125b-mlx --retry 5
 # every command in this shell now targets that root and model,
 # and retries invalid model replies up to 5 times
 </code></pre>
@@ -430,9 +430,9 @@ Unbalanced quotes report <code>unreadable input</code> and the shell continues.<
 <li><strong>Errors don’t kill the shell.</strong> A failing command prints its error
 and returns to the prompt.</li>
 <li><strong>Blank lines</strong> are ignored.</li>
-<li><strong>After <code>greenfield</code>.</strong> A one-shot <code>bdd greenfield</code> that finishes on
-a real terminal stays in this shell (the <code>bdd&gt;</code> prompt) so you can
-run <code>spec list</code>, <code>greenfield</code>, or anything else without relaunching.</li>
+<li><strong>After <code>greenfield</code>.</strong> A one-shot <code>spec greenfield</code> that finishes on
+a real terminal stays in this shell (the <code>spec&gt;</code> prompt) so you can
+run <code>list</code>, <code>greenfield</code>, or anything else without relaunching.</li>
 </ul>
 <h2 id="leaving"><a class="header" href="#leaving">Leaving</a></h2>
 <ul>
@@ -442,7 +442,7 @@ run <code>spec list</code>, <code>greenfield</code>, or anything else without re
 </ul>
 <p>On exit the shell prints a summary of how many commands ran.</p>
 <h2 id="session-history"><a class="header" href="#session-history">Session history</a></h2>
-<p>Line history is kept across sessions in <code>.bdd-history</code> under the
+<p>Line history is kept across sessions in <code>.spec-history</code> under the
 project root. Use <kbd>↑</kbd>/<kbd>↓</kbd> to recall previous
 commands and <kbd>Ctrl</kbd>+<kbd>R</kbd> for reverse search. If the
 history cannot be saved, the shell says so and exits normally.</p>
@@ -452,15 +452,15 @@ model. This harness is developed and run against
 <code>qwen3.8-flash-next:125b-mlx</code>; your mileage will vary with a different
 model, especially one trained for work other than development. See
 <a href="#local-llm-ollama">Getting started</a> and
-<a href="#bdd-model"><code>bdd model</code></a>.</p>
+<a href="#spec-model"><code>spec model</code></a>.</p>
 <div class="table-wrapper">
 <table>
 <thead>
 <tr><th>Situation</th><th>Announcement</th></tr>
 </thead>
 <tbody>
-<tr><td>Configured in <code>.bdd.toml</code></td><td><code>Model set: qwen3.8-flash-next:125b-mlx (from configuration).</code></td></tr>
-<tr><td>No config, models installed</td><td><code>Model set for this session: qwen3.8-flash-next:125b-mlx (not saved - keep it with: bdd model use qwen3.8-flash-next:125b-mlx).</code></td></tr>
+<tr><td>Configured in <code>.spec.toml</code></td><td><code>Model set: qwen3.8-flash-next:125b-mlx (from configuration).</code></td></tr>
+<tr><td>No config, models installed</td><td><code>Model set for this session: qwen3.8-flash-next:125b-mlx (not saved - keep it with: spec model use qwen3.8-flash-next:125b-mlx).</code></td></tr>
 <tr><td>Ollama up, no models</td><td><code>Ollama is running but has no models - generation will use deterministic templates. For optimal results pull a coding model, e.g.: ollama pull qwen3.8-flash-next:125b-mlx (mileage varies with models not trained for development)</code></td></tr>
 <tr><td>Ollama unreachable</td><td><code>Ollama is not reachable - generation will use deterministic templates. Install it from https://ollama.com, start it, and pull a coding model, e.g.: ollama pull qwen3.8-flash-next:125b-mlx (mileage varies with models not trained for development)</code></td></tr>
 </tbody>
@@ -469,22 +469,22 @@ model, especially one trained for work other than development. See
 <h2 id="the-greenfield-nudge"><a class="header" href="#the-greenfield-nudge">The greenfield nudge</a></h2>
 <p>When all three signs of a brand-new project line up —</p>
 <ol>
-<li>this is the first shell session in the root (no <code>.bdd-history</code> yet),</li>
+<li>this is the first shell session in the root (no <code>.spec-history</code> yet),</li>
 <li>a model is ready, and</li>
 <li>there is no <code>requirements/requirements.json</code></li>
 </ol>
 <p>— the shell offers to start the loop before the first prompt. The same
-start refreshes <code>.bdd-memory.json</code> (language, libraries, layout) so
+start refreshes <code>.spec-memory.json</code> (language, libraries, layout) so
 later model calls in the session carry that brief.</p>
 <pre><code class="language-text">It appears you are in a greenfield - this project has no requirements/requirements.json yet.
 Start with the greenfield command now? [y/N]
 </code></pre>
-<p><code>y</code> runs <a href="#bdd-greenfield"><code>bdd greenfield</code></a> immediately;
+<p><code>y</code> runs <a href="#spec-greenfield"><code>spec greenfield</code></a> immediately;
 anything else declines and the shell carries on:</p>
-<pre><code class="language-text">No problem - type greenfield any time, or spec draft to begin with the spec.
+<pre><code class="language-text">No problem - type greenfield any time, or draft to begin with the spec.
 </code></pre>
 <h2 id="when-there-is-no-terminal"><a class="header" href="#when-there-is-no-terminal">When there is no terminal</a></h2>
-<p>If stdin is not a terminal (piped input, CI), bare <code>bdd</code> prints the
+<p>If stdin is not a terminal (piped input, CI), bare <code>spec</code> prints the
 help and exits instead of opening the shell.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="the-workflow-spec--red--green--refactor"><a class="header" href="#the-workflow-spec--red--green--refactor">The workflow: spec → RED → GREEN → REFACTOR</a></h1>
@@ -498,11 +498,11 @@ and may include child spec files (nested as deep as the backlog
 needs), and every command works on the merged view of the whole tree.
 The iteration loop for the spec itself:</p>
 <ol>
-<li>Draft or edit a requirement — <a href="#bdd-spec-draft"><code>bdd spec draft</code></a>
+<li>Draft or edit a requirement — <a href="#spec-draft"><code>spec draft</code></a>
 or your editor.</li>
-<li><a href="#bdd-spec-validate"><code>bdd spec validate</code></a> until the
+<li><a href="#spec-validate"><code>spec validate</code></a> until the
 structure is valid.</li>
-<li><a href="#bdd-spec-refine"><code>bdd spec refine &lt;id&gt;</code></a> until
+<li><a href="#spec-refine"><code>spec refine &lt;id&gt;</code></a> until
 there are no wording findings.</li>
 <li>A human approves the wording. This is the first human gate.</li>
 </ol>
@@ -512,51 +512,51 @@ there are no wording findings.</li>
 tagged <code>@REQ-...</code> in a feature file, with step definitions binding
 it to real code.</li>
 <li><strong>TDD altitude</strong> — unit tests
-(<a href="#bdd-unittest"><code>bdd unittest generate</code></a>) pin down the
+(<a href="#spec-unittest"><code>spec unittest generate</code></a>) pin down the
 fine-grained behavior beneath the scenario.</li>
 </ul>
 <h2 id="the-phase-machine"><a class="header" href="#the-phase-machine">The phase machine</a></h2>
-<p>The persistent TDD phase lives in <code>.bdd-tdd-state.json</code> under the
+<p>The persistent TDD phase lives in <code>.spec-state.json</code> under the
 project root and survives between invocations and across MCP sessions.</p>
 <pre><code class="language-text">          tests fail                    tests pass
   (start) ──────────► RED ────────────► GREEN ──┐
-                       ▲                  │     │ bdd refactor
+                       ▲                  │     │ spec refactor
                        │   tests fail     ▼     ▼
                        └────────────── REFACTOR
                                         (tests pass → GREEN)
 </code></pre>
 <ul>
-<li><a href="#bdd-test"><code>bdd test</code></a> runs the suite and moves the phase to
+<li><a href="#spec-test"><code>spec test</code></a> runs the suite and moves the phase to
 RED (failures) or GREEN (all passing).</li>
-<li><a href="#bdd-refactor"><code>bdd refactor</code></a> is only allowed on GREEN — it
+<li><a href="#spec-refactor"><code>spec refactor</code></a> is only allowed on GREEN — it
 moves to REFACTOR and records your note in the refactor log.</li>
-<li><a href="#bdd-state"><code>bdd state</code></a> shows the phase, the last run’s
+<li><a href="#spec-state"><code>spec state</code></a> shows the phase, the last run’s
 counts, and the refactor log at any time.</li>
-<li><a href="#bdd-status"><code>bdd status</code></a> zooms out from the phase to the
+<li><a href="#spec-status"><code>spec status</code></a> zooms out from the phase to the
 spec: where every requirement stands on the road to implemented, and
 the single next step for the one that is furthest along.</li>
 </ul>
 <h2 id="one-requirement-at-a-time"><a class="header" href="#one-requirement-at-a-time">One requirement at a time</a></h2>
 <p>The intended rhythm for each pending requirement:</p>
-<pre><code class="language-bash">bdd spec show REQ-002        # locations + workflow hint
-bdd scenario add --feature features/calculator.feature \
+<pre><code class="language-bash">spec show REQ-002        # locations + workflow hint
+spec scenario add --feature features/calculator.feature \
     --req REQ-002 --name "Two numbers are summed" \
     --step 'Given the input "1,2"' \
     --step 'When add is called' \
     --step 'Then the result is 3'
-bdd changes commit           # apply the staged scenario
-bdd steps missing            # any undefined steps?
-bdd steps generate &amp;&amp; bdd changes commit
-bdd test                     # RED: the scenario fails honestly
+spec changes commit           # apply the staged scenario
+spec steps missing            # any undefined steps?
+spec steps generate &amp;&amp; spec changes commit
+spec test                     # RED: the scenario fails honestly
 # ...implement the production code...
-bdd test                     # GREEN
-bdd refactor --note "tidy the parser" &amp;&amp; bdd test
-bdd status                   # confirm REQ-002 is ready to mark
-bdd spec mark-implemented REQ-002   # flips the status, records the featureFile
-bdd validate                 # checks the @REQ-002 scenario exists
-bdd changes commit
+spec test                     # GREEN
+spec refactor --note "tidy the parser" &amp;&amp; spec test
+spec status                   # confirm REQ-002 is ready to mark
+spec mark-implemented REQ-002   # flips the status, records the featureFile
+spec changes validate                 # checks the @REQ-002 scenario exists
+spec changes commit
 </code></pre>
-<p><a href="#bdd-greenfield"><code>bdd greenfield</code></a> automates exactly this
+<p><a href="#spec-greenfield"><code>spec greenfield</code></a> automates exactly this
 rhythm, pausing only at the two human gates.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="the-requirements-format"><a class="header" href="#the-requirements-format">The requirements format</a></h1>
@@ -566,10 +566,10 @@ its shape: what each field means, who consumes it, and how one file
 grows into a <strong>catalog</strong> of many.</p>
 <p>One thing to keep straight: <strong>Cucumber never reads this file.</strong>
 Cucumber runs the <code>.feature</code> files. The spec sits <em>upstream</em>: the
-tooling (<code>bdd</code>, the MCP server) reads it, agents turn its acceptance
+tooling (<code>spec</code>, the MCP server) reads it, agents turn its acceptance
 criteria into Gherkin scenarios and unit tests, and those are what the
 test runner executes.</p>
-<pre><code class="language-text">requirements.json  →  bdd / MCP tools  →  .feature + tests  →  Cucumber/JUnit
+<pre><code class="language-text">requirements.json  →  spec / MCP tools  →  .feature + tests  →  Cucumber/JUnit
 </code></pre>
 <h2 id="the-document-shape"><a class="header" href="#the-document-shape">The document shape</a></h2>
 <pre><code class="language-json">{
@@ -598,7 +598,7 @@ test runner executes.</p>
 <tr><th>Field</th><th>Required</th><th>What it does</th></tr>
 </thead>
 <tbody>
-<tr><td><code>project</code></td><td>root only</td><td>The project name. <code>bdd spec validate</code> fails when it is blank on the root document; included files never need one. Returned by <code>list_requirements</code>, and greenfield mode derives production file names from it.</td></tr>
+<tr><td><code>project</code></td><td>root only</td><td>The project name. <code>spec validate</code> fails when it is blank on the root document; included files never need one. Returned by <code>list_requirements</code>, and greenfield mode derives production file names from it.</td></tr>
 <tr><td><code>description</code></td><td>no</td><td>Documentation for humans and agents. The tooling never acts on it.</td></tr>
 <tr><td><code>includes</code></td><td>no</td><td>Child spec files merged into this one — see <a href="#the-catalog-splitting-the-spec-across-files">the catalog</a>.</td></tr>
 <tr><td><code>requirements</code></td><td>see note</td><td>The backlog this file contributes. A file may hold an empty array when it only exists to include others, but the <em>merged</em> catalog must contain at least one requirement.</td></tr>
@@ -613,11 +613,11 @@ test runner executes.</p>
 </thead>
 <tbody>
 <tr><td><code>id</code></td><td>yes</td><td>The lookup key, shaped like <code>REQ-007</code> (uppercase prefix, dash, number). Must be unique across the <strong>whole catalog</strong> — every included file counts. It is also the tag the workflow expects on the Gherkin scenario (<code>@REQ-007</code>); that tag is how a scenario traces back to its requirement.</td></tr>
-<tr><td><code>title</code></td><td>yes</td><td>One line naming the behavior. Shown by <code>bdd spec list</code>.</td></tr>
-<tr><td><code>status</code></td><td>yes</td><td><code>pending</code> or <code>implemented</code> — nothing else. <code>bdd spec mark-implemented</code> flips it on GREEN; the value gates the <code>featureFile</code> rules below.</td></tr>
-<tr><td><code>story</code></td><td>yes</td><td>The user story, <code>As a …, I want … so that …</code>. <code>bdd spec refine</code> reviews it for a missing actor, missing benefit, and ambiguous words.</td></tr>
+<tr><td><code>title</code></td><td>yes</td><td>One line naming the behavior. Shown by <code>spec list</code>.</td></tr>
+<tr><td><code>status</code></td><td>yes</td><td><code>pending</code> or <code>implemented</code> — nothing else. <code>spec mark-implemented</code> flips it on GREEN; the value gates the <code>featureFile</code> rules below.</td></tr>
+<tr><td><code>story</code></td><td>yes</td><td>The user story, <code>As a …, I want … so that …</code>. <code>spec refine</code> reviews it for a missing actor, missing benefit, and ambiguous words.</td></tr>
 <tr><td><code>acceptanceCriteria</code></td><td>at least one</td><td>Each criterion must be phrased Given/When/Then. This is the load-bearing field: agents translate these lines into the Gherkin scenarios and unit tests you then implement.</td></tr>
-<tr><td><code>featureFile</code></td><td>when implemented</td><td>Repo-root-relative path to the feature file carrying the scenario. Optional while <code>pending</code>; once <code>implemented</code>, validation requires the file to exist <em>and</em> to contain a scenario tagged <code>@&lt;id&gt;</code>. <code>bdd spec mark-implemented</code> records it automatically.</td></tr>
+<tr><td><code>featureFile</code></td><td>when implemented</td><td>Repo-root-relative path to the feature file carrying the scenario. Optional while <code>pending</code>; once <code>implemented</code>, validation requires the file to exist <em>and</em> to contain a scenario tagged <code>@&lt;id&gt;</code>. <code>spec mark-implemented</code> records it automatically.</td></tr>
 </tbody>
 </table>
 </div>
@@ -642,7 +642,7 @@ files, so the tree nests as many levels deep as the backlog needs.</p>
 <code>arithmetic.json</code>’s <code>"edge-cases.json"</code> lives next to
 <code>arithmetic.json</code>. Includes must stay inside the spec directory.</li>
 <li><strong>Merge order is depth-first</strong>: a file’s own requirements first,
-then each include in listed order. <code>bdd spec list</code>,
+then each include in listed order. <code>spec list</code>,
 <code>list_requirements</code>, <code>validate_spec</code>, and every other tool operate
 on this merged view — one backlog, whatever the file layout.</li>
 <li><strong>Ids are unique across the tree.</strong> A duplicate id spanning two
@@ -650,24 +650,24 @@ files fails validation naming the file that declared it first.</li>
 <li><strong>Cycles and missing files are validation issues</strong>, not crashes:
 including a file twice, including a file that does not exist, or
 escaping the spec directory each report a single actionable issue.</li>
-<li><strong>Mutations write back to the declaring file.</strong> <code>bdd spec reword</code>,
+<li><strong>Mutations write back to the declaring file.</strong> <code>spec reword</code>,
 <code>set-feature</code>, and <code>mark-implemented</code> find the file a requirement
-lives in and stage only that file. <code>bdd spec draft</code> appends to the
+lives in and stage only that file. <code>spec draft</code> appends to the
 root by default, or to a chosen file with <code>--file</code>.</li>
 </ul>
 <h3 id="growing-the-catalog"><a class="header" href="#growing-the-catalog">Growing the catalog</a></h3>
 <pre><code class="language-bash"># Stage a new (empty) spec file and the include entry on the root:
-bdd spec include add requirements/core/arithmetic.json
-bdd changes commit
+spec include add requirements/core/arithmetic.json
+spec changes commit
 
 # Draft directly into it:
-bdd spec draft --file requirements/core/arithmetic.json
+spec draft --file requirements/core/arithmetic.json
 
 # Nest deeper: include a file from a child instead of the root:
-bdd spec include add requirements/core/edge-cases.json \
+spec include add requirements/core/edge-cases.json \
   --from requirements/core/arithmetic.json
 </code></pre>
-<p><code>bdd spec list</code> names the file each requirement lives in, so the
+<p><code>spec list</code> names the file each requirement lives in, so the
 catalog stays navigable as it grows:</p>
 <pre><code class="language-json">[
   { "id": "REQ-001", "title": "Empty string returns zero", "status": "implemented",
@@ -680,22 +680,22 @@ catalog stays navigable as it grows:</p>
 backlog. Split it the day it stops fitting in your head.</p>
 <h2 id="see-also"><a class="header" href="#see-also">See also</a></h2>
 <ul>
-<li><a href="#bdd-spec"><code>bdd spec</code></a> — the commands that read, gate, and mutate the spec.</li>
+<li><a href="#the-requirements-spec"><code>spec</code></a> — the commands that read, gate, and mutate the spec.</li>
 <li><a href="#the-workflow-spec--red--green--refactor">The workflow</a> — where the spec drives the loop.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="this-workshops-string-calculator-harness"><a class="header" href="#this-workshops-string-calculator-harness">This workshop’s String Calculator (harness)</a></h1>
-<p>The 60-minute class uses Cursor against <code>bdd mcp serve</code> — one Rust binary
+<p>The 60-minute class uses Cursor against <code>spec mcp serve</code> — one Rust binary
 that is both the harness and the MCP server. (The Java module in the repo
 is a smoke-test <em>client</em> of that server, not a server of its own.) The same
-kata can be finished with <code>bdd</code> commands instead, or with a free local agent
+kata can be finished with <code>spec</code> commands instead, or with a free local agent
 through the <a href="../../../student-follow-docs/pi-path.html">pi path</a>. The student
 recipe — install, branch, draft REQ-007, then drive REQ-003…007 to
 <code>implemented</code> — lives in
 <a href="../../../student-follow-docs/harness-path.html">student-follow-docs/harness-path.md</a>.</p>
 <p>Do not edit <a href="../../../student-follow-along.html">student-follow-along.md</a>
 for this path. Do not implement the kata on <code>trunk</code>.</p>
-<p>Kata files <code>bdd</code> must reuse (not parallel <code>Req00NTest</code> / <code>Kata.java</code>
+<p>Kata files <code>spec</code> must reuse (not parallel <code>Req00NTest</code> / <code>Kata.java</code>
 classes):</p>
 <ul>
 <li><code>kata/src/test/resources/features/string_calculator.feature</code></li>
@@ -703,15 +703,15 @@ classes):</p>
 <li><code>kata/src/test/java/com/davidparry/workshop/kata/StringCalculatorTest.java</code></li>
 <li><code>kata/src/main/java/com/davidparry/workshop/kata/StringCalculator.java</code></li>
 </ul>
-<p>Commit staged files <strong>before</strong> <a href="#bdd-test"><code>bdd test</code></a>. The
-runner executes Maven on the working tree. <a href="#bdd-spec"><code>bdd spec mark-implemented</code></a>
+<p>Commit staged files <strong>before</strong> <a href="#spec-test"><code>spec test</code></a>. The
+runner executes Maven on the working tree. <a href="#the-requirements-spec"><code>spec mark-implemented</code></a>
 stays GREEN-gated.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="staged-changes"><a class="header" href="#staged-changes">Staged changes</a></h1>
 <p>Every command that would write into your project — feature creation,
 scenario mutations, step-definition and unit-test generation, spec
 drafting, marking a requirement implemented — writes to a staging area
-instead: <code>.bdd-staged/</code> under the project root. Nothing touches your
+instead: <code>.spec-staged/</code> under the project root. Nothing touches your
 working tree until you commit the transaction.</p>
 <h2 id="why"><a class="header" href="#why">Why</a></h2>
 <ul>
@@ -723,18 +723,18 @@ step definitions) lands together or not at all.</li>
 ever holding write access to your tree.</li>
 </ul>
 <h2 id="the-lifecycle"><a class="header" href="#the-lifecycle">The lifecycle</a></h2>
-<pre><code class="language-bash">bdd feature create --path features/calculator.feature --name "String Calculator"
-bdd changes show      # review: one staged "create"
-bdd changes commit    # apply to the working tree, clear the stage
+<pre><code class="language-bash">spec feature create --path features/calculator.feature --name "String Calculator"
+spec changes show      # review: one staged "create"
+spec changes commit    # apply to the working tree, clear the stage
 # or
-bdd changes discard   # drop everything staged, tree untouched
+spec changes discard   # drop everything staged, tree untouched
 </code></pre>
-<p><code>bdd changes show</code> lists each staged entry with its action and path:</p>
+<p><code>spec changes show</code> lists each staged entry with its action and path:</p>
 <pre><code class="language-json">{
   "changes": [
     { "action": "create", "path": "features/calculator.feature" }
   ],
-  "nextStep": "Review the staged changes, then 'bdd changes commit' to apply or 'bdd changes discard' to drop them."
+  "nextStep": "Review the staged changes, then 'spec changes commit' to apply or 'spec changes discard' to drop them."
 }
 </code></pre>
 <h2 id="what-stages-and-what-doesnt"><a class="header" href="#what-stages-and-what-doesnt">What stages and what doesn’t</a></h2>
@@ -745,7 +745,7 @@ bdd changes discard   # drop everything staged, tree untouched
 </thead>
 <tbody>
 <tr><td><code>feature create</code></td><td><code>init</code> (scaffolding a fresh project)</td></tr>
-<tr><td><code>scenario add</code> / <code>update</code> / <code>delete</code></td><td><code>model use</code> (writes <code>.bdd.toml</code>)</td></tr>
+<tr><td><code>scenario add</code> / <code>update</code> / <code>delete</code></td><td><code>model use</code> (writes <code>.spec.toml</code>)</td></tr>
 <tr><td><code>steps generate</code></td><td><code>test</code> / <code>refactor</code> (phase state file)</td></tr>
 <tr><td><code>unittest generate</code></td><td></td></tr>
 <tr><td><code>spec draft</code></td><td></td></tr>
@@ -753,14 +753,14 @@ bdd changes discard   # drop everything staged, tree untouched
 </tbody>
 </table>
 </div>
-<p>Validation (<code>bdd validate</code>) checks staged Gherkin too, so you can gate
+<p>Validation (<code>spec changes validate</code>) checks staged Gherkin too, so you can gate
 a transaction before committing it.</p>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="bdd-init"><a class="header" href="#bdd-init">bdd init</a></h1>
+<h1 id="spec-init"><a class="header" href="#spec-init">spec init</a></h1>
 <p>Scaffold build files, a Cucumber runner, an empty requirements spec,
 and the harness’s configuration in the project root. Existing files are
 never overwritten — they are reported as skipped.</p>
-<pre><code class="language-text">Usage: bdd init [OPTIONS]
+<pre><code class="language-text">Usage: spec init [OPTIONS]
 </code></pre>
 <h2 id="flags"><a class="header" href="#flags">Flags</a></h2>
 <div class="table-wrapper">
@@ -782,13 +782,13 @@ never overwritten — they are reported as skipped.</p>
 <li><code>requirements/requirements.json</code> — an empty, valid spec. It is also
 the root of the <a href="#the-requirements-format">spec catalog</a>: split the backlog
 into included files later with
-<a href="#bdd-spec-include"><code>bdd spec include add</code></a>.</li>
-<li><code>.bdd.toml</code> — the harness configuration (LLM, timeouts, per-command
-tool profiles). <code>bdd init</code> writes <code>[tools.profiles]</code> with the tools
+<a href="#spec-include"><code>spec include add</code></a>.</li>
+<li><code>.spec.toml</code> — the harness configuration (LLM, timeouts, per-command
+tool profiles). <code>spec init</code> writes <code>[tools.profiles]</code> with the tools
 each LLM-backed command offers the model (the code defaults, listed
 for reference). Other keys are commented with their defaults.</li>
 </ul>
-<p>After scaffolding, <code>init</code> scans the new files into <code>.bdd-memory.json</code>
+<p>After scaffolding, <code>init</code> scans the new files into <code>.spec-memory.json</code>
 (language, BDD framework, libraries, layout). That file is committed
 with the project; it is refreshed again when a shell, MCP server, or
 LLM command starts. Every model system prompt then opens with that
@@ -811,25 +811,25 @@ brief.</p>
 <h2 id="examples"><a class="header" href="#examples">Examples</a></h2>
 <p>Scaffold a Rust kata in a fresh directory:</p>
 <pre><code class="language-bash">mkdir calculator &amp;&amp; cd calculator
-bdd init --language rust --name "String Calculator"
+spec init --language rust --name "String Calculator"
 </code></pre>
 <pre><code class="language-json">{
   "language": "rust",
   "framework": "cucumber-rs",
   "created": [
     "requirements/requirements.json",
-    ".bdd.toml",
+    ".spec.toml",
     "Cargo.toml",
     "src/lib.rs",
     "tests/cucumber.rs",
     "features/.gitkeep"
   ],
   "skipped": [],
-  "nextStep": "Draft your first requirement with 'bdd spec draft', then 'bdd spec validate'."
+  "nextStep": "Draft your first requirement with 'spec draft', then 'spec validate'."
 }
 </code></pre>
 <p>Re-running is safe — everything that already exists is skipped:</p>
-<pre><code class="language-bash">bdd init --language rust
+<pre><code class="language-bash">spec init --language rust
 </code></pre>
 <pre><code class="language-json">{
   "language": "rust",
@@ -837,13 +837,13 @@ bdd init --language rust --name "String Calculator"
   "created": [],
   "skipped": [
     "requirements/requirements.json",
-    ".bdd.toml",
+    ".spec.toml",
     "Cargo.toml",
     "src/lib.rs",
     "tests/cucumber.rs",
     "features/.gitkeep"
   ],
-  "nextStep": "Draft your first requirement with 'bdd spec draft', then 'bdd spec validate'."
+  "nextStep": "Draft your first requirement with 'spec draft', then 'spec validate'."
 }
 </code></pre>
 <p>Omit <code>--language</code> and the harness prompts with the supported list; an
@@ -854,22 +854,22 @@ unrecognized answer re-prompts.</p>
 protect in an empty project); everything after <code>init</code> goes through
 <a href="#staged-changes">staged changes</a>.</li>
 <li><code>init</code> does not install runtimes. Run
-<a href="#bdd-inspect"><code>bdd inspect</code></a> to see whether the language’s runtime is
-present before expecting <code>bdd test</code> to execute.</li>
+<a href="#spec-inspect"><code>spec inspect</code></a> to see whether the language’s runtime is
+present before expecting <code>spec test</code> to execute.</li>
 </ul>
 <h2 id="see-also-1"><a class="header" href="#see-also-1">See also</a></h2>
 <ul>
-<li><a href="#bdd-greenfield"><code>bdd greenfield</code></a> — runs <code>init</code> as its first move.</li>
-<li><a href="#bdd-spec-draft"><code>bdd spec draft</code></a> — the natural next step.</li>
+<li><a href="#spec-greenfield"><code>spec greenfield</code></a> — runs <code>init</code> as its first move.</li>
+<li><a href="#spec-draft"><code>spec draft</code></a> — the natural next step.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="bdd-greenfield"><a class="header" href="#bdd-greenfield">bdd greenfield</a></h1>
+<h1 id="spec-greenfield"><a class="header" href="#spec-greenfield">spec greenfield</a></h1>
 <p>Run the full orchestrated loop from an empty directory to an
 implemented requirement, with exactly <strong>two human gates</strong>: approving
 the spec wording, and approving the generated tests before they run.
 Everything else — scaffolding, validation, scenario authoring, step
 generation, test execution, phase tracking — is automated.</p>
-<pre><code class="language-text">Usage: bdd greenfield [OPTIONS]
+<pre><code class="language-text">Usage: spec greenfield [OPTIONS]
 </code></pre>
 <h2 id="flags-1"><a class="header" href="#flags-1">Flags</a></h2>
 <div class="table-wrapper">
@@ -886,7 +886,7 @@ generation, test execution, phase tracking — is automated.</p>
 </div>
 <h2 id="the-orchestrated-flow"><a class="header" href="#the-orchestrated-flow">The orchestrated flow</a></h2>
 <pre><code class="language-text"> 1. inspect / init      scaffold if the root is empty (asks for language)
-                        and records the choice in .bdd-memory.json
+                        and records the choice in .spec-memory.json
  2. describe            you describe what to build in plain words; the
                         model splits it into requirement proposals
  3. accept + wizard     you accept all listed proposals, or a
@@ -906,7 +906,7 @@ generation, test execution, phase tracking — is automated.</p>
  9. test → GREEN        loop back to 8 while failing
 10. refactor            optional; only offered on GREEN
 11. mark implemented    Saving status spinner until requirements.json
-                        is written; then the bdd&gt; prompt for the next
+                        is written; then the spec&gt; prompt for the next
                         command
 </code></pre>
 <h2 id="the-description-driven-wizard"><a class="header" href="#the-description-driven-wizard">The description-driven wizard</a></h2>
@@ -941,7 +941,7 @@ straight into <code>requirements.json</code> (the root of the
 <code>REQ-###</code> id — you can open that file as soon as you hit Enter.
 You then pick which stored requirement to review and refine first.
 The others wait as pending requirements — reword them any time with
-<code>bdd spec reword</code>.
+<code>spec reword</code>.
 Nothing is accepted silently: every field passes through your hands,
 and the validate + refine gates still run on whatever you accept.</p>
 <p>Drafting falls back to the classic manual prompts whenever the
@@ -995,9 +995,9 @@ like this — model failures, missing runtimes, hand-offs back to manual
 work — print in red so they stand out from the loop’s narration. Without a
 model, <kbd>Enter</kbd> just reruns the tests.</p>
 <p>Typing <code>stop</code> pauses the run; a paused project continues with the
-standalone <a href="#bdd-implement"><code>bdd implement</code></a> command, which runs the
+standalone <a href="#spec-implement"><code>spec implement</code></a> command, which runs the
 same attempt from the persisted failure details:</p>
-<pre><code class="language-bash">bdd implement REQ-001 &amp;&amp; bdd changes commit &amp;&amp; bdd test
+<pre><code class="language-bash">spec implement REQ-001 &amp;&amp; spec changes commit &amp;&amp; spec test
 </code></pre>
 <h2 id="rewording-loop-details"><a class="header" href="#rewording-loop-details">Rewording loop details</a></h2>
 <p>When validation or refinement finds problems, each finding is printed
@@ -1054,7 +1054,7 @@ refactor, mark-implemented — and offers the remaining pending rows,
 until nothing is pending or you type <code>n</code>. <code>nextStep</code> says how to
 continue later.</p>
 <p>The JSON reply then prints, and on a real terminal a one-shot
-<code>bdd greenfield</code> keeps the session open at the <code>bdd&gt;</code> prompt so you can
+<code>spec greenfield</code> keeps the session open at the <code>spec&gt;</code> prompt so you can
 run <code>spec list</code>, <code>greenfield</code>, or any other command without relaunching.</p>
 <h2 id="reply"><a class="header" href="#reply">Reply</a></h2>
 <p>The final JSON reply summarizes where the run ended:</p>
@@ -1083,29 +1083,30 @@ trained for development work.</li>
 <h2 id="see-also-2"><a class="header" href="#see-also-2">See also</a></h2>
 <ul>
 <li><a href="#the-workflow-spec--red--green--refactor">The workflow</a> — the same rhythm, step by step.</li>
-<li><a href="#bdd-model"><code>bdd model</code></a> — pick which model powers generation.</li>
+<li><a href="#spec-model"><code>spec model</code></a> — pick which model powers generation.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="bdd-spec"><a class="header" href="#bdd-spec">bdd spec</a></h1>
-<p>Requirements spec tools. The spec at
-<code>requirements/requirements.json</code> is the project’s source of truth;
-these subcommands read it, gate it, and mutate it (through the
+<h1 id="the-requirements-spec"><a class="header" href="#the-requirements-spec">The requirements spec</a></h1>
+<p>The spec at <code>requirements/requirements.json</code> is the project’s source of
+truth. These commands read it, gate it, and mutate it (through the
 <a href="#staged-changes">staging area</a>). The root file is a
 <a href="#the-catalog-splitting-the-spec-across-files">catalog</a>:
-it may include child spec files, and every subcommand operates on the
+it may include child spec files, and every command here operates on the
 merged view of the whole tree.</p>
-<pre><code class="language-text">Usage: bdd spec [OPTIONS] &lt;COMMAND&gt;
-
-Commands: list, show, draft, validate, refine, reword, set-feature, mark-implemented, include
+<pre><code class="language-text">spec list             spec refine &lt;REQ_ID&gt;
+spec show &lt;REQ_ID&gt;    spec reword &lt;REQ_ID&gt;
+spec draft            spec set-feature &lt;REQ_ID&gt; --file &lt;FILE&gt;
+spec validate         spec mark-implemented &lt;REQ_ID&gt;
+                      spec include add &lt;PATH&gt;
 </code></pre>
 <p>MCP tool equivalents: <code>list_requirements</code>, <code>get_requirement</code>,
 <code>validate_spec</code>, <code>refine_requirement</code>, <code>requirement_reword</code>,
 <code>requirement_mark_implemented</code>.</p>
 <hr>
-<h2 id="bdd-spec-list"><a class="header" href="#bdd-spec-list">bdd spec list</a></h2>
+<h2 id="spec-list"><a class="header" href="#spec-list">spec list</a></h2>
 <p>List every requirement with its id, title, status, and the spec file
 it lives in — requirements from included files merge into one backlog.</p>
-<pre><code class="language-bash">bdd spec list
+<pre><code class="language-bash">spec list
 </code></pre>
 <pre><code class="language-json">[
   { "id": "REQ-001", "title": "Empty string returns zero", "status": "implemented",
@@ -1118,12 +1119,12 @@ it lives in — requirements from included files merge into one backlog.</p>
 </code></pre>
 <p>Use it to pick the next <code>pending</code> requirement to work on.</p>
 <hr>
-<h2 id="bdd-spec-show"><a class="header" href="#bdd-spec-show">bdd spec show</a></h2>
+<h2 id="spec-show"><a class="header" href="#spec-show">spec show</a></h2>
 <p>Show one requirement, enriched with file locations and a workflow
 hint.</p>
-<pre><code class="language-text">Usage: bdd spec show [OPTIONS] &lt;REQ_ID&gt;
+<pre><code class="language-text">Usage: spec show [OPTIONS] &lt;REQ_ID&gt;
 </code></pre>
-<pre><code class="language-bash">bdd spec show REQ-003
+<pre><code class="language-bash">spec show REQ-003
 </code></pre>
 <pre><code class="language-json">{
   "id": "REQ-003",
@@ -1145,15 +1146,15 @@ hint.</p>
 <pre><code class="language-text">Error: no requirement with id REQ-999
 </code></pre>
 <hr>
-<h2 id="bdd-spec-draft"><a class="header" href="#bdd-spec-draft">bdd spec draft</a></h2>
+<h2 id="spec-draft"><a class="header" href="#spec-draft">spec draft</a></h2>
 <p>Interactively draft a requirement. Human input drives the spec — the
 harness never invents requirements. The draft is validated and
 quality-gated in a loop until it is clean, then staged.</p>
-<pre><code class="language-bash">bdd spec draft
+<pre><code class="language-bash">spec draft
 </code></pre>
 <p>Non-interactive (no TTY). Repeat <code>--criterion</code> for each Given/When/Then
 line. The next free id is allocated; the draft is staged.</p>
-<pre><code class="language-bash">bdd spec draft \
+<pre><code class="language-bash">spec draft \
   --title "Newlines as delimiters" \
   --story "As a calculator user, I want newlines to separate numbers in addition to commas so that multi-line input just works." \
   --criterion 'Given the input "1\n2,3", when add is called, then the result is 6' \
@@ -1161,14 +1162,14 @@ line. The next free id is allocated; the draft is staged.</p>
 </code></pre>
 <p><code>--title</code>, <code>--story</code>, and at least one <code>--criterion</code> must be given
 together. Structural validate must pass; refine findings are reported
-in <code>nextStep</code> (<code>bdd spec reword &lt;id&gt;</code> to address them). A title or
+in <code>nextStep</code> (<code>spec reword &lt;id&gt;</code> to address them). A title or
 criterion that collides with an existing requirement warns but still
 stages.</p>
 <p>By default the draft lands in the root <code>requirements.json</code>. To draft
 into an included spec file instead, name it with <code>--file</code> (it must
 already be part of the catalog — see
-<a href="#bdd-spec-include"><code>bdd spec include</code></a>):</p>
-<pre><code class="language-bash">bdd spec draft --file requirements/core/arithmetic.json
+<a href="#spec-include"><code>spec include</code></a>):</p>
+<pre><code class="language-bash">spec draft --file requirements/core/arithmetic.json
 </code></pre>
 <p>Ids are allocated across the whole catalog, so a requirement drafted
 into a child file still gets the next free <code>REQ-nnn</code>.</p>
@@ -1207,7 +1208,7 @@ REQ-004 criterion 2 (leave blank to finish the criteria):
 <li><code>-</code> drops a prior criterion.</li>
 <li>New criteria can be appended after the priors.</li>
 </ul>
-<p>With a resolved model, <code>bdd spec draft</code> runs the same
+<p>With a resolved model, <code>spec draft</code> runs the same
 description-driven wizard as <a href="#the-description-driven-wizard">greenfield</a>,
 and findings are sent to the model first: the rewording prompts carry
 its corrected proposal instead of your raw prior answers, so
@@ -1243,11 +1244,11 @@ hands, and validate + refine rerun on whatever you accept.</p>
   "id": "REQ-004",
   "title": "Newlines act as delimiters",
   "staged": true,
-  "nextStep": "Review with 'bdd changes show', apply with 'bdd changes commit', then write the Gherkin scenario."
+  "nextStep": "Review with 'spec changes show', apply with 'spec changes commit', then write the Gherkin scenario."
 }
 </code></pre>
 <hr>
-<h2 id="bdd-spec-validate"><a class="header" href="#bdd-spec-validate">bdd spec validate</a></h2>
+<h2 id="spec-validate"><a class="header" href="#spec-validate">spec validate</a></h2>
 <p>Validate the whole spec on disk: JSON shape, required fields, unique
 ids, status values, and Given/When/Then phrasing of every criterion.
 The full include tree is validated as one catalog: missing included
@@ -1255,13 +1256,13 @@ files, include cycles, and duplicate ids across files are each one
 actionable issue (a cross-file duplicate names the file that declared
 the id first). Only the root document needs a <code>project</code> name, and the
 merged tree must hold at least one requirement.</p>
-<pre><code class="language-bash">bdd spec validate
+<pre><code class="language-bash">spec validate
 </code></pre>
 <p>Valid spec:</p>
 <pre><code class="language-json">{
   "valid": true,
   "issues": [],
-  "nextStep": "Pick a pending requirement with 'bdd spec list' and write its scenario."
+  "nextStep": "Pick a pending requirement with 'spec list' and write its scenario."
 }
 </code></pre>
 <p>Invalid spec (the command still exits 0 — the <em>report</em> carries the
@@ -1275,13 +1276,13 @@ verdict):</p>
 }
 </code></pre>
 <hr>
-<h2 id="bdd-spec-refine"><a class="header" href="#bdd-spec-refine">bdd spec refine</a></h2>
+<h2 id="spec-refine"><a class="header" href="#spec-refine">spec refine</a></h2>
 <p>Review one requirement’s wording for quality: vague words, missing
 actor or benefit in the story, compound criteria, non-concrete
 outcomes, happy-path-only criteria.</p>
-<pre><code class="language-text">Usage: bdd spec refine [OPTIONS] &lt;REQ_ID&gt;
+<pre><code class="language-text">Usage: spec refine [OPTIONS] &lt;REQ_ID&gt;
 </code></pre>
-<pre><code class="language-bash">bdd spec refine REQ-004
+<pre><code class="language-bash">spec refine REQ-004
 </code></pre>
 <pre><code class="language-json">{
   "id": "REQ-004",
@@ -1296,11 +1297,11 @@ outcomes, happy-path-only criteria.</p>
 <p>Refine until <code>"clean": true</code>, then have the developer approve the
 wording — that approval is the first human gate of the workflow.</p>
 <hr>
-<h2 id="bdd-spec-reword"><a class="header" href="#bdd-spec-reword">bdd spec reword</a></h2>
+<h2 id="spec-reword"><a class="header" href="#spec-reword">spec reword</a></h2>
 <p>Reword an existing backlog item (staged). Interactive wizard is the
 same refine → reword loop as draft. Flags skip the wizard:</p>
-<pre><code class="language-bash">bdd spec reword REQ-007
-bdd spec reword REQ-007 \
+<pre><code class="language-bash">spec reword REQ-007
+spec reword REQ-007 \
   --title "Newlines as delimiters" \
   --story "As a calculator user, I want newlines to separate numbers in addition to commas so that multi-line input just works." \
   --criterion 'Given the input "1\n2,3", when add is called, then the result is 6' \
@@ -1312,30 +1313,30 @@ or <code>refine_requirement</code> reported: the spec file’s JSON escaping and
 indentation differ from what the read tools return, so a hand-written
 string replacement against <code>requirements.json</code> will not match.</p>
 <hr>
-<h2 id="bdd-spec-set-feature"><a class="header" href="#bdd-spec-set-feature">bdd spec set-feature</a></h2>
+<h2 id="spec-set-feature"><a class="header" href="#spec-set-feature">spec set-feature</a></h2>
 <p>Point a requirement at the feature file that was actually written
 (staged). Used when a copied spec still names <code>kata/…</code> paths that do
-not exist on an extracted project. <code>bdd scenario add</code> already updates
+not exist on an extracted project. <code>spec scenario add</code> already updates
 <code>featureFile</code> when it is missing or stale.</p>
-<pre><code class="language-bash">bdd spec set-feature REQ-003 --file src/test/resources/features/string_calculator.feature
+<pre><code class="language-bash">spec set-feature REQ-003 --file src/test/resources/features/string_calculator.feature
 </code></pre>
 <hr>
-<h2 id="bdd-spec-mark-implemented"><a class="header" href="#bdd-spec-mark-implemented">bdd spec mark-implemented</a></h2>
+<h2 id="spec-mark-implemented"><a class="header" href="#spec-mark-implemented">spec mark-implemented</a></h2>
 <p>Flip a requirement’s status to <code>implemented</code> and record its
 <code>featureFile</code> — the feature carrying the <code>@REQ-...</code> tag — in the same
 staged edit, so the spec passes validation. The change is staged, not
 applied directly.</p>
-<pre><code class="language-text">Usage: bdd spec mark-implemented [OPTIONS] &lt;REQ_ID&gt;
+<pre><code class="language-text">Usage: spec mark-implemented [OPTIONS] &lt;REQ_ID&gt;
 </code></pre>
-<pre><code class="language-bash">bdd spec mark-implemented REQ-003
-bdd validate
-bdd changes commit
+<pre><code class="language-bash">spec mark-implemented REQ-003
+spec changes validate
+spec changes commit
 </code></pre>
 <pre><code class="language-json">{
   "id": "REQ-003",
   "status": "implemented",
   "staged": true,
-  "nextStep": "Review with changes show, run bdd validate (it checks the @REQ-003 scenario exists), then bdd changes commit."
+  "nextStep": "Review with changes show, run spec changes validate (it checks the @REQ-003 scenario exists), then spec changes commit."
 }
 </code></pre>
 <p>The command is gated twice:</p>
@@ -1345,7 +1346,7 @@ Do this only when the scenario and tests for the requirement are
 GREEN; it is the last move of the per-requirement rhythm.</li>
 <li><strong>Tagged scenario only</strong> — it refuses when no committed feature
 file carries a scenario tagged <code>@&lt;REQ_ID&gt;</code>; add one with
-<code>bdd scenario add</code> and apply it with <code>bdd changes commit</code> first.</li>
+<code>spec scenario add</code> and apply it with <code>spec changes commit</code> first.</li>
 </ul>
 <p>Re-running it on an already-implemented requirement is safe: on GREEN
 it backfills a missing <code>featureFile</code>, which is exactly the repair for
@@ -1355,10 +1356,10 @@ a spec that fails validation with
 requirement actually lives in — a requirement declared in an included
 file stages that file, never the root.</p>
 <hr>
-<h2 id="bdd-spec-include"><a class="header" href="#bdd-spec-include">bdd spec include</a></h2>
+<h2 id="spec-include"><a class="header" href="#spec-include">spec include</a></h2>
 <p>Manage the catalog’s included spec files
 (<a href="#the-catalog-splitting-the-spec-across-files">format reference</a>).</p>
-<pre><code class="language-text">Usage: bdd spec include add [OPTIONS] &lt;PATH&gt;
+<pre><code class="language-text">Usage: spec include add [OPTIONS] &lt;PATH&gt;
 
 Options:
   --from &lt;FILE&gt;  The catalog document declaring the include (default: the root requirements.json)
@@ -1366,19 +1367,19 @@ Options:
 <p><code>add</code> stages two things: the include entry on the parent document,
 and — when the included file does not exist anywhere yet — an empty
 spec skeleton (<code>{ "requirements": [] }</code>) for it.</p>
-<pre><code class="language-bash">bdd spec include add requirements/core/arithmetic.json
+<pre><code class="language-bash">spec include add requirements/core/arithmetic.json
 </code></pre>
 <pre><code class="language-json">{
   "file": "requirements/core/arithmetic.json",
   "parent": "requirements/requirements.json",
   "created": true,
   "staged": true,
-  "nextStep": "Review with bdd changes show, apply with bdd changes commit, then draft into it with bdd spec draft --file."
+  "nextStep": "Review with spec changes show, apply with spec changes commit, then draft into it with spec draft --file."
 }
 </code></pre>
 <p>Nest deeper by including from a child instead of the root; the entry
 is written relative to that parent’s directory:</p>
-<pre><code class="language-bash">bdd spec include add requirements/core/edge-cases.json \
+<pre><code class="language-bash">spec include add requirements/core/edge-cases.json \
   --from requirements/core/arithmetic.json
 </code></pre>
 <p>Including a file that is already part of the catalog is a safe no-op.
@@ -1387,15 +1388,15 @@ Includes must be <code>.json</code> files inside the spec directory.</p>
 <ul>
 <li><a href="#the-requirements-format">The requirements format</a> — every field of the spec, and the include catalog.</li>
 <li><a href="#the-workflow-spec--red--green--refactor">The workflow</a> — where each subcommand fits.</li>
-<li><a href="#bdd-changes"><code>bdd changes</code></a> — reviewing and applying staged spec mutations.</li>
+<li><a href="#spec-changes"><code>spec changes</code></a> — reviewing and applying staged spec mutations.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="bdd-inspect"><a class="header" href="#bdd-inspect">bdd inspect</a></h1>
+<h1 id="spec-inspect"><a class="header" href="#spec-inspect">spec inspect</a></h1>
 <p>Detect the project’s languages, build system, BDD framework, and —
 critically — whether each language’s runtime is actually installed.
 The harness only executes tests when the runtime is present, so <code>inspect</code>
 tells you up front what will run and what will refuse.</p>
-<pre><code class="language-text">Usage: bdd inspect [OPTIONS]
+<pre><code class="language-text">Usage: spec inspect [OPTIONS]
 </code></pre>
 <h2 id="flags-2"><a class="header" href="#flags-2">Flags</a></h2>
 <p>Only the <a href="#global-flags">global flags</a> (<code>--root</code>, <code>--model</code>).</p>
@@ -1416,7 +1417,7 @@ tells you up front what will run and what will refuse.</p>
 </div>
 <h2 id="examples-1"><a class="header" href="#examples-1">Examples</a></h2>
 <p>A Rust project with the toolchain installed:</p>
-<pre><code class="language-bash">bdd inspect
+<pre><code class="language-bash">spec inspect
 </code></pre>
 <pre><code class="language-json">{
   "languages": [
@@ -1428,7 +1429,7 @@ tells you up front what will run and what will refuse.</p>
       "runtimeVersion": "cargo 1.97.0"
     }
   ],
-  "nextStep": "The runtime is present. 'bdd test' will execute the suite."
+  "nextStep": "The runtime is present. 'spec test' will execute the suite."
 }
 </code></pre>
 <p>A Java project without Maven on the PATH:</p>
@@ -1442,15 +1443,15 @@ tells you up front what will run and what will refuse.</p>
       "note": "Install Maven (and a JDK) to execute tests; the harness reports, it never installs."
     }
   ],
-  "nextStep": "Install the missing runtime before 'bdd test'; authoring commands still work."
+  "nextStep": "Install the missing runtime before 'spec test'; authoring commands still work."
 }
 </code></pre>
 <p>An empty directory reports no languages and points you at
-<a href="#bdd-init"><code>bdd init</code></a>.</p>
+<a href="#spec-init"><code>spec init</code></a>.</p>
 <h2 id="project-memory"><a class="header" href="#project-memory">Project memory</a></h2>
-<p>Session start (<code>bdd</code> shell, <code>bdd mcp serve</code>), <a href="#bdd-init"><code>bdd init</code></a>,
-<a href="#bdd-greenfield"><code>bdd greenfield</code></a>, and every LLM command refresh
-<code>.bdd-memory.json</code> in the project root: language, BDD framework, build
+<p>Session start (<code>spec</code> shell, <code>spec mcp serve</code>), <a href="#spec-init"><code>spec init</code></a>,
+<a href="#spec-greenfield"><code>spec greenfield</code></a>, and every LLM command refresh
+<code>.spec-memory.json</code> in the project root: language, BDD framework, build
 tool, libraries parsed from the manifest, and a short layout outline.
 A language chosen at greenfield/init is kept even if other marker files
 appear later. That file is project identity (commit it); every model
@@ -1458,25 +1459,25 @@ system prompt opens with a compact brief of its contents.</p>
 <h2 id="notes-1"><a class="header" href="#notes-1">Notes</a></h2>
 <ul>
 <li>Authoring commands (spec, feature, scenario, steps, unittest) work
-without any runtime; only <a href="#bdd-test"><code>bdd test</code></a> and the test-running
-parts of <a href="#bdd-greenfield"><code>bdd greenfield</code></a> require one.</li>
+without any runtime; only <a href="#spec-test"><code>spec test</code></a> and the test-running
+parts of <a href="#spec-greenfield"><code>spec greenfield</code></a> require one.</li>
 <li>With multiple markers present (a polyglot root), every detected
 language is listed.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="bdd-feature"><a class="header" href="#bdd-feature">bdd feature</a></h1>
+<h1 id="spec-feature"><a class="header" href="#spec-feature">spec feature</a></h1>
 <p>Feature discovery and creation. Feature files are the BDD altitude of
 the workflow: each requirement gets a scenario in one, tagged with its
 <code>@REQ-...</code> id.</p>
-<pre><code class="language-text">Usage: bdd feature [OPTIONS] &lt;COMMAND&gt;
+<pre><code class="language-text">Usage: spec feature [OPTIONS] &lt;COMMAND&gt;
 
 Commands: list, show, create
 </code></pre>
 <hr>
-<h2 id="bdd-feature-list"><a class="header" href="#bdd-feature-list">bdd feature list</a></h2>
+<h2 id="spec-feature-list"><a class="header" href="#spec-feature-list">spec feature list</a></h2>
 <p>List every feature file under the root with its feature name and
 scenario count.</p>
-<pre><code class="language-bash">bdd feature list
+<pre><code class="language-bash">spec feature list
 </code></pre>
 <pre><code class="language-json">[
   {
@@ -1487,13 +1488,13 @@ scenario count.</p>
 ]
 </code></pre>
 <hr>
-<h2 id="bdd-feature-show"><a class="header" href="#bdd-feature-show">bdd feature show</a></h2>
+<h2 id="spec-feature-show"><a class="header" href="#spec-feature-show">spec feature show</a></h2>
 <p>Show one parsed feature file — its name, scenarios, tags, and steps —
 as structured JSON rather than raw text.</p>
-<pre><code class="language-text">Usage: bdd feature show [OPTIONS] &lt;PATH&gt;
+<pre><code class="language-text">Usage: spec feature show [OPTIONS] &lt;PATH&gt;
 </code></pre>
 <p>The path is relative to <code>--root</code>:</p>
-<pre><code class="language-bash">bdd feature show features/string_calculator.feature
+<pre><code class="language-bash">spec feature show features/string_calculator.feature
 </code></pre>
 <pre><code class="language-json">{
   "path": "features/string_calculator.feature",
@@ -1513,11 +1514,11 @@ as structured JSON rather than raw text.</p>
 </code></pre>
 <p>A file that is not valid Gherkin fails with the parser’s diagnosis.</p>
 <hr>
-<h2 id="bdd-feature-create"><a class="header" href="#bdd-feature-create">bdd feature create</a></h2>
+<h2 id="spec-feature-create"><a class="header" href="#spec-feature-create">spec feature create</a></h2>
 <p>Create a feature file. The file is <strong>staged</strong>, not written to the
-working tree — review with <a href="#bdd-changes"><code>bdd changes show</code></a> and apply
-with <code>bdd changes commit</code>.</p>
-<pre><code class="language-text">Usage: bdd feature create [OPTIONS] --path &lt;PATH&gt; --name &lt;NAME&gt;
+working tree — review with <a href="#spec-changes"><code>spec changes show</code></a> and apply
+with <code>spec changes commit</code>.</p>
+<pre><code class="language-text">Usage: spec feature create [OPTIONS] --path &lt;PATH&gt; --name &lt;NAME&gt;
 </code></pre>
 <div class="table-wrapper">
 <table>
@@ -1530,33 +1531,33 @@ with <code>bdd changes commit</code>.</p>
 </tbody>
 </table>
 </div>
-<pre><code class="language-bash">bdd feature create --path features/string_calculator.feature --name "String Calculator"
-bdd changes show
-bdd changes commit
+<pre><code class="language-bash">spec feature create --path features/string_calculator.feature --name "String Calculator"
+spec changes show
+spec changes commit
 </code></pre>
 <p>The staged file contains the <code>Feature:</code> header ready for scenarios:</p>
 <pre><code class="language-gherkin">Feature: String Calculator
 </code></pre>
-<p>Add scenarios with <a href="#bdd-scenario"><code>bdd scenario add</code></a> — don’t edit the
+<p>Add scenarios with <a href="#spec-scenario"><code>spec scenario add</code></a> — don’t edit the
 staged file by hand.</p>
 <h2 id="see-also-4"><a class="header" href="#see-also-4">See also</a></h2>
 <ul>
-<li><a href="#bdd-scenario"><code>bdd scenario</code></a> — populate features with tagged scenarios.</li>
-<li><a href="#bdd-validate"><code>bdd validate</code></a> — parse-check all features, staged included.</li>
+<li><a href="#spec-scenario"><code>spec scenario</code></a> — populate features with tagged scenarios.</li>
+<li><a href="#spec-changes-validate"><code>spec changes validate</code></a> — parse-check all features, staged included.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="bdd-scenario"><a class="header" href="#bdd-scenario">bdd scenario</a></h1>
+<h1 id="spec-scenario"><a class="header" href="#spec-scenario">spec scenario</a></h1>
 <p>Scenario mutations. Every scenario is tied to a requirement by a
 <code>@REQ-...</code> tag, keeping the feature files traceable back to the spec.
 All three subcommands write to the <a href="#staged-changes">staging area</a>.</p>
-<pre><code class="language-text">Usage: bdd scenario [OPTIONS] &lt;COMMAND&gt;
+<pre><code class="language-text">Usage: spec scenario [OPTIONS] &lt;COMMAND&gt;
 
 Commands: add, update, delete
 </code></pre>
 <hr>
-<h2 id="bdd-scenario-add"><a class="header" href="#bdd-scenario-add">bdd scenario add</a></h2>
+<h2 id="spec-scenario-add"><a class="header" href="#spec-scenario-add">spec scenario add</a></h2>
 <p>Append a tagged scenario to an existing feature file.</p>
-<pre><code class="language-text">Usage: bdd scenario add [OPTIONS] --feature &lt;FEATURE&gt; --req &lt;REQ&gt; --name &lt;NAME&gt;
+<pre><code class="language-text">Usage: spec scenario add [OPTIONS] --feature &lt;FEATURE&gt; --req &lt;REQ&gt; --name &lt;NAME&gt;
 </code></pre>
 <div class="table-wrapper">
 <table>
@@ -1571,7 +1572,7 @@ Commands: add, update, delete
 </tbody>
 </table>
 </div>
-<pre><code class="language-bash">bdd scenario add \
+<pre><code class="language-bash">spec scenario add \
   --feature features/string_calculator.feature \
   --req REQ-003 \
   --name "Two numbers separated by a comma are summed" \
@@ -1590,10 +1591,10 @@ Commands: add, update, delete
 <code>Then</code>, <code>And</code>, <code>But</code>); the mutation is validated as real Gherkin
 before it stages.</p>
 <hr>
-<h2 id="bdd-scenario-update"><a class="header" href="#bdd-scenario-update">bdd scenario update</a></h2>
+<h2 id="spec-scenario-update"><a class="header" href="#spec-scenario-update">spec scenario update</a></h2>
 <p>Replace a scenario’s steps and/or its requirement tag. The scenario is
 found by feature path + scenario name; omitted parts are kept.</p>
-<pre><code class="language-text">Usage: bdd scenario update [OPTIONS] --feature &lt;FEATURE&gt; --name &lt;NAME&gt;
+<pre><code class="language-text">Usage: spec scenario update [OPTIONS] --feature &lt;FEATURE&gt; --name &lt;NAME&gt;
 </code></pre>
 <div class="table-wrapper">
 <table>
@@ -1609,13 +1610,13 @@ found by feature path + scenario name; omitted parts are kept.</p>
 </table>
 </div>
 <p>Retag a scenario without touching its steps:</p>
-<pre><code class="language-bash">bdd scenario update \
+<pre><code class="language-bash">spec scenario update \
   --feature features/string_calculator.feature \
   --name "Two numbers separated by a comma are summed" \
   --req REQ-007
 </code></pre>
 <p>Rewrite the steps:</p>
-<pre><code class="language-bash">bdd scenario update \
+<pre><code class="language-bash">spec scenario update \
   --feature features/string_calculator.feature \
   --name "Two numbers separated by a comma are summed" \
   --step 'Given the input "10,20"' \
@@ -1623,46 +1624,46 @@ found by feature path + scenario name; omitted parts are kept.</p>
   --step 'Then the result is 30'
 </code></pre>
 <hr>
-<h2 id="bdd-scenario-delete"><a class="header" href="#bdd-scenario-delete">bdd scenario delete</a></h2>
+<h2 id="spec-scenario-delete"><a class="header" href="#spec-scenario-delete">spec scenario delete</a></h2>
 <p>Remove a scenario from a feature file.</p>
-<pre><code class="language-text">Usage: bdd scenario delete [OPTIONS] --feature &lt;FEATURE&gt; --name &lt;NAME&gt;
+<pre><code class="language-text">Usage: spec scenario delete [OPTIONS] --feature &lt;FEATURE&gt; --name &lt;NAME&gt;
 </code></pre>
-<pre><code class="language-bash">bdd scenario delete \
+<pre><code class="language-bash">spec scenario delete \
   --feature features/string_calculator.feature \
   --name "Two numbers separated by a comma are summed"
 </code></pre>
 <p>Deleting a scenario that does not exist fails with exit status 1 and
 names the feature searched.</p>
 <h2 id="the-full-rhythm"><a class="header" href="#the-full-rhythm">The full rhythm</a></h2>
-<pre><code class="language-bash">bdd scenario add --feature features/calc.feature --req REQ-002 --name "..." --step '...'
-bdd changes show      # review the staged modify
-bdd changes commit    # apply
-bdd steps missing     # any steps without definitions?
-bdd test              # expect RED
+<pre><code class="language-bash">spec scenario add --feature features/calc.feature --req REQ-002 --name "..." --step '...'
+spec changes show      # review the staged modify
+spec changes commit    # apply
+spec steps missing     # any steps without definitions?
+spec test              # expect RED
 </code></pre>
 <h2 id="see-also-5"><a class="header" href="#see-also-5">See also</a></h2>
 <ul>
-<li><a href="#bdd-steps"><code>bdd steps</code></a> — find and generate the step definitions
+<li><a href="#spec-steps"><code>spec steps</code></a> — find and generate the step definitions
 behind these scenarios.</li>
-<li><a href="#bdd-changes"><code>bdd changes</code></a> — review, apply, or discard the staged mutation.</li>
+<li><a href="#spec-changes"><code>spec changes</code></a> — review, apply, or discard the staged mutation.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="bdd-steps"><a class="header" href="#bdd-steps">bdd steps</a></h1>
+<h1 id="spec-steps"><a class="header" href="#spec-steps">spec steps</a></h1>
 <p>Step-definition discovery and generation — the glue between Gherkin
 scenarios and real code.</p>
-<pre><code class="language-text">Usage: bdd steps [OPTIONS] &lt;COMMAND&gt;
+<pre><code class="language-text">Usage: spec steps [OPTIONS] &lt;COMMAND&gt;
 
 Commands: missing, generate
 </code></pre>
 <p>MCP tool equivalents: <code>step_definitions_find</code>, <code>step_definition_create</code>.</p>
 <hr>
-<h2 id="bdd-steps-missing"><a class="header" href="#bdd-steps-missing">bdd steps missing</a></h2>
+<h2 id="spec-steps-missing"><a class="header" href="#spec-steps-missing">spec steps missing</a></h2>
 <p>Report steps used by scenarios that have no matching definition
 (undefined), and steps matched by more than one definition
 (ambiguous). Detection is language-aware: Cucumber-JVM annotations for
 Java, Cucumber-JS functions for JavaScript/TypeScript, Reqnroll
 bindings for .NET, cucumber-rs attributes for Rust.</p>
-<pre><code class="language-bash">bdd steps missing
+<pre><code class="language-bash">spec steps missing
 </code></pre>
 <pre><code class="language-json">{
   "language": "javascript",
@@ -1671,22 +1672,22 @@ bindings for .NET, cucumber-rs attributes for Rust.</p>
     { "step": "Given the input \"1,2\"", "keyword": "Given" },
     { "step": "Then the result is 3", "keyword": "Then" }
   ],
-  "nextStep": "Generate skeletons with 'bdd steps generate', then implement their bodies."
+  "nextStep": "Generate skeletons with 'spec steps generate', then implement their bodies."
 }
 </code></pre>
 <p>An empty <code>missing</code> array means every step in every scenario is bound.</p>
 <hr>
-<h2 id="bdd-steps-generate"><a class="header" href="#bdd-steps-generate">bdd steps generate</a></h2>
+<h2 id="spec-steps-generate"><a class="header" href="#spec-steps-generate">spec steps generate</a></h2>
 <p>Generate step definitions for the undefined steps and stage them.
 Already-defined steps are never regenerated — only the gap is filled.</p>
-<pre><code class="language-bash">bdd steps generate
+<pre><code class="language-bash">spec steps generate
 </code></pre>
 <pre><code class="language-json">{
   "target": "features/step_definitions/string_calculator_steps.js",
   "staged": true,
   "source": "template",
   "summary": "2 step definitions generated for undefined steps.",
-  "nextStep": "Review with 'bdd changes show', apply with 'bdd changes commit', implement the bodies, then 'bdd test'."
+  "nextStep": "Review with 'spec changes show', apply with 'spec changes commit', implement the bodies, then 'spec test'."
 }
 </code></pre>
 <h3 id="source-template-or-llm"><a class="header" href="#source-template-or-llm"><code>source</code>: template or llm</a></h3>
@@ -1695,7 +1696,7 @@ Already-defined steps are never regenerated — only the gap is filled.</p>
 signatures, bodies that fail honestly (throw / <code>panic!</code> /
 <code>PendingStepException</code>) so the first run is genuinely RED.</li>
 <li><code>"llm"</code> — a model polished the skeleton and the result passed
-validation. Requires a resolved model (see <a href="#bdd-model"><code>bdd model</code></a>);
+validation. Requires a resolved model (see <a href="#spec-model"><code>spec model</code></a>);
 when no model is reachable, generation silently falls back to the
 template. The LLM output must parse and compile-shape-check or the
 template is used instead — a model can never stage broken code.</li>
@@ -1712,36 +1713,36 @@ ecosystem’s conventions, not just the step expressions.</p>
 </code></pre>
 <h2 id="see-also-6"><a class="header" href="#see-also-6">See also</a></h2>
 <ul>
-<li><a href="#bdd-scenario"><code>bdd scenario</code></a> — where the steps come from.</li>
-<li><a href="#bdd-changes"><code>bdd changes</code></a> — apply the staged definitions.</li>
-<li><a href="#bdd-test"><code>bdd test</code></a> — run and watch the honest RED.</li>
+<li><a href="#spec-scenario"><code>spec scenario</code></a> — where the steps come from.</li>
+<li><a href="#spec-changes"><code>spec changes</code></a> — apply the staged definitions.</li>
+<li><a href="#spec-test"><code>spec test</code></a> — run and watch the honest RED.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="bdd-unittest"><a class="header" href="#bdd-unittest">bdd unittest</a></h1>
+<h1 id="spec-unittest"><a class="header" href="#spec-unittest">spec unittest</a></h1>
 <p>Unit-test generation — the TDD altitude beneath the Gherkin scenarios.
 Where a scenario proves the behavior end to end, the unit test pins
 down the fine-grained contract of the production code.</p>
-<pre><code class="language-text">Usage: bdd unittest [OPTIONS] &lt;COMMAND&gt;
+<pre><code class="language-text">Usage: spec unittest [OPTIONS] &lt;COMMAND&gt;
 
 Commands: generate
 </code></pre>
 <p>MCP tool equivalent: <code>unit_test_create</code>.</p>
 <hr>
-<h2 id="bdd-unittest-generate"><a class="header" href="#bdd-unittest-generate">bdd unittest generate</a></h2>
+<h2 id="spec-unittest-generate"><a class="header" href="#spec-unittest-generate">spec unittest generate</a></h2>
 <p>Generate a unit test from a requirement’s acceptance criteria and
 stage it. Each Given/When/Then criterion becomes one test case with
 the Given as setup, the When as the action, and the Then as the
 assertion.</p>
-<pre><code class="language-text">Usage: bdd unittest generate [OPTIONS] &lt;REQ_ID&gt;
+<pre><code class="language-text">Usage: spec unittest generate [OPTIONS] &lt;REQ_ID&gt;
 </code></pre>
-<pre><code class="language-bash">bdd unittest generate REQ-003
+<pre><code class="language-bash">spec unittest generate REQ-003
 </code></pre>
 <pre><code class="language-json">{
   "target": "src/test/java/StringCalculatorTest.java",
   "staged": true,
   "source": "template",
   "summary": "Unit test for REQ-003 with 2 cases from its acceptance criteria.",
-  "nextStep": "Review with 'bdd changes show', apply with 'bdd changes commit', then 'bdd test' to see RED."
+  "nextStep": "Review with 'spec changes show', apply with 'spec changes commit', then 'spec test' to see RED."
 }
 </code></pre>
 <p>The target file and framework follow the detected language:</p>
@@ -1760,25 +1761,25 @@ assertion.</p>
 </table>
 </div>
 <p><code>source</code> works exactly as in
-<a href="#source-template-or-llm"><code>bdd steps generate</code></a>: deterministic
+<a href="#source-template-or-llm"><code>spec steps generate</code></a>: deterministic
 template by default, <code>"llm"</code> only when a model’s polished version
 passed validation, with the session language’s best practices pinned
 in the prompt. Generated assertions fail honestly until the
 production code exists — the point is a real RED.</p>
 <p>An unknown requirement id fails with exit status 1.</p>
 <h2 id="where-it-fits"><a class="header" href="#where-it-fits">Where it fits</a></h2>
-<pre><code class="language-bash">bdd spec show REQ-003          # read the criteria
-bdd unittest generate REQ-003  # stage the test
-bdd changes commit
-bdd test                       # RED at both altitudes
+<pre><code class="language-bash">spec show REQ-003          # read the criteria
+spec unittest generate REQ-003  # stage the test
+spec changes commit
+spec test                       # RED at both altitudes
 </code></pre>
 <h2 id="see-also-7"><a class="header" href="#see-also-7">See also</a></h2>
 <ul>
-<li><a href="#bdd-spec-show"><code>bdd spec show</code></a> — the criteria being turned into cases.</li>
-<li><a href="#bdd-test"><code>bdd test</code></a> — run the generated test.</li>
+<li><a href="#spec-show"><code>spec show</code></a> — the criteria being turned into cases.</li>
+<li><a href="#spec-test"><code>spec test</code></a> — run the generated test.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="bdd-implement"><a class="header" href="#bdd-implement">bdd implement</a></h1>
+<h1 id="spec-implement"><a class="header" href="#spec-implement">spec implement</a></h1>
 <p>Ask the resolved model to make the failing tests pass. The model
 receives the requirement, the last run’s full failure details — stack
 traces included — the project’s source files, the history of every
@@ -1789,17 +1790,17 @@ the production code plus real bodies for the TODO placeholders in the
 generated tests and step definitions. Everything it writes lands in
 the staging area — you review before anything touches the working
 tree, and the next test run is the real validator.</p>
-<pre><code class="language-text">Usage: bdd implement [OPTIONS] &lt;REQ_ID&gt;
+<pre><code class="language-text">Usage: spec implement [OPTIONS] &lt;REQ_ID&gt;
 </code></pre>
 <p>Requires a resolved model (configured with
-<a href="#bdd-model-use"><code>bdd model use</code></a>, passed with <code>--model</code>, or
+<a href="#spec-model-use"><code>spec model use</code></a>, passed with <code>--model</code>, or
 the session default when Ollama has installed models). Without one the
 command is refused — implementing stays in your hands. The model this
 harness is developed and run against is <code>qwen3.8-flash-next:125b-mlx</code>; your
 mileage will vary with a different model, especially one trained for
 work other than development.</p>
-<pre><code class="language-bash">bdd test                 # a fresh RED bar records the failure details
-bdd implement REQ-001    # the model attempts the implementation
+<pre><code class="language-bash">spec test                 # a fresh RED bar records the failure details
+spec implement REQ-001    # the model attempts the implementation
 </code></pre>
 <p>The command narrates as it works — the preflight result, each asset it
 found or missed, then a <code>working ...</code> line while the model call runs.
@@ -1822,7 +1823,7 @@ Sending the sources, the failures, and the attempt history to the model - workin
   ],
   "staged": true,
   "source": "llm",
-  "nextStep": "Apply with bdd changes commit, then bdd test - the run decides."
+  "nextStep": "Apply with spec changes commit, then spec test - the run decides."
 }
 </code></pre>
 <h2 id="the-follow-up-offer"><a class="header" href="#the-follow-up-offer">The follow-up offer</a></h2>
@@ -1852,8 +1853,8 @@ prerequisites of an implementation attempt:</p>
 <li>a RED test run is recorded, so its failures can brief the model.</li>
 </ul>
 <p>When one is missing the attempt does not run. Each gap is printed in
-red with the step to take instead — <code>bdd scenario add</code>,
-<code>bdd steps generate</code>, <code>bdd unittest generate REQ-XXX</code>, or <code>bdd test</code> —
+red with the step to take instead — <code>spec scenario add</code>,
+<code>spec steps generate</code>, <code>spec unittest generate REQ-XXX</code>, or <code>spec test</code> —
 and the JSON reply is the readiness report:</p>
 <pre><code class="language-json">{
   "ready": false,
@@ -1864,17 +1865,17 @@ and the JSON reply is the readiness report:</p>
     { "role": "production code (the attempt creates it when missing)", "path": "src/main/java/StringCalculator.java", "present": false }
   ],
   "findings": [
-    "No RED test run is recorded - run bdd test first so its failures brief the model.",
-    "No scenario is tagged @REQ-001 - add one with bdd scenario add, then bdd changes commit."
+    "No RED test run is recorded - run spec test first so its failures brief the model.",
+    "No scenario is tagged @REQ-001 - add one with spec scenario add, then spec changes commit."
   ],
-  "nextStep": "No RED test run is recorded - run bdd test first so its failures brief the model."
+  "nextStep": "No RED test run is recorded - run spec test first so its failures brief the model."
 }
 </code></pre>
 <p>The production file is surveyed but never blocks — the attempt creates
 it when it is missing. A missing prerequisite with a model resolved
 also triggers one advice call: the requirement, the asset survey, the
 findings, and the last failures go to the model, which answers in a
-few sentences whether <code>bdd implement</code> can succeed right now and names
+few sentences whether <code>spec implement</code> can succeed right now and names
 the exact next command. The advice is printed as
 <code>Model advice: ...</code> under the findings.</p>
 <h2 id="what-the-model-may-write"><a class="header" href="#what-the-model-may-write">What the model may write</a></h2>
@@ -1906,23 +1907,23 @@ is staged, and you implement by hand instead.</p>
 <p>The implementation prompt is the largest call the harness makes, so a
 local model can need minutes to answer. The generation timeout
 defaults to 300 seconds; if you see <code>no reply within ...s</code>, raise
-<code>timeout_seconds</code> under <code>[llm]</code> in <code>.bdd.toml</code> (see
-<a href="#the-llm-configuration-block"><code>bdd model</code></a>).</p>
+<code>timeout_seconds</code> under <code>[llm]</code> in <code>.spec.toml</code> (see
+<a href="#the-llm-configuration-block"><code>spec model</code></a>).</p>
 <h2 id="where-it-fits-1"><a class="header" href="#where-it-fits-1">Where it fits</a></h2>
-<p>This is the standalone form of the <a href="#bdd-greenfield">greenfield</a>
+<p>This is the standalone form of the <a href="#spec-greenfield">greenfield</a>
 implementation attempt — the same behavior <kbd>Enter</kbd> triggers
 on a RED bar inside the loop. Use it to continue a paused run:</p>
-<pre><code class="language-bash">bdd test                 # confirm RED, record the failures
-bdd implement REQ-001    # stage the model's attempt
-bdd changes show         # review what it wrote
-bdd changes commit
-bdd test                 # GREEN? then bdd refactor / bdd spec mark-implemented
+<pre><code class="language-bash">spec test                 # confirm RED, record the failures
+spec implement REQ-001    # stage the model's attempt
+spec changes show         # review what it wrote
+spec changes commit
+spec test                 # GREEN? then spec refactor / spec mark-implemented
 </code></pre>
-<p>If the bar stays RED, run <code>bdd implement</code> again — the fresh failure
+<p>If the bar stays RED, run <code>spec implement</code> again — the fresh failure
 details from the latest run go back to the model — or take over by
 hand.</p>
 <h2 id="attempts-are-remembered"><a class="header" href="#attempts-are-remembered">Attempts are remembered</a></h2>
-<p>Every attempt is logged in <code>.bdd-state.json</code> (under <code>attemptLog</code> on a
+<p>Every attempt is logged in <code>.spec-state.json</code> (under <code>attemptLog</code> on a
 timestamped state entry): the files it wrote, the failures it was
 addressing, and — attached by the first test run after it — the
 <code>outcome</code>: what that run actually reported, build output included. The
@@ -1941,84 +1942,25 @@ stays on disk for humans; it is not sent to the model.</p>
 test run goes GREEN — a closed loop leaves no history for the next
 requirement to inherit.</p>
 <p><code>run_tests</code> during this command sees the <strong>working tree</strong>, not the
-unstaged patch sitting in <code>.bdd-staged/</code>. Commit (or apply) before you
+unstaged patch sitting in <code>.spec-staged/</code>. Commit (or apply) before you
 trust the bar. If the model requests <code>command_run</code>, the harness asks you to
 confirm first; piped or CI stdin declines and never hangs.</p>
 <h2 id="see-also-8"><a class="header" href="#see-also-8">See also</a></h2>
 <ul>
-<li><a href="#bdd-greenfield"><code>bdd greenfield</code></a> — the orchestrated loop with the same attempt built in.</li>
-<li><a href="#bdd-changes"><code>bdd changes</code></a> — review and apply the staged files.</li>
-<li><a href="#bdd-test"><code>bdd test</code></a> — the run that decides.</li>
-<li><a href="#bdd-tools"><code>bdd tools</code></a> — the implement profile (includes <code>command_run</code>).</li>
+<li><a href="#spec-greenfield"><code>spec greenfield</code></a> — the orchestrated loop with the same attempt built in.</li>
+<li><a href="#spec-changes"><code>spec changes</code></a> — review and apply the staged files.</li>
+<li><a href="#spec-test"><code>spec test</code></a> — the run that decides.</li>
+<li><a href="#spec-tools"><code>spec tools</code></a> — the implement profile (includes <code>command_run</code>).</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="bdd-validate"><a class="header" href="#bdd-validate">bdd validate</a></h1>
-<p>Validate all Gherkin in the project — committed feature files <strong>and</strong>
-staged ones — so a broken scenario never reaches a test run. This is
-the cheap gate to run before <code>bdd changes commit</code>. MCP clients call the
-same check as <code>changes_validate</code> (<code>validate_spec</code> remains the on-disk
-frozen tool).</p>
-<pre><code class="language-text">Usage: bdd validate [OPTIONS]
-</code></pre>
-<h2 id="flags-3"><a class="header" href="#flags-3">Flags</a></h2>
-<p>Only the <a href="#global-flags">global flags</a> (<code>--root</code>, <code>--model</code>).</p>
-<h2 id="what-is-checked"><a class="header" href="#what-is-checked">What is checked</a></h2>
-<ul>
-<li>Every <code>.feature</code> file under the root parses as valid Gherkin.</li>
-<li>Every file in the staging area (<code>.bdd-staged/</code>) that is a feature
-file parses too — you cannot commit a transaction containing broken
-Gherkin without knowing.</li>
-<li>Scenario requirement tags (<code>@REQ-...</code>) refer to ids that exist in
-the spec.</li>
-</ul>
-<h2 id="examples-2"><a class="header" href="#examples-2">Examples</a></h2>
-<p>Everything clean:</p>
-<pre><code class="language-bash">bdd validate
-</code></pre>
-<pre><code class="language-json">{
-  "valid": true,
-  "issues": [],
-  "nextStep": "Gherkin is clean. Run 'bdd test' or commit staged changes."
-}
-</code></pre>
-<p>Problems found (the command exits 0; the report carries the verdict):</p>
-<pre><code class="language-json">{
-  "valid": false,
-  "issues": [
-    "features/string_calculator.feature: (5:3) expected a step keyword",
-    "staged features/newlines.feature: scenario 'Newlines act as delimiters' is tagged @REQ-009 but the spec has no such requirement"
-  ],
-  "nextStep": "Fix the listed files (staged ones via their originating command), then validate again."
-}
-</code></pre>
-<h2 id="relation-to-bdd-spec-validate"><a class="header" href="#relation-to-bdd-spec-validate">Relation to <code>bdd spec validate</code></a></h2>
-<div class="table-wrapper">
-<table>
-<thead>
-<tr><th>Command</th><th>Validates</th></tr>
-</thead>
-<tbody>
-<tr><td><code>bdd spec validate</code></td><td>The requirements JSON: shape, ids, statuses, criterion phrasing.</td></tr>
-<tr><td><code>bdd validate</code></td><td>The Gherkin: feature files on disk and in the stage, plus tag/spec consistency.</td></tr>
-</tbody>
-</table>
-</div>
-<p>Run both before a commit-and-test cycle; both appear as <code>nextStep</code>
-suggestions at the appropriate moments.</p>
-<h2 id="see-also-9"><a class="header" href="#see-also-9">See also</a></h2>
-<ul>
-<li><a href="#bdd-changes"><code>bdd changes</code></a> — the staged transaction this gate protects.</li>
-<li><a href="#bdd-feature-show"><code>bdd feature show</code></a> — inspect a file that failed to parse.</li>
-</ul>
-<div style="break-before: page; page-break-before: always;"></div>
-<h1 id="bdd-test"><a class="header" href="#bdd-test">bdd test</a></h1>
+<h1 id="spec-test"><a class="header" href="#spec-test">spec test</a></h1>
 <p>Run the project’s tests through its own build tool and update the
 persistent RED/GREEN/REFACTOR phase from the results. This is the
 heartbeat of the workflow.</p>
-<pre><code class="language-text">Usage: bdd test [OPTIONS]
+<pre><code class="language-text">Usage: spec test [OPTIONS]
 </code></pre>
 <p>MCP tool equivalent: <code>run_tests</code>.</p>
-<h2 id="flags-4"><a class="header" href="#flags-4">Flags</a></h2>
+<h2 id="flags-3"><a class="header" href="#flags-3">Flags</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -2052,9 +1994,9 @@ project’s own toolchain:</p>
 pretending</strong>:</p>
 <pre><code class="language-text">Error: runtime_missing: mvn is not installed. Install Maven (and a JDK) to run tests; the harness reports, it never installs.
 </code></pre>
-<h2 id="examples-3"><a class="header" href="#examples-3">Examples</a></h2>
+<h2 id="examples-2"><a class="header" href="#examples-2">Examples</a></h2>
 <p>A failing run — the phase moves to RED:</p>
-<pre><code class="language-bash">bdd test
+<pre><code class="language-bash">spec test
 </code></pre>
 <pre><code class="language-json">{
   "phase": "RED",
@@ -2076,12 +2018,12 @@ pretending</strong>:</p>
   "errors": 0,
   "skipped": 0,
   "failureDetails": [],
-  "nextStep": "You are GREEN. Refactor with 'bdd refactor', or mark the requirement implemented and pick the next one."
+  "nextStep": "You are GREEN. Refactor with 'spec refactor', or mark the requirement implemented and pick the next one."
 }
 </code></pre>
 <p>Filtered runs:</p>
-<pre><code class="language-bash">bdd test --feature features/string_calculator.feature
-bdd test --scenario "Two numbers separated by a comma are summed"
+<pre><code class="language-bash">spec test --feature features/string_calculator.feature
+spec test --scenario "Two numbers separated by a comma are summed"
 </code></pre>
 <p>Filters are forwarded to the underlying runner (e.g. Cucumber’s name
 filter), so only the selected slice executes — useful while iterating
@@ -2093,25 +2035,25 @@ on one scenario.</p>
 <li>A failing run during REFACTOR drops you back to RED — the refactor
 broke behavior.</li>
 </ul>
-<p>The phase is stored in <code>.bdd-tdd-state.json</code> and read back by
-<a href="#bdd-state"><code>bdd state</code></a> and enforced by <a href="#bdd-refactor"><code>bdd refactor</code></a>.</p>
-<h2 id="see-also-10"><a class="header" href="#see-also-10">See also</a></h2>
+<p>The phase is stored in <code>.spec-state.json</code> and read back by
+<a href="#spec-state"><code>spec state</code></a> and enforced by <a href="#spec-refactor"><code>spec refactor</code></a>.</p>
+<h2 id="see-also-9"><a class="header" href="#see-also-9">See also</a></h2>
 <ul>
 <li><a href="#the-workflow-spec--red--green--refactor">The workflow</a> — the phase machine in full.</li>
-<li><a href="#bdd-inspect"><code>bdd inspect</code></a> — check the runtime before expecting a run.</li>
+<li><a href="#spec-inspect"><code>spec inspect</code></a> — check the runtime before expecting a run.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="bdd-state"><a class="header" href="#bdd-state">bdd state</a></h1>
+<h1 id="spec-state"><a class="header" href="#spec-state">spec state</a></h1>
 <p>Show the current TDD phase, the last run’s counts, the refactor
 log, and at most the three latest dated state entries. Read-only —
 it never changes anything.</p>
-<pre><code class="language-text">Usage: bdd state [OPTIONS]
+<pre><code class="language-text">Usage: spec state [OPTIONS]
 </code></pre>
 <p>MCP tool equivalent: <code>get_tdd_state</code>.</p>
-<h2 id="flags-5"><a class="header" href="#flags-5">Flags</a></h2>
+<h2 id="flags-4"><a class="header" href="#flags-4">Flags</a></h2>
 <p>Only the <a href="#global-flags">global flags</a> (<code>--root</code>, <code>--model</code>).</p>
-<h2 id="examples-4"><a class="header" href="#examples-4">Examples</a></h2>
-<pre><code class="language-bash">bdd state
+<h2 id="examples-3"><a class="header" href="#examples-3">Examples</a></h2>
+<pre><code class="language-bash">spec state
 </code></pre>
 <pre><code class="language-json">{
   "instructions": "This file is the TDD phase log. ... When briefing a model, include only the three most recent entries. ...",
@@ -2143,21 +2085,21 @@ it never changes anything.</p>
       "attemptLog": []
     }
   ],
-  "nextStep": "You are GREEN. Refactor with 'bdd refactor', or mark the requirement implemented."
+  "nextStep": "You are GREEN. Refactor with 'spec refactor', or mark the requirement implemented."
 }
 </code></pre>
 <p>Before any test has ever run, the phase is the starting state and
-<code>lastRun</code> is all zeros; <code>nextStep</code> points you at <code>bdd test</code>.</p>
+<code>lastRun</code> is all zeros; <code>nextStep</code> points you at <code>spec test</code>.</p>
 <h2 id="where-the-state-lives"><a class="header" href="#where-the-state-lives">Where the state lives</a></h2>
-<p><code>.bdd-state.json</code> under the project root. It is a chronological log of
+<p><code>.spec-state.json</code> under the project root. It is a chronological log of
 timestamped entries — one per test run, refactor, or implementation
 attempt — plus <code>instructions</code> that explain how to read the schema. The
-file keeps the full history so a human can audit the loop; <code>bdd state</code>
+file keeps the full history so a human can audit the loop; <code>spec state</code>
 and every model brief include <strong>only the three latest entries</strong>. Delete
 the file to reset the phase machine (there is deliberately no <code>reset</code>
 command — losing the log should be an explicit filesystem act).</p>
 <p>The same file also carries <code>attemptLog</code> — the record of every model
-implementation attempt that <a href="#bdd-implement"><code>bdd implement</code></a> and the
+implementation attempt that <a href="#spec-implement"><code>spec implement</code></a> and the
 greenfield loop brief the next attempt with: the files it wrote
 (<code>targets</code>), the failures it was briefed with (<code>failures</code>), and the
 output of the first test run after it (<code>outcome</code>; empty means no run
@@ -2173,28 +2115,28 @@ the file).</li>
 <a href="#the-workflow-spec--red--green--refactor">the workflow</a>). The current phase; also the last
 entry’s <code>phase</code>.</li>
 <li><code>lastRun</code> — counts only; the failure details live in the
-<a href="#bdd-test"><code>bdd test</code></a> reply that produced them.</li>
+<a href="#spec-test"><code>spec test</code></a> reply that produced them.</li>
 <li><code>refactorLog</code> — every note passed to
-<a href="#bdd-refactor"><code>bdd refactor --note</code></a>, in order. It is the audit
+<a href="#spec-refactor"><code>spec refactor --note</code></a>, in order. It is the audit
 trail of intentional design work.</li>
 <li><code>entries</code> — at most the three latest dated snapshots (<code>timestamp</code>,
 <code>phase</code>, <code>lastRun</code>, <code>refactorLog</code>, <code>attemptLog</code>). Older entries stay
 on disk and are not sent to a model.</li>
 </ul>
-<h2 id="see-also-11"><a class="header" href="#see-also-11">See also</a></h2>
+<h2 id="see-also-10"><a class="header" href="#see-also-10">See also</a></h2>
 <ul>
-<li><a href="#bdd-test"><code>bdd test</code></a> — the command that moves the phase.</li>
-<li><a href="#bdd-refactor"><code>bdd refactor</code></a> — appends to the log shown here.</li>
+<li><a href="#spec-test"><code>spec test</code></a> — the command that moves the phase.</li>
+<li><a href="#spec-refactor"><code>spec refactor</code></a> — appends to the log shown here.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="bdd-status"><a class="header" href="#bdd-status">bdd status</a></h1>
+<h1 id="spec-status"><a class="header" href="#spec-status">spec status</a></h1>
 <p>Where the project stands on the road to every requirement being
-implemented — and the one next step that moves it forward. <code>bdd state</code>
-answers “what did the last test run say”; <code>bdd status</code> answers “where
+implemented — and the one next step that moves it forward. <code>spec state</code>
+answers “what did the last test run say”; <code>spec status</code> answers “where
 am I in the whole loop and what do I do now”.</p>
-<pre><code class="language-text">Usage: bdd status [OPTIONS]
+<pre><code class="language-text">Usage: spec status [OPTIONS]
 </code></pre>
-<pre><code class="language-bash">bdd status
+<pre><code class="language-bash">spec status
 </code></pre>
 <pre><code class="language-json">{
   "phase": "RED",
@@ -2209,7 +2151,7 @@ am I in the whole loop and what do I do now”.</p>
       "findings": []
     }
   ],
-  "nextStep": "1 staged file(s) await review - inspect with bdd changes show, apply with bdd changes commit, then run bdd test."
+  "nextStep": "1 staged file(s) await review - inspect with spec changes show, apply with spec changes commit, then run spec test."
 }
 </code></pre>
 <h2 id="how-the-next-step-is-chosen"><a class="header" href="#how-the-next-step-is-chosen">How the next step is chosen</a></h2>
@@ -2218,58 +2160,58 @@ am I in the whole loop and what do I do now”.</p>
 <li><strong>Staged changes wait</strong> — nothing the harness authors touches the
 working tree until you apply it, so an unapplied implementation
 attempt (or scenario, or spec edit) always comes first:
-<code>bdd changes show</code>, then <code>bdd changes commit</code>, then <code>bdd test</code>.</li>
+<code>spec changes show</code>, then <code>spec changes commit</code>, then <code>spec test</code>.</li>
 <li><strong>A requirement is in flight</strong> — its scenario, step definitions,
 and unit test all exist. On GREEN the loop closes with the chain
-<code>bdd spec mark-implemented &lt;id&gt;</code>, then <code>bdd validate</code>, then
-<code>bdd changes commit</code>; on any other bar the step is <code>bdd test</code>,
-and on RED <code>bdd implement &lt;id&gt;</code> lets the model try.</li>
+<code>spec mark-implemented &lt;id&gt;</code>, then <code>spec changes validate</code>, then
+<code>spec changes commit</code>; on any other bar the step is <code>spec test</code>,
+and on RED <code>spec implement &lt;id&gt;</code> lets the model try.</li>
 <li><strong>The earliest asset gap</strong> — a pending requirement is missing its
-tagged scenario (<code>bdd scenario add</code>), step definitions
-(<code>bdd steps generate</code>), or unit test
-(<code>bdd unittest generate &lt;id&gt;</code>); the finding names the command.</li>
+tagged scenario (<code>spec scenario add</code>), step definitions
+(<code>spec steps generate</code>), or unit test
+(<code>spec unittest generate &lt;id&gt;</code>); the finding names the command.</li>
 <li><strong>Everything is implemented</strong> — draft the next requirement with
-<code>bdd spec draft</code>.</li>
+<code>spec draft</code>.</li>
 </ol>
 <p>Each pending requirement’s entry carries its own <code>findings</code>, so with
 several requirements you see every gap, not just the first.</p>
 <h2 id="model-advice"><a class="header" href="#model-advice">Model advice</a></h2>
-<p>When a model is resolved (see <a href="#bdd-model"><code>bdd model</code></a>), the
+<p>When a model is resolved (see <a href="#spec-model"><code>spec model</code></a>), the
 deterministic report is followed by one advice call: the model is
 briefed with the whole workflow process — the states, the commands,
 the loop, and the invariants — plus the current phase, the last run’s
 counts, the staging area, and every requirement’s position, and it
 answers with the next command in plain words:</p>
 <pre><code class="language-text">Model advice: The bar is GREEN and REQ-001 has every asset in place -
-close the loop with bdd spec mark-implemented REQ-001, then bdd
-validate, then bdd changes commit.
+close the loop with spec mark-implemented REQ-001, then spec
+validate, then spec changes commit.
 </code></pre>
 <p>Without a model the report alone is the whole reply, and a model
-failure never breaks <code>bdd status</code>.</p>
+failure never breaks <code>spec status</code>.</p>
 <h2 id="why-a-requirement-stays-pending"><a class="header" href="#why-a-requirement-stays-pending">Why a requirement stays pending</a></h2>
 <p><code>implemented</code> is never set by a passing run alone. The status flips
-only when you run <a href="#bdd-spec"><code>bdd spec mark-implemented</code></a> — and that
+only when you run <a href="#the-requirements-spec"><code>spec mark-implemented</code></a> — and that
 command is GREEN-gated: it refuses unless the last recorded run
 passed, and it refuses without a scenario tagged <code>@&lt;id&gt;</code> (it records
 the tagged feature as the requirement’s <code>featureFile</code>). The road is
-always: staged changes applied → <code>bdd test</code> GREEN →
-<code>bdd spec mark-implemented &lt;id&gt;</code> → <code>bdd validate</code> →
-<code>bdd changes commit</code> (the status change is staged too, like every
+always: staged changes applied → <code>spec test</code> GREEN →
+<code>spec mark-implemented &lt;id&gt;</code> → <code>spec changes validate</code> →
+<code>spec changes commit</code> (the status change is staged too, like every
 mutation).</p>
-<h2 id="see-also-12"><a class="header" href="#see-also-12">See also</a></h2>
+<h2 id="see-also-11"><a class="header" href="#see-also-11">See also</a></h2>
 <ul>
-<li><a href="#bdd-state"><code>bdd state</code></a> — the raw TDD state: phase, last run, refactor log.</li>
-<li><a href="#bdd-changes"><code>bdd changes</code></a> — review and apply what is staged.</li>
-<li><a href="#bdd-implement"><code>bdd implement</code></a> — the model attempt, with its own preflight.</li>
+<li><a href="#spec-state"><code>spec state</code></a> — the raw TDD state: phase, last run, refactor log.</li>
+<li><a href="#spec-changes"><code>spec changes</code></a> — review and apply what is staged.</li>
+<li><a href="#spec-implement"><code>spec implement</code></a> — the model attempt, with its own preflight.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="bdd-refactor"><a class="header" href="#bdd-refactor">bdd refactor</a></h1>
+<h1 id="spec-refactor"><a class="header" href="#spec-refactor">spec refactor</a></h1>
 <p>Begin a refactor step. Only allowed on GREEN — the discipline’s core
 rule is that you never restructure code while tests are failing.</p>
-<pre><code class="language-text">Usage: bdd refactor [OPTIONS]
+<pre><code class="language-text">Usage: spec refactor [OPTIONS]
 </code></pre>
 <p>MCP tool equivalent: <code>start_refactor</code>.</p>
-<h2 id="flags-6"><a class="header" href="#flags-6">Flags</a></h2>
+<h2 id="flags-5"><a class="header" href="#flags-5">Flags</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -2282,52 +2224,52 @@ rule is that you never restructure code while tests are failing.</p>
 </tbody>
 </table>
 </div>
-<h2 id="examples-5"><a class="header" href="#examples-5">Examples</a></h2>
+<h2 id="examples-4"><a class="header" href="#examples-4">Examples</a></h2>
 <p>On GREEN:</p>
-<pre><code class="language-bash">bdd refactor --note "extract the delimiter parser from add()"
+<pre><code class="language-bash">spec refactor --note "extract the delimiter parser from add()"
 </code></pre>
 <pre><code class="language-json">{
   "phase": "REFACTOR",
-  "nextStep": "Refactor with the tests as your safety net, then 'bdd test'. Passing returns you to GREEN; a failure means the refactor broke behavior."
+  "nextStep": "Refactor with the tests as your safety net, then 'spec test'. Passing returns you to GREEN; a failure means the refactor broke behavior."
 }
 </code></pre>
 <p>Attempting it on RED is refused with exit status 1:</p>
 <pre><code class="language-text">Error: refactoring is only allowed on GREEN - you are RED. Make the tests pass first.
 </code></pre>
 <h2 id="the-refactor-loop"><a class="header" href="#the-refactor-loop">The refactor loop</a></h2>
-<pre><code class="language-bash">bdd test                                  # GREEN - safe to restructure
-bdd refactor --note "collapse duplicate parsing"
+<pre><code class="language-bash">spec test                                  # GREEN - safe to restructure
+spec refactor --note "collapse duplicate parsing"
 # ...restructure, behavior unchanged...
-bdd test                                  # GREEN again: refactor complete
+spec test                                  # GREEN again: refactor complete
 </code></pre>
-<p>If that final <code>bdd test</code> fails, the phase drops to RED: the refactor
+<p>If that final <code>spec test</code> fails, the phase drops to RED: the refactor
 changed behavior, and the failing tests tell you exactly where.</p>
 <h2 id="why-the-note-matters"><a class="header" href="#why-the-note-matters">Why the note matters</a></h2>
 <p>Each <code>--note</code> is appended to the <code>refactorLog</code> that
-<a href="#bdd-state"><code>bdd state</code></a> reports. Over a kata or a workshop, the log
+<a href="#spec-state"><code>spec state</code></a> reports. Over a kata or a workshop, the log
 becomes the narrative of deliberate design decisions — which is the
 half of TDD that “make it pass” alone never captures.</p>
-<h2 id="see-also-13"><a class="header" href="#see-also-13">See also</a></h2>
+<h2 id="see-also-12"><a class="header" href="#see-also-12">See also</a></h2>
 <ul>
-<li><a href="#bdd-state"><code>bdd state</code></a> — the phase and the accumulated log.</li>
+<li><a href="#spec-state"><code>spec state</code></a> — the phase and the accumulated log.</li>
 <li><a href="#the-workflow-spec--red--green--refactor">The workflow</a> — where REFACTOR sits in the machine.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="bdd-changes"><a class="header" href="#bdd-changes">bdd changes</a></h1>
+<h1 id="spec-changes"><a class="header" href="#spec-changes">spec changes</a></h1>
 <p>Staged-transaction management. Every file mutation the harness authors
-lands in <code>.bdd-staged/</code> first (see <a href="#staged-changes">Staged changes</a>);
+lands in <code>.spec-staged/</code> first (see <a href="#staged-changes">Staged changes</a>);
 these subcommands are how you review, apply, or drop the transaction.</p>
-<pre><code class="language-text">Usage: bdd changes [OPTIONS] &lt;COMMAND&gt;
+<pre><code class="language-text">Usage: spec changes [OPTIONS] &lt;COMMAND&gt;
 
-Commands: show, commit, discard
+Commands: show, commit, discard, validate
 </code></pre>
 <p>None of the subcommands take flags beyond the
 <a href="#global-flags">global flags</a>.</p>
 <hr>
-<h2 id="bdd-changes-show"><a class="header" href="#bdd-changes-show">bdd changes show</a></h2>
+<h2 id="spec-changes-show"><a class="header" href="#spec-changes-show">spec changes show</a></h2>
 <p>List everything currently staged: the path, whether applying would
 create or modify the file, and a one-line summary of the change.</p>
-<pre><code class="language-bash">bdd changes show
+<pre><code class="language-bash">spec changes show
 </code></pre>
 <pre><code class="language-json">{
   "changes": [
@@ -2342,7 +2284,7 @@ create or modify the file, and a one-line summary of the change.</p>
       "summary": "2 step definitions generated for undefined steps"
     }
   ],
-  "nextStep": "Apply with 'bdd changes commit' or drop with 'bdd changes discard'."
+  "nextStep": "Apply with 'spec changes commit' or drop with 'spec changes discard'."
 }
 </code></pre>
 <p>An empty stage:</p>
@@ -2352,16 +2294,17 @@ create or modify the file, and a one-line summary of the change.</p>
 }
 </code></pre>
 <p>To see the full content of a staged file, read it directly under
-<code>.bdd-staged/</code> — the layout mirrors the project tree.</p>
+<code>.spec-staged/</code> — the layout mirrors the project tree.</p>
 <hr>
-<h2 id="bdd-changes-commit"><a class="header" href="#bdd-changes-commit">bdd changes commit</a></h2>
+<h2 id="spec-changes-commit"><a class="header" href="#spec-changes-commit">spec changes commit</a></h2>
 <p>Apply every staged change to the working tree atomically and clear
 the stage. Files marked <code>create</code> are written fresh; <code>modify</code> replaces
 the working copy with the staged version.</p>
-<pre><code class="language-bash">bdd changes commit
+<pre><code class="language-bash">spec changes commit
 </code></pre>
-<p>Run <a href="#bdd-validate"><code>bdd validate</code></a> first when the transaction contains
-Gherkin — broken staged Gherkin is reported there before it can land.</p>
+<p>Run <a href="#spec-changes-validate"><code>spec changes validate</code></a> first when the
+transaction contains Gherkin — broken staged Gherkin is reported there
+before it can land.</p>
 <p>After applying, <code>commit</code> re-validates the working tree. Open issues
 ride along in the reply as a warning — the commit still happened, but
 an invalid spec never lands silently:</p>
@@ -2370,37 +2313,90 @@ an invalid spec never lands silently:</p>
     { "path": "requirements/requirements.json", "action": "modify", "summary": "mark REQ-001 implemented" }
   ],
   "issues": [
-    "REQ-001: implemented requirements must name their featureFile - rerun bdd spec mark-implemented REQ-001 on GREEN to backfill it"
+    "REQ-001: implemented requirements must name their featureFile - rerun spec mark-implemented REQ-001 on GREEN to backfill it"
   ],
-  "nextStep": "Staged changes applied, but the working tree does not validate - fix the issues above, then run bdd validate again."
+  "nextStep": "Staged changes applied, but the working tree does not validate - fix the issues above, then run spec changes validate again."
 }
 </code></pre>
 <p>A clean commit carries no <code>issues</code> field.</p>
 <hr>
-<h2 id="bdd-changes-discard"><a class="header" href="#bdd-changes-discard">bdd changes discard</a></h2>
+<h2 id="spec-changes-discard"><a class="header" href="#spec-changes-discard">spec changes discard</a></h2>
 <p>Drop the entire staged transaction. The working tree is untouched; the
 stage is emptied. There is no partial discard — the stage is one
 transaction by design (a scenario without its step definitions is not
 a state worth keeping).</p>
-<pre><code class="language-bash">bdd changes discard
+<pre><code class="language-bash">spec changes discard
 </code></pre>
+<hr>
+<h2 id="spec-changes-validate"><a class="header" href="#spec-changes-validate">spec changes validate</a></h2>
+<p>Validate all Gherkin in the project — committed feature files <strong>and</strong>
+staged ones — so a broken scenario never reaches a test run. This is
+the cheap gate to run before <code>spec changes commit</code>. MCP clients call
+the same check as <code>changes_validate</code> (<code>validate_spec</code> remains the
+on-disk frozen tool).</p>
+<pre><code class="language-text">Usage: spec changes validate [OPTIONS]
+</code></pre>
+<h3 id="what-is-checked"><a class="header" href="#what-is-checked">What is checked</a></h3>
+<ul>
+<li>Every <code>.feature</code> file under the root parses as valid Gherkin.</li>
+<li>Every file in the staging area (<code>.spec-staged/</code>) that is a feature
+file parses too — you cannot commit a transaction containing broken
+Gherkin without knowing.</li>
+<li>Scenario requirement tags (<code>@REQ-...</code>) refer to ids that exist in
+the spec.</li>
+</ul>
+<h3 id="examples-5"><a class="header" href="#examples-5">Examples</a></h3>
+<p>Everything clean:</p>
+<pre><code class="language-bash">spec changes validate
+</code></pre>
+<pre><code class="language-json">{
+  "valid": true,
+  "issues": [],
+  "nextStep": "Gherkin is clean. Run 'spec test' or commit staged changes."
+}
+</code></pre>
+<p>Problems found (the command exits 0; the report carries the verdict):</p>
+<pre><code class="language-json">{
+  "valid": false,
+  "issues": [
+    "features/string_calculator.feature: (5:3) expected a step keyword",
+    "staged features/newlines.feature: scenario 'Newlines act as delimiters' is tagged @REQ-009 but the spec has no such requirement"
+  ],
+  "nextStep": "Fix the listed files (staged ones via their originating command), then validate again."
+}
+</code></pre>
+<h3 id="relation-to-spec-validate"><a class="header" href="#relation-to-spec-validate">Relation to <code>spec validate</code></a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Command</th><th>Validates</th></tr>
+</thead>
+<tbody>
+<tr><td><code>spec validate</code></td><td>The requirements JSON: shape, ids, statuses, criterion phrasing.</td></tr>
+<tr><td><code>spec changes validate</code></td><td>The Gherkin: feature files on disk and in the stage, plus tag/spec consistency.</td></tr>
+</tbody>
+</table>
+</div>
+<p>Run both before a commit-and-test cycle; both appear as <code>nextStep</code>
+suggestions at the appropriate moments.</p>
 <h2 id="a-typical-review-session"><a class="header" href="#a-typical-review-session">A typical review session</a></h2>
-<pre><code class="language-bash">bdd scenario add --feature features/calc.feature --req REQ-002 \
+<pre><code class="language-bash">spec scenario add --feature features/calc.feature --req REQ-002 \
     --name "A single number is returned" --step 'Given the input "5"' \
     --step 'When add is called' --step 'Then the result is 5'
-bdd steps generate
-bdd changes show                 # one modify + one create
-bdd validate                     # staged Gherkin parses, tags resolve
-bdd changes commit               # both land together
-bdd test                         # honest RED
+spec steps generate
+spec changes show                 # one modify + one create
+spec changes validate                     # staged Gherkin parses, tags resolve
+spec changes commit               # both land together
+spec test                         # honest RED
 </code></pre>
-<h2 id="see-also-14"><a class="header" href="#see-also-14">See also</a></h2>
+<h2 id="see-also-13"><a class="header" href="#see-also-13">See also</a></h2>
 <ul>
 <li><a href="#staged-changes">Staged changes</a> — the model and its rationale.</li>
-<li><a href="#bdd-validate"><code>bdd validate</code></a> — the gate before <code>commit</code>.</li>
+<li><a href="#spec-validate"><code>spec validate</code></a> — the requirements-spec gate, the other half of the pair.</li>
+<li><a href="#spec-feature-show"><code>spec feature show</code></a> — inspect a file that failed to parse.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="bdd-model"><a class="header" href="#bdd-model">bdd model</a></h1>
+<h1 id="spec-model"><a class="header" href="#spec-model">spec model</a></h1>
 <p>LLM model discovery and selection. The harness talks to a local
 <a href="https://ollama.com">Ollama</a> — no cloud calls, no tokens — and uses
 the model only to <em>polish</em> deterministic templates in the generation
@@ -2409,14 +2405,14 @@ template quality.</p>
 <p>The model this harness is developed and run against is
 <code>qwen3.8-flash-next:125b-mlx</code>. Pull it with
 <code>ollama pull qwen3.8-flash-next:125b-mlx</code>, then persist the choice with
-<code>bdd model use qwen3.8-flash-next:125b-mlx</code>. Your mileage will vary with
+<code>spec model use qwen3.8-flash-next:125b-mlx</code>. Your mileage will vary with
 other models: a stronger coding model may improve drafts and
 implementations; a model trained for chat, general knowledge, or work
 other than development will typically produce weaker specs, steps,
 tests, and production code. The harness does not require this specific
 model — it uses whatever you configure, or the first model Ollama has
 installed.</p>
-<pre><code class="language-text">Usage: bdd model [OPTIONS] &lt;COMMAND&gt;
+<pre><code class="language-text">Usage: spec model [OPTIONS] &lt;COMMAND&gt;
 
 Commands: list, current, use
 </code></pre>
@@ -2424,18 +2420,18 @@ Commands: list, current, use
 <p>Highest priority first:</p>
 <ol>
 <li><strong><code>--model</code> flag</strong> — this invocation only, never persisted.</li>
-<li><strong>Configuration</strong> — the <code>model</code> key in <code>.bdd.toml</code> under the
-project root, written by <code>bdd model use</code>.</li>
+<li><strong>Configuration</strong> — the <code>model</code> key in <code>.spec.toml</code> under the
+project root, written by <code>spec model use</code>.</li>
 <li><strong>Discovery</strong> — the first model installed in Ollama, as a
 session-only default. Nothing is written to disk.</li>
 </ol>
 <p>If Ollama is unreachable or has no models, LLM-backed generation falls
 back to deterministic templates.</p>
 <hr>
-<h2 id="bdd-model-list"><a class="header" href="#bdd-model-list">bdd model list</a></h2>
+<h2 id="spec-model-list"><a class="header" href="#spec-model-list">spec model list</a></h2>
 <p>List the models installed in Ollama, marking the one that would
 currently be used.</p>
-<pre><code class="language-bash">bdd model list
+<pre><code class="language-bash">spec model list
 </code></pre>
 <pre><code class="language-text">Models available in Ollama:
 * qwen3.8-flash-next:125b-mlx   (configured)
@@ -2446,34 +2442,34 @@ currently be used.</p>
 default. If Ollama is down, the command fails with exit status 1 and
 says the provider is unreachable.</p>
 <hr>
-<h2 id="bdd-model-current"><a class="header" href="#bdd-model-current">bdd model current</a></h2>
+<h2 id="spec-model-current"><a class="header" href="#spec-model-current">spec model current</a></h2>
 <p>Show the resolved model and where it came from.</p>
-<pre><code class="language-bash">bdd model current
+<pre><code class="language-bash">spec model current
 </code></pre>
 <pre><code class="language-text">Configured model: qwen3.8-flash-next:125b-mlx
 </code></pre>
 <p>With nothing configured but models installed, the first one is the
 session default and the output tells you it is not saved:</p>
-<pre><code class="language-text">Model set for this session: qwen3.8-flash-next:125b-mlx (not saved - keep it with: bdd model use qwen3.8-flash-next:125b-mlx).
+<pre><code class="language-text">Model set for this session: qwen3.8-flash-next:125b-mlx (not saved - keep it with: spec model use qwen3.8-flash-next:125b-mlx).
 </code></pre>
 <p>The same announcement appears when the
 <a href="#the-interactive-shell">interactive shell</a> starts.</p>
 <hr>
-<h2 id="bdd-model-use"><a class="header" href="#bdd-model-use">bdd model use</a></h2>
+<h2 id="spec-model-use"><a class="header" href="#spec-model-use">spec model use</a></h2>
 <p>Persist a model choice in the project’s configuration.</p>
-<pre><code class="language-text">Usage: bdd model use [OPTIONS] &lt;MODEL_NAME&gt;
+<pre><code class="language-text">Usage: spec model use [OPTIONS] &lt;MODEL_NAME&gt;
 </code></pre>
-<pre><code class="language-bash">bdd model use qwen3.8-flash-next:125b-mlx
+<pre><code class="language-bash">spec model use qwen3.8-flash-next:125b-mlx
 </code></pre>
 <pre><code class="language-text">Configured model: qwen3.8-flash-next:125b-mlx
-Written to /Users/you/code/calculator/.bdd.toml
+Written to /Users/you/code/calculator/.spec.toml
 </code></pre>
 <p>The choice is validated against Ollama’s installed models — a name
 Ollama does not have is rejected rather than silently saved.</p>
 <h2 id="the-llm-configuration-block"><a class="header" href="#the-llm-configuration-block">The [llm] configuration block</a></h2>
-<p>Everything model-related lives under <code>[llm]</code> in <code>.bdd.toml</code>:</p>
+<p>Everything model-related lives under <code>[llm]</code> in <code>.spec.toml</code>:</p>
 <pre><code class="language-toml">[llm]
-model = "qwen3.8-flash-next:125b-mlx"     # persisted by bdd model use
+model = "qwen3.8-flash-next:125b-mlx"     # persisted by spec model use
 endpoint = "http://localhost:11434"   # the Ollama endpoint
 timeout_seconds = 300                 # generation timeout (default 300)
 cache_ttl_seconds = 600               # response cache TTL; 0 disables
@@ -2499,20 +2495,20 @@ it explicitly (<code>no reply within 300s ... set timeout_seconds under [llm]</c
 </tbody>
 </table>
 </div>
-<h2 id="see-also-15"><a class="header" href="#see-also-15">See also</a></h2>
+<h2 id="see-also-14"><a class="header" href="#see-also-14">See also</a></h2>
 <ul>
 <li><a href="#global-flags">Global flags</a> — the <code>--model</code> override.</li>
-<li><a href="#bdd-config"><code>bdd config</code></a> — dump every key and where it came from.</li>
-<li><a href="#source-template-or-llm"><code>bdd steps generate</code></a> — how LLM
+<li><a href="#spec-config"><code>spec config</code></a> — dump every key and where it came from.</li>
+<li><a href="#source-template-or-llm"><code>spec steps generate</code></a> — how LLM
 output is validated before it can stage.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="bdd-config"><a class="header" href="#bdd-config">bdd config</a></h1>
+<h1 id="spec-config"><a class="header" href="#spec-config">spec config</a></h1>
 <p>Print every configuration key the harness uses and whether the value is a
-code <strong>default</strong> or was read from the project file (<code>.bdd.toml</code>).</p>
-<pre><code class="language-text">Usage: bdd config [OPTIONS]
+code <strong>default</strong> or was read from the project file (<code>.spec.toml</code>).</p>
+<pre><code class="language-text">Usage: spec config [OPTIONS]
 </code></pre>
-<h2 id="flags-7"><a class="header" href="#flags-7">Flags</a></h2>
+<h2 id="flags-6"><a class="header" href="#flags-6">Flags</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -2531,21 +2527,21 @@ supplied it. The first line is <code>file</code> and the path that was opened,
 <code>(none)</code> when no file exists, or the path plus <code>(invalid TOML)</code> /
 <code>(unreadable)</code> when the file could not be used.</p>
 <p>When the file names no <code>llm.model</code>, Ollama is asked which model a run
-would actually use — the same order <a href="#bdd-model"><code>bdd model current</code></a>
+would actually use — the same order <a href="#spec-model"><code>spec model current</code></a>
 follows — and that name is shown as <code>(discovered)</code>. Nothing is
-written; persist it with <code>bdd model use &lt;name&gt;</code>. A configured model
+written; persist it with <code>spec model use &lt;name&gt;</code>. A configured model
 skips the provider call, and an unreachable or empty Ollama leaves the
 key <code>(unset)</code>.</p>
 <p>The file is read from <code>--root</code> only; there is no search of parent
-directories. Run <code>bdd config</code> from the project root, or point
+directories. Run <code>spec config</code> from the project root, or point
 <code>--root</code> at it, or <code>file</code> reads <code>(none)</code> and every key is a default.</p>
-<pre><code class="language-bash">bdd config
+<pre><code class="language-bash">spec config
 </code></pre>
-<pre><code class="language-text">file	/Users/you/code/calculator/.bdd.toml
-llm.model	qwen3.8-flash-next:125b-mlx	/Users/you/code/calculator/.bdd.toml
+<pre><code class="language-text">file	/Users/you/code/calculator/.spec.toml
+llm.model	qwen3.8-flash-next:125b-mlx	/Users/you/code/calculator/.spec.toml
 llm.endpoint	http://localhost:11434	(default)
-llm.timeout_seconds	900	/Users/you/code/calculator/.bdd.toml
-llm.cache_ttl_seconds	600	/Users/you/code/calculator/.bdd.toml
+llm.timeout_seconds	900	/Users/you/code/calculator/.spec.toml
+llm.cache_ttl_seconds	600	/Users/you/code/calculator/.spec.toml
 llm.retry	3	(default)
 tools.max_rounds	12	(default)
 tools.confirm	command_run	(default)
@@ -2556,31 +2552,31 @@ tools.mcp_config	(unset)	(default)
 tools.profiles.spec-draft	list_requirements, get_requirement, validate_spec, refine_requirement	(default)
 tools.profiles.implement	get_requirement, feature_read, …	(default)
 </code></pre>
-<p>In a project that has never run <code>bdd model use</code>, the first row is the
+<p>In a project that has never run <code>spec model use</code>, the first row is the
 name Ollama supplied:</p>
 <pre><code class="language-text">llm.model	qwen3:8b	(discovered)
 </code></pre>
 <p>A <code>[tools.profiles]</code> list for a caller <strong>replaces</strong> that command’s
-built-in tools and is attributed to the file. <code>bdd init</code> writes every
+built-in tools and is attributed to the file. <code>spec init</code> writes every
 caller’s default list so those rows show as from the file. Callers not
 listed keep the code default. <code>[tools.enabled]</code> / <code>[tools.disabled]</code>
 rows appear only when those tables are set.</p>
 <p>Optional keys with nothing to show print <code>(unset)</code> with source
 <code>(default)</code>: <code>tools.mcp_config</code>, and <code>llm.model</code> when Ollama is down
 or has no models pulled.</p>
-<h2 id="see-also-16"><a class="header" href="#see-also-16">See also</a></h2>
+<h2 id="see-also-15"><a class="header" href="#see-also-15">See also</a></h2>
 <ul>
-<li><a href="#bdd-model"><code>bdd model</code></a> — persist <code>llm.model</code>.</li>
-<li><a href="#bdd-tools"><code>bdd tools</code></a> — per-command profiles and <code>mcp.json</code> tools.</li>
+<li><a href="#spec-model"><code>spec model</code></a> — persist <code>llm.model</code>.</li>
+<li><a href="#spec-tools"><code>spec tools</code></a> — per-command profiles and <code>mcp.json</code> tools.</li>
 <li><a href="#global-flags">Global flags</a> — <code>--model</code>, <code>--retry</code>, <code>--tools</code>
 override a value for one run and are not written to the file.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="bdd-mcp"><a class="header" href="#bdd-mcp">bdd mcp</a></h1>
+<h1 id="spec-mcp"><a class="header" href="#spec-mcp">spec mcp</a></h1>
 <p>The workshop MCP server. This is the same workflow the harness offers a
 human, exposed to AI agents as typed tools over the Model Context
-Protocol. Cursor, Claude, the bundled <code>smoke-test.jar</code>, and <code>bdd mcp call</code> all talk to this process.</p>
-<pre><code class="language-text">Usage: bdd mcp [OPTIONS] &lt;COMMAND&gt;
+Protocol. Cursor, Claude, the bundled <code>smoke-test.jar</code>, and <code>spec mcp call</code> all talk to this process.</p>
+<pre><code class="language-text">Usage: spec mcp [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   serve  Serve the MCP tools over stdio
@@ -2591,7 +2587,7 @@ Commands:
 serves spec-driven TDD and BDD tools; the requirements spec is the
 source of truth; website
 https://davidparry.github.io/spec-driven-agentic/; icon
-https://davidparry.github.io/spec-driven-agentic/assets/bdd-harness-mark.png). Frozen seven-tool
+https://davidparry.github.io/spec-driven-agentic/assets/spec-harness-mark.png). Frozen seven-tool
 <strong>reply shapes</strong> are owned by
 <code>harness/tests/mcp_conformance.rs</code> and smoke-test’s <code>ToolPlan</code> — not by a
 separate Java server.</p>
@@ -2599,27 +2595,27 @@ separate Java server.</p>
 Inspector, <code>pi</code> (through <code>pi-mcp-extension</code>), and <code>smoke-test.jar</code> launch it
 as a child process.</p>
 <p><strong>The lifecycle is dual-era, and both eras work.</strong> The server prefers
-<code>2026-07-28</code>, where there is no <code>initialize</code> handshake: <code>bdd mcp call</code> and
-<code>bdd mcp tools</code> open a session with <code>server/discover</code> and per-request
+<code>2026-07-28</code>, where there is no <code>initialize</code> handshake: <code>spec mcp call</code> and
+<code>spec mcp tools</code> open a session with <code>server/discover</code> and per-request
 <code>_meta</code>, and the Java smoke walkthrough starts straight at <code>tools/list</code>. A
 host that still sends the classic <code>initialize</code> with protocol <code>2025-11-25</code>
 gets a normal handshake reply — that path is live, not a fallback stub,
 which is why <code>.cursor/mcp.json</code> can set <code>"protocolEra": "auto"</code> and let the
 host pick. This project’s own Rust clients use the newer era.</p>
 <hr>
-<h2 id="bdd-mcp-serve"><a class="header" href="#bdd-mcp-serve">bdd mcp serve</a></h2>
+<h2 id="spec-mcp-serve"><a class="header" href="#spec-mcp-serve">spec mcp serve</a></h2>
 <p>Serve the MCP tools over stdio. The process reads JSON-RPC on stdin
 and writes replies on stdout, so an MCP client (Cursor, Claude
 Desktop, <code>smoke-test.jar</code>) launches it as a child process — you
 normally never run it by hand.</p>
-<pre><code class="language-bash">bdd mcp serve --root /path/to/project
+<pre><code class="language-bash">spec mcp serve --root /path/to/project
 </code></pre>
 <p>Client configuration (Cursor’s <code>mcp.json</code> shown; others are
 equivalent):</p>
 <pre><code class="language-json">{
   "mcpServers": {
     "spec-driven-server": {
-      "command": "bdd",
+      "command": "spec",
       "args": ["mcp", "serve", "--root", "${workspaceFolder}"]
     }
   }
@@ -2633,29 +2629,29 @@ the model gets. The bridge registers them as <code>mcp_&lt;server&gt;_&lt;tool&g
 <code>run_tests</code> arrives as <code>mcp_spec_driven_server_run_tests</code>.</p>
 <p>Cursor sees <strong>all 25 tools</strong>, including staging, and so does <code>pi -nbt</code>.
 Harness commands that call a model attach a <strong>narrower profile</strong>
-(<code>bdd tools profiles</code>) — 3–7 tools for a generating command, 12 for the
-read-only <code>bdd ask</code> — so a local model is not offered commit or
+(<code>spec tools profiles</code>) — 3–7 tools for a generating command, 12 for the
+read-only <code>spec ask</code> — so a local model is not offered commit or
 mark-implemented.</p>
-<h2 id="bdd-mcp-tools"><a class="header" href="#bdd-mcp-tools">bdd mcp tools</a></h2>
+<h2 id="spec-mcp-tools"><a class="header" href="#spec-mcp-tools">spec mcp tools</a></h2>
 <p>List the built-in tools over one throwaway session. Default is an
-in-process loopback; <code>--stdio</code> spawns <code>bdd mcp serve</code> as a child
+in-process loopback; <code>--stdio</code> spawns <code>spec mcp serve</code> as a child
 (the same bytes Cursor would read).</p>
-<pre><code class="language-bash">bdd mcp tools
-bdd mcp tools --stdio --json
+<pre><code class="language-bash">spec mcp tools
+spec mcp tools --stdio --json
 </code></pre>
-<h2 id="bdd-mcp-call"><a class="header" href="#bdd-mcp-call">bdd mcp call</a></h2>
+<h2 id="spec-mcp-call"><a class="header" href="#spec-mcp-call">spec mcp call</a></h2>
 <p>Invoke one tool, print the result, exit. No narration, no tokens.</p>
-<pre><code class="language-bash">bdd mcp call get_tdd_state
-bdd mcp call get_requirement --arg id=REQ-003
-bdd mcp call list_requirements --json
-bdd mcp call run_tests --stdio
+<pre><code class="language-bash">spec mcp call get_tdd_state
+spec mcp call get_requirement --arg id=REQ-003
+spec mcp call list_requirements --json
+spec mcp call run_tests --stdio
 </code></pre>
 <p><code>--arg key=value</code> is always a string unless the value parses as JSON.
 <code>--args '{"id":"REQ-003"}'</code> merges a JSON object.</p>
 <h2 id="the-tools-served"><a class="header" href="#the-tools-served">The tools served</a></h2>
 <p>Twenty-five tools in three groups. There is no <code>spec_draft</code> or
 <code>implement</code> MCP tool: a <strong>new</strong> requirement is still drafted by the
-human (<code>bdd spec draft</code>) and Cursor writes production Java. Rewording an
+human (<code>spec draft</code>) and Cursor writes production Java. Rewording an
 existing requirement, Gherkin, steps, unit-test scaffolds,
 mark-implemented, and staging all go through tools. Generation over MCP
 is <strong>template-only</strong> (<code>source: "template"</code>).</p>
@@ -2666,13 +2662,13 @@ is <strong>template-only</strong> (<code>source: "template"</code>).</p>
 <tr><th>MCP tool</th><th>Harness equivalent</th></tr>
 </thead>
 <tbody>
-<tr><td><code>list_requirements</code></td><td><a href="#bdd-spec-list"><code>bdd spec list</code></a></td></tr>
-<tr><td><code>get_requirement</code></td><td><a href="#bdd-spec-show"><code>bdd spec show</code></a></td></tr>
-<tr><td><code>validate_spec</code></td><td><a href="#bdd-spec-validate"><code>bdd spec validate</code></a></td></tr>
-<tr><td><code>refine_requirement</code></td><td><a href="#bdd-spec-refine"><code>bdd spec refine</code></a></td></tr>
-<tr><td><code>run_tests</code></td><td><a href="#bdd-test"><code>bdd test</code></a></td></tr>
-<tr><td><code>get_tdd_state</code></td><td><a href="#bdd-state"><code>bdd state</code></a></td></tr>
-<tr><td><code>start_refactor</code></td><td><a href="#bdd-refactor"><code>bdd refactor</code></a></td></tr>
+<tr><td><code>list_requirements</code></td><td><a href="#spec-list"><code>spec list</code></a></td></tr>
+<tr><td><code>get_requirement</code></td><td><a href="#spec-show"><code>spec show</code></a></td></tr>
+<tr><td><code>validate_spec</code></td><td><a href="#spec-validate"><code>spec validate</code></a></td></tr>
+<tr><td><code>refine_requirement</code></td><td><a href="#spec-refine"><code>spec refine</code></a></td></tr>
+<tr><td><code>run_tests</code></td><td><a href="#spec-test"><code>spec test</code></a></td></tr>
+<tr><td><code>get_tdd_state</code></td><td><a href="#spec-state"><code>spec state</code></a></td></tr>
+<tr><td><code>start_refactor</code></td><td><a href="#spec-refactor"><code>spec refactor</code></a></td></tr>
 </tbody>
 </table>
 </div>
@@ -2683,15 +2679,15 @@ is <strong>template-only</strong> (<code>source: "template"</code>).</p>
 <tr><th>MCP tool</th><th>Harness equivalent</th></tr>
 </thead>
 <tbody>
-<tr><td><code>feature_list</code> / <code>feature_read</code> / <code>feature_create</code></td><td><a href="#bdd-feature"><code>bdd feature</code></a></td></tr>
-<tr><td><code>scenario_add</code> / <code>scenario_update</code> / <code>scenario_delete</code></td><td><a href="#bdd-scenario"><code>bdd scenario</code></a></td></tr>
-<tr><td><code>changes_show</code> / <code>changes_commit</code> / <code>changes_discard</code></td><td><a href="#bdd-changes"><code>bdd changes</code></a></td></tr>
-<tr><td><code>changes_validate</code></td><td><a href="#bdd-validate"><code>bdd validate</code></a> (staged-wins; frozen <code>validate_spec</code> stays on disk)</td></tr>
-<tr><td><code>requirement_reword</code></td><td><a href="#bdd-spec-reword"><code>bdd spec reword</code></a> (the repair path for <code>validate_spec</code> and <code>refine_requirement</code> findings; never hand-edit the spec file)</td></tr>
-<tr><td><code>requirement_mark_implemented</code></td><td><a href="#bdd-spec-mark-implemented"><code>bdd spec mark-implemented</code></a></td></tr>
-<tr><td><code>step_definitions_find</code></td><td><a href="#bdd-steps-missing"><code>bdd steps missing</code></a></td></tr>
-<tr><td><code>step_definition_create</code></td><td><a href="#bdd-steps-generate"><code>bdd steps generate</code></a> (template only)</td></tr>
-<tr><td><code>unit_test_create</code></td><td><a href="#bdd-unittest"><code>bdd unittest generate</code></a> (template only; arg is <code>req_id</code>)</td></tr>
+<tr><td><code>feature_list</code> / <code>feature_read</code> / <code>feature_create</code></td><td><a href="#spec-feature"><code>spec feature</code></a></td></tr>
+<tr><td><code>scenario_add</code> / <code>scenario_update</code> / <code>scenario_delete</code></td><td><a href="#spec-scenario"><code>spec scenario</code></a></td></tr>
+<tr><td><code>changes_show</code> / <code>changes_commit</code> / <code>changes_discard</code></td><td><a href="#spec-changes"><code>spec changes</code></a></td></tr>
+<tr><td><code>changes_validate</code></td><td><a href="#spec-changes-validate"><code>spec changes validate</code></a> (staged-wins; frozen <code>validate_spec</code> stays on disk)</td></tr>
+<tr><td><code>requirement_reword</code></td><td><a href="#spec-reword"><code>spec reword</code></a> (the repair path for <code>validate_spec</code> and <code>refine_requirement</code> findings; never hand-edit the spec file)</td></tr>
+<tr><td><code>requirement_mark_implemented</code></td><td><a href="#spec-mark-implemented"><code>spec mark-implemented</code></a></td></tr>
+<tr><td><code>step_definitions_find</code></td><td><a href="#spec-steps-missing"><code>spec steps missing</code></a></td></tr>
+<tr><td><code>step_definition_create</code></td><td><a href="#spec-steps-generate"><code>spec steps generate</code></a> (template only)</td></tr>
+<tr><td><code>unit_test_create</code></td><td><a href="#spec-unittest"><code>spec unittest generate</code></a> (template only; arg is <code>req_id</code>)</td></tr>
 </tbody>
 </table>
 </div>
@@ -2703,7 +2699,7 @@ is <strong>template-only</strong> (<code>source: "template"</code>).</p>
 </thead>
 <tbody>
 <tr><td><code>project_root</code></td><td><code>--root</code> (the absolute directory this process was started with)</td></tr>
-<tr><td><code>project_inspect</code></td><td><a href="#bdd-inspect"><code>bdd inspect</code></a></td></tr>
+<tr><td><code>project_inspect</code></td><td><a href="#spec-inspect"><code>spec inspect</code></a></td></tr>
 <tr><td><code>command_run</code></td><td>— (MCP and the <code>implement</code> profile; see below)</td></tr>
 </tbody>
 </table>
@@ -2730,7 +2726,7 @@ directory, and no argument may be an absolute path or contain
 <code>..</code> — the command cannot name anything outside the root.</li>
 <li><strong>RED bar only.</strong> Commands run only during the implementation
 phase. Off a RED bar the tool refuses and points at <code>run_tests</code>.</li>
-<li><strong>Human confirm on the harness.</strong> When <code>bdd implement</code> offers
+<li><strong>Human confirm on the harness.</strong> When <code>spec implement</code> offers
 <code>command_run</code>, the harness asks before spawning. Piped/CI stdin
 declines; it never hangs.</li>
 <li><strong>Timeout and output cap.</strong> A hard timeout (default and maximum
@@ -2741,7 +2737,7 @@ to its last 200 lines.</li>
 build tool can still run build scripts. What the policy makes
 unexpressible is running destructive binaries and reaching outside
 the project root.</p>
-<p><code>run_tests</code> during <code>bdd implement</code> sees the <strong>working tree</strong>, not an
+<p><code>run_tests</code> during <code>spec implement</code> sees the <strong>working tree</strong>, not an
 unstaged patch. Commit (or apply staged files) before you trust the
 bar.</p>
 <h2 id="why-serve-tools-instead-of-letting-the-agent-edit-files"><a class="header" href="#why-serve-tools-instead-of-letting-the-agent-edit-files">Why serve tools instead of letting the agent edit files?</a></h2>
@@ -2759,7 +2755,7 @@ scenario.</li>
 reconnecting agent (or a human taking over in the harness) continues
 from the same place.</li>
 </ul>
-<h2 id="flags-8"><a class="header" href="#flags-8">Flags</a></h2>
+<h2 id="flags-7"><a class="header" href="#flags-7">Flags</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -2777,16 +2773,16 @@ from the same place.</li>
 is the wire). Diagnostics go to stderr.</li>
 <li>One server serves one project root. Point different projects at
 different server entries.</li>
-<li>Backup Inspector: <code>npx @modelcontextprotocol/inspector bdd mcp serve --root $PWD</code>.</li>
-<li>See also <a href="#bdd-tools"><code>bdd tools</code></a> and <a href="#bdd-ask"><code>bdd ask</code></a>.</li>
+<li>Backup Inspector: <code>npx @modelcontextprotocol/inspector spec mcp serve --root $PWD</code>.</li>
+<li>See also <a href="#spec-tools"><code>spec tools</code></a> and <a href="#spec-ask"><code>spec ask</code></a>.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="bdd-tools"><a class="header" href="#bdd-tools">bdd tools</a></h1>
+<h1 id="spec-tools"><a class="header" href="#spec-tools">spec tools</a></h1>
 <p>Inspect and attach the tools a model call may use. Built-in tools are
-listed offline from <code>bdd mcp serve</code>. External MCP servers from
+listed offline from <code>spec mcp serve</code>. External MCP servers from
 <code>mcp.json</code> are discovered on demand and must be attached <strong>per command</strong>
 with <code>--for</code> — never globally.</p>
-<pre><code class="language-text">Usage: bdd tools [OPTIONS] &lt;COMMAND&gt;
+<pre><code class="language-text">Usage: spec tools [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   list      Catalog (optionally `--for` one caller, `--offline`, `--refresh`)
@@ -2794,10 +2790,10 @@ Commands:
   show      One tool's description and schema
   enable    Attach a tool to a caller (`--for` required)
   disable   Remove a tool from a caller (`--for` required)
-  refresh   Rediscover external servers and rewrite `.bdd-cache/tools/`
+  refresh   Rediscover external servers and rewrite `.spec-cache/tools/`
   servers   Registered mcp.json servers and parse problems
 </code></pre>
-<pre><code class="language-bash">bdd tools profiles
+<pre><code class="language-bash">spec tools profiles
 # spec-draft          4  get_requirement, list_requirements, refine_requirement, validate_spec
 # spec-reword         3  get_requirement, refine_requirement, validate_spec
 # steps-generate      4  feature_list, feature_read, project_inspect, step_definitions_find
@@ -2807,10 +2803,10 @@ Commands:
 # status              7  project_root, list_requirements, …, changes_show, changes_validate
 # ask                12  the read-only set: everything above that only reads
 
-bdd tools list --for status          # exactly those seven
-bdd tools list --offline             # built-ins only; never connects
-bdd tools enable self__validate_spec --for status
-bdd tools servers
+spec tools list --for status          # exactly those seven
+spec tools list --offline             # built-ins only; never connects
+spec tools enable self__validate_spec --for status
+spec tools servers
 </code></pre>
 <p>A command that generates or implements is handed <strong>3–7</strong> tools — the ones
 its current step can legitimately use, and nothing else. Only the read-only
@@ -2824,15 +2820,15 @@ a harness-side model may request is <code>command_run</code> on the <code>implem
 profile, and that call still asks the human to confirm.</p>
 <p>External tools are namespaced <code>server__tool</code>. A name in config that is
 not in the catalog is a warning, not a hard failure.</p>
-<h2 id="bddtoml-per-command-mapping"><a class="header" href="#bddtoml-per-command-mapping"><code>.bdd.toml</code> per-command mapping</a></h2>
+<h2 id="spectoml-per-command-mapping"><a class="header" href="#spectoml-per-command-mapping"><code>.spec.toml</code> per-command mapping</a></h2>
 <p>Built-in defaults live in code and are also written into
-<code>[tools.profiles]</code> by <code>bdd init</code> so you can see what each command
+<code>[tools.profiles]</code> by <code>spec init</code> so you can see what each command
 offers the model. If that table names a caller with a list, that list
 <strong>replaces</strong> the default for that command. Omitted callers keep the
 code defaults. <code>[tools.enabled]</code> adds names;
-<code>[tools.disabled]</code> removes them. <code>bdd tools enable</code> / <code>disable</code> write
+<code>[tools.disabled]</code> removes them. <code>spec tools enable</code> / <code>disable</code> write
 those last two tables.</p>
-<p>After you add a server to <code>mcp.json</code>, run <code>bdd tools refresh</code> and put
+<p>After you add a server to <code>mcp.json</code>, run <code>spec tools refresh</code> and put
 the tool on the command that should use it:</p>
 <pre><code class="language-toml">[tools.profiles]
 implement = ["get_requirement", "feature_read", "playwright:browser_navigate"]
@@ -2848,7 +2844,7 @@ origin when you need to be explicit:</p>
 <div class="table-wrapper">
 <table>
 <thead>
-<tr><th>Written in <code>.bdd.toml</code></th><th>Resolves to</th></tr>
+<tr><th>Written in <code>.spec.toml</code></th><th>Resolves to</th></tr>
 </thead>
 <tbody>
 <tr><td><code>validate_spec</code></td><td>built-in</td></tr>
@@ -2858,28 +2854,28 @@ origin when you need to be explicit:</p>
 </tbody>
 </table>
 </div>
-<p><code>builtin</code> is reserved for the harness’s own tools. <code>bdd init</code> writes
-<code>.bdd.toml</code> with every key and a live <code>[tools.profiles]</code> list for each
-caller. <a href="#bdd-config"><code>bdd config</code></a> prints the resolved set and whether
+<p><code>builtin</code> is reserved for the harness’s own tools. <code>spec init</code> writes
+<code>.spec.toml</code> with every key and a live <code>[tools.profiles]</code> list for each
+caller. <a href="#spec-config"><code>spec config</code></a> prints the resolved set and whether
 each value is a default or came from the file.</p>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="bdd-ask"><a class="header" href="#bdd-ask">bdd ask</a></h1>
+<h1 id="spec-ask"><a class="header" href="#spec-ask">spec ask</a></h1>
 <p>Ask the local model a question with the <strong>ask</strong> tool profile: the twelve
 read-only workflow tools (spec, TDD state, inspect, features, staged
 changes). It is the widest profile the harness attaches, because reading
 costs nothing — a generating command gets 3–7 tools instead. The model may
 look things up; it cannot stage, commit, or mark a requirement implemented.</p>
-<pre><code class="language-text">Usage: bdd ask [OPTIONS] [TASK]...
+<pre><code class="language-text">Usage: spec ask [OPTIONS] [TASK]...
 </code></pre>
-<pre><code class="language-bash">bdd ask "which pending requirement should we implement next?"
-bdd ask --json "what phase is the bar in?"
+<pre><code class="language-bash">spec ask "which pending requirement should we implement next?"
+spec ask --json "what phase is the bar in?"
 </code></pre>
-<p>With a TTY and no task, <code>bdd ask</code> opens a multi-turn prompt (<code>ask&gt;</code>).
+<p>With a TTY and no task, <code>spec ask</code> opens a multi-turn prompt (<code>ask&gt;</code>).
 Empty input, <code>exit</code>, or <code>quit</code> ends the session. Piped stdin without a
 task is refused so CI never hangs.</p>
-<p>A model must be resolved (<code>bdd model use</code>, <code>--model</code>, or a single
+<p>A model must be resolved (<code>spec model use</code>, <code>--model</code>, or a single
 installed Ollama tag). There is no template fallback.</p>
-<p>The offered tools are the <code>ask</code> row of <a href="#bdd-tools"><code>bdd tools profiles</code></a>.
+<p>The offered tools are the <code>ask</code> row of <a href="#spec-tools"><code>spec tools profiles</code></a>.
 Override for one run with <code>--tools</code>.</p>
 
                     </main>

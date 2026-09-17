@@ -1,4 +1,4 @@
-//! Live end-to-end happy path: spawn the built `bdd` binary and drive the
+//! Live end-to-end happy path: spawn the built `spec` binary and drive the
 //! interactive `greenfield` loop over piped stdio until REQ-001 lands as
 //! "implemented" in requirements/requirements.json.
 //!
@@ -11,7 +11,7 @@
 //! Every run writes an artifacts directory (default
 //! `harness/target/greenfield-e2e/<unix-seconds>/` - always the crate's own
 //! target/, regardless of the working directory - override with
-//! `BDD_E2E_ARTIFACTS`):
+//! `SPEC_E2E_ARTIFACTS`):
 //!
 //! - `transcript.log` - the full ANSI-stripped session
 //! - `steps.jsonl` - one timestamped JSON event per prompt, answer, and
@@ -29,10 +29,10 @@
 //! cargo test --test greenfield_e2e -- --ignored --nocapture
 //! ```
 //!
-//! Knobs: `BDD_E2E_MODEL` picks the model (default: bdd's own discovery),
-//! `BDD_E2E_TIMEOUT_SECS` bounds the whole run (default 3600 - a full
+//! Knobs: `SPEC_E2E_MODEL` picks the model (default: spec's own discovery),
+//! `SPEC_E2E_TIMEOUT_SECS` bounds the whole run (default 3600 - a full
 //! 30-attempt budget takes roughly two minutes per attempt),
-//! `BDD_E2E_PROMPT_TIMEOUT_SECS` bounds silence between outputs
+//! `SPEC_E2E_PROMPT_TIMEOUT_SECS` bounds silence between outputs
 //! (default 300).
 //!
 //! The implementation budget is granted exactly once: the driver answers
@@ -47,7 +47,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-const BDD: &str = env!("CARGO_BIN_EXE_bdd");
+const SPEC: &str = env!("CARGO_BIN_EXE_spec");
 
 const PROJECT_NAME: &str = "String Calculator";
 const DESCRIPTION: &str = "String calculator only intended for addition";
@@ -217,7 +217,7 @@ struct Reporter {
 
 impl Reporter {
     fn new() -> Self {
-        let dir = std::env::var("BDD_E2E_ARTIFACTS")
+        let dir = std::env::var("SPEC_E2E_ARTIFACTS")
             .map(PathBuf::from)
             .unwrap_or_else(|_| {
                 let seconds = SystemTime::now()
@@ -378,21 +378,21 @@ fn preflight() {
 
     // The binary's own discovery path doubles as the Ollama probe: it
     // hits the configured endpoint's /api/tags exactly like greenfield.
-    let models = Command::new(BDD)
+    let models = Command::new(SPEC)
         .args(["model", "list"])
         .output()
-        .expect("preflight: the bdd binary should spawn");
+        .expect("preflight: the spec binary should spawn");
     let listing = String::from_utf8_lossy(&models.stdout);
     assert!(
         models.status.success() && !listing.trim().is_empty(),
-        "preflight: `bdd model list` found no models - is Ollama running \
+        "preflight: `spec model list` found no models - is Ollama running \
          on localhost:11434 with at least one model pulled? stdout: {listing} \
          stderr: {}",
         String::from_utf8_lossy(&models.stderr)
     );
 }
 
-/// Kills the child if the test panics mid-drive - otherwise the bdd
+/// Kills the child if the test panics mid-drive - otherwise the spec
 /// process outlives the test and keeps generating against the model,
 /// mutating the project snapshot the failure left behind.
 struct ChildGuard(Child);
@@ -407,9 +407,9 @@ impl Drop for ChildGuard {
 }
 
 fn spawn_greenfield(root: &Path) -> Child {
-    let mut command = Command::new(BDD);
+    let mut command = Command::new(SPEC);
     command.arg("--root").arg(root);
-    if let Ok(model) = std::env::var("BDD_E2E_MODEL") {
+    if let Ok(model) = std::env::var("SPEC_E2E_MODEL") {
         command.args(["--model", &model]);
     }
     command
@@ -419,7 +419,7 @@ fn spawn_greenfield(root: &Path) -> Child {
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
         .spawn()
-        .expect("the bdd binary should spawn")
+        .expect("the spec binary should spawn")
 }
 
 /// Drive the child to completion: read stdout, answer each prompt, log
@@ -443,8 +443,8 @@ fn drive(child: &mut Child, reporter: &mut Reporter) -> (String, Result<(), Stri
         }
     });
 
-    let overall = env_secs("BDD_E2E_TIMEOUT_SECS", 3600);
-    let silence = env_secs("BDD_E2E_PROMPT_TIMEOUT_SECS", 300);
+    let overall = env_secs("SPEC_E2E_TIMEOUT_SECS", 3600);
+    let silence = env_secs("SPEC_E2E_PROMPT_TIMEOUT_SECS", 300);
     let started = Instant::now();
     let mut last_output = Instant::now();
     let mut stripped = String::new();
@@ -459,7 +459,7 @@ fn drive(child: &mut Child, reporter: &mut Reporter) -> (String, Result<(), Stri
     let verdict = loop {
         if started.elapsed() >= overall {
             break Err(format!(
-                "the greenfield run exceeded {overall:?} (BDD_E2E_TIMEOUT_SECS)"
+                "the greenfield run exceeded {overall:?} (SPEC_E2E_TIMEOUT_SECS)"
             ));
         }
         match receiver.recv_timeout(Duration::from_secs(1)) {
@@ -473,7 +473,7 @@ fn drive(child: &mut Child, reporter: &mut Reporter) -> (String, Result<(), Stri
             Err(RecvTimeoutError::Timeout) => {
                 if last_output.elapsed() >= silence {
                     break Err(format!(
-                        "no output for {silence:?} (BDD_E2E_PROMPT_TIMEOUT_SECS) - \
+                        "no output for {silence:?} (SPEC_E2E_PROMPT_TIMEOUT_SECS) - \
                          the run looks hung"
                     ));
                 }
@@ -609,7 +609,7 @@ fn greenfield_happy_path_marks_the_requirement_implemented() {
                 if status.success() {
                     Ok(())
                 } else {
-                    Err(format!("bdd greenfield exited with {status}"))
+                    Err(format!("spec greenfield exited with {status}"))
                 }
             })
         })

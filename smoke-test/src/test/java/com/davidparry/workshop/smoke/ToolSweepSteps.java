@@ -19,9 +19,9 @@ public class ToolSweepSteps {
     private final Scripted server = new Scripted();
     private ToolSweep.SweepReport report;
 
-    @When("a bdd launch is built for root {string} and binary {string}")
-    public void bddLaunchIsBuilt(String root, String binary) {
-        launch = ServerLaunch.bdd(Path.of(root), Path.of(binary));
+    @When("a spec launch is built for root {string} and binary {string}")
+    public void specLaunchIsBuilt(String root, String binary) {
+        launch = ServerLaunch.spec(Path.of(root), Path.of(binary));
     }
 
     @Then("the launch program is {string}")

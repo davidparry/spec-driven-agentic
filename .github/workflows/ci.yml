@@ -2,9 +2,9 @@
 #
 # Jobs:
 #   - build-and-test: smoke-test verify (JaCoCo 100%, SpotBugs, PMD) and
-#     `mvn -f kata/pom.xml test`. Does not require the bdd binary, so a
+#     `mvn -f kata/pom.xml test`. Does not require the spec binary, so a
 #     missing Rust build cannot look like a JaCoCo failure.
-#   - harness: bdd tests, clippy, fmt, coverage, and the release binary.
+#   - harness: spec tests, clippy, fmt, coverage, and the release binary.
 #   - smoke-test-live: needs harness; drives smoke-test.jar against that binary.
 #   - class-completeness / workshop-start: branch guards as before.
 name: CI
@@ -53,7 +53,7 @@ jobs:
             **/target/site/pmd.html
 
   harness:
-    name: bdd harness (tests, clippy, fmt, coverage)
+    name: spec harness (tests, clippy, fmt, coverage)
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -85,11 +85,11 @@ jobs:
       - name: Release binary
         run: cargo build --release
 
-      - name: Upload bdd binary
+      - name: Upload spec binary
         uses: actions/upload-artifact@v4
         with:
-          name: bdd-linux
-          path: harness/target/release/bdd
+          name: spec-linux
+          path: harness/target/release/spec
 
       - name: Coverage
         id: coverage
@@ -124,7 +124,7 @@ jobs:
           git push --force origin badges
 
   smoke-test-live:
-    name: smoke-test live against bdd
+    name: smoke-test live against spec
     needs: harness
     runs-on: ubuntu-latest
     steps:
@@ -139,13 +139,13 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          name: bdd-linux
-          path: /tmp/bdd-bin
+          name: spec-linux
+          path: /tmp/spec-bin
 
       - name: Live sweep (24 tools against the real binary)
         run: |
-          chmod +x /tmp/bdd-bin/bdd
-          mvn -B -pl smoke-test test -Dbdd.binary=/tmp/bdd-bin/bdd
+          chmod +x /tmp/spec-bin/spec
+          mvn -B -pl smoke-test test -Dspec.binary=/tmp/spec-bin/spec
 
   class-completeness:
     name: Class completeness (complete branch only)

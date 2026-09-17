@@ -3,12 +3,12 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>bdd unittest - bdd Harness Manual</title>
+        <title>spec unittest - spec Harness Manual</title>
 
 
         <!-- Custom HTML head -->
 
-        <meta name="description" content="The complete, searchable reference for the bdd harness: every command, subcommand, and flag, with in-depth examples.">
+        <meta name="description" content="The complete, searchable reference for the spec harness: every command, subcommand, and flag, with in-depth examples.">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff">
 
@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-aaad9ee5.js";
+            window.path_to_searchindex_js = "../searchindex-5959f77b.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-9d4e1520.js"></script>
+        <script src="../toc-372d77fe.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -137,7 +137,7 @@
                         </button>
                     </div>
 
-                    <h1 class="menu-title">bdd Harness Manual</h1>
+                    <h1 class="menu-title">spec Harness Manual</h1>
 
                     <div class="right-buttons">
                         <a href="../print.html" title="Print this book" aria-label="Print this book">
@@ -180,31 +180,31 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="bdd-unittest"><a class="header" href="#bdd-unittest">bdd unittest</a></h1>
+                        <h1 id="spec-unittest"><a class="header" href="#spec-unittest">spec unittest</a></h1>
 <p>Unit-test generation — the TDD altitude beneath the Gherkin scenarios.
 Where a scenario proves the behavior end to end, the unit test pins
 down the fine-grained contract of the production code.</p>
-<pre><code class="language-text">Usage: bdd unittest [OPTIONS] &lt;COMMAND&gt;
+<pre><code class="language-text">Usage: spec unittest [OPTIONS] &lt;COMMAND&gt;
 
 Commands: generate
 </code></pre>
 <p>MCP tool equivalent: <code>unit_test_create</code>.</p>
 <hr>
-<h2 id="bdd-unittest-generate"><a class="header" href="#bdd-unittest-generate">bdd unittest generate</a></h2>
+<h2 id="spec-unittest-generate"><a class="header" href="#spec-unittest-generate">spec unittest generate</a></h2>
 <p>Generate a unit test from a requirement’s acceptance criteria and
 stage it. Each Given/When/Then criterion becomes one test case with
 the Given as setup, the When as the action, and the Then as the
 assertion.</p>
-<pre><code class="language-text">Usage: bdd unittest generate [OPTIONS] &lt;REQ_ID&gt;
+<pre><code class="language-text">Usage: spec unittest generate [OPTIONS] &lt;REQ_ID&gt;
 </code></pre>
-<pre><code class="language-bash">bdd unittest generate REQ-003
+<pre><code class="language-bash">spec unittest generate REQ-003
 </code></pre>
 <pre><code class="language-json">{
   "target": "src/test/java/StringCalculatorTest.java",
   "staged": true,
   "source": "template",
   "summary": "Unit test for REQ-003 with 2 cases from its acceptance criteria.",
-  "nextStep": "Review with 'bdd changes show', apply with 'bdd changes commit', then 'bdd test' to see RED."
+  "nextStep": "Review with 'spec changes show', apply with 'spec changes commit', then 'spec test' to see RED."
 }
 </code></pre>
 <p>The target file and framework follow the detected language:</p>
@@ -223,22 +223,22 @@ assertion.</p>
 </table>
 </div>
 <p><code>source</code> works exactly as in
-<a href="steps.html#source-template-or-llm"><code>bdd steps generate</code></a>: deterministic
+<a href="steps.html#source-template-or-llm"><code>spec steps generate</code></a>: deterministic
 template by default, <code>"llm"</code> only when a model’s polished version
 passed validation, with the session language’s best practices pinned
 in the prompt. Generated assertions fail honestly until the
 production code exists — the point is a real RED.</p>
 <p>An unknown requirement id fails with exit status 1.</p>
 <h2 id="where-it-fits"><a class="header" href="#where-it-fits">Where it fits</a></h2>
-<pre><code class="language-bash">bdd spec show REQ-003          # read the criteria
-bdd unittest generate REQ-003  # stage the test
-bdd changes commit
-bdd test                       # RED at both altitudes
+<pre><code class="language-bash">spec show REQ-003          # read the criteria
+spec unittest generate REQ-003  # stage the test
+spec changes commit
+spec test                       # RED at both altitudes
 </code></pre>
 <h2 id="see-also"><a class="header" href="#see-also">See also</a></h2>
 <ul>
-<li><a href="spec.html#bdd-spec-show"><code>bdd spec show</code></a> — the criteria being turned into cases.</li>
-<li><a href="test.html"><code>bdd test</code></a> — run the generated test.</li>
+<li><a href="spec.html#spec-show"><code>spec show</code></a> — the criteria being turned into cases.</li>
+<li><a href="test.html"><code>spec test</code></a> — run the generated test.</li>
 </ul>
 
                     </main>

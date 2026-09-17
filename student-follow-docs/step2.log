@@ -2,8 +2,8 @@
 ========================================================================
   STEP 0 — Launch the server
 ========================================================================
-The client starts bdd mcp serve as a child process and talks JSON-RPC 2.0 over stdin/stdout.
-Command: /Users/davidparry/code/github/tdd-bdd-agentic/harness/target/debug/bdd mcp serve --root /Users/davidparry/code/github/tdd-bdd-agentic
+The client starts spec mcp serve as a child process and talks JSON-RPC 2.0 over stdin/stdout.
+Command: /Users/davidparry/code/github/tdd-bdd-agentic/harness/target/debug/spec mcp serve --root /Users/davidparry/code/github/tdd-bdd-agentic
 
 ========================================================================
   STEP 1 — tools/list (discovery)
@@ -42,7 +42,7 @@ JSON-RPC request: method="tools/list" — the agent asks what it is allowed to d
 JSON-RPC request: method="tools/call" params={"name":"get_tdd_state","arguments":{}}
 Result:
     {
-      "instructions": "This file is the TDD phase log. `instructions` is this guide, not workflow state. `entries` is chronological, oldest first; each entry is the machine at `timestamp` (UTC RFC 3339). `phase` is START, RED, GREEN, or REFACTOR. Never refactor on RED; never mark a requirement implemented off GREEN. `lastRun` is test counts at that moment; failure details live on the test-run reply. `refactorLog` is every bdd refactor --note, in order. `attemptLog` is model implementation attempts for the requirement in flight; a GREEN run clears it. Each attempt records what it wrote (`targets`), the failures it was briefed with (`failures`), and the output of the first run after it (`outcome`; empty means no run verified it). When briefing a model, include only the three most recent entries. Older entries stay on disk for humans.",
+      "instructions": "This file is the TDD phase log. `instructions` is this guide, not workflow state. `entries` is chronological, oldest first; each entry is the machine at `timestamp` (UTC RFC 3339). `phase` is START, RED, GREEN, or REFACTOR. Never refactor on RED; never mark a requirement implemented off GREEN. `lastRun` is test counts at that moment; failure details live on the test-run reply. `refactorLog` is every spec refactor --note, in order. `attemptLog` is model implementation attempts for the requirement in flight; a GREEN run clears it. Each attempt records what it wrote (`targets`), the failures it was briefed with (`failures`), and the output of the first run after it (`outcome`; empty means no run verified it). When briefing a model, include only the three most recent entries. Older entries stay on disk for humans.",
       "phase": "GREEN",
       "lastRun": {
         "tests": 5,
@@ -264,7 +264,7 @@ Result:
       "language": "Java",
       "framework": "Cucumber-JVM",
       "missing": [],
-      "nextStep": "Every step has a definition. Run bdd test to execute the suite."
+      "nextStep": "Every step has a definition. Run spec test to execute the suite."
     }
 
 ========================================================================

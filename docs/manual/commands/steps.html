@@ -3,12 +3,12 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>bdd steps - bdd Harness Manual</title>
+        <title>spec steps - spec Harness Manual</title>
 
 
         <!-- Custom HTML head -->
 
-        <meta name="description" content="The complete, searchable reference for the bdd harness: every command, subcommand, and flag, with in-depth examples.">
+        <meta name="description" content="The complete, searchable reference for the spec harness: every command, subcommand, and flag, with in-depth examples.">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff">
 
@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-aaad9ee5.js";
+            window.path_to_searchindex_js = "../searchindex-5959f77b.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-9d4e1520.js"></script>
+        <script src="../toc-372d77fe.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -137,7 +137,7 @@
                         </button>
                     </div>
 
-                    <h1 class="menu-title">bdd Harness Manual</h1>
+                    <h1 class="menu-title">spec Harness Manual</h1>
 
                     <div class="right-buttons">
                         <a href="../print.html" title="Print this book" aria-label="Print this book">
@@ -180,22 +180,22 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="bdd-steps"><a class="header" href="#bdd-steps">bdd steps</a></h1>
+                        <h1 id="spec-steps"><a class="header" href="#spec-steps">spec steps</a></h1>
 <p>Step-definition discovery and generation — the glue between Gherkin
 scenarios and real code.</p>
-<pre><code class="language-text">Usage: bdd steps [OPTIONS] &lt;COMMAND&gt;
+<pre><code class="language-text">Usage: spec steps [OPTIONS] &lt;COMMAND&gt;
 
 Commands: missing, generate
 </code></pre>
 <p>MCP tool equivalents: <code>step_definitions_find</code>, <code>step_definition_create</code>.</p>
 <hr>
-<h2 id="bdd-steps-missing"><a class="header" href="#bdd-steps-missing">bdd steps missing</a></h2>
+<h2 id="spec-steps-missing"><a class="header" href="#spec-steps-missing">spec steps missing</a></h2>
 <p>Report steps used by scenarios that have no matching definition
 (undefined), and steps matched by more than one definition
 (ambiguous). Detection is language-aware: Cucumber-JVM annotations for
 Java, Cucumber-JS functions for JavaScript/TypeScript, Reqnroll
 bindings for .NET, cucumber-rs attributes for Rust.</p>
-<pre><code class="language-bash">bdd steps missing
+<pre><code class="language-bash">spec steps missing
 </code></pre>
 <pre><code class="language-json">{
   "language": "javascript",
@@ -204,22 +204,22 @@ bindings for .NET, cucumber-rs attributes for Rust.</p>
     { "step": "Given the input \"1,2\"", "keyword": "Given" },
     { "step": "Then the result is 3", "keyword": "Then" }
   ],
-  "nextStep": "Generate skeletons with 'bdd steps generate', then implement their bodies."
+  "nextStep": "Generate skeletons with 'spec steps generate', then implement their bodies."
 }
 </code></pre>
 <p>An empty <code>missing</code> array means every step in every scenario is bound.</p>
 <hr>
-<h2 id="bdd-steps-generate"><a class="header" href="#bdd-steps-generate">bdd steps generate</a></h2>
+<h2 id="spec-steps-generate"><a class="header" href="#spec-steps-generate">spec steps generate</a></h2>
 <p>Generate step definitions for the undefined steps and stage them.
 Already-defined steps are never regenerated — only the gap is filled.</p>
-<pre><code class="language-bash">bdd steps generate
+<pre><code class="language-bash">spec steps generate
 </code></pre>
 <pre><code class="language-json">{
   "target": "features/step_definitions/string_calculator_steps.js",
   "staged": true,
   "source": "template",
   "summary": "2 step definitions generated for undefined steps.",
-  "nextStep": "Review with 'bdd changes show', apply with 'bdd changes commit', implement the bodies, then 'bdd test'."
+  "nextStep": "Review with 'spec changes show', apply with 'spec changes commit', implement the bodies, then 'spec test'."
 }
 </code></pre>
 <h3 id="source-template-or-llm"><a class="header" href="#source-template-or-llm"><code>source</code>: template or llm</a></h3>
@@ -228,7 +228,7 @@ Already-defined steps are never regenerated — only the gap is filled.</p>
 signatures, bodies that fail honestly (throw / <code>panic!</code> /
 <code>PendingStepException</code>) so the first run is genuinely RED.</li>
 <li><code>"llm"</code> — a model polished the skeleton and the result passed
-validation. Requires a resolved model (see <a href="model.html"><code>bdd model</code></a>);
+validation. Requires a resolved model (see <a href="model.html"><code>spec model</code></a>);
 when no model is reachable, generation silently falls back to the
 template. The LLM output must parse and compile-shape-check or the
 template is used instead — a model can never stage broken code.</li>
@@ -245,9 +245,9 @@ ecosystem’s conventions, not just the step expressions.</p>
 </code></pre>
 <h2 id="see-also"><a class="header" href="#see-also">See also</a></h2>
 <ul>
-<li><a href="scenario.html"><code>bdd scenario</code></a> — where the steps come from.</li>
-<li><a href="changes.html"><code>bdd changes</code></a> — apply the staged definitions.</li>
-<li><a href="test.html"><code>bdd test</code></a> — run and watch the honest RED.</li>
+<li><a href="scenario.html"><code>spec scenario</code></a> — where the steps come from.</li>
+<li><a href="changes.html"><code>spec changes</code></a> — apply the staged definitions.</li>
+<li><a href="test.html"><code>spec test</code></a> — run and watch the honest RED.</li>
 </ul>
 
                     </main>

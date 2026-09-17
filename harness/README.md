@@ -1,4 +1,4 @@
-# bdd — spec-driven BDD/TDD harness
+# spec — spec-driven BDD/TDD harness
 
 [![CI](https://github.com/davidparry/tdd-bdd-agentic/actions/workflows/ci.yml/badge.svg?branch=trunk)](https://github.com/davidparry/tdd-bdd-agentic/actions/workflows/ci.yml)
 [![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdavidparry%2Ftdd-bdd-agentic%2Fbadges%2Fcoverage.json)](https://github.com/davidparry/tdd-bdd-agentic/actions/workflows/ci.yml)
@@ -6,7 +6,7 @@
 [![Clippy](https://img.shields.io/badge/clippy--D%20warnings-enforced-blue)](../.github/workflows/ci.yml)
 
 One native binary for the whole spec-driven loop (spec → Gherkin → RED →
-GREEN → REFACTOR) **and** the workshop MCP server: `bdd mcp serve` exposes
+GREEN → REFACTOR) **and** the workshop MCP server: `spec mcp serve` exposes
 25 tools (wire identity `spec-driven-server` / `1.0.0`, title
 `Spec Driven`, website
 https://davidparry.github.io/spec-driven-agentic/). Frozen seven-tool
@@ -50,7 +50,7 @@ The harness grew out of a talk and hands-on class that teaches spec-driven
 development with BDD and TDD — this repository is that workshop (see
 [../student-follow-along.md](../student-follow-along.md)). The class
 walks students through the loop in Cursor against **this binary**
-(`bdd mcp serve`, 25 tools). To finish the same kata from the terminal
+(`spec mcp serve`, 25 tools). To finish the same kata from the terminal
 with scoped profiles (Wi-Fi off), follow
 [../student-follow-docs/harness-path.md](../student-follow-docs/harness-path.md).
 
@@ -65,10 +65,10 @@ Stated as facts about what each tool does and does not do:
   (a third-party extension adds it). Generality is the goal, so the
   workflow is the operator's to supply — through prompts, skills, prompt
   templates, and extensions, all of which work and all of which you then
-  maintain. `bdd` is the opposite trade: a *spec-specific runner* that
+  maintain. `spec` is the opposite trade: a *spec-specific runner* that
   knows exactly one workflow and can therefore enforce it — per-command
   tool profiles, staged mutations, phase gates. **This is not an
-  either/or.** Point pi at `bdd mcp serve` (`pi -nbt`) and it drives the
+  either/or.** Point pi at `spec mcp serve` (`pi -nbt`) and it drives the
   same 25 tools; the server is the constant, the runner is the opinion.
 - **GitHub Spec Kit** — a phase workflow (specify, plan, tasks,
   implement) for AI agents over markdown specs. Its specs are prose for
@@ -105,11 +105,11 @@ for the general-agent side of the comparison.
 Every roadmap phase through greenfield mode has landed, with clean
 architecture and full test coverage throughout:
 
-- `bdd spec list | show | validate | refine` — the `list_requirements`,
+- `spec list | show | validate | refine` — the `list_requirements`,
   `get_requirement`, `validate_spec`, and `refine_requirement` behaviors.
   Frozen seven-tool reply shapes are gated by `tests/mcp_conformance.rs`
   (and smoke-test `ToolPlan`).
-- `bdd spec draft | mark-implemented` — interactive drafting where the
+- `spec draft | mark-implemented` — interactive drafting where the
   human words the spec and validate/refine findings drive rewording
   until clean. With a resolved model, drafting starts from a plain-words
   description the model splits into proposals, and findings are sent to
@@ -118,30 +118,30 @@ architecture and full test coverage throughout:
   tagged `@REQ-...`; it records the tagged feature as the requirement's
   `featureFile` so the spec keeps validating, and re-running it
   backfills a missing `featureFile`.
-- `bdd feature list | show | create` and
-  `bdd scenario add | update | delete` — typed Gherkin reads and
+- `spec feature list | show | create` and
+  `spec scenario add | update | delete` — typed Gherkin reads and
   mutations, parsed back before they are staged so broken syntax can
   never land.
-- `bdd changes show | commit | discard` and `bdd validate` — every
-  mutation goes to a staging area (`.bdd-staged/`) first; the human
+- `spec changes show | commit | discard` and `spec changes validate` — every
+  mutation goes to a staging area (`.spec-staged/`) first; the human
   reviews and applies, and `validate` checks spec plus staged Gherkin
   together before commit. After applying, `commit` re-validates the
   working tree and carries any open issues in its reply as a warning,
   so an invalid spec never lands silently.
-- `bdd test | state | refactor` — the Red/Green/Refactor state machine,
-  persisted as a timestamped log in `.bdd-state.json` across invocations
+- `spec test | state | refactor` — the Red/Green/Refactor state machine,
+  persisted as a timestamped log in `.spec-state.json` across invocations
   (interpretation instructions in the file; model briefs get only the
   three latest entries), executing through Maven, cucumber-js,
   `dotnet test`, or `cargo test` depending on the detected project, with
   fixture-tested report parsers.
-- `bdd steps missing | generate` and `bdd unittest generate` — step
+- `spec steps missing | generate` and `spec unittest generate` — step
   discovery per framework and hybrid generation: deterministic templates
   always work, a resolved Ollama model's output is preferred when it
   validates, and everything lands in staging. Every code-producing
   prompt pins the session language's best practices — package naming
   for Java, snake_case modules for Rust, and their kin for JS/TS and
   .NET — so generated code follows the ecosystem's conventions.
-- `bdd implement` — the model attempts to make the failing tests pass:
+- `spec implement` — the model attempts to make the failing tests pass:
   production code plus real bodies for the generated placeholders, fed
   by the last run's full failure details (stack traces included) and
   the logged history of every prior attempt — what it wrote, what it
@@ -158,41 +158,41 @@ architecture and full test coverage throughout:
   answering with a number there, e.g. `5`, lets the model attempt and
   rerun up to that many times without asking again, stopping early on
   GREEN.
-- `bdd status` — where every requirement stands on the road to
+- `spec status` — where every requirement stands on the road to
   implemented: the phase, what waits in staging, each requirement's
   open gaps, and the one next step that moves the loop forward. With a
   resolved model the report is followed by workflow-aware advice: the
   model is briefed with the whole process document (states, commands,
   loop, invariants) plus the full project state, and names the next
   command in plain words.
-- `bdd mcp serve` — the workshop MCP stdio server: 25 tools (frozen seven
+- `spec mcp serve` — the workshop MCP stdio server: 25 tools (frozen seven
   plus authoring/staging/inspect). Conformance-tested over real JSON-RPC.
   Cursor sees all 25; harness LLM commands attach a scoped profile.
-- `bdd mcp tools | call` — list or invoke one tool over a throwaway
+- `spec mcp tools | call` — list or invoke one tool over a throwaway
   session (loopback or `--stdio`).
-- `bdd tools list | profiles | show | enable | disable | refresh | servers`
+- `spec tools list | profiles | show | enable | disable | refresh | servers`
   — per-command profiles and the `mcp.json` registry. External tools attach
   with `--for`, never globally.
-- `bdd ask` — free-form question with the read-only profile.
-- `bdd init` and `bdd greenfield` — per-language scaffolds and the whole
+- `spec ask` — free-form question with the read-only profile.
+- `spec init` and `spec greenfield` — per-language scaffolds and the whole
   orchestrated loop from an empty directory with exactly two human
   gates (see [Greenfield mode flow](#greenfield-mode-flow)).
-- `bdd model list | current | use` — Ollama model discovery and
-  selection: `--model` flag > `.bdd.toml` configuration > discovery.
+- `spec model list | current | use` — Ollama model discovery and
+  selection: `--model` flag > `.spec.toml` configuration > discovery.
   With no configured model, discovery uses the first installed model as
   a session-only default (nothing is written until you run
-  `bdd model use <name>`), and reports `llm_unavailable` when Ollama is
+  `spec model use <name>`), and reports `llm_unavailable` when Ollama is
   down or empty — never installs anything.
-- `bdd config` — every LLM and tools key, marked `(default)` or with the
-  path of the `.bdd.toml` it was read from (`--json` for the same as an
+- `spec config` — every LLM and tools key, marked `(default)` or with the
+  path of the `.spec.toml` it was read from (`--json` for the same as an
   object). With no configured `llm.model`, it shows the model discovery
   would use, marked `(discovered)`. The file is read from `--root`
   (default `.`) only.
-- `bdd inspect` — detects the project's ecosystems from marker files and
+- `spec inspect` — detects the project's ecosystems from marker files and
   probes each runtime. A missing runtime disables test execution with a
   structured `runtime_missing` note — authoring and validation keep
   working, and nothing is ever installed for you. Session start, init,
-  greenfield, and every LLM command also refresh `.bdd-memory.json`
+  greenfield, and every LLM command also refresh `.spec-memory.json`
   (language, libraries, layout) and prepend that brief to every model
   system prompt.
 
@@ -204,7 +204,7 @@ model this harness is developed and run against is
 
 ```bash
 ollama pull qwen3.8-flash-next:125b-mlx
-bdd model use qwen3.8-flash-next:125b-mlx
+spec model use qwen3.8-flash-next:125b-mlx
 ```
 
 Your mileage will vary with a different model. A stronger coding model
@@ -222,7 +222,7 @@ Model calls are cached in two complementary layers:
   Ollama keeps the model loaded between calls and the next request
   skips the multi-second startup cost.
 - **Response cache**: completed answers are stored on disk under
-  `.bdd-cache/` in the project root (gitignored; safe to delete at any
+  `.spec-cache/` in the project root (gitignored; safe to delete at any
   time). An identical request — same endpoint, model, system prompt,
   and user prompt, hashed with SHA-256 — within the TTL is answered
   from disk without calling the model at all, even across separate
@@ -233,7 +233,7 @@ Model calls are cached in two complementary layers:
   corrupt entries are swept on the next write.
 
 The TTL defaults to 10 minutes and is configured under `[llm]` in
-`.bdd.toml`:
+`.spec.toml`:
 
 ```toml
 [llm]
@@ -246,9 +246,9 @@ retry = 3
 ```
 
 After pulling new model data behind an unchanged tag such as
-`:latest`, delete `.bdd-cache/` so stale answers from the old weights
+`:latest`, delete `.spec-cache/` so stale answers from the old weights
 cannot be served. Run with `--debug` to trace cache hits and misses in
-the `.bdd-log/` diagnostics.
+the `.spec-log/` diagnostics.
 
 Invalid model replies (not JSON, incomplete requirements, empty
 advice, a polish pass that is not a valid file) are retried up to
@@ -258,7 +258,7 @@ retried.
 
 ## Debug logging
 
-Diagnostics are written to daily-rolling files under `.bdd-log/` in
+Diagnostics are written to daily-rolling files under `.spec-log/` in
 the project root (gitignored; safe to delete at any time), so stdout
 stays clean for JSON output and the MCP stdio protocol, and stderr
 stays clean for user-facing messages. Log writes go through an
@@ -272,37 +272,37 @@ test-runner activity. Without the flag only high-level lifecycle
 events are logged.
 
 ```bash
-bdd --debug implement REQ-003             # full prompts and replies in the log
-tail -f .bdd-log/bdd.log.$(date +%F)      # watch the diagnostics live
+spec --debug implement REQ-003             # full prompts and replies in the log
+tail -f .spec-log/spec.log.$(date +%F)      # watch the diagnostics live
 ```
 
 The standard `RUST_LOG` environment variable overrides both the
 default and `--debug` with per-module directives, e.g.
-`RUST_LOG=bdd_harness::adapters=trace bdd test`. If the log directory
+`RUST_LOG=spec_harness::adapters=trace spec test`. If the log directory
 cannot be created (for example a read-only project root), diagnostics
 fall back to stderr rather than disappearing.
 
 ## Interactive shell
 
-Bare `bdd` prints the help and, when run in a terminal, opens an
-interactive shell so the loop never needs the `bdd` prefix retyped:
+Bare `spec` prints the help and, when run in a terminal, opens an
+interactive shell so the loop never needs the `spec` prefix retyped:
 
 ```
-$ bdd
+$ spec
 ...help...
 
   ╭──────────────────────────────────╮
   │                                  ▼
-  │    > bdd  v{latest-version}      │
+  │    > spec  v{latest-version}      │
   │    spec → RED → GREEN → REFACTOR │
   ▲                                  │
   ╰──────────────────────────────────╯
 
-Model set for this session: qwen3.8-flash-next:125b-mlx (not saved - keep it with: bdd model use qwen3.8-flash-next:125b-mlx).
-bdd> spec list
-bdd> test
-bdd> state
-bdd> exit
+Model set for this session: qwen3.8-flash-next:125b-mlx (not saved - keep it with: spec model use qwen3.8-flash-next:125b-mlx).
+spec> list
+spec> test
+spec> state
+spec> exit
 Session over - 3 commands run.
 ```
 
@@ -312,7 +312,7 @@ around the prompt — with the compiled-in version.
 The shell announces the model status on startup: the configured model
 if one is set; otherwise the first installed Ollama model, borrowed for
 this session only (nothing is written until you run
-`bdd model use <name>`). When Ollama is unreachable it says to install
+`spec model use <name>`). When Ollama is unreachable it says to install
 it from [ollama.com](https://ollama.com), and when no models are pulled
 it gives the exact command (`ollama pull qwen3.8-flash-next:125b-mlx`) —
 generation falls back to deterministic templates either way. See
@@ -320,25 +320,25 @@ generation falls back to deterministic templates either way. See
 will change the quality of generated work.
 
 On a brand-new project the shell notices and offers the loop directly:
-when this is the first session in the root (no `.bdd-history` yet), a
+when this is the first session in the root (no `.spec-history` yet), a
 model is ready, and there is no `requirements/requirements.json`, it
 asks *"It appears you are in a greenfield - start with the greenfield
-command now? [y/N]"* — `y` runs `bdd greenfield` on the spot, anything
-else drops to the prompt. Shell start also refreshes `.bdd-memory.json`
+command now? [y/N]"* — `y` runs `spec greenfield` on the spot, anything
+else drops to the prompt. Shell start also refreshes `.spec-memory.json`
 so later model calls in the session carry this project's language,
 libraries, and layout.
 
-- Commands are typed without the `bdd` prefix (a pasted `bdd spec list`
+- Commands are typed without the `spec` prefix (a pasted `spec list`
   still works), with full quoting support for arguments like
   `--step "Given a calculator"`.
 - Each line inherits the shell's `--root` and `--model` unless the line
   sets its own.
 - `exit`, `quit`, Ctrl+C, or Ctrl+D ends the session.
-- The session history is saved to `.bdd-history` in the project root on
+- The session history is saved to `.spec-history` in the project root on
   the way out and loaded next time, so arrow-key recall picks up where
   the last session stopped.
 - A bad line (unknown command, unbalanced quote) prints its error and
-  the shell keeps going; without a terminal (pipes, CI) bare `bdd`
+  the shell keeps going; without a terminal (pipes, CI) bare `spec`
   prints the help and exits.
 
 ## Supported target languages
@@ -362,7 +362,7 @@ greenfield orchestrator in `src/greenfield.rs`) name concrete adapters:
 | Domain | `src/domain/` | Requirement model, spec validator, wording refiner, TDD state machine, language detection, project memory scan, Gherkin feature model, step discovery, generation templates, scaffolds. Pure logic, no IO. |
 | Ports | `src/ports.rs` | Traits the inner layers depend on: `SpecRepository`, `FeatureFiles`, `FeatureCatalog`, `ChangeStore`, `Prompter`, `StateStore`, `TestRunner`, `LlmConversation`, `ToolBroker`, `ModelCatalog`, `ModelStore`, `ProjectFiles`, `ProjectInventory`, `MemoryStore`, `SourceFiles`, `ScaffoldWriter`, `RuntimeProbe`, `InteractiveShell`. |
 | Application | `src/application/` | Use-case services (`SpecService`, `SpecMutationService`, `ScenarioService`, `ChangeService`, `TddService`, `GenerationService`, `InitService`, `ModelService`, `InspectService`, `MemoryService`) composed via constructor injection. The interactive shell loop lives in `src/repl.rs`. |
-| Adapters | `src/adapters/` | Filesystem spec/feature/staging/state/source/memory access, the four test runners (Maven, cucumber-js, dotnet, cargo), Ollama HTTP catalog and `/api/chat`, MCP loopback/stdio broker, TOML config store, console prompter, rustyline shell with the persistent `.bdd-history`, runtime probe. |
+| Adapters | `src/adapters/` | Filesystem spec/feature/staging/state/source/memory access, the four test runners (Maven, cucumber-js, dotnet, cargo), Ollama HTTP catalog and `/api/chat`, MCP loopback/stdio broker, TOML config store, console prompter, rustyline shell with the persistent `.spec-history`, runtime probe. |
 
 ## Building
 
@@ -375,13 +375,13 @@ Fast compile, debug assertions on — the everyday loop:
 
 ```bash
 cargo build
-./target/debug/bdd --help
-./target/debug/bdd --root .. spec validate   # against the workshop repo
+./target/debug/spec --help
+./target/debug/spec --root .. validate   # against the workshop repo
 ```
 
 The profile picks the output directory: plain `cargo build` writes
-`target/debug/bdd`, only `cargo build --release` writes
-`target/release/bdd`. Flags like `--all-targets` add compile targets
+`target/debug/spec`, only `cargo build --release` writes
+`target/release/spec`. Flags like `--all-targets` add compile targets
 (tests, benches), not profiles — after a `cargo clean`, a release
 binary exists only once you build with `--release`.
 
@@ -391,13 +391,13 @@ Optimized, self-contained native binary:
 
 ```bash
 cargo build --release
-./target/release/bdd --help
+./target/release/spec --help
 ```
 
 Or build and install onto your `PATH` in one step:
 
 ```bash
-cargo install --path .    # drops bdd into ~/.cargo/bin/
+cargo install --path .    # drops spec into ~/.cargo/bin/
 ```
 
 Distribution model: one native executable per OS/architecture, bundling
@@ -440,7 +440,7 @@ Tag the commit you want released only after it is pushed, and make
 sure the version has not been released before — dist matches the tag
 against `harness/Cargo.toml` and publishes the GitHub Release from it.
 
-The version reported by `bdd -V` is compiled in, so a binary built
+The version reported by `spec -V` is compiled in, so a binary built
 before a bump keeps reporting the old number until it is rebuilt
 (`cargo build --release`) or reinstalled from the new release.
 
@@ -452,19 +452,19 @@ workspace); after changing it, run `dist generate` from the repository
 root to regenerate the workflow.
 
 The shell installer places the binary in `$CARGO_HOME/bin` (usually
-`~/.cargo/bin/bdd`) and writes an install receipt to
-`~/.config/bdd-harness/bdd-harness-receipt.json`.
+`~/.cargo/bin/spec`) and writes an install receipt to
+`~/.config/spec-harness/spec-harness-receipt.json`.
 
 ### Uninstalling
 
-Each release also ships `bdd-harness-uninstaller.sh` (source:
-`scripts/bdd-harness-uninstaller.sh`). It reads the install receipt,
+Each release also ships `spec-harness-uninstaller.sh` (source:
+`scripts/spec-harness-uninstaller.sh`). It reads the install receipt,
 removes the installed binaries and the receipt, and warns about
 anything it deliberately leaves alone (the shared `~/.cargo/env` PATH
 hook, which rustup also uses):
 
 ```bash
-curl -LsSf https://github.com/davidparry/tdd-bdd-agentic/releases/latest/download/bdd-harness-uninstaller.sh | sh -s -- -y
+curl -LsSf https://github.com/davidparry/tdd-bdd-agentic/releases/latest/download/spec-harness-uninstaller.sh | sh -s -- -y
 ```
 
 Drop the `-y` to get a confirmation prompt listing what will be
@@ -494,12 +494,12 @@ cargo test --test cucumber   # spec-driven cucumber scenarios only
   discovery, hybrid generation, greenfield mode, LLM model listing and
   selection, project inspection, and the interactive shell.
 - MCP conformance tests in `tests/mcp_conformance.rs` drive the embedded
-  server over an in-memory transport and over the real `bdd mcp serve`
+  server over an in-memory transport and over the real `spec mcp serve`
   child process, asserting the frozen tool replies. This suite is the
   executable spec for `mcp serve` — there is deliberately no separate
   Cucumber feature for the MCP transport.
 - A live end-to-end test in `tests/greenfield_e2e.rs` spawns the built
-  `bdd` binary and drives the whole interactive `greenfield` loop against
+  `spec` binary and drives the whole interactive `greenfield` loop against
   a real Ollama model until a requirement is implemented — see
   [Live end-to-end test: the greenfield loop](#live-end-to-end-test-the-greenfield-loop).
 - Coverage is gated at 97% of reachable lines over the library (CI
@@ -545,7 +545,7 @@ directory to `"status": "implemented"` in
 
 - **Ollama** running on `localhost:11434` with at least one model pulled
   (`ollama pull <model>`); the test fails fast with instructions if
-  `bdd model list` finds none.
+  `spec model list` finds none.
 - **A JDK and Maven** on PATH (`mvn -version` must succeed) — the wizard
   scaffolds a Java/Cucumber-JVM project and the loop runs `mvn test`.
 - **Time**: minutes to an hour. The model does real work — drafting the
@@ -568,7 +568,7 @@ it the transcript only appears if the test fails.
 The test creates the project at
 `harness/target/greenfield-e2e/<unix-seconds>/project/` — inside the crate's
 own `target/`, never in the system temp dir — and spawns
-`bdd --root <that project> greenfield` with **piped stdio** —
+`spec --root <that project> greenfield` with **piped stdio** —
 no PTY. Piped stdin steers the harness onto its plain-stdin prompter, which
 flushes every question before reading, so an expect-style loop can watch
 stdout, match the pending prompt, and answer it. The script mirrors a
@@ -604,10 +604,10 @@ transcript shows a `GREEN:` bar and `is implemented. Loop closed.`, and
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `BDD_E2E_MODEL` | bdd's own discovery (first installed model) | Passed as `--model` |
-| `BDD_E2E_TIMEOUT_SECS` | `3600` | Total-run watchdog; a full 30-attempt budget takes roughly two minutes per attempt |
-| `BDD_E2E_PROMPT_TIMEOUT_SECS` | `300` | Max silence between outputs before the run counts as hung |
-| `BDD_E2E_ARTIFACTS` | `harness/target/greenfield-e2e/<unix-seconds>/` | Where the run's artifacts land |
+| `SPEC_E2E_MODEL` | spec's own discovery (first installed model) | Passed as `--model` |
+| `SPEC_E2E_TIMEOUT_SECS` | `3600` | Total-run watchdog; a full 30-attempt budget takes roughly two minutes per attempt |
+| `SPEC_E2E_PROMPT_TIMEOUT_SECS` | `300` | Max silence between outputs before the run counts as hung |
+| `SPEC_E2E_ARTIFACTS` | `harness/target/greenfield-e2e/<unix-seconds>/` | Where the run's artifacts land |
 
 #### Artifacts and failure triage
 
@@ -652,7 +652,7 @@ test-first:
    must keep their reply shapes. The source of truth is
    `tests/mcp_conformance.rs` plus smoke-test `ToolPlan` (exactly 25
    names; a 26th tool fails that Java build). Backup Inspector:
-   `npx @modelcontextprotocol/inspector bdd mcp serve --root $PWD`.
+   `npx @modelcontextprotocol/inspector spec mcp serve --root $PWD`.
 4. **Never expose escape hatches.** No `write_file`, `run_shell`,
    `install_dependency`, or arbitrary-path tools. Mutations go through
    typed, validated tools only.
@@ -669,7 +669,7 @@ have all landed; hardening (security, packaging) is the open phase.
 
 ## Greenfield mode flow
 
-`bdd greenfield` runs the whole creation order from an empty directory,
+`spec greenfield` runs the whole creation order from an empty directory,
 consulting the human at exactly two moments — the wording of the
 driving spec, and the review of generated tests before they are
 committed.
@@ -677,7 +677,7 @@ committed.
 ```mermaid
 flowchart TD
     subgraph auto0 [Harness automated - phase 0]
-        scaffold["Scaffold: build files, Cucumber runner,<br/>empty spec, .bdd.toml config"]
+        scaffold["Scaffold: build files, Cucumber runner,<br/>empty spec, .spec.toml config"]
     end
     subgraph human1 [Human input - phase 1: the driving spec]
         describe["Human describes what to build in plain words"]
@@ -720,7 +720,7 @@ Guard rails: greenfield mode checks the target language's runtime up
 front and offers authoring-only mode when it is missing (it never
 installs one), and it resolves the LLM model first — with no model
 configured it borrows the first installed Ollama model for the session
-(persist a choice any time with `bdd model use <name>`).
+(persist a choice any time with `spec model use <name>`).
 
 The description step needs a resolved model; without one (or when the
 description is left blank, the model is unreachable, or its reply

@@ -5,18 +5,18 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 /**
- * Resolves the installed {@code bdd} harness the same way a shell does: the
- * first executable named {@code bdd} on {@code PATH}. The smoke jar does
+ * Resolves the installed {@code spec} harness the same way a shell does: the
+ * first executable named {@code spec} on {@code PATH}. The smoke jar does
  * not look under {@code harness/target}.
  */
-public final class BddBinary {
+public final class SpecBinary {
 
-    private BddBinary() {
+    private SpecBinary() {
     }
 
-    /** The {@code bdd} on {@code PATH}, or {@code null} if it is not installed. */
+    /** The {@code spec} on {@code PATH}, or {@code null} if it is not installed. */
     public static Path onPath() {
-        return find("bdd", System.getenv("PATH"));
+        return find("spec", System.getenv("PATH"));
     }
 
     static Path find(String name, String pathEnv) {

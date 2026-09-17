@@ -36,12 +36,12 @@ PAGES = [
         "src": "student-follow-along.md",
         "dest": "workshop/index.html",
         "title": "Workshop follow-along",
-        "description": "Step-by-step companion for the 60-minute bdd workshop.",
+        "description": "Step-by-step companion for the 60-minute spec workshop.",
     },
     {
         "src": "harness/README.md",
         "dest": "harness/index.html",
-        "title": "bdd harness",
+        "title": "spec harness",
         "description": "Spec-driven BDD/TDD harness with an embedded MCP server.",
     },
     {

@@ -86,7 +86,7 @@ pub trait ProjectInventory {
     fn list_tree(&self) -> Vec<String>;
 }
 
-/// Persists [`.bdd-memory.json`](crate::domain::memory::ProjectMemory)
+/// Persists [`.spec-memory.json`](crate::domain::memory::ProjectMemory)
 /// between harness invocations.
 pub trait MemoryStore {
     fn load(&self) -> Result<Option<crate::domain::memory::ProjectMemory>, MemoryError>;
@@ -192,7 +192,7 @@ pub trait ToolDiscovery {
         server: &crate::domain::mcp_registry::ServerSpec,
     ) -> Result<Vec<crate::domain::tools::ToolDefinition>, ToolError>;
 
-    /// Bypass any catalog cache (`bdd tools refresh`). Defaults to [`Self::discover`].
+    /// Bypass any catalog cache (`spec tools refresh`). Defaults to [`Self::discover`].
     fn discover_fresh(
         &self,
         server: &crate::domain::mcp_registry::ServerSpec,
@@ -231,7 +231,7 @@ pub trait SourceFiles {
 pub struct SourceError(pub String);
 string_error!(SourceError);
 
-/// Writes scaffold files during `bdd init`. Never overwrites: existing
+/// Writes scaffold files during `spec init`. Never overwrites: existing
 /// files are reported as skipped so re-running init is always safe.
 pub trait ScaffoldWriter {
     /// Returns `true` when the file was created, `false` when it already
@@ -322,7 +322,7 @@ pub trait Prompter {
 pub struct PromptError(pub String);
 string_error!(PromptError);
 
-/// One read from the interactive `bdd` shell.
+/// One read from the interactive `spec` shell.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ShellLine {
     Line(String),
@@ -347,7 +347,7 @@ pub trait InteractiveShell {
 }
 
 /// Persists the TDD state log between harness invocations
-/// (`.bdd-state.json`): timestamped entries plus interpretation
+/// (`.spec-state.json`): timestamped entries plus interpretation
 /// instructions, so `test`, `state`, and `refactor` share one machine
 /// across harness invocations.
 pub trait StateStore {

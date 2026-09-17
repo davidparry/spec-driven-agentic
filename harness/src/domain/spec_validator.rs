@@ -130,7 +130,7 @@ impl<'a> SpecValidator<'a> {
                 if !r.is_pending() {
                     issues.push(format!(
                         "{id}: implemented requirements must name their featureFile - \
-                         rerun bdd spec mark-implemented {id} on GREEN to backfill it"
+                         rerun spec mark-implemented {id} on GREEN to backfill it"
                     ));
                 }
                 return;
@@ -332,7 +332,7 @@ mod tests {
             issues,
             vec![
                 "REQ-005: implemented requirements must name their featureFile - \
-                 rerun bdd spec mark-implemented REQ-005 on GREEN to backfill it"
+                 rerun spec mark-implemented REQ-005 on GREEN to backfill it"
             ]
         );
     }

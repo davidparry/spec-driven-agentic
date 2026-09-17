@@ -47,7 +47,7 @@ pub fn detect_runner(root: &Path) -> Result<Box<dyn TestRunner>, String> {
         tracing::warn!(root = %root.display(), "no supported project detected for a test runner");
         return Err(
             "No supported project detected (pom.xml, build.gradle, package.json, \
-             *.csproj, Cargo.toml). Run bdd inspect."
+             *.csproj, Cargo.toml). Run spec inspect."
                 .to_string(),
         );
     };

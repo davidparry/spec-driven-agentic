@@ -5,6 +5,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::domain::STAGED_DIR;
 use crate::ports::{SourceError, SourceFile, SourceFiles};
 
 /// Directories that contain generated or third-party code, never
@@ -16,7 +17,7 @@ const SKIPPED_DIRS: [&str; 7] = [
     "obj",
     "dist",
     ".git",
-    ".bdd-staged",
+    STAGED_DIR,
 ];
 
 pub struct FsSourceFiles {

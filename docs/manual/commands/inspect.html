@@ -3,12 +3,12 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>bdd inspect - bdd Harness Manual</title>
+        <title>spec inspect - spec Harness Manual</title>
 
 
         <!-- Custom HTML head -->
 
-        <meta name="description" content="The complete, searchable reference for the bdd harness: every command, subcommand, and flag, with in-depth examples.">
+        <meta name="description" content="The complete, searchable reference for the spec harness: every command, subcommand, and flag, with in-depth examples.">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff">
 
@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-aaad9ee5.js";
+            window.path_to_searchindex_js = "../searchindex-5959f77b.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-9d4e1520.js"></script>
+        <script src="../toc-372d77fe.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -137,7 +137,7 @@
                         </button>
                     </div>
 
-                    <h1 class="menu-title">bdd Harness Manual</h1>
+                    <h1 class="menu-title">spec Harness Manual</h1>
 
                     <div class="right-buttons">
                         <a href="../print.html" title="Print this book" aria-label="Print this book">
@@ -180,12 +180,12 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="bdd-inspect"><a class="header" href="#bdd-inspect">bdd inspect</a></h1>
+                        <h1 id="spec-inspect"><a class="header" href="#spec-inspect">spec inspect</a></h1>
 <p>Detect the project’s languages, build system, BDD framework, and —
 critically — whether each language’s runtime is actually installed.
 The harness only executes tests when the runtime is present, so <code>inspect</code>
 tells you up front what will run and what will refuse.</p>
-<pre><code class="language-text">Usage: bdd inspect [OPTIONS]
+<pre><code class="language-text">Usage: spec inspect [OPTIONS]
 </code></pre>
 <h2 id="flags"><a class="header" href="#flags">Flags</a></h2>
 <p>Only the <a href="../global-flags.html">global flags</a> (<code>--root</code>, <code>--model</code>).</p>
@@ -206,7 +206,7 @@ tells you up front what will run and what will refuse.</p>
 </div>
 <h2 id="examples"><a class="header" href="#examples">Examples</a></h2>
 <p>A Rust project with the toolchain installed:</p>
-<pre><code class="language-bash">bdd inspect
+<pre><code class="language-bash">spec inspect
 </code></pre>
 <pre><code class="language-json">{
   "languages": [
@@ -218,7 +218,7 @@ tells you up front what will run and what will refuse.</p>
       "runtimeVersion": "cargo 1.97.0"
     }
   ],
-  "nextStep": "The runtime is present. 'bdd test' will execute the suite."
+  "nextStep": "The runtime is present. 'spec test' will execute the suite."
 }
 </code></pre>
 <p>A Java project without Maven on the PATH:</p>
@@ -232,15 +232,15 @@ tells you up front what will run and what will refuse.</p>
       "note": "Install Maven (and a JDK) to execute tests; the harness reports, it never installs."
     }
   ],
-  "nextStep": "Install the missing runtime before 'bdd test'; authoring commands still work."
+  "nextStep": "Install the missing runtime before 'spec test'; authoring commands still work."
 }
 </code></pre>
 <p>An empty directory reports no languages and points you at
-<a href="init.html"><code>bdd init</code></a>.</p>
+<a href="init.html"><code>spec init</code></a>.</p>
 <h2 id="project-memory"><a class="header" href="#project-memory">Project memory</a></h2>
-<p>Session start (<code>bdd</code> shell, <code>bdd mcp serve</code>), <a href="init.html"><code>bdd init</code></a>,
-<a href="greenfield.html"><code>bdd greenfield</code></a>, and every LLM command refresh
-<code>.bdd-memory.json</code> in the project root: language, BDD framework, build
+<p>Session start (<code>spec</code> shell, <code>spec mcp serve</code>), <a href="init.html"><code>spec init</code></a>,
+<a href="greenfield.html"><code>spec greenfield</code></a>, and every LLM command refresh
+<code>.spec-memory.json</code> in the project root: language, BDD framework, build
 tool, libraries parsed from the manifest, and a short layout outline.
 A language chosen at greenfield/init is kept even if other marker files
 appear later. That file is project identity (commit it); every model
@@ -248,8 +248,8 @@ system prompt opens with a compact brief of its contents.</p>
 <h2 id="notes"><a class="header" href="#notes">Notes</a></h2>
 <ul>
 <li>Authoring commands (spec, feature, scenario, steps, unittest) work
-without any runtime; only <a href="test.html"><code>bdd test</code></a> and the test-running
-parts of <a href="greenfield.html"><code>bdd greenfield</code></a> require one.</li>
+without any runtime; only <a href="test.html"><code>spec test</code></a> and the test-running
+parts of <a href="greenfield.html"><code>spec greenfield</code></a> require one.</li>
 <li>With multiple markers present (a polyglot root), every detected
 language is listed.</li>
 </ul>

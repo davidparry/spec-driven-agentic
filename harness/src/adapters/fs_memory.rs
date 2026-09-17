@@ -1,10 +1,11 @@
-//! Filesystem project memory: `.bdd-memory.json` plus a tree inventory
+//! Filesystem project memory: `.spec-memory.json` plus a tree inventory
 //! of the project root (skipping build output and dependency directories).
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::domain::memory::ProjectMemory;
+use crate::domain::{MEMORY_FILE, STAGED_DIR};
 use crate::ports::{MemoryError, MemoryStore, ProjectInventory};
 
 const SKIPPED_DIRS: [&str; 7] = [
@@ -14,7 +15,7 @@ const SKIPPED_DIRS: [&str; 7] = [
     "obj",
     "dist",
     ".git",
-    ".bdd-staged",
+    STAGED_DIR,
 ];
 
 pub struct FsMemoryStore {
@@ -24,7 +25,7 @@ pub struct FsMemoryStore {
 impl FsMemoryStore {
     pub fn new(root: PathBuf) -> Self {
         Self {
-            file: root.join(".bdd-memory.json"),
+            file: root.join(MEMORY_FILE),
         }
     }
 }
@@ -35,17 +36,17 @@ impl MemoryStore for FsMemoryStore {
             return Ok(None);
         }
         let text = fs::read_to_string(&self.file)
-            .map_err(|e| MemoryError(format!(".bdd-memory.json is not readable - {e}")))?;
+            .map_err(|e| MemoryError(format!("{MEMORY_FILE} is not readable - {e}")))?;
         serde_json::from_str(&text)
             .map(Some)
-            .map_err(|e| MemoryError(format!(".bdd-memory.json is not valid JSON - {e}")))
+            .map_err(|e| MemoryError(format!("{MEMORY_FILE} is not valid JSON - {e}")))
     }
 
     fn save(&self, memory: &ProjectMemory) -> Result<(), MemoryError> {
         let text =
             serde_json::to_string_pretty(memory).expect("project memory is always serializable");
         fs::write(&self.file, format!("{text}\n"))
-            .map_err(|e| MemoryError(format!(".bdd-memory.json is not writable - {e}")))
+            .map_err(|e| MemoryError(format!("{MEMORY_FILE} is not writable - {e}")))
     }
 }
 
@@ -126,19 +127,19 @@ mod tests {
         };
         store.save(&memory).unwrap();
         assert_eq!(store.load().unwrap(), Some(memory));
-        let text = fs::read_to_string(dir.path().join(".bdd-memory.json")).unwrap();
+        let text = fs::read_to_string(dir.path().join(MEMORY_FILE)).unwrap();
         assert!(text.contains("\"language\": \"Java\""));
     }
 
     #[test]
     fn corrupt_memory_is_a_structured_error() {
         let dir = tempfile::tempdir().unwrap();
-        fs::write(dir.path().join(".bdd-memory.json"), "not json").unwrap();
+        fs::write(dir.path().join(MEMORY_FILE), "not json").unwrap();
         let error = FsMemoryStore::new(dir.path().to_path_buf())
             .load()
             .unwrap_err();
         assert!(
-            error.0.starts_with(".bdd-memory.json is not valid JSON -"),
+            error.0.starts_with(".spec-memory.json is not valid JSON -"),
             "got: {}",
             error.0
         );
@@ -149,7 +150,7 @@ mod tests {
         let store = FsMemoryStore::new(PathBuf::from("/dev/null/nowhere"));
         let error = store.save(&ProjectMemory::default()).unwrap_err();
         assert!(
-            error.0.starts_with(".bdd-memory.json is not writable -"),
+            error.0.starts_with(".spec-memory.json is not writable -"),
             "got: {}",
             error.0
         );

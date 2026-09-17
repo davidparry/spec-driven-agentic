@@ -3,12 +3,12 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>bdd state - bdd Harness Manual</title>
+        <title>spec state - spec Harness Manual</title>
 
 
         <!-- Custom HTML head -->
 
-        <meta name="description" content="The complete, searchable reference for the bdd harness: every command, subcommand, and flag, with in-depth examples.">
+        <meta name="description" content="The complete, searchable reference for the spec harness: every command, subcommand, and flag, with in-depth examples.">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff">
 
@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-aaad9ee5.js";
+            window.path_to_searchindex_js = "../searchindex-5959f77b.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-9d4e1520.js"></script>
+        <script src="../toc-372d77fe.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -137,7 +137,7 @@
                         </button>
                     </div>
 
-                    <h1 class="menu-title">bdd Harness Manual</h1>
+                    <h1 class="menu-title">spec Harness Manual</h1>
 
                     <div class="right-buttons">
                         <a href="../print.html" title="Print this book" aria-label="Print this book">
@@ -180,17 +180,17 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="bdd-state"><a class="header" href="#bdd-state">bdd state</a></h1>
+                        <h1 id="spec-state"><a class="header" href="#spec-state">spec state</a></h1>
 <p>Show the current TDD phase, the last run’s counts, the refactor
 log, and at most the three latest dated state entries. Read-only —
 it never changes anything.</p>
-<pre><code class="language-text">Usage: bdd state [OPTIONS]
+<pre><code class="language-text">Usage: spec state [OPTIONS]
 </code></pre>
 <p>MCP tool equivalent: <code>get_tdd_state</code>.</p>
 <h2 id="flags"><a class="header" href="#flags">Flags</a></h2>
 <p>Only the <a href="../global-flags.html">global flags</a> (<code>--root</code>, <code>--model</code>).</p>
 <h2 id="examples"><a class="header" href="#examples">Examples</a></h2>
-<pre><code class="language-bash">bdd state
+<pre><code class="language-bash">spec state
 </code></pre>
 <pre><code class="language-json">{
   "instructions": "This file is the TDD phase log. ... When briefing a model, include only the three most recent entries. ...",
@@ -222,21 +222,21 @@ it never changes anything.</p>
       "attemptLog": []
     }
   ],
-  "nextStep": "You are GREEN. Refactor with 'bdd refactor', or mark the requirement implemented."
+  "nextStep": "You are GREEN. Refactor with 'spec refactor', or mark the requirement implemented."
 }
 </code></pre>
 <p>Before any test has ever run, the phase is the starting state and
-<code>lastRun</code> is all zeros; <code>nextStep</code> points you at <code>bdd test</code>.</p>
+<code>lastRun</code> is all zeros; <code>nextStep</code> points you at <code>spec test</code>.</p>
 <h2 id="where-the-state-lives"><a class="header" href="#where-the-state-lives">Where the state lives</a></h2>
-<p><code>.bdd-state.json</code> under the project root. It is a chronological log of
+<p><code>.spec-state.json</code> under the project root. It is a chronological log of
 timestamped entries — one per test run, refactor, or implementation
 attempt — plus <code>instructions</code> that explain how to read the schema. The
-file keeps the full history so a human can audit the loop; <code>bdd state</code>
+file keeps the full history so a human can audit the loop; <code>spec state</code>
 and every model brief include <strong>only the three latest entries</strong>. Delete
 the file to reset the phase machine (there is deliberately no <code>reset</code>
 command — losing the log should be an explicit filesystem act).</p>
 <p>The same file also carries <code>attemptLog</code> — the record of every model
-implementation attempt that <a href="implement.html"><code>bdd implement</code></a> and the
+implementation attempt that <a href="implement.html"><code>spec implement</code></a> and the
 greenfield loop brief the next attempt with: the files it wrote
 (<code>targets</code>), the failures it was briefed with (<code>failures</code>), and the
 output of the first test run after it (<code>outcome</code>; empty means no run
@@ -252,9 +252,9 @@ the file).</li>
 <a href="../workflow.html">the workflow</a>). The current phase; also the last
 entry’s <code>phase</code>.</li>
 <li><code>lastRun</code> — counts only; the failure details live in the
-<a href="test.html"><code>bdd test</code></a> reply that produced them.</li>
+<a href="test.html"><code>spec test</code></a> reply that produced them.</li>
 <li><code>refactorLog</code> — every note passed to
-<a href="refactor.html"><code>bdd refactor --note</code></a>, in order. It is the audit
+<a href="refactor.html"><code>spec refactor --note</code></a>, in order. It is the audit
 trail of intentional design work.</li>
 <li><code>entries</code> — at most the three latest dated snapshots (<code>timestamp</code>,
 <code>phase</code>, <code>lastRun</code>, <code>refactorLog</code>, <code>attemptLog</code>). Older entries stay
@@ -262,8 +262,8 @@ on disk and are not sent to a model.</li>
 </ul>
 <h2 id="see-also"><a class="header" href="#see-also">See also</a></h2>
 <ul>
-<li><a href="test.html"><code>bdd test</code></a> — the command that moves the phase.</li>
-<li><a href="refactor.html"><code>bdd refactor</code></a> — appends to the log shown here.</li>
+<li><a href="test.html"><code>spec test</code></a> — the command that moves the phase.</li>
+<li><a href="refactor.html"><code>spec refactor</code></a> — appends to the log shown here.</li>
 </ul>
 
                     </main>

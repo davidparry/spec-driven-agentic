@@ -112,7 +112,7 @@ where
     ) -> Result<ImplementationReport, ServiceError> {
         let Some(llm) = &self.llm else {
             return Err(ServiceError(
-                "No model resolved - implement by hand and rerun bdd test.".into(),
+                "No model resolved - implement by hand and rerun spec test.".into(),
             ));
         };
         let spec = load_effective_spec(&self.spec, &self.store)?;
@@ -180,11 +180,11 @@ where
             )
         });
         let next_step = if production_written {
-            "Apply with bdd changes commit, then bdd test - the run decides.".to_string()
+            "Apply with spec changes commit, then spec test - the run decides.".to_string()
         } else {
             format!(
                 "The attempt is incomplete without {production}. Apply what was \
-                 staged with bdd changes commit, rerun bdd test, then bdd implement \
+                 staged with spec changes commit, rerun spec test, then spec implement \
                  {req_id} again - or implement {production} by hand."
             )
         };
@@ -213,15 +213,15 @@ where
         if requirement.status == "implemented" {
             findings.push(format!(
                 "{req_id} is already implemented - pick the next pending requirement \
-                 with bdd spec list."
+                 with spec list."
             ));
         }
         if phase != "RED" || failures.is_empty() {
             findings.push(match phase {
                 "GREEN" => "The bar is GREEN - there is nothing to implement. Refactor \
-                            with bdd refactor or close the loop with bdd spec mark-implemented."
+                            with spec refactor or close the loop with spec mark-implemented."
                     .to_string(),
-                _ => "No RED test run is recorded - run bdd test first so its failures \
+                _ => "No RED test run is recorded - run spec test first so its failures \
                       brief the model."
                     .to_string(),
             });
@@ -239,7 +239,7 @@ where
 
         let ready = findings.is_empty();
         let next_step = findings.first().cloned().unwrap_or_else(|| {
-            format!("Every prerequisite is in place - bdd implement {req_id} can run.")
+            format!("Every prerequisite is in place - spec implement {req_id} can run.")
         });
         Ok(ReadinessReport {
             ready,
@@ -334,7 +334,7 @@ mod tests {
             .unwrap_err();
         assert_eq!(
             error.0,
-            "No model resolved - implement by hand and rerun bdd test."
+            "No model resolved - implement by hand and rerun spec test."
         );
     }
 
@@ -410,7 +410,7 @@ mod tests {
                 .next_step
                 .contains("incomplete without src/main/java/Kata.java")
         );
-        assert!(report.next_step.contains("bdd implement REQ-001"));
+        assert!(report.next_step.contains("spec implement REQ-001"));
     }
 
     #[test]
@@ -429,7 +429,7 @@ mod tests {
         assert_eq!(report.warning, None);
         assert_eq!(
             report.next_step,
-            "Apply with bdd changes commit, then bdd test - the run decides."
+            "Apply with spec changes commit, then spec test - the run decides."
         );
     }
 
@@ -539,7 +539,7 @@ mod tests {
         assert!(report.findings.is_empty());
         assert_eq!(
             report.next_step,
-            "Every prerequisite is in place - bdd implement REQ-001 can run."
+            "Every prerequisite is in place - spec implement REQ-001 can run."
         );
         let asset = |path: &str| {
             report
@@ -569,11 +569,11 @@ mod tests {
                 report.findings
             );
         };
-        has("run bdd test first");
-        has("bdd steps generate");
-        has("bdd unittest generate REQ-001");
+        has("run spec test first");
+        has("spec steps generate");
+        has("spec unittest generate REQ-001");
         assert!(
-            report.next_step.contains("bdd test"),
+            report.next_step.contains("spec test"),
             "the earliest gap leads: {}",
             report.next_step
         );
@@ -650,7 +650,7 @@ mod tests {
         let service = service(
             vec![],
             Some(FakeLlm::replying(
-                "No - run bdd test first to record the RED bar.",
+                "No - run spec test first to record the RED bar.",
             )),
         );
         assert!(service.has_model());
@@ -659,7 +659,7 @@ mod tests {
             .advice(&mut NullPrompter, "REQ-001", &readiness, &[])
             .unwrap()
             .unwrap();
-        assert_eq!(advice, "No - run bdd test first to record the RED bar.");
+        assert_eq!(advice, "No - run spec test first to record the RED bar.");
         let prompts = service.llm.as_ref().unwrap().chat().prompts.borrow();
         assert!(prompts[0].contains("The project assets:"));
         assert!(prompts[0].contains("No RED test run is recorded"));

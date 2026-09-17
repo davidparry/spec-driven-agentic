@@ -1,5 +1,5 @@
 Feature: Greenfield mode
-  bdd greenfield walks the whole loop from an empty directory: scaffold,
+  spec greenfield walks the whole loop from an empty directory: scaffold,
   spec draft, tagged scenarios, generated tests, RED, implementation,
   GREEN, refactor, mark-implemented. Exactly two gates need the human -
   the spec wording approval and the generated-test review. Execution
@@ -31,8 +31,8 @@ Feature: Greenfield mode
     When the greenfield loop runs
     Then the greenfield run completes with phase "GREEN"
     And the working tree file "pom.xml" contains "cucumber-junit-platform-engine"
-    And the working tree file ".bdd-memory.json" contains "Java"
-    And the working tree file ".bdd-memory.json" contains "cucumber-java"
+    And the working tree file ".spec-memory.json" contains "Java"
+    And the working tree file ".spec-memory.json" contains "cucumber-java"
     And the working tree file "features/empty-string-returns-zero.feature" contains "@REQ-001"
     And the working tree file "requirements/requirements.json" contains "implemented"
     And the developer was told a finding containing "Generating the unit test for REQ-001 - working ..."

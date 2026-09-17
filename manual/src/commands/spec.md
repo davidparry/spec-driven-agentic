@@ -1,17 +1,18 @@
-# bdd spec
+# The requirements spec
 
-Requirements spec tools. The spec at
-`requirements/requirements.json` is the project's source of truth;
-these subcommands read it, gate it, and mutate it (through the
+The spec at `requirements/requirements.json` is the project's source of
+truth. These commands read it, gate it, and mutate it (through the
 [staging area](../staged-changes.md)). The root file is a
 [catalog](../spec-format.md#the-catalog-splitting-the-spec-across-files):
-it may include child spec files, and every subcommand operates on the
+it may include child spec files, and every command here operates on the
 merged view of the whole tree.
 
 ```text
-Usage: bdd spec [OPTIONS] <COMMAND>
-
-Commands: list, show, draft, validate, refine, reword, set-feature, mark-implemented, include
+spec list             spec refine <REQ_ID>
+spec show <REQ_ID>    spec reword <REQ_ID>
+spec draft            spec set-feature <REQ_ID> --file <FILE>
+spec validate         spec mark-implemented <REQ_ID>
+                      spec include add <PATH>
 ```
 
 MCP tool equivalents: `list_requirements`, `get_requirement`,
@@ -20,13 +21,13 @@ MCP tool equivalents: `list_requirements`, `get_requirement`,
 
 ---
 
-## bdd spec list
+## spec list
 
 List every requirement with its id, title, status, and the spec file
 it lives in — requirements from included files merge into one backlog.
 
 ```bash
-bdd spec list
+spec list
 ```
 
 ```json
@@ -44,17 +45,17 @@ Use it to pick the next `pending` requirement to work on.
 
 ---
 
-## bdd spec show
+## spec show
 
 Show one requirement, enriched with file locations and a workflow
 hint.
 
 ```text
-Usage: bdd spec show [OPTIONS] <REQ_ID>
+Usage: spec show [OPTIONS] <REQ_ID>
 ```
 
 ```bash
-bdd spec show REQ-003
+spec show REQ-003
 ```
 
 ```json
@@ -83,21 +84,21 @@ Error: no requirement with id REQ-999
 
 ---
 
-## bdd spec draft
+## spec draft
 
 Interactively draft a requirement. Human input drives the spec — the
 harness never invents requirements. The draft is validated and
 quality-gated in a loop until it is clean, then staged.
 
 ```bash
-bdd spec draft
+spec draft
 ```
 
 Non-interactive (no TTY). Repeat `--criterion` for each Given/When/Then
 line. The next free id is allocated; the draft is staged.
 
 ```bash
-bdd spec draft \
+spec draft \
   --title "Newlines as delimiters" \
   --story "As a calculator user, I want newlines to separate numbers in addition to commas so that multi-line input just works." \
   --criterion 'Given the input "1\n2,3", when add is called, then the result is 6' \
@@ -106,17 +107,17 @@ bdd spec draft \
 
 `--title`, `--story`, and at least one `--criterion` must be given
 together. Structural validate must pass; refine findings are reported
-in `nextStep` (`bdd spec reword <id>` to address them). A title or
+in `nextStep` (`spec reword <id>` to address them). A title or
 criterion that collides with an existing requirement warns but still
 stages.
 
 By default the draft lands in the root `requirements.json`. To draft
 into an included spec file instead, name it with `--file` (it must
 already be part of the catalog — see
-[`bdd spec include`](#bdd-spec-include)):
+[`spec include`](#spec-include)):
 
 ```bash
-bdd spec draft --file requirements/core/arithmetic.json
+spec draft --file requirements/core/arithmetic.json
 ```
 
 Ids are allocated across the whole catalog, so a requirement drafted
@@ -161,7 +162,7 @@ REQ-004 criterion 2 (leave blank to finish the criteria):
 - `-` drops a prior criterion.
 - New criteria can be appended after the priors.
 
-With a resolved model, `bdd spec draft` runs the same
+With a resolved model, `spec draft` runs the same
 description-driven wizard as [greenfield](greenfield.md#the-description-driven-wizard),
 and findings are sent to the model first: the rewording prompts carry
 its corrected proposal instead of your raw prior answers, so
@@ -206,13 +207,13 @@ When the draft is clean it is staged:
   "id": "REQ-004",
   "title": "Newlines act as delimiters",
   "staged": true,
-  "nextStep": "Review with 'bdd changes show', apply with 'bdd changes commit', then write the Gherkin scenario."
+  "nextStep": "Review with 'spec changes show', apply with 'spec changes commit', then write the Gherkin scenario."
 }
 ```
 
 ---
 
-## bdd spec validate
+## spec validate
 
 Validate the whole spec on disk: JSON shape, required fields, unique
 ids, status values, and Given/When/Then phrasing of every criterion.
@@ -223,7 +224,7 @@ the id first). Only the root document needs a `project` name, and the
 merged tree must hold at least one requirement.
 
 ```bash
-bdd spec validate
+spec validate
 ```
 
 Valid spec:
@@ -232,7 +233,7 @@ Valid spec:
 {
   "valid": true,
   "issues": [],
-  "nextStep": "Pick a pending requirement with 'bdd spec list' and write its scenario."
+  "nextStep": "Pick a pending requirement with 'spec list' and write its scenario."
 }
 ```
 
@@ -251,18 +252,18 @@ verdict):
 
 ---
 
-## bdd spec refine
+## spec refine
 
 Review one requirement's wording for quality: vague words, missing
 actor or benefit in the story, compound criteria, non-concrete
 outcomes, happy-path-only criteria.
 
 ```text
-Usage: bdd spec refine [OPTIONS] <REQ_ID>
+Usage: spec refine [OPTIONS] <REQ_ID>
 ```
 
 ```bash
-bdd spec refine REQ-004
+spec refine REQ-004
 ```
 
 ```json
@@ -282,14 +283,14 @@ wording — that approval is the first human gate of the workflow.
 
 ---
 
-## bdd spec reword
+## spec reword
 
 Reword an existing backlog item (staged). Interactive wizard is the
 same refine → reword loop as draft. Flags skip the wizard:
 
 ```bash
-bdd spec reword REQ-007
-bdd spec reword REQ-007 \
+spec reword REQ-007
+spec reword REQ-007 \
   --title "Newlines as delimiters" \
   --story "As a calculator user, I want newlines to separate numbers in addition to commas so that multi-line input just works." \
   --criterion 'Given the input "1\n2,3", when add is called, then the result is 6' \
@@ -304,20 +305,20 @@ string replacement against `requirements.json` will not match.
 
 ---
 
-## bdd spec set-feature
+## spec set-feature
 
 Point a requirement at the feature file that was actually written
 (staged). Used when a copied spec still names `kata/…` paths that do
-not exist on an extracted project. `bdd scenario add` already updates
+not exist on an extracted project. `spec scenario add` already updates
 `featureFile` when it is missing or stale.
 
 ```bash
-bdd spec set-feature REQ-003 --file src/test/resources/features/string_calculator.feature
+spec set-feature REQ-003 --file src/test/resources/features/string_calculator.feature
 ```
 
 ---
 
-## bdd spec mark-implemented
+## spec mark-implemented
 
 Flip a requirement's status to `implemented` and record its
 `featureFile` — the feature carrying the `@REQ-...` tag — in the same
@@ -325,13 +326,13 @@ staged edit, so the spec passes validation. The change is staged, not
 applied directly.
 
 ```text
-Usage: bdd spec mark-implemented [OPTIONS] <REQ_ID>
+Usage: spec mark-implemented [OPTIONS] <REQ_ID>
 ```
 
 ```bash
-bdd spec mark-implemented REQ-003
-bdd validate
-bdd changes commit
+spec mark-implemented REQ-003
+spec changes validate
+spec changes commit
 ```
 
 ```json
@@ -339,7 +340,7 @@ bdd changes commit
   "id": "REQ-003",
   "status": "implemented",
   "staged": true,
-  "nextStep": "Review with changes show, run bdd validate (it checks the @REQ-003 scenario exists), then bdd changes commit."
+  "nextStep": "Review with changes show, run spec changes validate (it checks the @REQ-003 scenario exists), then spec changes commit."
 }
 ```
 
@@ -350,7 +351,7 @@ The command is gated twice:
   GREEN; it is the last move of the per-requirement rhythm.
 - **Tagged scenario only** — it refuses when no committed feature
   file carries a scenario tagged `@<REQ_ID>`; add one with
-  `bdd scenario add` and apply it with `bdd changes commit` first.
+  `spec scenario add` and apply it with `spec changes commit` first.
 
 Re-running it on an already-implemented requirement is safe: on GREEN
 it backfills a missing `featureFile`, which is exactly the repair for
@@ -363,13 +364,13 @@ file stages that file, never the root.
 
 ---
 
-## bdd spec include
+## spec include
 
 Manage the catalog's included spec files
 ([format reference](../spec-format.md#the-catalog-splitting-the-spec-across-files)).
 
 ```text
-Usage: bdd spec include add [OPTIONS] <PATH>
+Usage: spec include add [OPTIONS] <PATH>
 
 Options:
   --from <FILE>  The catalog document declaring the include (default: the root requirements.json)
@@ -380,7 +381,7 @@ and — when the included file does not exist anywhere yet — an empty
 spec skeleton (`{ "requirements": [] }`) for it.
 
 ```bash
-bdd spec include add requirements/core/arithmetic.json
+spec include add requirements/core/arithmetic.json
 ```
 
 ```json
@@ -389,7 +390,7 @@ bdd spec include add requirements/core/arithmetic.json
   "parent": "requirements/requirements.json",
   "created": true,
   "staged": true,
-  "nextStep": "Review with bdd changes show, apply with bdd changes commit, then draft into it with bdd spec draft --file."
+  "nextStep": "Review with spec changes show, apply with spec changes commit, then draft into it with spec draft --file."
 }
 ```
 
@@ -397,7 +398,7 @@ Nest deeper by including from a child instead of the root; the entry
 is written relative to that parent's directory:
 
 ```bash
-bdd spec include add requirements/core/edge-cases.json \
+spec include add requirements/core/edge-cases.json \
   --from requirements/core/arithmetic.json
 ```
 
@@ -408,4 +409,4 @@ Includes must be `.json` files inside the spec directory.
 
 - [The requirements format](../spec-format.md) — every field of the spec, and the include catalog.
 - [The workflow](../workflow.md) — where each subcommand fits.
-- [`bdd changes`](changes.md) — reviewing and applying staged spec mutations.
+- [`spec changes`](changes.md) — reviewing and applying staged spec mutations.

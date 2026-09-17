@@ -1,5 +1,5 @@
 Feature: Per-command tool profiles
-  As a developer running an LLM-backed bdd command
+  As a developer running an LLM-backed spec command
   I want each caller offered only the tools that step of the loop needs
   So that the model stays on-task and cannot stage or commit by default
 

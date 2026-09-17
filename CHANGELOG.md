@@ -2,6 +2,44 @@
 
 ## Unreleased
 
+- The binary is now `spec` and the crate is `spec-harness`. What the tool
+  does is author, gate, and drive a requirements spec; `bdd` named the
+  altitude of one of the two test loops it runs, which was always the
+  narrower half of the story. This is a hard cutover — there is no `bdd`
+  shim and no alias. Installing `spec` leaves an older `bdd` on PATH
+  untouched, so uninstall that separately.
+
+  The `bdd spec …` group is promoted to the top level, because
+  `spec spec draft` is absurd: `spec list`, `spec show`, `spec draft`,
+  `spec validate`, `spec refine`, `spec reword`, `spec set-feature`,
+  `spec mark-implemented`, and `spec include add`. Only `validate`
+  collided, and the requirements spec won it, so the Gherkin gate that
+  was `bdd validate` is now `spec changes validate` — which also finally
+  matches its MCP name, `changes_validate`. Every other command keeps its
+  own name behind the new one.
+
+  On-disk state is renamed with the tool: `.spec.toml`,
+  `.spec-state.json`, `.spec-memory.json`, `.spec-staged/`,
+  `.spec-cache/`, `.spec-log/` (holding `spec.log`), `.spec-history`, and
+  the home-directory MCP registry at `~/.spec/mcp.json`. Those names were
+  scattered string literals and are now constants in `domain`, declared
+  once. Nothing migrates a project carrying the old names: rename them,
+  or let the harness recreate what it needs.
+
+  Also renamed: `BDD_MCP_CONFIG` to `SPEC_MCP_CONFIG` and the `BDD_E2E_*`
+  knobs to `SPEC_E2E_*`; release assets to `spec-harness-*` with the
+  receipt at `~/.config/spec-harness/spec-harness-receipt.json`;
+  `RUST_LOG` filters on `spec_harness::…`; the interactive shell prompt to
+  `spec>`, forgiving a pasted leading `spec` where it used to forgive
+  `bdd`; and the smoke test's `-Dbdd.binary` to `-Dspec.binary`.
+
+  Two things deliberately did not move. The 25 MCP tool names and the
+  `spec-driven-server` key are unchanged, so an MCP client needs nothing
+  but the new `"command": "spec"`. And `bddFramework` stays `bddFramework`
+  in `project_inspect` output and `.spec-memory.json`, because that field
+  names the project's BDD framework — Cucumber-JVM, cucumber-rs — and has
+  never referred to this tool.
+
 - The `cli/` directory is now `harness/` and the crate is `bdd-harness`:
   what ships is a harness for the whole spec-driven loop — commands and
   the embedded MCP server — not only a command line. The binary is still
@@ -34,6 +72,17 @@
   missing scenario is still caught, and named: `bdd validate` only
   requires that *one* tagged scenario exist, so a run that wrote a
   scenario for one of two criteria used to pass every gate.
+
+- The deck can change cuts from inside the deck: a switch in the
+  bottom-left corner and the <kbd>t</kbd> key move between the 60- and
+  30-minute tracks, and `?60` now forces the long cut so the switch also
+  works from the published `/talk30/` path. Until now the cut was decided
+  by the URL alone, so opening `slides/index.html` — what the README tells
+  you to do — left no way to reach the short track but to retype the
+  address. The links that were supposed to offer it were broken in the
+  same direction: `README.md` and `speaking.md` each wrote `?30` in the
+  link text and left it out of the target, so every route into the deck,
+  including the published `/speaking/` page, landed on the 60-minute cut.
 
 - Exercise 2 names REQ-003 in its prompt — in the follow-along, the
   README, and the slide deck, the three places attendees paste it from.

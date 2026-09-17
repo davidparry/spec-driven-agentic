@@ -1,11 +1,11 @@
-# bdd init
+# spec init
 
 Scaffold build files, a Cucumber runner, an empty requirements spec,
 and the harness's configuration in the project root. Existing files are
 never overwritten — they are reported as skipped.
 
 ```text
-Usage: bdd init [OPTIONS]
+Usage: spec init [OPTIONS]
 ```
 
 ## Flags
@@ -24,13 +24,13 @@ Every language gets the two spec-driven anchors:
 - `requirements/requirements.json` — an empty, valid spec. It is also
   the root of the [spec catalog](../spec-format.md): split the backlog
   into included files later with
-  [`bdd spec include add`](spec.md#bdd-spec-include).
-- `.bdd.toml` — the harness configuration (LLM, timeouts, per-command
-  tool profiles). `bdd init` writes `[tools.profiles]` with the tools
+  [`spec include add`](spec.md#spec-include).
+- `.spec.toml` — the harness configuration (LLM, timeouts, per-command
+  tool profiles). `spec init` writes `[tools.profiles]` with the tools
   each LLM-backed command offers the model (the code defaults, listed
   for reference). Other keys are commented with their defaults.
 
-After scaffolding, `init` scans the new files into `.bdd-memory.json`
+After scaffolding, `init` scans the new files into `.spec-memory.json`
 (language, BDD framework, libraries, layout). That file is committed
 with the project; it is refreshed again when a shell, MCP server, or
 LLM command starts. Every model system prompt then opens with that
@@ -52,7 +52,7 @@ Scaffold a Rust kata in a fresh directory:
 
 ```bash
 mkdir calculator && cd calculator
-bdd init --language rust --name "String Calculator"
+spec init --language rust --name "String Calculator"
 ```
 
 ```json
@@ -61,21 +61,21 @@ bdd init --language rust --name "String Calculator"
   "framework": "cucumber-rs",
   "created": [
     "requirements/requirements.json",
-    ".bdd.toml",
+    ".spec.toml",
     "Cargo.toml",
     "src/lib.rs",
     "tests/cucumber.rs",
     "features/.gitkeep"
   ],
   "skipped": [],
-  "nextStep": "Draft your first requirement with 'bdd spec draft', then 'bdd spec validate'."
+  "nextStep": "Draft your first requirement with 'spec draft', then 'spec validate'."
 }
 ```
 
 Re-running is safe — everything that already exists is skipped:
 
 ```bash
-bdd init --language rust
+spec init --language rust
 ```
 
 ```json
@@ -85,13 +85,13 @@ bdd init --language rust
   "created": [],
   "skipped": [
     "requirements/requirements.json",
-    ".bdd.toml",
+    ".spec.toml",
     "Cargo.toml",
     "src/lib.rs",
     "tests/cucumber.rs",
     "features/.gitkeep"
   ],
-  "nextStep": "Draft your first requirement with 'bdd spec draft', then 'bdd spec validate'."
+  "nextStep": "Draft your first requirement with 'spec draft', then 'spec validate'."
 }
 ```
 
@@ -104,10 +104,10 @@ unrecognized answer re-prompts.
   protect in an empty project); everything after `init` goes through
   [staged changes](../staged-changes.md).
 - `init` does not install runtimes. Run
-  [`bdd inspect`](inspect.md) to see whether the language's runtime is
-  present before expecting `bdd test` to execute.
+  [`spec inspect`](inspect.md) to see whether the language's runtime is
+  present before expecting `spec test` to execute.
 
 ## See also
 
-- [`bdd greenfield`](greenfield.md) — runs `init` as its first move.
-- [`bdd spec draft`](spec.md#bdd-spec-draft) — the natural next step.
+- [`spec greenfield`](greenfield.md) — runs `init` as its first move.
+- [`spec draft`](spec.md#spec-draft) — the natural next step.

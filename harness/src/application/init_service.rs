@@ -1,4 +1,4 @@
-//! `bdd init`: lay down the per-language scaffold (build file, Cucumber
+//! `spec init`: lay down the per-language scaffold (build file, Cucumber
 //! runner, empty spec, harness configuration). Existing files are never
 //! touched, so init is safe to re-run and safe on half-scaffolded
 //! directories.
@@ -46,7 +46,7 @@ impl<W: ScaffoldWriter> InitService<W> {
             framework: language.bdd_framework().to_string(),
             created,
             skipped,
-            next_step: "Draft the first requirement with bdd spec draft (or run bdd greenfield \
+            next_step: "Draft the first requirement with spec draft (or run spec greenfield \
                         for the whole loop)."
                 .into(),
         })
@@ -93,7 +93,7 @@ mod tests {
                 .contains(&"requirements/requirements.json".to_string())
         );
         assert!(report.skipped.is_empty());
-        assert!(report.next_step.contains("bdd spec draft"));
+        assert!(report.next_step.contains("spec draft"));
     }
 
     #[test]

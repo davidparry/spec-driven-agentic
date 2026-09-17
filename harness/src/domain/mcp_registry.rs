@@ -37,7 +37,7 @@ pub fn config_candidates(
     paths.push(root.join(".cursor/mcp.json"));
     paths.push(root.join(".vscode/mcp.json"));
     if let Some(home) = home {
-        paths.push(home.join(".bdd/mcp.json"));
+        paths.push(home.join(".spec/mcp.json"));
     }
     paths
 }
@@ -215,7 +215,7 @@ mod tests {
         assert_eq!(paths[0], PathBuf::from("/cfg.json"));
         assert_eq!(paths[1], PathBuf::from("/env.json"));
         assert_eq!(paths[2], root.join("mcp.json"));
-        assert_eq!(paths.last().unwrap(), &home.join(".bdd/mcp.json"));
+        assert_eq!(paths.last().unwrap(), &home.join(".spec/mcp.json"));
     }
 
     fn env(name: &str) -> Option<String> {

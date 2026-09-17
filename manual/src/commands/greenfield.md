@@ -1,4 +1,4 @@
-# bdd greenfield
+# spec greenfield
 
 Run the full orchestrated loop from an empty directory to an
 implemented requirement, with exactly **two human gates**: approving
@@ -7,7 +7,7 @@ Everything else — scaffolding, validation, scenario authoring, step
 generation, test execution, phase tracking — is automated.
 
 ```text
-Usage: bdd greenfield [OPTIONS]
+Usage: spec greenfield [OPTIONS]
 ```
 
 ## Flags
@@ -22,7 +22,7 @@ Usage: bdd greenfield [OPTIONS]
 
 ```text
  1. inspect / init      scaffold if the root is empty (asks for language)
-                        and records the choice in .bdd-memory.json
+                        and records the choice in .spec-memory.json
  2. describe            you describe what to build in plain words; the
                         model splits it into requirement proposals
  3. accept + wizard     you accept all listed proposals, or a
@@ -42,7 +42,7 @@ Usage: bdd greenfield [OPTIONS]
  9. test → GREEN        loop back to 8 while failing
 10. refactor            optional; only offered on GREEN
 11. mark implemented    Saving status spinner until requirements.json
-                        is written; then the bdd> prompt for the next
+                        is written; then the spec> prompt for the next
                         command
 ```
 
@@ -82,7 +82,7 @@ straight into `requirements.json` (the root of the
 `REQ-###` id — you can open that file as soon as you hit Enter.
 You then pick which stored requirement to review and refine first.
 The others wait as pending requirements — reword them any time with
-`bdd spec reword`.
+`spec reword`.
 Nothing is accepted silently: every field passes through your hands,
 and the validate + refine gates still run on whatever you accept.
 
@@ -148,11 +148,11 @@ work — print in red so they stand out from the loop's narration. Without a
 model, <kbd>Enter</kbd> just reruns the tests.
 
 Typing `stop` pauses the run; a paused project continues with the
-standalone [`bdd implement`](implement.md) command, which runs the
+standalone [`spec implement`](implement.md) command, which runs the
 same attempt from the persisted failure details:
 
 ```bash
-bdd implement REQ-001 && bdd changes commit && bdd test
+spec implement REQ-001 && spec changes commit && spec test
 ```
 
 ## Rewording loop details
@@ -229,7 +229,7 @@ until nothing is pending or you type `n`. `nextStep` says how to
 continue later.
 
 The JSON reply then prints, and on a real terminal a one-shot
-`bdd greenfield` keeps the session open at the `bdd>` prompt so you can
+`spec greenfield` keeps the session open at the `spec>` prompt so you can
 run `spec list`, `greenfield`, or any other command without relaunching.
 
 ## Reply
@@ -264,4 +264,4 @@ continue.
 ## See also
 
 - [The workflow](../workflow.md) — the same rhythm, step by step.
-- [`bdd model`](model.md) — pick which model powers generation.
+- [`spec model`](model.md) — pick which model powers generation.

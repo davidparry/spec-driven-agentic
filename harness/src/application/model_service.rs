@@ -12,7 +12,7 @@ pub enum ModelSource {
     OnlyInstalled,
     /// Several models are installed and none is configured: the first
     /// one serves as the session default. Nothing is persisted until
-    /// the user explicitly picks a model with `bdd model use`.
+    /// the user explicitly picks a model with `spec model use`.
     FirstInstalled,
 }
 

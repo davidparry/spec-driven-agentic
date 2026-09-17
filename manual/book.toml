@@ -1,9 +1,9 @@
 [book]
-title = "bdd Harness Manual"
+title = "spec Harness Manual"
 authors = ["David Parry"]
 language = "en"
 src = "src"
-description = "The complete, searchable reference for the bdd harness: every command, subcommand, and flag, with in-depth examples."
+description = "The complete, searchable reference for the spec harness: every command, subcommand, and flag, with in-depth examples."
 
 [build]
 # The built book is committed so GitHub Pages serves it at /manual/.

@@ -1,11 +1,11 @@
-# bdd state
+# spec state
 
 Show the current TDD phase, the last run's counts, the refactor
 log, and at most the three latest dated state entries. Read-only —
 it never changes anything.
 
 ```text
-Usage: bdd state [OPTIONS]
+Usage: spec state [OPTIONS]
 ```
 
 MCP tool equivalent: `get_tdd_state`.
@@ -17,7 +17,7 @@ Only the [global flags](../global-flags.md) (`--root`, `--model`).
 ## Examples
 
 ```bash
-bdd state
+spec state
 ```
 
 ```json
@@ -51,25 +51,25 @@ bdd state
       "attemptLog": []
     }
   ],
-  "nextStep": "You are GREEN. Refactor with 'bdd refactor', or mark the requirement implemented."
+  "nextStep": "You are GREEN. Refactor with 'spec refactor', or mark the requirement implemented."
 }
 ```
 
 Before any test has ever run, the phase is the starting state and
-`lastRun` is all zeros; `nextStep` points you at `bdd test`.
+`lastRun` is all zeros; `nextStep` points you at `spec test`.
 
 ## Where the state lives
 
-`.bdd-state.json` under the project root. It is a chronological log of
+`.spec-state.json` under the project root. It is a chronological log of
 timestamped entries — one per test run, refactor, or implementation
 attempt — plus `instructions` that explain how to read the schema. The
-file keeps the full history so a human can audit the loop; `bdd state`
+file keeps the full history so a human can audit the loop; `spec state`
 and every model brief include **only the three latest entries**. Delete
 the file to reset the phase machine (there is deliberately no `reset`
 command — losing the log should be an explicit filesystem act).
 
 The same file also carries `attemptLog` — the record of every model
-implementation attempt that [`bdd implement`](implement.md) and the
+implementation attempt that [`spec implement`](implement.md) and the
 greenfield loop brief the next attempt with: the files it wrote
 (`targets`), the failures it was briefed with (`failures`), and the
 output of the first test run after it (`outcome`; empty means no run
@@ -86,9 +86,9 @@ requirement to inherit.
   [the workflow](../workflow.md)). The current phase; also the last
   entry's `phase`.
 - `lastRun` — counts only; the failure details live in the
-  [`bdd test`](test.md) reply that produced them.
+  [`spec test`](test.md) reply that produced them.
 - `refactorLog` — every note passed to
-  [`bdd refactor --note`](refactor.md), in order. It is the audit
+  [`spec refactor --note`](refactor.md), in order. It is the audit
   trail of intentional design work.
 - `entries` — at most the three latest dated snapshots (`timestamp`,
   `phase`, `lastRun`, `refactorLog`, `attemptLog`). Older entries stay
@@ -96,5 +96,5 @@ requirement to inherit.
 
 ## See also
 
-- [`bdd test`](test.md) — the command that moves the phase.
-- [`bdd refactor`](refactor.md) — appends to the log shown here.
+- [`spec test`](test.md) — the command that moves the phase.
+- [`spec refactor`](refactor.md) — appends to the log shown here.

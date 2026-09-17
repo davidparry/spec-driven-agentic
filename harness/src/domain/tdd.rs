@@ -9,7 +9,7 @@
 //!   refactor on a red bar)
 //!
 //! Persistence is a chronological log of timestamped entries in
-//! `.bdd-state.json`. The file keeps the full history; an LLM brief
+//! `.spec-state.json`. The file keeps the full history; an LLM brief
 //! only receives the three latest entries plus the interpretation
 //! instructions.
 
@@ -22,14 +22,14 @@ use crate::domain::model::TestRunSummary;
 /// How many dated state entries an LLM may be briefed with.
 pub const LLM_STATE_ENTRIES: usize = 3;
 
-/// How to read `.bdd-state.json`. Written into the file so an agent
+/// How to read `.spec-state.json`. Written into the file so an agent
 /// opening it knows the schema without a side document.
 pub const STATE_INSTRUCTIONS: &str = "\
 This file is the TDD phase log. `instructions` is this guide, not workflow state. \
 `entries` is chronological, oldest first; each entry is the machine at `timestamp` (UTC RFC 3339). \
 `phase` is START, RED, GREEN, or REFACTOR. Never refactor on RED; never mark a requirement implemented off GREEN. \
 `lastRun` is test counts at that moment; failure details live on the test-run reply. \
-`refactorLog` is every bdd refactor --note, in order. \
+`refactorLog` is every spec refactor --note, in order. \
 `attemptLog` is model implementation attempts for the requirement in flight; a GREEN run clears it. \
 Each attempt records what it wrote (`targets`), the failures it was briefed with (`failures`), and \
 the output of the first run after it (`outcome`; empty means no run verified it). \
@@ -93,7 +93,7 @@ pub struct StateEntry {
 /// is what an LLM is allowed to see. The envelope is strict
 /// (`instructions` and `entries` are required). `attemptLog[].outcome`
 /// defaults to empty so 0.2.3 files still load. A file that does not
-/// match is a parse error (delete `.bdd-state.json` to reset the machine).
+/// match is a parse error (delete `.spec-state.json` to reset the machine).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TddSnapshot {
     pub instructions: String,

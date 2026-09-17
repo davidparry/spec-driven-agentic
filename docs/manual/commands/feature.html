@@ -3,12 +3,12 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>bdd feature - bdd Harness Manual</title>
+        <title>spec feature - spec Harness Manual</title>
 
 
         <!-- Custom HTML head -->
 
-        <meta name="description" content="The complete, searchable reference for the bdd harness: every command, subcommand, and flag, with in-depth examples.">
+        <meta name="description" content="The complete, searchable reference for the spec harness: every command, subcommand, and flag, with in-depth examples.">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff">
 
@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-aaad9ee5.js";
+            window.path_to_searchindex_js = "../searchindex-5959f77b.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-9d4e1520.js"></script>
+        <script src="../toc-372d77fe.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -137,7 +137,7 @@
                         </button>
                     </div>
 
-                    <h1 class="menu-title">bdd Harness Manual</h1>
+                    <h1 class="menu-title">spec Harness Manual</h1>
 
                     <div class="right-buttons">
                         <a href="../print.html" title="Print this book" aria-label="Print this book">
@@ -180,19 +180,19 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="bdd-feature"><a class="header" href="#bdd-feature">bdd feature</a></h1>
+                        <h1 id="spec-feature"><a class="header" href="#spec-feature">spec feature</a></h1>
 <p>Feature discovery and creation. Feature files are the BDD altitude of
 the workflow: each requirement gets a scenario in one, tagged with its
 <code>@REQ-...</code> id.</p>
-<pre><code class="language-text">Usage: bdd feature [OPTIONS] &lt;COMMAND&gt;
+<pre><code class="language-text">Usage: spec feature [OPTIONS] &lt;COMMAND&gt;
 
 Commands: list, show, create
 </code></pre>
 <hr>
-<h2 id="bdd-feature-list"><a class="header" href="#bdd-feature-list">bdd feature list</a></h2>
+<h2 id="spec-feature-list"><a class="header" href="#spec-feature-list">spec feature list</a></h2>
 <p>List every feature file under the root with its feature name and
 scenario count.</p>
-<pre><code class="language-bash">bdd feature list
+<pre><code class="language-bash">spec feature list
 </code></pre>
 <pre><code class="language-json">[
   {
@@ -203,13 +203,13 @@ scenario count.</p>
 ]
 </code></pre>
 <hr>
-<h2 id="bdd-feature-show"><a class="header" href="#bdd-feature-show">bdd feature show</a></h2>
+<h2 id="spec-feature-show"><a class="header" href="#spec-feature-show">spec feature show</a></h2>
 <p>Show one parsed feature file — its name, scenarios, tags, and steps —
 as structured JSON rather than raw text.</p>
-<pre><code class="language-text">Usage: bdd feature show [OPTIONS] &lt;PATH&gt;
+<pre><code class="language-text">Usage: spec feature show [OPTIONS] &lt;PATH&gt;
 </code></pre>
 <p>The path is relative to <code>--root</code>:</p>
-<pre><code class="language-bash">bdd feature show features/string_calculator.feature
+<pre><code class="language-bash">spec feature show features/string_calculator.feature
 </code></pre>
 <pre><code class="language-json">{
   "path": "features/string_calculator.feature",
@@ -229,11 +229,11 @@ as structured JSON rather than raw text.</p>
 </code></pre>
 <p>A file that is not valid Gherkin fails with the parser’s diagnosis.</p>
 <hr>
-<h2 id="bdd-feature-create"><a class="header" href="#bdd-feature-create">bdd feature create</a></h2>
+<h2 id="spec-feature-create"><a class="header" href="#spec-feature-create">spec feature create</a></h2>
 <p>Create a feature file. The file is <strong>staged</strong>, not written to the
-working tree — review with <a href="changes.html"><code>bdd changes show</code></a> and apply
-with <code>bdd changes commit</code>.</p>
-<pre><code class="language-text">Usage: bdd feature create [OPTIONS] --path &lt;PATH&gt; --name &lt;NAME&gt;
+working tree — review with <a href="changes.html"><code>spec changes show</code></a> and apply
+with <code>spec changes commit</code>.</p>
+<pre><code class="language-text">Usage: spec feature create [OPTIONS] --path &lt;PATH&gt; --name &lt;NAME&gt;
 </code></pre>
 <div class="table-wrapper">
 <table>
@@ -246,19 +246,19 @@ with <code>bdd changes commit</code>.</p>
 </tbody>
 </table>
 </div>
-<pre><code class="language-bash">bdd feature create --path features/string_calculator.feature --name "String Calculator"
-bdd changes show
-bdd changes commit
+<pre><code class="language-bash">spec feature create --path features/string_calculator.feature --name "String Calculator"
+spec changes show
+spec changes commit
 </code></pre>
 <p>The staged file contains the <code>Feature:</code> header ready for scenarios:</p>
 <pre><code class="language-gherkin">Feature: String Calculator
 </code></pre>
-<p>Add scenarios with <a href="scenario.html"><code>bdd scenario add</code></a> — don’t edit the
+<p>Add scenarios with <a href="scenario.html"><code>spec scenario add</code></a> — don’t edit the
 staged file by hand.</p>
 <h2 id="see-also"><a class="header" href="#see-also">See also</a></h2>
 <ul>
-<li><a href="scenario.html"><code>bdd scenario</code></a> — populate features with tagged scenarios.</li>
-<li><a href="validate.html"><code>bdd validate</code></a> — parse-check all features, staged included.</li>
+<li><a href="scenario.html"><code>spec scenario</code></a> — populate features with tagged scenarios.</li>
+<li><a href="changes.html#spec-changes-validate"><code>spec changes validate</code></a> — parse-check all features, staged included.</li>
 </ul>
 
                     </main>

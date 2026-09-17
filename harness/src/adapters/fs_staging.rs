@@ -1,11 +1,12 @@
 //! Filesystem implementation of the [`ChangeStore`] port. Staged files
-//! live under `.bdd-staged/files/` mirroring the project layout, with a
+//! live under `.spec-staged/files/` mirroring the project layout, with a
 //! `manifest.json` describing each change; `commit` copies them into the
 //! working tree and clears the area.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::domain::STAGED_DIR;
 use crate::ports::{ChangeStore, StageError, StagedChange};
 
 pub struct FsChangeStore {
@@ -18,7 +19,7 @@ impl FsChangeStore {
     }
 
     fn staged_dir(&self) -> PathBuf {
-        self.root.join(".bdd-staged")
+        self.root.join(STAGED_DIR)
     }
 
     fn manifest_file(&self) -> PathBuf {
@@ -207,7 +208,7 @@ mod tests {
             "{}"
         );
         assert_eq!(store.changes().unwrap(), vec![]);
-        assert!(!dir.path().join(".bdd-staged").exists());
+        assert!(!dir.path().join(STAGED_DIR).exists());
     }
 
     #[test]
@@ -223,8 +224,12 @@ mod tests {
     #[test]
     fn a_corrupt_manifest_is_a_structured_error() {
         let (dir, store) = store();
-        fs::create_dir_all(dir.path().join(".bdd-staged")).unwrap();
-        fs::write(dir.path().join(".bdd-staged/manifest.json"), "not json").unwrap();
+        fs::create_dir_all(dir.path().join(STAGED_DIR)).unwrap();
+        fs::write(
+            dir.path().join(STAGED_DIR).join("manifest.json"),
+            "not json",
+        )
+        .unwrap();
         let error = store.changes().unwrap_err();
         assert!(
             error.0.starts_with("staging manifest is not valid JSON -"),
@@ -244,7 +249,7 @@ mod tests {
     fn a_staged_file_missing_from_disk_is_a_structured_error() {
         let (dir, store) = store();
         store.stage("a.txt", "x", "s").unwrap();
-        fs::remove_file(dir.path().join(".bdd-staged/files/a.txt")).unwrap();
+        fs::remove_file(dir.path().join(STAGED_DIR).join("files/a.txt")).unwrap();
         let read = store.content("a.txt").unwrap_err();
         assert!(
             read.0.contains("staged file not readable"),

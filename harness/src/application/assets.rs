@@ -1,5 +1,5 @@
 //! The requirement/asset queries shared by step generation, the
-//! implement preflight, and `bdd status`: looking a requirement up by
+//! implement preflight, and `spec status`: looking a requirement up by
 //! id, finding undefined steps, and surveying the assets an
 //! implementation rests on.
 
@@ -67,7 +67,7 @@ pub(crate) fn feature_tagged(
 /// tagged scenario, the step definitions, the unit test, the
 /// production file - and the finding (naming the command to run)
 /// for each one that is missing. Shared by the implement preflight
-/// and `bdd status`.
+/// and `spec status`.
 pub(crate) fn asset_survey(
     features: &impl FeatureCatalog,
     sources: &impl SourceFiles,
@@ -82,8 +82,8 @@ pub(crate) fn asset_survey(
     let tagged_feature = feature_tagged(features, &tag)?;
     if tagged_feature.is_none() {
         findings.push(format!(
-            "No scenario is tagged {tag} - add one with bdd scenario add, \
-             then bdd changes commit."
+            "No scenario is tagged {tag} - add one with spec scenario add, \
+             then spec changes commit."
         ));
     }
     assets.push(ImplementAsset {
@@ -102,8 +102,8 @@ pub(crate) fn asset_survey(
     let missing_steps = find_missing_steps(features, sources, language)?;
     if !missing_steps.is_empty() {
         findings.push(format!(
-            "{} step(s) have no definition - run bdd steps generate, \
-             then bdd changes commit.",
+            "{} step(s) have no definition - run spec steps generate, \
+             then spec changes commit.",
             missing_steps.len()
         ));
     }
@@ -124,8 +124,8 @@ pub(crate) fn asset_survey(
     });
     if !unit_test_present {
         findings.push(format!(
-            "The unit test {unit_path} does not exist - run bdd unittest \
-             generate {req_id}, then bdd changes commit."
+            "The unit test {unit_path} does not exist - run spec unittest \
+             generate {req_id}, then spec changes commit."
         ));
     }
     assets.push(ImplementAsset {
@@ -299,7 +299,7 @@ mod tests {
         assert!(
             findings
                 .iter()
-                .any(|f| f.contains("bdd unittest generate REQ-003"))
+                .any(|f| f.contains("spec unittest generate REQ-003"))
         );
     }
 

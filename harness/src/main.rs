@@ -1,4 +1,4 @@
-//! `bdd` — spec-driven BDD/TDD harness with an embedded MCP server.
+//! `spec` — spec-driven BDD/TDD harness with an embedded MCP server.
 //!
 //! This binary is a composition root: it names concrete adapters and
 //! wires them into application services, and nothing else.
@@ -7,61 +7,61 @@ use std::path::{Path, PathBuf};
 
 use clap::{Args, Parser, Subcommand};
 
-use bdd_harness::adapters::chat_cache::{CachedConversation, DEFAULT_CACHE_TTL};
-use bdd_harness::adapters::config::{
+use spec_harness::adapters::chat_cache::{CachedConversation, DEFAULT_CACHE_TTL};
+use spec_harness::adapters::config::{
     TomlModelStore, TomlToolStore, config_path, inspect_config, tools_settings,
 };
-use bdd_harness::adapters::console_prompt::ConsolePrompter;
-use bdd_harness::adapters::fs_project::FsProjectFiles;
-use bdd_harness::adapters::fs_scaffold::FsScaffoldWriter;
-use bdd_harness::adapters::fs_spec::FsSpecRepository;
-use bdd_harness::adapters::fs_staging::FsChangeStore;
-use bdd_harness::adapters::mcp_client::McpToolBroker;
-use bdd_harness::adapters::mcp_config::FsMcpRegistry;
-use bdd_harness::adapters::ollama::{DEFAULT_ENDPOINT, DEFAULT_GENERATION_TIMEOUT, OllamaCatalog};
-use bdd_harness::adapters::ollama_chat::OllamaChat;
-use bdd_harness::adapters::process_runtime::ProcessRuntimeProbe;
-use bdd_harness::adapters::readline_prompt::ReadlinePrompter;
-use bdd_harness::adapters::readline_shell::ReadlineShell;
-use bdd_harness::adapters::runners::detect_runner;
-use bdd_harness::adapters::spinner::Spinner;
-use bdd_harness::adapters::tool_cache::CachedDiscovery;
-use bdd_harness::application::DEFAULT_LLM_ATTEMPTS;
-use bdd_harness::application::agent_service::AgentConfig;
-use bdd_harness::application::generation_service::{GenerationService, ResolvedLlm};
-use bdd_harness::application::implement_service::ImplementService;
-use bdd_harness::application::init_service::InitService;
-use bdd_harness::application::inspect_service::InspectService;
-use bdd_harness::application::memory_service::MemoryAwareConversation;
-use bdd_harness::application::model_service::{
+use spec_harness::adapters::console_prompt::ConsolePrompter;
+use spec_harness::adapters::fs_project::FsProjectFiles;
+use spec_harness::adapters::fs_scaffold::FsScaffoldWriter;
+use spec_harness::adapters::fs_spec::FsSpecRepository;
+use spec_harness::adapters::fs_staging::FsChangeStore;
+use spec_harness::adapters::mcp_client::McpToolBroker;
+use spec_harness::adapters::mcp_config::FsMcpRegistry;
+use spec_harness::adapters::ollama::{DEFAULT_ENDPOINT, DEFAULT_GENERATION_TIMEOUT, OllamaCatalog};
+use spec_harness::adapters::ollama_chat::OllamaChat;
+use spec_harness::adapters::process_runtime::ProcessRuntimeProbe;
+use spec_harness::adapters::readline_prompt::ReadlinePrompter;
+use spec_harness::adapters::readline_shell::ReadlineShell;
+use spec_harness::adapters::runners::detect_runner;
+use spec_harness::adapters::spinner::Spinner;
+use spec_harness::adapters::tool_cache::CachedDiscovery;
+use spec_harness::application::DEFAULT_LLM_ATTEMPTS;
+use spec_harness::application::agent_service::AgentConfig;
+use spec_harness::application::generation_service::{GenerationService, ResolvedLlm};
+use spec_harness::application::implement_service::ImplementService;
+use spec_harness::application::init_service::InitService;
+use spec_harness::application::inspect_service::InspectService;
+use spec_harness::application::memory_service::MemoryAwareConversation;
+use spec_harness::application::model_service::{
     ModelResolution, ModelService, ModelSource, SessionModel,
 };
-use bdd_harness::application::spec_mutation_service::SpecMutationService;
-use bdd_harness::application::status_service::StatusService;
-use bdd_harness::application::tdd_service::TddError;
-use bdd_harness::application::tool_call_service::ToolCallService;
-use bdd_harness::application::tool_service::ToolService;
-use bdd_harness::domain::RECOMMENDED_MODEL;
-use bdd_harness::domain::config_report::{ConfigSource, LLM_MODEL_KEY};
-use bdd_harness::domain::language::Language;
-use bdd_harness::domain::mcp_registry::ServerSpec;
-use bdd_harness::domain::prompts::ask_prompt;
-use bdd_harness::domain::tdd::ImplementAttempt;
-use bdd_harness::domain::tool_profile::{Caller, resolve};
-use bdd_harness::greenfield::{
+use spec_harness::application::spec_mutation_service::SpecMutationService;
+use spec_harness::application::status_service::StatusService;
+use spec_harness::application::tdd_service::TddError;
+use spec_harness::application::tool_call_service::ToolCallService;
+use spec_harness::application::tool_service::ToolService;
+use spec_harness::domain::config_report::{ConfigSource, LLM_MODEL_KEY};
+use spec_harness::domain::language::Language;
+use spec_harness::domain::mcp_registry::ServerSpec;
+use spec_harness::domain::prompts::ask_prompt;
+use spec_harness::domain::tdd::ImplementAttempt;
+use spec_harness::domain::tool_profile::{Caller, resolve};
+use spec_harness::domain::{CACHE_DIR, HISTORY_FILE, LOG_DIR, RECOMMENDED_MODEL};
+use spec_harness::greenfield::{
     DynLlm, Greenfield, parse_language, prompt_language, refresh_project_memory,
 };
-use bdd_harness::mcp::{WorkflowServer, builtin_tool_definitions};
-use bdd_harness::ports::{
+use spec_harness::mcp::{WorkflowServer, builtin_tool_definitions};
+use spec_harness::ports::{
     FeatureCatalog as _, McpRegistrySource as _, Prompter, TestFilter, ToolStore as _,
 };
-use bdd_harness::repl::{Ending, is_greenfield_start, offer_greenfield, run_shell};
-use bdd_harness::wiring;
-use bdd_harness::workspace::{SPEC_PATH, detect_project_layout};
+use spec_harness::repl::{Ending, is_greenfield_start, offer_greenfield, run_shell};
+use spec_harness::wiring;
+use spec_harness::workspace::{SPEC_PATH, detect_project_layout};
 
 #[derive(Parser)]
 #[command(
-    name = "bdd",
+    name = "spec",
     version,
     about = "Spec-driven BDD/TDD authoring, validation, and execution"
 )]
@@ -70,7 +70,7 @@ struct Cli {
     #[arg(long, global = true)]
     model: Option<String>,
 
-    /// Project root (where requirements/ and .bdd.toml live)
+    /// Project root (where requirements/ and .spec.toml live)
     #[arg(long, global = true, default_value = ".")]
     root: PathBuf,
 
@@ -101,8 +101,9 @@ enum Command {
     Init(InitArgs),
     /// Run the full orchestrated loop from zero (two human gates)
     Greenfield,
-    /// Requirements spec tools (list, show, draft, validate, refine, reword, mark-implemented)
-    #[command(subcommand)]
+    // Flattened, so the requirements-spec verbs are `spec list`, `spec draft`,
+    // `spec validate`, … rather than `spec spec …`.
+    #[command(flatten)]
     Spec(SpecCommand),
     /// Detect project languages, build system, runtimes, and roots
     Inspect,
@@ -120,8 +121,6 @@ enum Command {
     Unittest(UnittestCommand),
     /// Ask the model to make the failing tests pass (stages the files)
     Implement { req_id: String },
-    /// Validate Gherkin and staged changes
-    Validate,
     /// Run tests and update the RED/GREEN/REFACTOR phase (run_tests)
     Test(TestArgs),
     /// Show the current TDD phase and last run (get_tdd_state)
@@ -319,6 +318,8 @@ enum ChangesCommand {
     Show,
     Commit,
     Discard,
+    /// Validate Gherkin on disk and in the stage (changes_validate)
+    Validate,
 }
 
 #[derive(Subcommand)]
@@ -337,7 +338,7 @@ enum McpCommand {
     Serve,
     /// List tools over one throwaway MCP session
     Tools {
-        /// Spawn `bdd mcp serve` as a child instead of the in-process loopback
+        /// Spawn `spec mcp serve` as a child instead of the in-process loopback
         #[arg(long)]
         stdio: bool,
         #[arg(long)]
@@ -352,7 +353,7 @@ enum McpCommand {
         /// JSON object merged under --arg
         #[arg(long = "args")]
         args: Option<String>,
-        /// Spawn `bdd mcp serve` as a child instead of the in-process loopback
+        /// Spawn `spec mcp serve` as a child instead of the in-process loopback
         #[arg(long)]
         stdio: bool,
         #[arg(long)]
@@ -466,7 +467,7 @@ fn main() -> anyhow::Result<()> {
     }
 }
 
-/// Diagnostics go to daily-rolling files under `<root>/.bdd-log/`, so
+/// Diagnostics go to daily-rolling files under `<root>/.spec-log/`, so
 /// stdout stays clean for JSON output and the MCP stdio protocol, and
 /// stderr stays clean for user-facing messages. Writes go through an
 /// in-memory queue drained by a dedicated worker thread; the returned
@@ -477,13 +478,13 @@ fn init_logging(debug: bool, root: &Path) -> Option<tracing_appender::non_blocki
     use tracing_subscriber::EnvFilter;
 
     let default_directives = if debug {
-        "bdd=debug,bdd_harness=debug"
+        "spec=debug,spec_harness=debug"
     } else {
-        "bdd=info,bdd_harness=info"
+        "spec=info,spec_harness=info"
     };
     let filter =
         EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_directives));
-    let log_dir = root.join(".bdd-log");
+    let log_dir = root.join(LOG_DIR);
     if std::fs::create_dir_all(&log_dir).is_err() {
         tracing_subscriber::fmt()
             .with_env_filter(filter)
@@ -493,7 +494,7 @@ fn init_logging(debug: bool, root: &Path) -> Option<tracing_appender::non_blocki
             .init();
         return None;
     }
-    let appender = tracing_appender::rolling::daily(log_dir, "bdd.log");
+    let appender = tracing_appender::rolling::daily(log_dir, "spec.log");
     // lossy(false): a full queue blocks the caller instead of dropping
     // lines, so prompts and responses are never missing from the file.
     let (writer, guard) = tracing_appender::non_blocking::NonBlockingBuilder::default()
@@ -538,7 +539,6 @@ fn execute(
         Command::Feature(command) => run_feature(root, command),
         Command::Scenario(command) => run_scenario(root, command),
         Command::Changes(command) => run_changes(root, command),
-        Command::Validate => print_json(&change_service(root).validate()?),
         Command::Init(args) => run_init(root, args),
         Command::Greenfield => run_greenfield(root, model, attempts),
         Command::Mcp(command) => run_mcp(root, command),
@@ -603,7 +603,7 @@ fn execute(
                 .phase;
             // The last run's failure details (stack traces included) are
             // the model's brief, together with every prior attempt on
-            // this requirement; a fresh RED bar comes from bdd test
+            // this requirement; a fresh RED bar comes from spec test
             // right before this. The attempt is logged so the next one
             // learns from it.
             let brief = tdd
@@ -707,7 +707,7 @@ fn execute(
     }
 }
 
-/// Bare `bdd`: print the help, then hand the terminal to the
+/// Bare `spec`: print the help, then hand the terminal to the
 /// interactive shell. Each line is parsed exactly like a one-shot
 /// invocation, inheriting the shell's --root, --model, and --retry unless the
 /// line sets its own; errors are printed and the shell keeps going.
@@ -723,14 +723,14 @@ fn print_banner() {
     // Interior width of the loop, in display columns.
     const W: usize = 34;
     let version = env!("CARGO_PKG_VERSION");
-    let title = format!("> bdd  v{version}");
+    let title = format!("> spec  v{version}");
     let title_pad = " ".repeat(W - 4 - title.len());
     let top = "─".repeat(W);
     let gap = " ".repeat(W);
     println!();
     println!("  {R}╭{top}╮{X}");
     println!("  {R}│{X}{gap}{R}▼{X}");
-    println!("  {R}│{X}    {B}> bdd{X}  {D}v{version}{X}{title_pad}{G}│{X}");
+    println!("  {R}│{X}    {B}> spec{X}  {D}v{version}{X}{title_pad}{G}│{X}");
     println!("  {R}│{X}    {D}spec →{X} {R}RED{X} {D}→{X} {G}GREEN{X} {D}→ REFACTOR{X} {G}│{X}");
     println!("  {G}▲{X}{gap}{G}│{X}");
     println!("  {G}╰{top}╯{X}");
@@ -739,7 +739,7 @@ fn print_banner() {
 
 /// The startup model line: what this session will use, or exactly what
 /// to install to make generation work. Discovery is session-only - the
-/// configuration is never touched until the user runs `bdd model use`.
+/// configuration is never touched until the user runs `spec model use`.
 /// Returns whether a model is ready, which gates the greenfield nudge.
 fn announce_session_model(root: &Path, flag: Option<&str>) -> bool {
     let session = model_service(root).session_model(flag);
@@ -750,7 +750,7 @@ fn announce_session_model(root: &Path, flag: Option<&str>) -> bool {
             ModelSource::Config => println!("Model set: {model} (from configuration)."),
             ModelSource::OnlyInstalled | ModelSource::FirstInstalled => println!(
                 "Model set for this session: {model} (not saved - keep it with: \
-                 bdd model use {model})."
+                 spec model use {model})."
             ),
         },
         SessionModel::NoModels => println!(
@@ -780,15 +780,15 @@ fn run_shell_mode(root: &Path, model: Option<&str>, retry: Option<u32>) -> anyho
     let model_ready = announce_session_model(root, model);
     refresh_project_memory(root, None);
     println!(
-        "Interactive shell - type commands without the bdd prefix \
-         (e.g. spec list). exit, quit, or Ctrl+C leaves. The session \
-         history lives in .bdd-history."
+        "Interactive shell - type commands without the spec prefix \
+         (e.g. list). exit, quit, or Ctrl+C leaves. The session \
+         history lives in .spec-history."
     );
     interactive_shell_loop(root, model, retry, true, model_ready)
 }
 
-/// After a one-shot `bdd greenfield` on a real terminal, keep the
-/// session open at the `bdd>` prompt so the next requirement (or any
+/// After a one-shot `spec greenfield` on a real terminal, keep the
+/// session open at the `spec>` prompt so the next requirement (or any
 /// other command) can be typed without relaunching.
 fn resume_shell_after_greenfield(
     root: &Path,
@@ -800,8 +800,8 @@ fn resume_shell_after_greenfield(
         return Ok(());
     }
     println!(
-        "Interactive shell - type commands without the bdd prefix \
-         (e.g. spec list, greenfield). exit, quit, or Ctrl+C leaves."
+        "Interactive shell - type commands without the spec prefix \
+         (e.g. list, greenfield). exit, quit, or Ctrl+C leaves."
     );
     interactive_shell_loop(root, model, retry, false, false)
 }
@@ -814,14 +814,14 @@ fn interactive_shell_loop(
     model_ready: bool,
 ) -> anyhow::Result<()> {
     use clap::CommandFactory as _;
-    let history = root.join(".bdd-history");
+    let history = root.join(HISTORY_FILE);
     let first_session = !history.exists();
     let mut shell = ReadlineShell::open(history).map_err(|error| anyhow::anyhow!(error.0))?;
     let mut dispatch = |tokens: Vec<String>| {
         let explicit_root = tokens
             .iter()
             .any(|t| t == "--root" || t.starts_with("--root="));
-        let argv = std::iter::once("bdd".to_string()).chain(tokens);
+        let argv = std::iter::once("spec".to_string()).chain(tokens);
         match Cli::try_parse_from(argv) {
             Err(error) => {
                 let _ = error.print();
@@ -872,7 +872,7 @@ fn interactive_shell_loop(
 /// Detect the project's primary language. Memory (a greenfield choice)
 /// wins over marker detection so a polyglot tree keeps the chosen stack.
 fn primary_language(root: &Path) -> anyhow::Result<Language> {
-    bdd_harness::workspace::primary_language(root).map_err(anyhow::Error::msg)
+    spec_harness::workspace::primary_language(root).map_err(anyhow::Error::msg)
 }
 
 type OverlayFeatures = wiring::OverlayFeatures;
@@ -887,11 +887,11 @@ fn overlay_sources(root: &Path) -> OverlayTree {
 }
 
 fn deterministic_status_gap(next_step: &str) -> bool {
-    next_step.contains("bdd scenario add")
-        || next_step.contains("bdd unittest generate")
-        || next_step.contains("bdd steps generate")
-        || next_step.contains("bdd spec mark-implemented")
-        || next_step.contains("bdd implement")
+    next_step.contains("spec scenario add")
+        || next_step.contains("spec unittest generate")
+        || next_step.contains("spec steps generate")
+        || next_step.contains("spec mark-implemented")
+        || next_step.contains("spec implement")
 }
 
 fn generation_service(
@@ -985,17 +985,17 @@ fn status_service(
 
 fn spec_service(
     root: &Path,
-) -> bdd_harness::application::spec_service::SpecService<
+) -> spec_harness::application::spec_service::SpecService<
     FsSpecRepository,
-    bdd_harness::adapters::fs_spec::FsFeatureFiles,
+    spec_harness::adapters::fs_spec::FsFeatureFiles,
 > {
     wiring::spec_service(root, detect_project_layout(root))
 }
 
 fn change_service(
     root: &Path,
-) -> bdd_harness::application::change_service::ChangeService<
-    bdd_harness::adapters::fs_staging::FsChangeStore,
+) -> spec_harness::application::change_service::ChangeService<
+    spec_harness::adapters::fs_staging::FsChangeStore,
     FsSpecRepository,
     OverlayFeatures,
 > {
@@ -1008,16 +1008,16 @@ fn mutation_service(
 ) -> SpecMutationService<
     FsSpecRepository,
     OverlayFeatures,
-    bdd_harness::adapters::fs_staging::FsChangeStore,
-    bdd_harness::adapters::fs_state::FsStateStore,
+    spec_harness::adapters::fs_staging::FsChangeStore,
+    spec_harness::adapters::fs_state::FsStateStore,
 > {
     wiring::mutation_service(root, attempts)
 }
 
 fn scenario_service(
     root: &Path,
-) -> bdd_harness::application::scenario_service::ScenarioService<
-    bdd_harness::adapters::fs_staging::FsChangeStore,
+) -> spec_harness::application::scenario_service::ScenarioService<
+    spec_harness::adapters::fs_staging::FsChangeStore,
     OverlayFeatures,
 > {
     wiring::scenario_service(root)
@@ -1025,8 +1025,9 @@ fn scenario_service(
 
 fn tdd_service(
     root: &Path,
-) -> bdd_harness::application::tdd_service::TddService<bdd_harness::adapters::fs_state::FsStateStore>
-{
+) -> spec_harness::application::tdd_service::TddService<
+    spec_harness::adapters::fs_state::FsStateStore,
+> {
     wiring::tdd_service(root)
 }
 
@@ -1042,7 +1043,7 @@ fn run_test(root: &Path, args: &TestArgs) -> anyhow::Result<()> {
     tdd_reply(tdd_service(root).run_tests(runner.as_ref(), &filter))
 }
 
-/// After `bdd implement` stages files, close the loop. On a terminal
+/// After `spec implement` stages files, close the loop. On a terminal
 /// the command offers to apply the staged changes and run the tests
 /// right away; a decline - or piped stdin - still says the next
 /// command in plain words instead of leaving it inside the JSON.
@@ -1076,7 +1077,7 @@ fn implement_follow_up(root: &Path, req_id: &str) -> anyhow::Result<()> {
             if green {
                 println!(
                     "{GREEN}GREEN{RESET} - next: refactor (optional), then \
-                     {GREEN}spec mark-implemented {req_id} && changes commit{RESET}."
+                     {GREEN}mark-implemented {req_id} && changes commit{RESET}."
                 );
             } else {
                 println!(
@@ -1121,6 +1122,7 @@ fn tdd_error_message(error: TddError) -> String {
 fn run_changes(root: &Path, command: &ChangesCommand) -> anyhow::Result<()> {
     let service = change_service(root);
     let report = match command {
+        ChangesCommand::Validate => return print_json(&service.validate()?),
         ChangesCommand::Show => service.show(),
         ChangesCommand::Commit => service.commit(),
         ChangesCommand::Discard => service.discard(),
@@ -1173,11 +1175,11 @@ fn run_spec(
         SpecCommand::Validate => {
             let mut report = service.validate_spec();
             report.next_step = if report.valid {
-                "The spec is valid. Run bdd spec list, pick a pending requirement, and write \
-                 its Gherkin scenario (bdd scenario add)."
+                "The spec is valid. Run spec list, pick a pending requirement, and write \
+                 its Gherkin scenario (spec scenario add)."
                     .into()
             } else {
-                "Run bdd spec reword to fix the issues, then run bdd spec validate again.".into()
+                "Run spec reword to fix the issues, then run spec validate again.".into()
             };
             print_json(&report)
         }
@@ -1185,8 +1187,8 @@ fn run_spec(
             let mut report = service.refine_requirement(req_id)?;
             if !report.clean {
                 report.next_step = format!(
-                    "Run bdd spec reword {req_id} to address each finding, then run \
-                     bdd spec validate and bdd spec refine {req_id} again. Iterate \
+                    "Run spec reword {req_id} to address each finding, then run \
+                     spec validate and spec refine {req_id} again. Iterate \
                      until there are no findings."
                 );
             }
@@ -1202,13 +1204,13 @@ fn run_spec(
             let file = file.as_deref();
             if title.is_some() || story.is_some() || !criterion.is_empty() {
                 let title = title.as_deref().ok_or_else(|| {
-                    anyhow::anyhow!("bdd spec draft --title requires --story and --criterion")
+                    anyhow::anyhow!("spec draft --title requires --story and --criterion")
                 })?;
                 let story = story.as_deref().ok_or_else(|| {
-                    anyhow::anyhow!("bdd spec draft --story requires --title and --criterion")
+                    anyhow::anyhow!("spec draft --story requires --title and --criterion")
                 })?;
                 if criterion.is_empty() {
-                    anyhow::bail!("bdd spec draft needs at least one --criterion");
+                    anyhow::bail!("spec draft needs at least one --criterion");
                 }
                 let report = mutations.draft_direct_in(title, story, criterion.clone(), file)?;
                 return print_json(&report);
@@ -1274,7 +1276,7 @@ fn config_file(root: &Path) -> PathBuf {
 /// asked which one a run would actually use, so `llm.model` shows that
 /// instead of `(unset)`. A configured model skips the call entirely;
 /// an unreachable or empty provider leaves the key unset.
-fn config_report(root: &Path) -> bdd_harness::domain::config_report::ConfigReport {
+fn config_report(root: &Path) -> spec_harness::domain::config_report::ConfigReport {
     let mut report = inspect_config(&config_file(root));
     let configured = report
         .setting(LLM_MODEL_KEY)
@@ -1334,7 +1336,7 @@ fn cached_chat(root: &Path, model_flag: Option<&str>) -> Option<(String, CachedC
             let context = endpoint.clone();
             let chat = CachedConversation::new(
                 OllamaChat::with_timeout(endpoint, timeout),
-                root.join(".bdd-cache"),
+                root.join(CACHE_DIR),
                 ttl,
                 context,
             );
@@ -1373,7 +1375,7 @@ fn run_model(root: &Path, flag: Option<&str>, command: &ModelCommand) -> anyhow:
                     ModelSource::OnlyInstalled => "the only installed model",
                     ModelSource::FirstInstalled => {
                         "the first installed model, this session only - \
-                         persist it with: bdd model use <model-name>"
+                         persist it with: spec model use <model-name>"
                     }
                 };
                 println!("{model} (from {source})");
@@ -1492,7 +1494,7 @@ fn tool_service(root: &Path) -> LiveTools {
         TomlToolStore::new(config_file(root)),
         CachedDiscovery::new(
             live_broker(root),
-            root.join(".bdd-cache").join("tools"),
+            root.join(CACHE_DIR).join("tools"),
             settings.cache_ttl,
         ),
         mcp_registry(root),
@@ -1502,9 +1504,9 @@ fn tool_service(root: &Path) -> LiveTools {
 
 fn self_stdio_spec(root: &Path) -> anyhow::Result<ServerSpec> {
     let program = std::env::current_exe()
-        .map_err(|e| anyhow::anyhow!("cannot locate this bdd binary: {e}"))?;
+        .map_err(|e| anyhow::anyhow!("cannot locate this spec binary: {e}"))?;
     Ok(ServerSpec {
-        name: "bdd".into(),
+        name: "spec".into(),
         program: program.display().to_string(),
         args: vec![
             "mcp".into(),
@@ -1526,7 +1528,7 @@ fn call_broker(root: &Path, stdio: bool) -> anyhow::Result<LiveBroker> {
 }
 
 fn parse_caller_arg(raw: Option<&str>) -> anyhow::Result<Caller> {
-    bdd_harness::application::tool_service::parse_caller(raw).map_err(anyhow::Error::from)
+    spec_harness::application::tool_service::parse_caller(raw).map_err(anyhow::Error::from)
 }
 
 fn warn_unknown(unknown: &[String]) {
@@ -1539,7 +1541,7 @@ fn one_shot_overrides(
     root: &Path,
     caller: Caller,
     tools_flag: Option<&str>,
-) -> bdd_harness::domain::tool_profile::ProfileOverrides {
+) -> spec_harness::domain::tool_profile::ProfileOverrides {
     let mut overrides = TomlToolStore::new(config_file(root)).overrides();
     if let Some(flag) = tools_flag {
         let names: Vec<String> = flag
@@ -1602,8 +1604,8 @@ fn mutation_with_tools(
 ) -> SpecMutationService<
     FsSpecRepository,
     OverlayFeatures,
-    bdd_harness::adapters::fs_staging::FsChangeStore,
-    bdd_harness::adapters::fs_state::FsStateStore,
+    spec_harness::adapters::fs_staging::FsChangeStore,
+    spec_harness::adapters::fs_state::FsStateStore,
 > {
     let settings = tools_settings(&config_file(root));
     let catalog = tool_service(root).catalog(false, false);
@@ -1670,7 +1672,7 @@ fn run_tools(root: &Path, command: &ToolsCommand) -> anyhow::Result<()> {
             }
             if *offline {
                 for name in &list.undiscovered {
-                    eprintln!("warning: {name} (not discovered — run bdd tools refresh)");
+                    eprintln!("warning: {name} (not discovered — run spec tools refresh)");
                 }
             }
             Ok(())
@@ -1777,7 +1779,7 @@ fn run_mcp(root: &Path, command: &McpCommand) -> anyhow::Result<()> {
     match command {
         McpCommand::Serve => {
             let runtime = tokio::runtime::Runtime::new()?;
-            runtime.block_on(bdd_harness::mcp::serve_stdio(root.to_path_buf()))
+            runtime.block_on(spec_harness::mcp::serve_stdio(root.to_path_buf()))
         }
         McpCommand::Tools { stdio, json } => {
             let broker = call_broker(root, *stdio)?;
@@ -1798,7 +1800,7 @@ fn run_mcp(root: &Path, command: &McpCommand) -> anyhow::Result<()> {
             json,
         } => {
             let mut catalog = builtin_tool_definitions();
-            if bdd_harness::domain::tools::find(&catalog, tool).is_err() {
+            if spec_harness::domain::tools::find(&catalog, tool).is_err() {
                 catalog = tool_service(root).catalog(false, false).tools;
             }
             let arguments = ToolCallService::merge_arguments(args.as_deref(), arg)?;
@@ -1828,14 +1830,14 @@ fn run_ask(
     json: bool,
 ) -> anyhow::Result<()> {
     let Some(llm) = connected_llm(root, model, Caller::Ask, attempts, tools, max_rounds) else {
-        anyhow::bail!("no model resolved - pull one with ollama and run bdd model use <name>");
+        anyhow::bail!("no model resolved - pull one with ollama and run spec model use <name>");
     };
     let mut prompter = interactive_prompter();
     let joined = task.join(" ").trim().to_string();
     if joined.is_empty() {
         use std::io::IsTerminal as _;
         if !std::io::stdin().is_terminal() {
-            anyhow::bail!("bdd ask needs a task (or a tty for the multi-turn prompt)");
+            anyhow::bail!("spec ask needs a task (or a tty for the multi-turn prompt)");
         }
         loop {
             let line = prompter.ask("ask> ")?;
@@ -1872,8 +1874,8 @@ fn ask_once(
             |_, _, _| {},
         )
         .map_err(|e| match e {
-            bdd_harness::application::LlmReplyError::Call(error) => anyhow::anyhow!(error.0),
-            bdd_harness::application::LlmReplyError::Invalid { reason } => anyhow::anyhow!(reason),
+            spec_harness::application::LlmReplyError::Call(error) => anyhow::anyhow!(error.0),
+            spec_harness::application::LlmReplyError::Invalid { reason } => anyhow::anyhow!(reason),
         })?;
     if json {
         print_json(&serde_json::json!({ "answer": answer }))

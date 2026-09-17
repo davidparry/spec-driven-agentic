@@ -1,4 +1,4 @@
-//! The embedded MCP server: `bdd mcp serve` exposes the workflow over
+//! The embedded MCP server: `spec mcp serve` exposes the workflow over
 //! stdio. Frozen seven-tool reply shapes stay (`harness/tests/mcp_conformance.rs`);
 //! the additive typed tools expose inspection and staged mutation. This
 //! module is a delivery mechanism like `main.rs`: it wires the same
@@ -666,7 +666,7 @@ impl WorkflowServer {
             ) {
                 // The service words its next step for the harness. Over MCP the
                 // agent has tools, not a shell, so name the tools instead —
-                // the mirror of what `bdd spec validate` does to
+                // the mirror of what `spec validate` does to
                 // `validate_spec`.
                 Ok(mut report) => {
                     report.next_step = if report.findings.is_empty() {
@@ -763,7 +763,7 @@ impl ServerHandler for WorkflowServer {
                         "Serves spec-driven TDD and BDD tools. The requirements spec is the source of truth.",
                     )
                     .with_icons(vec![Icon::new(
-                        "https://davidparry.github.io/spec-driven-agentic/assets/bdd-harness-mark.png",
+                        "https://davidparry.github.io/spec-driven-agentic/assets/spec-harness-mark.png",
                     )
                     .with_mime_type("image/png")
                     .with_sizes(vec!["1024x1024".into()])

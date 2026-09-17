@@ -72,7 +72,7 @@ impl<C: ChangeStore, R: SpecRepository, F: FeatureFiles> ChangeService<C, R, F> 
         let (issues, next_step) = if validation.valid {
             (
                 Vec::new(),
-                "Staged changes applied to the working tree. Run bdd test to see where \
+                "Staged changes applied to the working tree. Run spec test to see where \
                  the bar stands."
                     .to_string(),
             )
@@ -80,7 +80,7 @@ impl<C: ChangeStore, R: SpecRepository, F: FeatureFiles> ChangeService<C, R, F> 
             (
                 validation.issues,
                 "Staged changes applied, but the working tree does not validate - \
-                 fix the issues above, then run bdd validate again."
+                 fix the issues above, then run spec changes validate again."
                     .to_string(),
             )
         };

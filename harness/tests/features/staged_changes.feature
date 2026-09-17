@@ -1,5 +1,5 @@
 # Executable spec for the staging area — the behavior of
-# `bdd changes show|commit|discard` and `bdd validate`.
+# `spec changes show|commit|discard` and `spec changes validate`.
 Feature: Staged changes
   As a developer keeping control of every edit
   I want authored changes held in a staging area

@@ -3,12 +3,12 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>bdd status - bdd Harness Manual</title>
+        <title>spec status - spec Harness Manual</title>
 
 
         <!-- Custom HTML head -->
 
-        <meta name="description" content="The complete, searchable reference for the bdd harness: every command, subcommand, and flag, with in-depth examples.">
+        <meta name="description" content="The complete, searchable reference for the spec harness: every command, subcommand, and flag, with in-depth examples.">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff">
 
@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-aaad9ee5.js";
+            window.path_to_searchindex_js = "../searchindex-5959f77b.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-9d4e1520.js"></script>
+        <script src="../toc-372d77fe.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -137,7 +137,7 @@
                         </button>
                     </div>
 
-                    <h1 class="menu-title">bdd Harness Manual</h1>
+                    <h1 class="menu-title">spec Harness Manual</h1>
 
                     <div class="right-buttons">
                         <a href="../print.html" title="Print this book" aria-label="Print this book">
@@ -180,14 +180,14 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="bdd-status"><a class="header" href="#bdd-status">bdd status</a></h1>
+                        <h1 id="spec-status"><a class="header" href="#spec-status">spec status</a></h1>
 <p>Where the project stands on the road to every requirement being
-implemented — and the one next step that moves it forward. <code>bdd state</code>
-answers “what did the last test run say”; <code>bdd status</code> answers “where
+implemented — and the one next step that moves it forward. <code>spec state</code>
+answers “what did the last test run say”; <code>spec status</code> answers “where
 am I in the whole loop and what do I do now”.</p>
-<pre><code class="language-text">Usage: bdd status [OPTIONS]
+<pre><code class="language-text">Usage: spec status [OPTIONS]
 </code></pre>
-<pre><code class="language-bash">bdd status
+<pre><code class="language-bash">spec status
 </code></pre>
 <pre><code class="language-json">{
   "phase": "RED",
@@ -202,7 +202,7 @@ am I in the whole loop and what do I do now”.</p>
       "findings": []
     }
   ],
-  "nextStep": "1 staged file(s) await review - inspect with bdd changes show, apply with bdd changes commit, then run bdd test."
+  "nextStep": "1 staged file(s) await review - inspect with spec changes show, apply with spec changes commit, then run spec test."
 }
 </code></pre>
 <h2 id="how-the-next-step-is-chosen"><a class="header" href="#how-the-next-step-is-chosen">How the next step is chosen</a></h2>
@@ -211,49 +211,49 @@ am I in the whole loop and what do I do now”.</p>
 <li><strong>Staged changes wait</strong> — nothing the harness authors touches the
 working tree until you apply it, so an unapplied implementation
 attempt (or scenario, or spec edit) always comes first:
-<code>bdd changes show</code>, then <code>bdd changes commit</code>, then <code>bdd test</code>.</li>
+<code>spec changes show</code>, then <code>spec changes commit</code>, then <code>spec test</code>.</li>
 <li><strong>A requirement is in flight</strong> — its scenario, step definitions,
 and unit test all exist. On GREEN the loop closes with the chain
-<code>bdd spec mark-implemented &lt;id&gt;</code>, then <code>bdd validate</code>, then
-<code>bdd changes commit</code>; on any other bar the step is <code>bdd test</code>,
-and on RED <code>bdd implement &lt;id&gt;</code> lets the model try.</li>
+<code>spec mark-implemented &lt;id&gt;</code>, then <code>spec changes validate</code>, then
+<code>spec changes commit</code>; on any other bar the step is <code>spec test</code>,
+and on RED <code>spec implement &lt;id&gt;</code> lets the model try.</li>
 <li><strong>The earliest asset gap</strong> — a pending requirement is missing its
-tagged scenario (<code>bdd scenario add</code>), step definitions
-(<code>bdd steps generate</code>), or unit test
-(<code>bdd unittest generate &lt;id&gt;</code>); the finding names the command.</li>
+tagged scenario (<code>spec scenario add</code>), step definitions
+(<code>spec steps generate</code>), or unit test
+(<code>spec unittest generate &lt;id&gt;</code>); the finding names the command.</li>
 <li><strong>Everything is implemented</strong> — draft the next requirement with
-<code>bdd spec draft</code>.</li>
+<code>spec draft</code>.</li>
 </ol>
 <p>Each pending requirement’s entry carries its own <code>findings</code>, so with
 several requirements you see every gap, not just the first.</p>
 <h2 id="model-advice"><a class="header" href="#model-advice">Model advice</a></h2>
-<p>When a model is resolved (see <a href="model.html"><code>bdd model</code></a>), the
+<p>When a model is resolved (see <a href="model.html"><code>spec model</code></a>), the
 deterministic report is followed by one advice call: the model is
 briefed with the whole workflow process — the states, the commands,
 the loop, and the invariants — plus the current phase, the last run’s
 counts, the staging area, and every requirement’s position, and it
 answers with the next command in plain words:</p>
 <pre><code class="language-text">Model advice: The bar is GREEN and REQ-001 has every asset in place -
-close the loop with bdd spec mark-implemented REQ-001, then bdd
-validate, then bdd changes commit.
+close the loop with spec mark-implemented REQ-001, then spec
+validate, then spec changes commit.
 </code></pre>
 <p>Without a model the report alone is the whole reply, and a model
-failure never breaks <code>bdd status</code>.</p>
+failure never breaks <code>spec status</code>.</p>
 <h2 id="why-a-requirement-stays-pending"><a class="header" href="#why-a-requirement-stays-pending">Why a requirement stays pending</a></h2>
 <p><code>implemented</code> is never set by a passing run alone. The status flips
-only when you run <a href="spec.html"><code>bdd spec mark-implemented</code></a> — and that
+only when you run <a href="spec.html"><code>spec mark-implemented</code></a> — and that
 command is GREEN-gated: it refuses unless the last recorded run
 passed, and it refuses without a scenario tagged <code>@&lt;id&gt;</code> (it records
 the tagged feature as the requirement’s <code>featureFile</code>). The road is
-always: staged changes applied → <code>bdd test</code> GREEN →
-<code>bdd spec mark-implemented &lt;id&gt;</code> → <code>bdd validate</code> →
-<code>bdd changes commit</code> (the status change is staged too, like every
+always: staged changes applied → <code>spec test</code> GREEN →
+<code>spec mark-implemented &lt;id&gt;</code> → <code>spec changes validate</code> →
+<code>spec changes commit</code> (the status change is staged too, like every
 mutation).</p>
 <h2 id="see-also"><a class="header" href="#see-also">See also</a></h2>
 <ul>
-<li><a href="state.html"><code>bdd state</code></a> — the raw TDD state: phase, last run, refactor log.</li>
-<li><a href="changes.html"><code>bdd changes</code></a> — review and apply what is staged.</li>
-<li><a href="implement.html"><code>bdd implement</code></a> — the model attempt, with its own preflight.</li>
+<li><a href="state.html"><code>spec state</code></a> — the raw TDD state: phase, last run, refactor log.</li>
+<li><a href="changes.html"><code>spec changes</code></a> — review and apply what is staged.</li>
+<li><a href="implement.html"><code>spec implement</code></a> — the model attempt, with its own preflight.</li>
 </ul>
 
                     </main>

@@ -13,20 +13,20 @@ import java.util.Map;
 
 /**
  * {@link McpToolClient} backed by the MCP SDK's synchronous client: launches
- * {@code bdd mcp serve} as a child process over stdio — exactly what an IDE
+ * {@code spec mcp serve} as a child process over stdio — exactly what an IDE
  * host does. Pure delegation: every call forwards to the SDK and maps the
  * result through {@link SdkMappers}. Excluded from the coverage gate.
  *
  * <p>Does not call {@code initialize}. STEP 1 is {@code tools/list}. The
  * Java MCP SDK 2.0 may still open the stdio session with initialize on
- * first use; {@code bdd mcp serve} does not require that handshake.
+ * first use; {@code spec mcp serve} does not require that handshake.
  */
 public class SdkToolClient implements McpToolClient {
 
     private final McpSyncClient client;
 
-    public SdkToolClient(Path workshopRoot, Path bddBinary) {
-        this(ServerLaunch.bdd(workshopRoot, bddBinary));
+    public SdkToolClient(Path workshopRoot, Path specBinary) {
+        this(ServerLaunch.spec(workshopRoot, specBinary));
     }
 
     public SdkToolClient(ServerLaunch launch) {

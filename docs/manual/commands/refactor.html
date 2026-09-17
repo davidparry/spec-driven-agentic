@@ -3,12 +3,12 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>bdd refactor - bdd Harness Manual</title>
+        <title>spec refactor - spec Harness Manual</title>
 
 
         <!-- Custom HTML head -->
 
-        <meta name="description" content="The complete, searchable reference for the bdd harness: every command, subcommand, and flag, with in-depth examples.">
+        <meta name="description" content="The complete, searchable reference for the spec harness: every command, subcommand, and flag, with in-depth examples.">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff">
 
@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-aaad9ee5.js";
+            window.path_to_searchindex_js = "../searchindex-5959f77b.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-9d4e1520.js"></script>
+        <script src="../toc-372d77fe.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -137,7 +137,7 @@
                         </button>
                     </div>
 
-                    <h1 class="menu-title">bdd Harness Manual</h1>
+                    <h1 class="menu-title">spec Harness Manual</h1>
 
                     <div class="right-buttons">
                         <a href="../print.html" title="Print this book" aria-label="Print this book">
@@ -180,10 +180,10 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="bdd-refactor"><a class="header" href="#bdd-refactor">bdd refactor</a></h1>
+                        <h1 id="spec-refactor"><a class="header" href="#spec-refactor">spec refactor</a></h1>
 <p>Begin a refactor step. Only allowed on GREEN — the discipline’s core
 rule is that you never restructure code while tests are failing.</p>
-<pre><code class="language-text">Usage: bdd refactor [OPTIONS]
+<pre><code class="language-text">Usage: spec refactor [OPTIONS]
 </code></pre>
 <p>MCP tool equivalent: <code>start_refactor</code>.</p>
 <h2 id="flags"><a class="header" href="#flags">Flags</a></h2>
@@ -201,32 +201,32 @@ rule is that you never restructure code while tests are failing.</p>
 </div>
 <h2 id="examples"><a class="header" href="#examples">Examples</a></h2>
 <p>On GREEN:</p>
-<pre><code class="language-bash">bdd refactor --note "extract the delimiter parser from add()"
+<pre><code class="language-bash">spec refactor --note "extract the delimiter parser from add()"
 </code></pre>
 <pre><code class="language-json">{
   "phase": "REFACTOR",
-  "nextStep": "Refactor with the tests as your safety net, then 'bdd test'. Passing returns you to GREEN; a failure means the refactor broke behavior."
+  "nextStep": "Refactor with the tests as your safety net, then 'spec test'. Passing returns you to GREEN; a failure means the refactor broke behavior."
 }
 </code></pre>
 <p>Attempting it on RED is refused with exit status 1:</p>
 <pre><code class="language-text">Error: refactoring is only allowed on GREEN - you are RED. Make the tests pass first.
 </code></pre>
 <h2 id="the-refactor-loop"><a class="header" href="#the-refactor-loop">The refactor loop</a></h2>
-<pre><code class="language-bash">bdd test                                  # GREEN - safe to restructure
-bdd refactor --note "collapse duplicate parsing"
+<pre><code class="language-bash">spec test                                  # GREEN - safe to restructure
+spec refactor --note "collapse duplicate parsing"
 # ...restructure, behavior unchanged...
-bdd test                                  # GREEN again: refactor complete
+spec test                                  # GREEN again: refactor complete
 </code></pre>
-<p>If that final <code>bdd test</code> fails, the phase drops to RED: the refactor
+<p>If that final <code>spec test</code> fails, the phase drops to RED: the refactor
 changed behavior, and the failing tests tell you exactly where.</p>
 <h2 id="why-the-note-matters"><a class="header" href="#why-the-note-matters">Why the note matters</a></h2>
 <p>Each <code>--note</code> is appended to the <code>refactorLog</code> that
-<a href="state.html"><code>bdd state</code></a> reports. Over a kata or a workshop, the log
+<a href="state.html"><code>spec state</code></a> reports. Over a kata or a workshop, the log
 becomes the narrative of deliberate design decisions — which is the
 half of TDD that “make it pass” alone never captures.</p>
 <h2 id="see-also"><a class="header" href="#see-also">See also</a></h2>
 <ul>
-<li><a href="state.html"><code>bdd state</code></a> — the phase and the accumulated log.</li>
+<li><a href="state.html"><code>spec state</code></a> — the phase and the accumulated log.</li>
 <li><a href="../workflow.html">The workflow</a> — where REFACTOR sits in the machine.</li>
 </ul>
 

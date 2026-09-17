@@ -1,12 +1,12 @@
-# bdd tools
+# spec tools
 
 Inspect and attach the tools a model call may use. Built-in tools are
-listed offline from `bdd mcp serve`. External MCP servers from
+listed offline from `spec mcp serve`. External MCP servers from
 `mcp.json` are discovered on demand and must be attached **per command**
 with `--for` — never globally.
 
 ```text
-Usage: bdd tools [OPTIONS] <COMMAND>
+Usage: spec tools [OPTIONS] <COMMAND>
 
 Commands:
   list      Catalog (optionally `--for` one caller, `--offline`, `--refresh`)
@@ -14,12 +14,12 @@ Commands:
   show      One tool's description and schema
   enable    Attach a tool to a caller (`--for` required)
   disable   Remove a tool from a caller (`--for` required)
-  refresh   Rediscover external servers and rewrite `.bdd-cache/tools/`
+  refresh   Rediscover external servers and rewrite `.spec-cache/tools/`
   servers   Registered mcp.json servers and parse problems
 ```
 
 ```bash
-bdd tools profiles
+spec tools profiles
 # spec-draft          4  get_requirement, list_requirements, refine_requirement, validate_spec
 # spec-reword         3  get_requirement, refine_requirement, validate_spec
 # steps-generate      4  feature_list, feature_read, project_inspect, step_definitions_find
@@ -29,10 +29,10 @@ bdd tools profiles
 # status              7  project_root, list_requirements, …, changes_show, changes_validate
 # ask                12  the read-only set: everything above that only reads
 
-bdd tools list --for status          # exactly those seven
-bdd tools list --offline             # built-ins only; never connects
-bdd tools enable self__validate_spec --for status
-bdd tools servers
+spec tools list --for status          # exactly those seven
+spec tools list --offline             # built-ins only; never connects
+spec tools enable self__validate_spec --for status
+spec tools servers
 ```
 
 A command that generates or implements is handed **3–7** tools — the ones
@@ -51,17 +51,17 @@ profile, and that call still asks the human to confirm.
 External tools are namespaced `server__tool`. A name in config that is
 not in the catalog is a warning, not a hard failure.
 
-## `.bdd.toml` per-command mapping
+## `.spec.toml` per-command mapping
 
 Built-in defaults live in code and are also written into
-`[tools.profiles]` by `bdd init` so you can see what each command
+`[tools.profiles]` by `spec init` so you can see what each command
 offers the model. If that table names a caller with a list, that list
 **replaces** the default for that command. Omitted callers keep the
 code defaults. `[tools.enabled]` adds names;
-`[tools.disabled]` removes them. `bdd tools enable` / `disable` write
+`[tools.disabled]` removes them. `spec tools enable` / `disable` write
 those last two tables.
 
-After you add a server to `mcp.json`, run `bdd tools refresh` and put
+After you add a server to `mcp.json`, run `spec tools refresh` and put
 the tool on the command that should use it:
 
 ```toml
@@ -79,14 +79,14 @@ Built-in tools keep their catalog names (`validate_spec`). Tools from
 built-in. When both exist, the **bare** name is the built-in. Pin the
 origin when you need to be explicit:
 
-| Written in `.bdd.toml` | Resolves to |
+| Written in `.spec.toml` | Resolves to |
 | --- | --- |
 | `validate_spec` | built-in |
 | `builtin:validate_spec` | built-in, even if an MCP tool shares the short name |
 | `self:validate_spec` | mcp.json server `self` |
 | `self__validate_spec` | same MCP tool (catalog name) |
 
-`builtin` is reserved for the harness's own tools. `bdd init` writes
-`.bdd.toml` with every key and a live `[tools.profiles]` list for each
-caller. [`bdd config`](config.md) prints the resolved set and whether
+`builtin` is reserved for the harness's own tools. `spec init` writes
+`.spec.toml` with every key and a live `[tools.profiles]` list for each
+caller. [`spec config`](config.md) prints the resolved set and whether
 each value is a default or came from the file.

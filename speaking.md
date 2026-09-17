@@ -35,7 +35,7 @@ fix a failing build by editing the test.
 
 **Second move: keep pi, take the tools away.** pi deliberately has no MCP in
 core — a third-party extension adds it — so we install that extension, register
-this repo's server (`bdd mcp serve`, 25 tools), and launch pi with
+this repo's server (`spec mcp serve`, 25 tools), and launch pi with
 `--no-builtin-tools`. Now the same local model, in the same loose host, has no
 shell and no file writes: only a set of typed tools that make it validate a
 requirement's structure, survive a wording review that rejects ambiguity like
@@ -107,7 +107,7 @@ failure the project actually hit; each is now caught by a deterministic check.
 | Refactoring on red | Offered to "clean up" while tests were failing | The TDD state machine refuses the transition from any phase but GREEN |
 | Premature completion | Marked a requirement implemented with nothing proving it | `requirement_mark_implemented` requires GREEN plus a scenario tagged with the requirement ID |
 | Right process, wrong requirement | Asked for "the next pending id", took the requirement it had just drafted to green instead — correct discipline, every gate satisfied, an hour spent on work nobody asked for | Nothing in the loop, and that is the point: the phase gates police *how* the agent works, never *what it works on*. The prompt names the id, and the end-of-run verifier grades that id by name |
-| Tool-calling drift | Local model invented a tool, skipped staging, or called `command_run` without waiting | Per-command profiles (`bdd tools profiles`) hand the generating commands 3–7 tools and the read-only `bdd ask` 12; `[tool_rules]` in `harness/prompts/prompts.toml`; the harness's `command_run` asks the human to confirm |
+| Tool-calling drift | Local model invented a tool, skipped staging, or called `command_run` without waiting | Per-command profiles (`spec tools profiles`) hand the generating commands 3–7 tools and the read-only `spec ask` 12; `[tool_rules]` in `harness/prompts/prompts.toml`; the harness's `command_run` asks the human to confirm |
 | Fixing the test instead of the code | Given a shell and a writable test file, the local model made the bar green by deleting the assertion | Nothing in a loose host — pi has no permission popups by design. The harness has no shell and no file-write tool at all: scenarios and tests are typed mutations that land in staging, and `run_tests` is the only thing that can report a bar |
 
 Where a frontier model is still the better call, and where a human still has to
@@ -125,7 +125,7 @@ or LLM experience required; comfort with JUnit and Cucumber is assumed.
 | Format | What it covers |
 | --- | --- |
 | **Conference session** (50 minutes) | The full narrative above — pi on Ollama, pi with its built-ins taken away, then the harness — with the live frontier-versus-local comparison and the *Where This Breaks* segment. |
-| **Short session** (30 minutes) | The same three acts, demo-driven, with no hands-on segment: pi free and offline, the one-flag change to `pi --no-builtin-tools`, then the spec-specific runner taken from requirement to green — plus *Where This Breaks*. Deck cut: [`slides/index.html?30`](slides/index.html), published at [/talk30/](https://davidparry.github.io/spec-driven-agentic/talk30/). |
+| **Short session** (30 minutes) | The same three acts, demo-driven, with no hands-on segment: pi free and offline, the one-flag change to `pi --no-builtin-tools`, then the spec-specific runner taken from requirement to green — plus *Where This Breaks*. Deck cut: [`slides/index.html?30`](slides/index.html?30), published at [/talk30/](https://davidparry.github.io/spec-driven-agentic/talk30/). |
 | **Hands-on workshop** | Attendees run the loop on their own machines against a local model: draft a requirement, refine it until the wording review is clean, take it through RED, GREEN, and REFACTOR. Companion material is the [workshop follow-along](student-follow-along.md); the [pi path](student-follow-docs/pi-path.md) is the free, no-IDE on-ramp, and the [harness path](student-follow-docs/harness-path.md) covers attendees who prefer the terminal to an IDE. |
 
 ## Technical requirements
@@ -133,11 +133,11 @@ or LLM experience required; comfort with JUnit and Cucumber is assumed.
 - Stage projector and my laptop.
 - **No conference network needed.** The entire demo runs locally against
   Ollama, which is the thesis rather than a convenience.
-- Stack on stage: Java 21, Maven, the `bdd` binary (`bdd mcp serve`), Cucumber-JVM 7, JUnit 5,
+- Stack on stage: Java 21, Maven, the `spec` binary (`spec mcp serve`), Cucumber-JVM 7, JUnit 5,
   Ollama running `qwen3.8-flash-next:125b-mlx`, and [pi](https://pi.dev) with the
   `pi-mcp-extension` package for the first two acts. The bundled `smoke-test.jar` is an
   MCP-server **smoke test**.
-- For the workshop format: attendees need **`bdd` on PATH**, Java 21, Maven, git, and an MCP
+- For the workshop format: attendees need **`spec` on PATH**, Java 21, Maven, git, and an MCP
   host — Cursor, Claude, or pi with `pi-mcp-extension` — and, to run fully offline, Ollama with
   `qwen3.8-flash-next:125b-mlx` pulled ahead of time. The [pi path](student-follow-docs/pi-path.md)
   and the [harness path](student-follow-docs/harness-path.md) are the Wi-Fi-off alternatives.
@@ -147,14 +147,14 @@ or LLM experience required; comfort with JUnit and Cucumber is assumed.
 | Shown live | Where it lives |
 | --- | --- |
 | The free on-ramp: pi on Ollama, then pi with `--no-builtin-tools` against this server | [`.pi/mcp.json`](.pi/mcp.json), [`student-follow-docs/pi-path.md`](student-follow-docs/pi-path.md) |
-| The 25-tool MCP server enforcing the loop | `harness/src/mcp.rs` (`bdd mcp serve`) |
+| The 25-tool MCP server enforcing the loop | `harness/src/mcp.rs` (`spec mcp serve`) |
 | The deterministic structure and wording reviews | `harness/src/domain/` (spec validator, requirement refiner) |
 | The state machine that refuses a red-bar refactor | `harness/src/domain/tdd.rs` (`TddStateMachine`) |
 | The requirements catalog that drives everything | `requirements/requirements.json` |
 | Gherkin and JUnit generated from the spec | `kata/` |
 | The offline harness: same server, scoped profiles on `qwen3.8-flash-next:125b-mlx` | [`harness/README.md`](harness/README.md), [`student-follow-docs/harness-path.md`](student-follow-docs/harness-path.md) |
 | Every prompt sent to the model, in one auditable file | `harness/prompts/prompts.toml` |
-| The slide deck — one file, two cuts ([`?30`](slides/index.html) selects the short one) | [`slides/index.html`](slides/index.html) |
+| The slide deck — one file, two cuts ([`?30`](slides/index.html?30) selects the short one, or press <kbd>t</kbd> in the deck) | [`slides/index.html`](slides/index.html) |
 
 ## Booking
 

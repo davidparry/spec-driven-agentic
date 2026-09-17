@@ -1,4 +1,4 @@
-# bdd implement
+# spec implement
 
 Ask the resolved model to make the failing tests pass. The model
 receives the requirement, the last run's full failure details — stack
@@ -12,11 +12,11 @@ the staging area — you review before anything touches the working
 tree, and the next test run is the real validator.
 
 ```text
-Usage: bdd implement [OPTIONS] <REQ_ID>
+Usage: spec implement [OPTIONS] <REQ_ID>
 ```
 
 Requires a resolved model (configured with
-[`bdd model use`](model.md#bdd-model-use), passed with `--model`, or
+[`spec model use`](model.md#spec-model-use), passed with `--model`, or
 the session default when Ollama has installed models). Without one the
 command is refused — implementing stays in your hands. The model this
 harness is developed and run against is `qwen3.8-flash-next:125b-mlx`; your
@@ -24,8 +24,8 @@ mileage will vary with a different model, especially one trained for
 work other than development.
 
 ```bash
-bdd test                 # a fresh RED bar records the failure details
-bdd implement REQ-001    # the model attempts the implementation
+spec test                 # a fresh RED bar records the failure details
+spec implement REQ-001    # the model attempts the implementation
 ```
 
 The command narrates as it works — the preflight result, each asset it
@@ -53,7 +53,7 @@ Sending the sources, the failures, and the attempt history to the model - workin
   ],
   "staged": true,
   "source": "llm",
-  "nextStep": "Apply with bdd changes commit, then bdd test - the run decides."
+  "nextStep": "Apply with spec changes commit, then spec test - the run decides."
 }
 ```
 
@@ -96,8 +96,8 @@ prerequisites of an implementation attempt:
 - a RED test run is recorded, so its failures can brief the model.
 
 When one is missing the attempt does not run. Each gap is printed in
-red with the step to take instead — `bdd scenario add`,
-`bdd steps generate`, `bdd unittest generate REQ-XXX`, or `bdd test` —
+red with the step to take instead — `spec scenario add`,
+`spec steps generate`, `spec unittest generate REQ-XXX`, or `spec test` —
 and the JSON reply is the readiness report:
 
 ```json
@@ -110,10 +110,10 @@ and the JSON reply is the readiness report:
     { "role": "production code (the attempt creates it when missing)", "path": "src/main/java/StringCalculator.java", "present": false }
   ],
   "findings": [
-    "No RED test run is recorded - run bdd test first so its failures brief the model.",
-    "No scenario is tagged @REQ-001 - add one with bdd scenario add, then bdd changes commit."
+    "No RED test run is recorded - run spec test first so its failures brief the model.",
+    "No scenario is tagged @REQ-001 - add one with spec scenario add, then spec changes commit."
   ],
-  "nextStep": "No RED test run is recorded - run bdd test first so its failures brief the model."
+  "nextStep": "No RED test run is recorded - run spec test first so its failures brief the model."
 }
 ```
 
@@ -121,7 +121,7 @@ The production file is surveyed but never blocks — the attempt creates
 it when it is missing. A missing prerequisite with a model resolved
 also triggers one advice call: the requirement, the asset survey, the
 findings, and the last failures go to the model, which answers in a
-few sentences whether `bdd implement` can succeed right now and names
+few sentences whether `spec implement` can succeed right now and names
 the exact next command. The advice is printed as
 `Model advice: ...` under the findings.
 
@@ -150,8 +150,8 @@ is staged, and you implement by hand instead.
 The implementation prompt is the largest call the harness makes, so a
 local model can need minutes to answer. The generation timeout
 defaults to 300 seconds; if you see `no reply within ...s`, raise
-`timeout_seconds` under `[llm]` in `.bdd.toml` (see
-[`bdd model`](model.md#the-llm-configuration-block)).
+`timeout_seconds` under `[llm]` in `.spec.toml` (see
+[`spec model`](model.md#the-llm-configuration-block)).
 
 ## Where it fits
 
@@ -160,20 +160,20 @@ implementation attempt — the same behavior <kbd>Enter</kbd> triggers
 on a RED bar inside the loop. Use it to continue a paused run:
 
 ```bash
-bdd test                 # confirm RED, record the failures
-bdd implement REQ-001    # stage the model's attempt
-bdd changes show         # review what it wrote
-bdd changes commit
-bdd test                 # GREEN? then bdd refactor / bdd spec mark-implemented
+spec test                 # confirm RED, record the failures
+spec implement REQ-001    # stage the model's attempt
+spec changes show         # review what it wrote
+spec changes commit
+spec test                 # GREEN? then spec refactor / spec mark-implemented
 ```
 
-If the bar stays RED, run `bdd implement` again — the fresh failure
+If the bar stays RED, run `spec implement` again — the fresh failure
 details from the latest run go back to the model — or take over by
 hand.
 
 ## Attempts are remembered
 
-Every attempt is logged in `.bdd-state.json` (under `attemptLog` on a
+Every attempt is logged in `.spec-state.json` (under `attemptLog` on a
 timestamped state entry): the files it wrote, the failures it was
 addressing, and — attached by the first test run after it — the
 `outcome`: what that run actually reported, build output included. The
@@ -195,13 +195,13 @@ test run goes GREEN — a closed loop leaves no history for the next
 requirement to inherit.
 
 `run_tests` during this command sees the **working tree**, not the
-unstaged patch sitting in `.bdd-staged/`. Commit (or apply) before you
+unstaged patch sitting in `.spec-staged/`. Commit (or apply) before you
 trust the bar. If the model requests `command_run`, the harness asks you to
 confirm first; piped or CI stdin declines and never hangs.
 
 ## See also
 
-- [`bdd greenfield`](greenfield.md) — the orchestrated loop with the same attempt built in.
-- [`bdd changes`](changes.md) — review and apply the staged files.
-- [`bdd test`](test.md) — the run that decides.
-- [`bdd tools`](tools.md) — the implement profile (includes `command_run`).
+- [`spec greenfield`](greenfield.md) — the orchestrated loop with the same attempt built in.
+- [`spec changes`](changes.md) — review and apply the staged files.
+- [`spec test`](test.md) — the run that decides.
+- [`spec tools`](tools.md) — the implement profile (includes `command_run`).

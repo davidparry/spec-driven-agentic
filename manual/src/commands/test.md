@@ -1,11 +1,11 @@
-# bdd test
+# spec test
 
 Run the project's tests through its own build tool and update the
 persistent RED/GREEN/REFACTOR phase from the results. This is the
 heartbeat of the workflow.
 
 ```text
-Usage: bdd test [OPTIONS]
+Usage: spec test [OPTIONS]
 ```
 
 MCP tool equivalent: `run_tests`.
@@ -43,7 +43,7 @@ Error: runtime_missing: mvn is not installed. Install Maven (and a JDK) to run t
 A failing run — the phase moves to RED:
 
 ```bash
-bdd test
+spec test
 ```
 
 ```json
@@ -70,15 +70,15 @@ After implementing — GREEN:
   "errors": 0,
   "skipped": 0,
   "failureDetails": [],
-  "nextStep": "You are GREEN. Refactor with 'bdd refactor', or mark the requirement implemented and pick the next one."
+  "nextStep": "You are GREEN. Refactor with 'spec refactor', or mark the requirement implemented and pick the next one."
 }
 ```
 
 Filtered runs:
 
 ```bash
-bdd test --feature features/string_calculator.feature
-bdd test --scenario "Two numbers separated by a comma are summed"
+spec test --feature features/string_calculator.feature
+spec test --scenario "Two numbers separated by a comma are summed"
 ```
 
 Filters are forwarded to the underlying runner (e.g. Cucumber's name
@@ -92,10 +92,10 @@ on one scenario.
 - A failing run during REFACTOR drops you back to RED — the refactor
   broke behavior.
 
-The phase is stored in `.bdd-tdd-state.json` and read back by
-[`bdd state`](state.md) and enforced by [`bdd refactor`](refactor.md).
+The phase is stored in `.spec-state.json` and read back by
+[`spec state`](state.md) and enforced by [`spec refactor`](refactor.md).
 
 ## See also
 
 - [The workflow](../workflow.md) — the phase machine in full.
-- [`bdd inspect`](inspect.md) — check the runtime before expecting a run.
+- [`spec inspect`](inspect.md) — check the runtime before expecting a run.

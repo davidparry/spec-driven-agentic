@@ -3,12 +3,12 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>The workflow: spec → RED → GREEN → REFACTOR - bdd Harness Manual</title>
+        <title>The workflow: spec → RED → GREEN → REFACTOR - spec Harness Manual</title>
 
 
         <!-- Custom HTML head -->
 
-        <meta name="description" content="The complete, searchable reference for the bdd harness: every command, subcommand, and flag, with in-depth examples.">
+        <meta name="description" content="The complete, searchable reference for the spec harness: every command, subcommand, and flag, with in-depth examples.">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff">
 
@@ -35,10 +35,10 @@
             const path_to_root = "";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "searchindex-aaad9ee5.js";
+            window.path_to_searchindex_js = "searchindex-5959f77b.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-9d4e1520.js"></script>
+        <script src="toc-372d77fe.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -137,7 +137,7 @@
                         </button>
                     </div>
 
-                    <h1 class="menu-title">bdd Harness Manual</h1>
+                    <h1 class="menu-title">spec Harness Manual</h1>
 
                     <div class="right-buttons">
                         <a href="print.html" title="Print this book" aria-label="Print this book">
@@ -191,11 +191,11 @@ and may include child spec files (nested as deep as the backlog
 needs), and every command works on the merged view of the whole tree.
 The iteration loop for the spec itself:</p>
 <ol>
-<li>Draft or edit a requirement — <a href="commands/spec.html#bdd-spec-draft"><code>bdd spec draft</code></a>
+<li>Draft or edit a requirement — <a href="commands/spec.html#spec-draft"><code>spec draft</code></a>
 or your editor.</li>
-<li><a href="commands/spec.html#bdd-spec-validate"><code>bdd spec validate</code></a> until the
+<li><a href="commands/spec.html#spec-validate"><code>spec validate</code></a> until the
 structure is valid.</li>
-<li><a href="commands/spec.html#bdd-spec-refine"><code>bdd spec refine &lt;id&gt;</code></a> until
+<li><a href="commands/spec.html#spec-refine"><code>spec refine &lt;id&gt;</code></a> until
 there are no wording findings.</li>
 <li>A human approves the wording. This is the first human gate.</li>
 </ol>
@@ -205,51 +205,51 @@ there are no wording findings.</li>
 tagged <code>@REQ-...</code> in a feature file, with step definitions binding
 it to real code.</li>
 <li><strong>TDD altitude</strong> — unit tests
-(<a href="commands/unittest.html"><code>bdd unittest generate</code></a>) pin down the
+(<a href="commands/unittest.html"><code>spec unittest generate</code></a>) pin down the
 fine-grained behavior beneath the scenario.</li>
 </ul>
 <h2 id="the-phase-machine"><a class="header" href="#the-phase-machine">The phase machine</a></h2>
-<p>The persistent TDD phase lives in <code>.bdd-tdd-state.json</code> under the
+<p>The persistent TDD phase lives in <code>.spec-state.json</code> under the
 project root and survives between invocations and across MCP sessions.</p>
 <pre><code class="language-text">          tests fail                    tests pass
   (start) ──────────► RED ────────────► GREEN ──┐
-                       ▲                  │     │ bdd refactor
+                       ▲                  │     │ spec refactor
                        │   tests fail     ▼     ▼
                        └────────────── REFACTOR
                                         (tests pass → GREEN)
 </code></pre>
 <ul>
-<li><a href="commands/test.html"><code>bdd test</code></a> runs the suite and moves the phase to
+<li><a href="commands/test.html"><code>spec test</code></a> runs the suite and moves the phase to
 RED (failures) or GREEN (all passing).</li>
-<li><a href="commands/refactor.html"><code>bdd refactor</code></a> is only allowed on GREEN — it
+<li><a href="commands/refactor.html"><code>spec refactor</code></a> is only allowed on GREEN — it
 moves to REFACTOR and records your note in the refactor log.</li>
-<li><a href="commands/state.html"><code>bdd state</code></a> shows the phase, the last run’s
+<li><a href="commands/state.html"><code>spec state</code></a> shows the phase, the last run’s
 counts, and the refactor log at any time.</li>
-<li><a href="commands/status.html"><code>bdd status</code></a> zooms out from the phase to the
+<li><a href="commands/status.html"><code>spec status</code></a> zooms out from the phase to the
 spec: where every requirement stands on the road to implemented, and
 the single next step for the one that is furthest along.</li>
 </ul>
 <h2 id="one-requirement-at-a-time"><a class="header" href="#one-requirement-at-a-time">One requirement at a time</a></h2>
 <p>The intended rhythm for each pending requirement:</p>
-<pre><code class="language-bash">bdd spec show REQ-002        # locations + workflow hint
-bdd scenario add --feature features/calculator.feature \
+<pre><code class="language-bash">spec show REQ-002        # locations + workflow hint
+spec scenario add --feature features/calculator.feature \
     --req REQ-002 --name "Two numbers are summed" \
     --step 'Given the input "1,2"' \
     --step 'When add is called' \
     --step 'Then the result is 3'
-bdd changes commit           # apply the staged scenario
-bdd steps missing            # any undefined steps?
-bdd steps generate &amp;&amp; bdd changes commit
-bdd test                     # RED: the scenario fails honestly
+spec changes commit           # apply the staged scenario
+spec steps missing            # any undefined steps?
+spec steps generate &amp;&amp; spec changes commit
+spec test                     # RED: the scenario fails honestly
 # ...implement the production code...
-bdd test                     # GREEN
-bdd refactor --note "tidy the parser" &amp;&amp; bdd test
-bdd status                   # confirm REQ-002 is ready to mark
-bdd spec mark-implemented REQ-002   # flips the status, records the featureFile
-bdd validate                 # checks the @REQ-002 scenario exists
-bdd changes commit
+spec test                     # GREEN
+spec refactor --note "tidy the parser" &amp;&amp; spec test
+spec status                   # confirm REQ-002 is ready to mark
+spec mark-implemented REQ-002   # flips the status, records the featureFile
+spec changes validate                 # checks the @REQ-002 scenario exists
+spec changes commit
 </code></pre>
-<p><a href="commands/greenfield.html"><code>bdd greenfield</code></a> automates exactly this
+<p><a href="commands/greenfield.html"><code>spec greenfield</code></a> automates exactly this
 rhythm, pausing only at the two human gates.</p>
 
                     </main>

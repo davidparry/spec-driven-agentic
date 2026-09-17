@@ -1,5 +1,5 @@
 # Executable spec for project memory: language, libraries, and layout
-# recorded in `.bdd-memory.json` and briefed into every LLM system prompt.
+# recorded in `.spec-memory.json` and briefed into every LLM system prompt.
 Feature: Project memory
   As a developer working a spec-driven loop
   I want the project's language, libraries, and structure remembered
@@ -21,11 +21,11 @@ Feature: Project memory
       class App {}
       """
     When the project memory is refreshed
-    Then the working tree file ".bdd-memory.json" contains "Java"
-    And the working tree file ".bdd-memory.json" contains "Cucumber-JVM"
-    And the working tree file ".bdd-memory.json" contains "Maven"
-    And the working tree file ".bdd-memory.json" contains "cucumber-java"
-    And the working tree file ".bdd-memory.json" contains "src/main/java"
+    Then the working tree file ".spec-memory.json" contains "Java"
+    And the working tree file ".spec-memory.json" contains "Cucumber-JVM"
+    And the working tree file ".spec-memory.json" contains "Maven"
+    And the working tree file ".spec-memory.json" contains "cucumber-java"
+    And the working tree file ".spec-memory.json" contains "src/main/java"
 
   Scenario: A chosen language is kept when other markers appear later
     Given a project source file "pom.xml" containing:
@@ -33,8 +33,8 @@ Feature: Project memory
       <project/>
       """
     When the project memory is refreshed for language "rust"
-    Then the working tree file ".bdd-memory.json" contains "Rust"
-    And the working tree file ".bdd-memory.json" contains "cucumber-rs"
+    Then the working tree file ".spec-memory.json" contains "Rust"
+    And the working tree file ".spec-memory.json" contains "cucumber-rs"
 
   Scenario: An LLM call is briefed with project memory
     Given a project source file "pom.xml" containing:

@@ -1,6 +1,6 @@
-# Executable spec for the persistent TDD state machine — `bdd test`,
-# `bdd state`, and `bdd refactor` sharing one machine across invocations
-# through .bdd-state.json, with replies matching the Java server.
+# Executable spec for the persistent TDD state machine — `spec test`,
+# `spec state`, and `spec refactor` sharing one machine across invocations
+# through .spec-state.json, with replies matching the Java server.
 Feature: Persistent TDD state
   As a developer running the loop from a short-lived harness
   I want the RED/GREEN/REFACTOR phase persisted between invocations

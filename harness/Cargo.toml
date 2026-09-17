@@ -1,6 +1,6 @@
 [package]
-name = "bdd-harness"
-version = "0.4.1"
+name = "spec-harness"
+version = "0.5.0"
 edition = "2024"
 rust-version = "1.97"
 description = "Spec-driven BDD/TDD harness with an embedded MCP server"
@@ -8,7 +8,7 @@ license = "AGPL-3.0-only"
 repository = "https://github.com/davidparry/tdd-bdd-agentic"
 
 [[bin]]
-name = "bdd"
+name = "spec"
 path = "src/main.rs"
 
 [[test]]

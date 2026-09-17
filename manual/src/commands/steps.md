@@ -1,10 +1,10 @@
-# bdd steps
+# spec steps
 
 Step-definition discovery and generation — the glue between Gherkin
 scenarios and real code.
 
 ```text
-Usage: bdd steps [OPTIONS] <COMMAND>
+Usage: spec steps [OPTIONS] <COMMAND>
 
 Commands: missing, generate
 ```
@@ -13,7 +13,7 @@ MCP tool equivalents: `step_definitions_find`, `step_definition_create`.
 
 ---
 
-## bdd steps missing
+## spec steps missing
 
 Report steps used by scenarios that have no matching definition
 (undefined), and steps matched by more than one definition
@@ -22,7 +22,7 @@ Java, Cucumber-JS functions for JavaScript/TypeScript, Reqnroll
 bindings for .NET, cucumber-rs attributes for Rust.
 
 ```bash
-bdd steps missing
+spec steps missing
 ```
 
 ```json
@@ -33,7 +33,7 @@ bdd steps missing
     { "step": "Given the input \"1,2\"", "keyword": "Given" },
     { "step": "Then the result is 3", "keyword": "Then" }
   ],
-  "nextStep": "Generate skeletons with 'bdd steps generate', then implement their bodies."
+  "nextStep": "Generate skeletons with 'spec steps generate', then implement their bodies."
 }
 ```
 
@@ -41,13 +41,13 @@ An empty `missing` array means every step in every scenario is bound.
 
 ---
 
-## bdd steps generate
+## spec steps generate
 
 Generate step definitions for the undefined steps and stage them.
 Already-defined steps are never regenerated — only the gap is filled.
 
 ```bash
-bdd steps generate
+spec steps generate
 ```
 
 ```json
@@ -56,7 +56,7 @@ bdd steps generate
   "staged": true,
   "source": "template",
   "summary": "2 step definitions generated for undefined steps.",
-  "nextStep": "Review with 'bdd changes show', apply with 'bdd changes commit', implement the bodies, then 'bdd test'."
+  "nextStep": "Review with 'spec changes show', apply with 'spec changes commit', implement the bodies, then 'spec test'."
 }
 ```
 
@@ -66,7 +66,7 @@ bdd steps generate
   signatures, bodies that fail honestly (throw / `panic!` /
   `PendingStepException`) so the first run is genuinely RED.
 - `"llm"` — a model polished the skeleton and the result passed
-  validation. Requires a resolved model (see [`bdd model`](model.md));
+  validation. Requires a resolved model (see [`spec model`](model.md));
   when no model is reachable, generation silently falls back to the
   template. The LLM output must parse and compile-shape-check or the
   template is used instead — a model can never stage broken code.
@@ -87,6 +87,6 @@ Given('the input {string}', function (input) {
 
 ## See also
 
-- [`bdd scenario`](scenario.md) — where the steps come from.
-- [`bdd changes`](changes.md) — apply the staged definitions.
-- [`bdd test`](test.md) — run and watch the honest RED.
+- [`spec scenario`](scenario.md) — where the steps come from.
+- [`spec changes`](changes.md) — apply the staged definitions.
+- [`spec test`](test.md) — run and watch the honest RED.

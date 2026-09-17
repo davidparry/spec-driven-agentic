@@ -35,27 +35,28 @@ target/
 .qodo/
 
 # Copy produced at the repo root by `dist build` (extra-artifacts)
-/bdd-harness-uninstaller.sh
+/spec-harness-uninstaller.sh
 
 # GitHub Pages build output
 _site/
-.bdd-history
+.spec-history
 
 # Cached LLM responses; safe to delete at any time
-.bdd-cache/
+.spec-cache/
 
-# Diagnostic logs written by the bdd harness; safe to delete at any time
-.bdd-log/
+# Diagnostic logs written by the spec harness; safe to delete at any time
+.spec-log/
 
-# TDD phase log and staged mutations written by the bdd harness
-.bdd-state.json
-.bdd-staged/
+# TDD phase log and staged mutations written by the spec harness
+.spec-state.json
+.spec-staged/
 
 # macOS Finder metadata
 .DS_Store
 # Claude Code: keep shared project settings; ignore machine-local files
 .claude/*
 !.claude/settings.json
-/.bdd-memory.json
-/.bdd-state.json
+/.spec-memory.json
+/.spec-state.json
 
+/harness/.bdd-log/

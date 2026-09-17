@@ -6,6 +6,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::application::spec_service::ProjectLayout;
+use crate::domain::STAGED_DIR;
 use crate::domain::language::{Language, detect_languages};
 
 /// Where the requirements spec lives, relative to the project root.
@@ -19,7 +20,7 @@ const SKIPPED_DIRS: [&str; 7] = [
     "obj",
     "dist",
     ".git",
-    ".bdd-staged",
+    STAGED_DIR,
 ];
 
 /// The workshop kata layout the frozen `get_requirement` tool reports,
@@ -98,7 +99,7 @@ fn collect_files(dir: &Path, root: &Path, extension: &str, into: &mut Vec<String
 }
 
 /// When this workshop's kata feature directory exists, discovery is
-/// restricted to it so `bdd feature list` does not pick up harness/MCP
+/// restricted to it so `spec feature list` does not pick up harness/MCP
 /// Cucumber features. Greenfield projects (no `kata/`) still walk the
 /// whole tree.
 pub fn feature_search_root(root: &Path) -> PathBuf {
@@ -112,7 +113,7 @@ pub fn feature_search_root(root: &Path) -> PathBuf {
 
 /// Detect the project's primary language. Memory (a greenfield choice)
 /// wins over marker detection so a polyglot tree keeps the chosen stack.
-/// Failure names `bdd inspect` so both composition roots can surface it.
+/// Failure names `spec inspect` so both composition roots can surface it.
 pub fn primary_language(root: &Path) -> Result<Language, String> {
     use crate::adapters::fs_memory::{FsMemoryStore, FsProjectInventory};
     use crate::adapters::fs_project::FsProjectFiles;
@@ -131,7 +132,7 @@ pub fn primary_language(root: &Path) -> Result<Language, String> {
     }
     detect_languages(&files).first().copied().ok_or_else(|| {
         "No supported project detected (pom.xml, build.gradle, package.json, \
-         *.csproj, Cargo.toml). Run bdd inspect."
+         *.csproj, Cargo.toml). Run spec inspect."
             .into()
     })
 }
@@ -223,13 +224,13 @@ mod tests {
         fs::write(dir.path().join("pom.xml"), "<project/>").unwrap();
         assert_eq!(primary_language(dir.path()).unwrap(), Language::Java);
         fs::write(
-            dir.path().join(".bdd-memory.json"),
+            dir.path().join(".spec-memory.json"),
             r#"{"version":1,"language":"Rust","refreshedAt":"2026-01-01T00:00:00Z"}"#,
         )
         .unwrap();
         assert_eq!(primary_language(dir.path()).unwrap(), Language::Rust);
         let empty = tempfile::tempdir().unwrap();
         let error = primary_language(empty.path()).unwrap_err();
-        assert!(error.contains("bdd inspect"), "{error}");
+        assert!(error.contains("spec inspect"), "{error}");
     }
 }

@@ -2,7 +2,7 @@
 
 [Introduction](introduction.md)
 
-# Using bdd
+# Using spec
 
 - [Getting started](getting-started.md)
 - [Global flags](global-flags.md)
@@ -14,23 +14,22 @@
 
 # Command reference
 
-- [bdd init](commands/init.md)
-- [bdd greenfield](commands/greenfield.md)
-- [bdd spec](commands/spec.md)
-- [bdd inspect](commands/inspect.md)
-- [bdd feature](commands/feature.md)
-- [bdd scenario](commands/scenario.md)
-- [bdd steps](commands/steps.md)
-- [bdd unittest](commands/unittest.md)
-- [bdd implement](commands/implement.md)
-- [bdd validate](commands/validate.md)
-- [bdd test](commands/test.md)
-- [bdd state](commands/state.md)
-- [bdd status](commands/status.md)
-- [bdd refactor](commands/refactor.md)
-- [bdd changes](commands/changes.md)
-- [bdd model](commands/model.md)
-- [bdd config](commands/config.md)
-- [bdd mcp](commands/mcp.md)
-- [bdd tools](commands/tools.md)
-- [bdd ask](commands/ask.md)
+- [spec init](commands/init.md)
+- [spec greenfield](commands/greenfield.md)
+- [The requirements spec](commands/spec.md)
+- [spec inspect](commands/inspect.md)
+- [spec feature](commands/feature.md)
+- [spec scenario](commands/scenario.md)
+- [spec steps](commands/steps.md)
+- [spec unittest](commands/unittest.md)
+- [spec implement](commands/implement.md)
+- [spec test](commands/test.md)
+- [spec state](commands/state.md)
+- [spec status](commands/status.md)
+- [spec refactor](commands/refactor.md)
+- [spec changes](commands/changes.md)
+- [spec model](commands/model.md)
+- [spec config](commands/config.md)
+- [spec mcp](commands/mcp.md)
+- [spec tools](commands/tools.md)
+- [spec ask](commands/ask.md)

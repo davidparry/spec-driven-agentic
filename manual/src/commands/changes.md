@@ -1,13 +1,13 @@
-# bdd changes
+# spec changes
 
 Staged-transaction management. Every file mutation the harness authors
-lands in `.bdd-staged/` first (see [Staged changes](../staged-changes.md));
+lands in `.spec-staged/` first (see [Staged changes](../staged-changes.md));
 these subcommands are how you review, apply, or drop the transaction.
 
 ```text
-Usage: bdd changes [OPTIONS] <COMMAND>
+Usage: spec changes [OPTIONS] <COMMAND>
 
-Commands: show, commit, discard
+Commands: show, commit, discard, validate
 ```
 
 None of the subcommands take flags beyond the
@@ -15,13 +15,13 @@ None of the subcommands take flags beyond the
 
 ---
 
-## bdd changes show
+## spec changes show
 
 List everything currently staged: the path, whether applying would
 create or modify the file, and a one-line summary of the change.
 
 ```bash
-bdd changes show
+spec changes show
 ```
 
 ```json
@@ -38,7 +38,7 @@ bdd changes show
       "summary": "2 step definitions generated for undefined steps"
     }
   ],
-  "nextStep": "Apply with 'bdd changes commit' or drop with 'bdd changes discard'."
+  "nextStep": "Apply with 'spec changes commit' or drop with 'spec changes discard'."
 }
 ```
 
@@ -52,22 +52,23 @@ An empty stage:
 ```
 
 To see the full content of a staged file, read it directly under
-`.bdd-staged/` — the layout mirrors the project tree.
+`.spec-staged/` — the layout mirrors the project tree.
 
 ---
 
-## bdd changes commit
+## spec changes commit
 
 Apply every staged change to the working tree atomically and clear
 the stage. Files marked `create` are written fresh; `modify` replaces
 the working copy with the staged version.
 
 ```bash
-bdd changes commit
+spec changes commit
 ```
 
-Run [`bdd validate`](validate.md) first when the transaction contains
-Gherkin — broken staged Gherkin is reported there before it can land.
+Run [`spec changes validate`](#spec-changes-validate) first when the
+transaction contains Gherkin — broken staged Gherkin is reported there
+before it can land.
 
 After applying, `commit` re-validates the working tree. Open issues
 ride along in the reply as a warning — the commit still happened, but
@@ -79,9 +80,9 @@ an invalid spec never lands silently:
     { "path": "requirements/requirements.json", "action": "modify", "summary": "mark REQ-001 implemented" }
   ],
   "issues": [
-    "REQ-001: implemented requirements must name their featureFile - rerun bdd spec mark-implemented REQ-001 on GREEN to backfill it"
+    "REQ-001: implemented requirements must name their featureFile - rerun spec mark-implemented REQ-001 on GREEN to backfill it"
   ],
-  "nextStep": "Staged changes applied, but the working tree does not validate - fix the issues above, then run bdd validate again."
+  "nextStep": "Staged changes applied, but the working tree does not validate - fix the issues above, then run spec changes validate again."
 }
 ```
 
@@ -89,7 +90,7 @@ A clean commit carries no `issues` field.
 
 ---
 
-## bdd changes discard
+## spec changes discard
 
 Drop the entire staged transaction. The working tree is untouched; the
 stage is emptied. There is no partial discard — the stage is one
@@ -97,23 +98,86 @@ transaction by design (a scenario without its step definitions is not
 a state worth keeping).
 
 ```bash
-bdd changes discard
+spec changes discard
 ```
+
+---
+
+## spec changes validate
+
+Validate all Gherkin in the project — committed feature files **and**
+staged ones — so a broken scenario never reaches a test run. This is
+the cheap gate to run before `spec changes commit`. MCP clients call
+the same check as `changes_validate` (`validate_spec` remains the
+on-disk frozen tool).
+
+```text
+Usage: spec changes validate [OPTIONS]
+```
+
+### What is checked
+
+- Every `.feature` file under the root parses as valid Gherkin.
+- Every file in the staging area (`.spec-staged/`) that is a feature
+  file parses too — you cannot commit a transaction containing broken
+  Gherkin without knowing.
+- Scenario requirement tags (`@REQ-...`) refer to ids that exist in
+  the spec.
+
+### Examples
+
+Everything clean:
+
+```bash
+spec changes validate
+```
+
+```json
+{
+  "valid": true,
+  "issues": [],
+  "nextStep": "Gherkin is clean. Run 'spec test' or commit staged changes."
+}
+```
+
+Problems found (the command exits 0; the report carries the verdict):
+
+```json
+{
+  "valid": false,
+  "issues": [
+    "features/string_calculator.feature: (5:3) expected a step keyword",
+    "staged features/newlines.feature: scenario 'Newlines act as delimiters' is tagged @REQ-009 but the spec has no such requirement"
+  ],
+  "nextStep": "Fix the listed files (staged ones via their originating command), then validate again."
+}
+```
+
+### Relation to `spec validate`
+
+| Command | Validates |
+| --- | --- |
+| `spec validate` | The requirements JSON: shape, ids, statuses, criterion phrasing. |
+| `spec changes validate` | The Gherkin: feature files on disk and in the stage, plus tag/spec consistency. |
+
+Run both before a commit-and-test cycle; both appear as `nextStep`
+suggestions at the appropriate moments.
 
 ## A typical review session
 
 ```bash
-bdd scenario add --feature features/calc.feature --req REQ-002 \
+spec scenario add --feature features/calc.feature --req REQ-002 \
     --name "A single number is returned" --step 'Given the input "5"' \
     --step 'When add is called' --step 'Then the result is 5'
-bdd steps generate
-bdd changes show                 # one modify + one create
-bdd validate                     # staged Gherkin parses, tags resolve
-bdd changes commit               # both land together
-bdd test                         # honest RED
+spec steps generate
+spec changes show                 # one modify + one create
+spec changes validate                     # staged Gherkin parses, tags resolve
+spec changes commit               # both land together
+spec test                         # honest RED
 ```
 
 ## See also
 
 - [Staged changes](../staged-changes.md) — the model and its rationale.
-- [`bdd validate`](validate.md) — the gate before `commit`.
+- [`spec validate`](spec.md#spec-validate) — the requirements-spec gate, the other half of the pair.
+- [`spec feature show`](feature.md#spec-feature-show) — inspect a file that failed to parse.

@@ -14,7 +14,7 @@ import java.nio.file.attribute.PosixFilePermissions;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-class BddBinaryTest {
+class SpecBinaryTest {
 
     @TempDir
     Path temp;
@@ -22,49 +22,49 @@ class BddBinaryTest {
     @Test
     @DisplayName("a missing PATH yields no binary")
     void missingPath() {
-        assertThat(BddBinary.find("bdd", null)).isNull();
-        assertThat(BddBinary.find("bdd", "  ")).isNull();
+        assertThat(SpecBinary.find("spec", null)).isNull();
+        assertThat(SpecBinary.find("spec", "  ")).isNull();
     }
 
     @Test
     @DisplayName("blank PATH entries are skipped")
     void blankEntriesSkipped() {
-        assertThat(BddBinary.find("bdd", File.pathSeparator + File.pathSeparator)).isNull();
+        assertThat(SpecBinary.find("spec", File.pathSeparator + File.pathSeparator)).isNull();
     }
 
     @Test
     @EnabledOnOs({OS.MAC, OS.LINUX})
-    @DisplayName("the first executable named bdd on PATH is used")
+    @DisplayName("the first executable named spec on PATH is used")
     void firstExecutableWins() throws IOException {
-        Path first = executable("first", "bdd");
-        Path second = executable("second", "bdd");
+        Path first = executable("first", "spec");
+        Path second = executable("second", "spec");
         String path = first.getParent() + File.pathSeparator + second.getParent();
-        assertThat(BddBinary.find("bdd", path)).isEqualTo(first.toAbsolutePath().normalize());
+        assertThat(SpecBinary.find("spec", path)).isEqualTo(first.toAbsolutePath().normalize());
     }
 
     @Test
     @EnabledOnOs({OS.MAC, OS.LINUX})
     @DisplayName("a non-executable file on PATH is ignored")
     void nonExecutableIgnored() throws IOException {
-        Path file = temp.resolve("bdd");
+        Path file = temp.resolve("spec");
         Files.writeString(file, "not a binary");
         Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("rw-r--r--"));
-        assertThat(BddBinary.find("bdd", temp.toString())).isNull();
+        assertThat(SpecBinary.find("spec", temp.toString())).isNull();
     }
 
     @Test
     @EnabledOnOs({OS.MAC, OS.LINUX})
-    @DisplayName("a directory named bdd on PATH is ignored")
+    @DisplayName("a directory named spec on PATH is ignored")
     void directoryIgnored() throws IOException {
-        Path dir = temp.resolve("bdd");
+        Path dir = temp.resolve("spec");
         Files.createDirectory(dir);
-        assertThat(BddBinary.find("bdd", temp.toString())).isNull();
+        assertThat(SpecBinary.find("spec", temp.toString())).isNull();
     }
 
     @Test
-    @DisplayName("onPath is the bdd found on the process PATH")
+    @DisplayName("onPath is the spec found on the process PATH")
     void onPathUsesProcessPath() {
-        assertThat(BddBinary.onPath()).isEqualTo(BddBinary.find("bdd", System.getenv("PATH")));
+        assertThat(SpecBinary.onPath()).isEqualTo(SpecBinary.find("spec", System.getenv("PATH")));
     }
 
     private Path executable(String folder, String name) throws IOException {

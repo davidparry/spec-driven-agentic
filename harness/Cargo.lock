@@ -124,36 +124,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5"
 
 [[package]]
-name = "bdd-harness"
-version = "0.4.0"
-dependencies = [
- "anyhow",
- "chrono",
- "clap",
- "cucumber",
- "futures",
- "gherkin",
- "libc",
- "minijinja",
- "quick-xml",
- "regex",
- "reqwest",
- "rmcp",
- "rustyline",
- "schemars",
- "serde",
- "serde_json",
- "sha2",
- "shell-words",
- "tempfile",
- "tokio",
- "toml",
- "tracing",
- "tracing-appender",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "bitflags"
 version = "2.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2157,6 +2127,36 @@ checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "spec-harness"
+version = "0.5.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "clap",
+ "cucumber",
+ "futures",
+ "gherkin",
+ "libc",
+ "minijinja",
+ "quick-xml",
+ "regex",
+ "reqwest",
+ "rmcp",
+ "rustyline",
+ "schemars",
+ "serde",
+ "serde_json",
+ "sha2",
+ "shell-words",
+ "tempfile",
+ "tokio",
+ "toml",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
 ]
 
 [[package]]

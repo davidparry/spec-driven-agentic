@@ -1,12 +1,12 @@
 Feature: External MCP server registry
-  As a developer attaching an extra MCP server to one bdd command
+  As a developer attaching an extra MCP server to one spec command
   I want mcp.json discovered, invalid entries skipped, and refresh rewriting the cache
   So that nothing external reaches a model until it is attached with --for
 
   Scenario: mcp.json in the root is found and its servers listed
     Given a project source file "mcp.json" containing:
       """
-      {"mcpServers":{"self":{"command":"bdd","args":["mcp","serve"]}}}
+      {"mcpServers":{"self":{"command":"spec","args":["mcp","serve"]}}}
       """
     When the MCP registry is loaded
     Then the registry path contains "mcp.json"
@@ -15,7 +15,7 @@ Feature: External MCP server registry
   Scenario: tools mcp_config overrides the location
     Given a project source file "elsewhere.json" containing:
       """
-      {"mcpServers":{"other":{"command":"bdd"}}}
+      {"mcpServers":{"other":{"command":"spec"}}}
       """
     When the MCP registry is loaded from "elsewhere.json"
     Then the registry lists server "other"
@@ -54,7 +54,7 @@ Feature: External MCP server registry
   Scenario: workspaceFolder expands
     Given the registry JSON:
       """
-      {"mcpServers":{"self":{"command":"bdd","args":["mcp","serve","--root","${workspaceFolder}"]}}}
+      {"mcpServers":{"self":{"command":"spec","args":["mcp","serve","--root","${workspaceFolder}"]}}}
       """
     When the registry JSON is parsed
     Then the registry server "self" argument contains the workspace folder
@@ -62,7 +62,7 @@ Feature: External MCP server registry
   Scenario: disabled true is skipped
     Given the registry JSON:
       """
-      {"mcpServers":{"off":{"command":"bdd","disabled":true},"on":{"command":"bdd"}}}
+      {"mcpServers":{"off":{"command":"spec","disabled":true},"on":{"command":"spec"}}}
       """
     When the registry JSON is parsed
     Then the registry lists server "on"
@@ -88,7 +88,7 @@ Feature: External MCP server registry
   Scenario: tools refresh rewrites the cache
     Given a project source file "mcp.json" containing:
       """
-      {"mcpServers":{"self":{"command":"bdd","args":["mcp","serve"]}}}
+      {"mcpServers":{"self":{"command":"spec","args":["mcp","serve"]}}}
       """
     When the tool catalog is refreshed
     Then discovery connected

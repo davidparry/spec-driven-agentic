@@ -94,7 +94,7 @@ fn test_next_step(summary: &crate::domain::model::TestRunSummary, suggestion: &s
             .any(|d| d.contains("parent POM") || d.contains("Fix the POM"))
     {
         return "The build failed before tests could run. Fix the POM named in the \
-                failure details, then run bdd test again."
+                failure details, then run spec test again."
             .into();
     }
     suggestion.to_string()

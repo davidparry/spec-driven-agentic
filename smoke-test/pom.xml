@@ -13,7 +13,7 @@
     <artifactId>smoke-test</artifactId>
     <name>MCP server smoke test</name>
     <description>
-        A Java smoke test of `bdd mcp serve`: launch the server over stdio,
+        A Java smoke test of `spec mcp serve`: launch the server over stdio,
         discover its tools, and walk a short Red/Green/Refactor protocol
         exchange — printing each step as it goes.
     </description>

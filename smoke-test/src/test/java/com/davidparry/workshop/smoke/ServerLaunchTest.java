@@ -14,33 +14,33 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class ServerLaunchTest {
 
     @Test
-    @DisplayName("bdd launch is mcp serve --root <absolute workshop root>")
-    void bddLaunch() {
+    @DisplayName("spec launch is mcp serve --root <absolute workshop root>")
+    void specLaunch() {
         Path root = Path.of(".").toAbsolutePath().normalize();
-        Path binary = Path.of("/usr/bin/bdd");
-        ServerLaunch launch = ServerLaunch.bdd(root, binary);
-        assertThat(launch.program()).isEqualTo("/usr/bin/bdd");
+        Path binary = Path.of("/usr/bin/spec");
+        ServerLaunch launch = ServerLaunch.spec(root, binary);
+        assertThat(launch.program()).isEqualTo("/usr/bin/spec");
         assertThat(launch.args()).containsExactly("mcp", "serve", "--root", root.toString());
     }
 
     @Test
     @DisplayName("null workshop root is refused")
     void nullRootIsRefused() {
-        assertThatThrownBy(() -> ServerLaunch.bdd(null, Path.of("bdd")))
+        assertThatThrownBy(() -> ServerLaunch.spec(null, Path.of("spec")))
                 .isInstanceOf(NullPointerException.class);
     }
 
     @Test
     @DisplayName("null binary is refused")
     void nullBinaryIsRefused() {
-        assertThatThrownBy(() -> ServerLaunch.bdd(Path.of("."), null))
+        assertThatThrownBy(() -> ServerLaunch.spec(Path.of("."), null))
                 .isInstanceOf(NullPointerException.class);
     }
 
     @Test
     @DisplayName("toParameters carries the program and args")
     void toParameters() {
-        ServerLaunch launch = new ServerLaunch("bdd", List.of("mcp", "serve"));
+        ServerLaunch launch = new ServerLaunch("spec", List.of("mcp", "serve"));
         ServerParameters params = launch.toParameters();
         assertThat(params).isNotNull();
     }

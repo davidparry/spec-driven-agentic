@@ -20,7 +20,7 @@ impl FsMcpRegistry {
 
 impl McpRegistrySource for FsMcpRegistry {
     fn load(&self) -> RegistryLoad {
-        let env_path = std::env::var("BDD_MCP_CONFIG").ok();
+        let env_path = std::env::var("SPEC_MCP_CONFIG").ok();
         let home = std::env::var("HOME")
             .ok()
             .or_else(|| std::env::var("USERPROFILE").ok())
@@ -81,13 +81,13 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         fs::write(
             dir.path().join("mcp.json"),
-            r#"{"mcpServers":{"self":{"command":"bdd","args":["mcp","serve"]}}}"#,
+            r#"{"mcpServers":{"self":{"command":"spec","args":["mcp","serve"]}}}"#,
         )
         .unwrap();
         let load = FsMcpRegistry::new(dir.path().to_path_buf(), None).load();
         assert!(load.path.unwrap().ends_with("mcp.json"));
         assert_eq!(load.servers.len(), 1);
-        assert_eq!(load.servers[0].program, "bdd");
+        assert_eq!(load.servers[0].program, "spec");
     }
 
     #[test]

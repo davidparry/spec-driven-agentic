@@ -1,6 +1,6 @@
 # Introduction
 
-`bdd` is one native binary for the whole spec-driven loop:
+`spec` is one native binary for the whole spec-driven loop:
 
 ```text
 spec → Gherkin scenario → RED → implement → GREEN → REFACTOR
@@ -15,13 +15,13 @@ quality-gates its wording, turns approved requirements into tagged
 Gherkin scenarios, runs the tests through your project's own build
 tool, and tracks the persistent RED/GREEN/REFACTOR phase between
 invocations. It also
-embeds an MCP server (`bdd mcp serve`) so AI agents can drive the same
+embeds an MCP server (`spec mcp serve`) so AI agents can drive the same
 workflow through typed tools — with no filesystem or shell escape
 hatches.
 
 ## How to read this manual
 
-- **Using bdd** covers the concepts that span commands: the global
+- **Using spec** covers the concepts that span commands: the global
   flags, the interactive shell, the workflow phases, and the staged
   changes model that protects your working tree.
 - **Command reference** documents every command, subcommand, and flag,
@@ -32,7 +32,7 @@ Use the search icon (or press <kbd>S</kbd>) to search the whole manual.
 ## Conventions
 
 - Commands are shown as you would type them in a shell. Inside the
-  [interactive shell](interactive-shell.md) the leading `bdd` is
+  [interactive shell](interactive-shell.md) the leading `spec` is
   optional.
 - Replies are JSON on stdout unless a command is inherently
   interactive. Every reply carries a `nextStep` field that says what
@@ -58,5 +58,5 @@ installs anything.
 LLM-backed generation uses local [Ollama](https://ollama.com). The
 model this harness is developed and run against is
 `qwen3.8-flash-next:125b-mlx` — see [Getting started](getting-started.md)
-and [`bdd model`](commands/model.md). Your mileage will vary with
+and [`spec model`](commands/model.md). Your mileage will vary with
 other models, especially those not trained for development work.

@@ -3,12 +3,12 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>bdd scenario - bdd Harness Manual</title>
+        <title>spec scenario - spec Harness Manual</title>
 
 
         <!-- Custom HTML head -->
 
-        <meta name="description" content="The complete, searchable reference for the bdd harness: every command, subcommand, and flag, with in-depth examples.">
+        <meta name="description" content="The complete, searchable reference for the spec harness: every command, subcommand, and flag, with in-depth examples.">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff">
 
@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-aaad9ee5.js";
+            window.path_to_searchindex_js = "../searchindex-5959f77b.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-9d4e1520.js"></script>
+        <script src="../toc-372d77fe.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -137,7 +137,7 @@
                         </button>
                     </div>
 
-                    <h1 class="menu-title">bdd Harness Manual</h1>
+                    <h1 class="menu-title">spec Harness Manual</h1>
 
                     <div class="right-buttons">
                         <a href="../print.html" title="Print this book" aria-label="Print this book">
@@ -180,18 +180,18 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="bdd-scenario"><a class="header" href="#bdd-scenario">bdd scenario</a></h1>
+                        <h1 id="spec-scenario"><a class="header" href="#spec-scenario">spec scenario</a></h1>
 <p>Scenario mutations. Every scenario is tied to a requirement by a
 <code>@REQ-...</code> tag, keeping the feature files traceable back to the spec.
 All three subcommands write to the <a href="../staged-changes.html">staging area</a>.</p>
-<pre><code class="language-text">Usage: bdd scenario [OPTIONS] &lt;COMMAND&gt;
+<pre><code class="language-text">Usage: spec scenario [OPTIONS] &lt;COMMAND&gt;
 
 Commands: add, update, delete
 </code></pre>
 <hr>
-<h2 id="bdd-scenario-add"><a class="header" href="#bdd-scenario-add">bdd scenario add</a></h2>
+<h2 id="spec-scenario-add"><a class="header" href="#spec-scenario-add">spec scenario add</a></h2>
 <p>Append a tagged scenario to an existing feature file.</p>
-<pre><code class="language-text">Usage: bdd scenario add [OPTIONS] --feature &lt;FEATURE&gt; --req &lt;REQ&gt; --name &lt;NAME&gt;
+<pre><code class="language-text">Usage: spec scenario add [OPTIONS] --feature &lt;FEATURE&gt; --req &lt;REQ&gt; --name &lt;NAME&gt;
 </code></pre>
 <div class="table-wrapper">
 <table>
@@ -206,7 +206,7 @@ Commands: add, update, delete
 </tbody>
 </table>
 </div>
-<pre><code class="language-bash">bdd scenario add \
+<pre><code class="language-bash">spec scenario add \
   --feature features/string_calculator.feature \
   --req REQ-003 \
   --name "Two numbers separated by a comma are summed" \
@@ -225,10 +225,10 @@ Commands: add, update, delete
 <code>Then</code>, <code>And</code>, <code>But</code>); the mutation is validated as real Gherkin
 before it stages.</p>
 <hr>
-<h2 id="bdd-scenario-update"><a class="header" href="#bdd-scenario-update">bdd scenario update</a></h2>
+<h2 id="spec-scenario-update"><a class="header" href="#spec-scenario-update">spec scenario update</a></h2>
 <p>Replace a scenario’s steps and/or its requirement tag. The scenario is
 found by feature path + scenario name; omitted parts are kept.</p>
-<pre><code class="language-text">Usage: bdd scenario update [OPTIONS] --feature &lt;FEATURE&gt; --name &lt;NAME&gt;
+<pre><code class="language-text">Usage: spec scenario update [OPTIONS] --feature &lt;FEATURE&gt; --name &lt;NAME&gt;
 </code></pre>
 <div class="table-wrapper">
 <table>
@@ -244,13 +244,13 @@ found by feature path + scenario name; omitted parts are kept.</p>
 </table>
 </div>
 <p>Retag a scenario without touching its steps:</p>
-<pre><code class="language-bash">bdd scenario update \
+<pre><code class="language-bash">spec scenario update \
   --feature features/string_calculator.feature \
   --name "Two numbers separated by a comma are summed" \
   --req REQ-007
 </code></pre>
 <p>Rewrite the steps:</p>
-<pre><code class="language-bash">bdd scenario update \
+<pre><code class="language-bash">spec scenario update \
   --feature features/string_calculator.feature \
   --name "Two numbers separated by a comma are summed" \
   --step 'Given the input "10,20"' \
@@ -258,28 +258,28 @@ found by feature path + scenario name; omitted parts are kept.</p>
   --step 'Then the result is 30'
 </code></pre>
 <hr>
-<h2 id="bdd-scenario-delete"><a class="header" href="#bdd-scenario-delete">bdd scenario delete</a></h2>
+<h2 id="spec-scenario-delete"><a class="header" href="#spec-scenario-delete">spec scenario delete</a></h2>
 <p>Remove a scenario from a feature file.</p>
-<pre><code class="language-text">Usage: bdd scenario delete [OPTIONS] --feature &lt;FEATURE&gt; --name &lt;NAME&gt;
+<pre><code class="language-text">Usage: spec scenario delete [OPTIONS] --feature &lt;FEATURE&gt; --name &lt;NAME&gt;
 </code></pre>
-<pre><code class="language-bash">bdd scenario delete \
+<pre><code class="language-bash">spec scenario delete \
   --feature features/string_calculator.feature \
   --name "Two numbers separated by a comma are summed"
 </code></pre>
 <p>Deleting a scenario that does not exist fails with exit status 1 and
 names the feature searched.</p>
 <h2 id="the-full-rhythm"><a class="header" href="#the-full-rhythm">The full rhythm</a></h2>
-<pre><code class="language-bash">bdd scenario add --feature features/calc.feature --req REQ-002 --name "..." --step '...'
-bdd changes show      # review the staged modify
-bdd changes commit    # apply
-bdd steps missing     # any steps without definitions?
-bdd test              # expect RED
+<pre><code class="language-bash">spec scenario add --feature features/calc.feature --req REQ-002 --name "..." --step '...'
+spec changes show      # review the staged modify
+spec changes commit    # apply
+spec steps missing     # any steps without definitions?
+spec test              # expect RED
 </code></pre>
 <h2 id="see-also"><a class="header" href="#see-also">See also</a></h2>
 <ul>
-<li><a href="steps.html"><code>bdd steps</code></a> — find and generate the step definitions
+<li><a href="steps.html"><code>spec steps</code></a> — find and generate the step definitions
 behind these scenarios.</li>
-<li><a href="changes.html"><code>bdd changes</code></a> — review, apply, or discard the staged mutation.</li>
+<li><a href="changes.html"><code>spec changes</code></a> — review, apply, or discard the staged mutation.</li>
 </ul>
 
                     </main>

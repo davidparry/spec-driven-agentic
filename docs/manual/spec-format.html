@@ -3,12 +3,12 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>The requirements format - bdd Harness Manual</title>
+        <title>The requirements format - spec Harness Manual</title>
 
 
         <!-- Custom HTML head -->
 
-        <meta name="description" content="The complete, searchable reference for the bdd harness: every command, subcommand, and flag, with in-depth examples.">
+        <meta name="description" content="The complete, searchable reference for the spec harness: every command, subcommand, and flag, with in-depth examples.">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff">
 
@@ -35,10 +35,10 @@
             const path_to_root = "";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "searchindex-aaad9ee5.js";
+            window.path_to_searchindex_js = "searchindex-5959f77b.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-9d4e1520.js"></script>
+        <script src="toc-372d77fe.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -137,7 +137,7 @@
                         </button>
                     </div>
 
-                    <h1 class="menu-title">bdd Harness Manual</h1>
+                    <h1 class="menu-title">spec Harness Manual</h1>
 
                     <div class="right-buttons">
                         <a href="print.html" title="Print this book" aria-label="Print this book">
@@ -187,10 +187,10 @@ its shape: what each field means, who consumes it, and how one file
 grows into a <strong>catalog</strong> of many.</p>
 <p>One thing to keep straight: <strong>Cucumber never reads this file.</strong>
 Cucumber runs the <code>.feature</code> files. The spec sits <em>upstream</em>: the
-tooling (<code>bdd</code>, the MCP server) reads it, agents turn its acceptance
+tooling (<code>spec</code>, the MCP server) reads it, agents turn its acceptance
 criteria into Gherkin scenarios and unit tests, and those are what the
 test runner executes.</p>
-<pre><code class="language-text">requirements.json  →  bdd / MCP tools  →  .feature + tests  →  Cucumber/JUnit
+<pre><code class="language-text">requirements.json  →  spec / MCP tools  →  .feature + tests  →  Cucumber/JUnit
 </code></pre>
 <h2 id="the-document-shape"><a class="header" href="#the-document-shape">The document shape</a></h2>
 <pre><code class="language-json">{
@@ -219,7 +219,7 @@ test runner executes.</p>
 <tr><th>Field</th><th>Required</th><th>What it does</th></tr>
 </thead>
 <tbody>
-<tr><td><code>project</code></td><td>root only</td><td>The project name. <code>bdd spec validate</code> fails when it is blank on the root document; included files never need one. Returned by <code>list_requirements</code>, and greenfield mode derives production file names from it.</td></tr>
+<tr><td><code>project</code></td><td>root only</td><td>The project name. <code>spec validate</code> fails when it is blank on the root document; included files never need one. Returned by <code>list_requirements</code>, and greenfield mode derives production file names from it.</td></tr>
 <tr><td><code>description</code></td><td>no</td><td>Documentation for humans and agents. The tooling never acts on it.</td></tr>
 <tr><td><code>includes</code></td><td>no</td><td>Child spec files merged into this one — see <a href="#the-catalog-splitting-the-spec-across-files">the catalog</a>.</td></tr>
 <tr><td><code>requirements</code></td><td>see note</td><td>The backlog this file contributes. A file may hold an empty array when it only exists to include others, but the <em>merged</em> catalog must contain at least one requirement.</td></tr>
@@ -234,11 +234,11 @@ test runner executes.</p>
 </thead>
 <tbody>
 <tr><td><code>id</code></td><td>yes</td><td>The lookup key, shaped like <code>REQ-007</code> (uppercase prefix, dash, number). Must be unique across the <strong>whole catalog</strong> — every included file counts. It is also the tag the workflow expects on the Gherkin scenario (<code>@REQ-007</code>); that tag is how a scenario traces back to its requirement.</td></tr>
-<tr><td><code>title</code></td><td>yes</td><td>One line naming the behavior. Shown by <code>bdd spec list</code>.</td></tr>
-<tr><td><code>status</code></td><td>yes</td><td><code>pending</code> or <code>implemented</code> — nothing else. <code>bdd spec mark-implemented</code> flips it on GREEN; the value gates the <code>featureFile</code> rules below.</td></tr>
-<tr><td><code>story</code></td><td>yes</td><td>The user story, <code>As a …, I want … so that …</code>. <code>bdd spec refine</code> reviews it for a missing actor, missing benefit, and ambiguous words.</td></tr>
+<tr><td><code>title</code></td><td>yes</td><td>One line naming the behavior. Shown by <code>spec list</code>.</td></tr>
+<tr><td><code>status</code></td><td>yes</td><td><code>pending</code> or <code>implemented</code> — nothing else. <code>spec mark-implemented</code> flips it on GREEN; the value gates the <code>featureFile</code> rules below.</td></tr>
+<tr><td><code>story</code></td><td>yes</td><td>The user story, <code>As a …, I want … so that …</code>. <code>spec refine</code> reviews it for a missing actor, missing benefit, and ambiguous words.</td></tr>
 <tr><td><code>acceptanceCriteria</code></td><td>at least one</td><td>Each criterion must be phrased Given/When/Then. This is the load-bearing field: agents translate these lines into the Gherkin scenarios and unit tests you then implement.</td></tr>
-<tr><td><code>featureFile</code></td><td>when implemented</td><td>Repo-root-relative path to the feature file carrying the scenario. Optional while <code>pending</code>; once <code>implemented</code>, validation requires the file to exist <em>and</em> to contain a scenario tagged <code>@&lt;id&gt;</code>. <code>bdd spec mark-implemented</code> records it automatically.</td></tr>
+<tr><td><code>featureFile</code></td><td>when implemented</td><td>Repo-root-relative path to the feature file carrying the scenario. Optional while <code>pending</code>; once <code>implemented</code>, validation requires the file to exist <em>and</em> to contain a scenario tagged <code>@&lt;id&gt;</code>. <code>spec mark-implemented</code> records it automatically.</td></tr>
 </tbody>
 </table>
 </div>
@@ -263,7 +263,7 @@ files, so the tree nests as many levels deep as the backlog needs.</p>
 <code>arithmetic.json</code>’s <code>"edge-cases.json"</code> lives next to
 <code>arithmetic.json</code>. Includes must stay inside the spec directory.</li>
 <li><strong>Merge order is depth-first</strong>: a file’s own requirements first,
-then each include in listed order. <code>bdd spec list</code>,
+then each include in listed order. <code>spec list</code>,
 <code>list_requirements</code>, <code>validate_spec</code>, and every other tool operate
 on this merged view — one backlog, whatever the file layout.</li>
 <li><strong>Ids are unique across the tree.</strong> A duplicate id spanning two
@@ -271,24 +271,24 @@ files fails validation naming the file that declared it first.</li>
 <li><strong>Cycles and missing files are validation issues</strong>, not crashes:
 including a file twice, including a file that does not exist, or
 escaping the spec directory each report a single actionable issue.</li>
-<li><strong>Mutations write back to the declaring file.</strong> <code>bdd spec reword</code>,
+<li><strong>Mutations write back to the declaring file.</strong> <code>spec reword</code>,
 <code>set-feature</code>, and <code>mark-implemented</code> find the file a requirement
-lives in and stage only that file. <code>bdd spec draft</code> appends to the
+lives in and stage only that file. <code>spec draft</code> appends to the
 root by default, or to a chosen file with <code>--file</code>.</li>
 </ul>
 <h3 id="growing-the-catalog"><a class="header" href="#growing-the-catalog">Growing the catalog</a></h3>
 <pre><code class="language-bash"># Stage a new (empty) spec file and the include entry on the root:
-bdd spec include add requirements/core/arithmetic.json
-bdd changes commit
+spec include add requirements/core/arithmetic.json
+spec changes commit
 
 # Draft directly into it:
-bdd spec draft --file requirements/core/arithmetic.json
+spec draft --file requirements/core/arithmetic.json
 
 # Nest deeper: include a file from a child instead of the root:
-bdd spec include add requirements/core/edge-cases.json \
+spec include add requirements/core/edge-cases.json \
   --from requirements/core/arithmetic.json
 </code></pre>
-<p><code>bdd spec list</code> names the file each requirement lives in, so the
+<p><code>spec list</code> names the file each requirement lives in, so the
 catalog stays navigable as it grows:</p>
 <pre><code class="language-json">[
   { "id": "REQ-001", "title": "Empty string returns zero", "status": "implemented",
@@ -301,7 +301,7 @@ catalog stays navigable as it grows:</p>
 backlog. Split it the day it stops fitting in your head.</p>
 <h2 id="see-also"><a class="header" href="#see-also">See also</a></h2>
 <ul>
-<li><a href="commands/spec.html"><code>bdd spec</code></a> — the commands that read, gate, and mutate the spec.</li>
+<li><a href="commands/spec.html"><code>spec</code></a> — the commands that read, gate, and mutate the spec.</li>
 <li><a href="workflow.html">The workflow</a> — where the spec drives the loop.</li>
 </ul>
 

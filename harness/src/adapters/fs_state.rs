@@ -1,11 +1,12 @@
 //! Filesystem implementation of the [`StateStore`] port: the TDD state
-//! machine persisted as `.bdd-state.json` in the project root. The file
+//! machine persisted as `.spec-state.json` in the project root. The file
 //! is a chronological log of timestamped entries plus interpretation
 //! instructions, so separate harness invocations share one machine.
 
 use std::fs;
 use std::path::PathBuf;
 
+use crate::domain::STATE_FILE;
 use crate::domain::tdd::TddSnapshot;
 use crate::ports::{StateError, StateStore};
 
@@ -16,7 +17,7 @@ pub struct FsStateStore {
 impl FsStateStore {
     pub fn new(root: PathBuf) -> Self {
         Self {
-            file: root.join(".bdd-state.json"),
+            file: root.join(STATE_FILE),
         }
     }
 }
@@ -27,15 +28,15 @@ impl StateStore for FsStateStore {
             return Ok(TddSnapshot::default());
         }
         let text = fs::read_to_string(&self.file)
-            .map_err(|e| StateError(format!(".bdd-state.json is not readable - {e}")))?;
+            .map_err(|e| StateError(format!("{STATE_FILE} is not readable - {e}")))?;
         serde_json::from_str(&text)
-            .map_err(|e| StateError(format!(".bdd-state.json is not valid JSON - {e}")))
+            .map_err(|e| StateError(format!("{STATE_FILE} is not valid JSON - {e}")))
     }
 
     fn save(&self, snapshot: &TddSnapshot) -> Result<(), StateError> {
         let text = serde_json::to_string_pretty(snapshot).expect("snapshot is always serializable");
         fs::write(&self.file, text)
-            .map_err(|e| StateError(format!(".bdd-state.json is not writable - {e}")))
+            .map_err(|e| StateError(format!("{STATE_FILE} is not writable - {e}")))
     }
 }
 
@@ -75,12 +76,12 @@ mod tests {
     #[test]
     fn corrupt_state_is_a_structured_error() {
         let dir = tempfile::tempdir().unwrap();
-        fs::write(dir.path().join(".bdd-state.json"), "not json").unwrap();
+        fs::write(dir.path().join(STATE_FILE), "not json").unwrap();
         let error = FsStateStore::new(dir.path().to_path_buf())
             .load()
             .unwrap_err();
         assert!(
-            error.0.starts_with(".bdd-state.json is not valid JSON -"),
+            error.0.starts_with(".spec-state.json is not valid JSON -"),
             "got: {}",
             error.0
         );
@@ -91,7 +92,7 @@ mod tests {
         let store = FsStateStore::new(PathBuf::from("/dev/null/nowhere"));
         let error = store.save(&TddSnapshot::default()).unwrap_err();
         assert!(
-            error.0.starts_with(".bdd-state.json is not writable -"),
+            error.0.starts_with(".spec-state.json is not writable -"),
             "got: {}",
             error.0
         );

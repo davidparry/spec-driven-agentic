@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Spec-Driven with Harness — TDD and BDD in the Agentic Era</title>
-  <link rel="icon" href="../assets/bdd-harness-mark.png" type="image/png">
-  <link rel="apple-touch-icon" href="../assets/bdd-harness-mark.png">
+  <link rel="icon" href="../assets/spec-harness-mark.png" type="image/png">
+  <link rel="apple-touch-icon" href="../assets/spec-harness-mark.png">
 
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/theme/black.css">
@@ -46,6 +46,18 @@
     .cycle .arrow { align-self: center; color: #9fb3c8; }
     .muted { color: #9fb3c8; }
     .reveal blockquote { width: 90%; font-size: 0.85em; }
+    /* Which cut you are in, and the way out of it. Dimmed so it cannot
+       compete with the slide, legible the moment a presenter looks for it. */
+    .track-switch {
+      position: fixed; bottom: 14px; left: 14px; z-index: 40;
+      display: flex; gap: 2px; padding: 3px; border-radius: 999px;
+      background: rgba(16, 20, 24, 0.85); border: 1px solid #2a323a;
+      font-size: 13px; font-family: inherit; opacity: 0.4; transition: opacity 0.2s;
+    }
+    .track-switch:hover { opacity: 1; }
+    .track-switch a { padding: 0.25em 0.8em; border-radius: 999px; color: #9fb3c8; text-decoration: none; }
+    .track-switch a.on { background: #2a323a; color: #fff; }
+    @media print { .track-switch { display: none; } }
   </style>
 </head>
 <body>
@@ -57,7 +69,7 @@
       <h1>Spec-Driven with Harness</h1>
       <h3>TDD and BDD in the agentic era — with the Wi-Fi switched off</h3>
       <p class="muted">30-minute session &nbsp;·&nbsp; every layer free and open source &nbsp;·&nbsp; every layer on this laptop</p>
-      <p class="muted">Start free: <code>pi</code> + Ollama &nbsp;·&nbsp; one server: <code>bdd mcp serve</code> (25 tools) &nbsp;·&nbsp; local model: <code>qwen3.8-flash-next:125b-mlx</code></p>
+      <p class="muted">Start free: <code>pi</code> + Ollama &nbsp;·&nbsp; one server: <code>spec mcp serve</code> (25 tools) &nbsp;·&nbsp; local model: <code>qwen3.8-flash-next:125b-mlx</code></p>
       <p><span class="badge red">RED</span> <span class="badge green">GREEN</span> <span class="badge refactor">REFACTOR</span> — now with agents</p>
       <aside class="notes">Thirty minutes, three acts, no slideware promises: everything here runs on this machine with the network off, and I will prove it before the end. Act one is free and takes five minutes to install. Act two costs one flag. Act three is the repo. Tell the room up front that the deck, the server, and the model are all open source and they can rebuild the whole thing tonight.</aside>
     </section>
@@ -81,7 +93,7 @@
       <h1>Spec-Driven with Harness</h1>
       <h3>TDD and BDD in the agentic era — one MCP-powered workflow, hands on</h3>
       <p class="muted">60-minute workshop &nbsp;·&nbsp; bring your laptop &nbsp;·&nbsp; you drive an agent from exercise one</p>
-      <p class="muted">Start free: <code>pi</code> + Ollama &nbsp;·&nbsp; one server: <code>bdd mcp serve</code> (25 tools) &nbsp;·&nbsp; local model: <code>qwen3.8-flash-next:125b-mlx</code></p>
+      <p class="muted">Start free: <code>pi</code> + Ollama &nbsp;·&nbsp; one server: <code>spec mcp serve</code> (25 tools) &nbsp;·&nbsp; local model: <code>qwen3.8-flash-next:125b-mlx</code></p>
       <p><span class="badge red">RED</span> <span class="badge green">GREEN</span> <span class="badge refactor">REFACTOR</span> — now with agents</p>
       <aside class="notes">Welcome. Promise of the hour: everyone here has watched an agent demo — nobody leaves having only watched one. We start from the cheapest possible setup — pi, MIT-licensed, on a local Ollama model, no account and no key — and build up to the harness. The MCP server and client in the repo are finished infrastructure; the hour is spent on the workflow they enable: drafting a spec with an agent, validating it through a tool, and driving spec to green. Everything is in the repo you cloned. The local model on this machine is qwen3.8-flash-next:125b-mlx through Ollama — Wi-Fi off still works. Attendees on Cursor can stay on their IDE agent; the pi path and the harness path use this same local model.</aside>
     </section>
@@ -93,7 +105,7 @@
         <li>A <strong>spec-authoring loop</strong>: you and an AI agent draft a requirement, <code>validate_spec</code> checks its structure, <code>refine_requirement</code> critiques its wording — and the agent iterates until both are clean</li>
         <li>A complete <strong>spec-to-green workflow</strong> you drove yourself: requirement → Gherkin → RED → GREEN → refactor</li>
         <li>A working grasp of how <strong>MCP feeds your tools into any agent</strong> — Cursor (all 25 tools), <code>pi --no-builtin-tools</code>, or the harness on <code>qwen3.8-flash-next:125b-mlx</code> (scoped profiles, same server)</li>
-        <li>A completed, fully tested <strong>MCP server in <code>bdd</code></strong> to point at your own project</li>
+        <li>A completed, fully tested <strong>MCP server in <code>spec</code></strong> to point at your own project</li>
       </ul>
       <aside class="notes">Set expectations up front: the MCP server and client are already built — we use them, we don't build them. MCP gets about four minutes as plumbing; the workflow gets the hour. ~35 of the 60 minutes are keyboard time. The pi segment is the giveaway — nobody needs a licence to reproduce the first half of this deck.</aside>
     </section>
@@ -101,7 +113,7 @@
     <section data-track="60">
       <h2>The next 60 minutes <span class="badge time">agenda</span></h2>
       <table>
-        <tr><td>0–5</td><td>Welcome, setup check (<code>bdd --version</code> and kata tests green)</td></tr>
+        <tr><td>0–5</td><td>Welcome, setup check (<code>spec --version</code> and kata tests green)</td></tr>
         <tr><td>5–11</td><td>TDD refresher, agents, and the SDD → BDD → TDD stack</td></tr>
         <tr><td>11–16</td><td>Start free: <code>pi</code> on Ollama — what an open agent gives you, and where it drifts</td></tr>
         <tr><td>16–20</td><td>The plumbing: MCP, the pre-built server, and <code>pi</code> with its built-ins taken away</td></tr>
@@ -217,7 +229,7 @@ requirements/
 ollama pull qwen3.8-flash-next:125b-mlx
 pi --offline            # or PI_OFFLINE=1 — no startup network calls at all
       </code></pre>
-      <p class="small">This is the same model the <code>bdd</code> runner uses later — <strong>one local model, two hosts</strong>, and the same server Cursor talks to.</p>
+      <p class="small">This is the same model the <code>spec</code> runner uses later — <strong>one local model, two hosts</strong>, and the same server Cursor talks to.</p>
       <aside class="notes">This is the giveaway slide — photograph it. Everything from here to the end of Act 2 costs nothing and needs no licence. Say the number out loud: this model is 104 GB on disk and runs on the laptop in front of you. --offline is not a gimmick, it is a documented flag; the thesis of this deck is that the network is optional.</aside>
     </section>
 
@@ -306,7 +318,7 @@ pi --offline            # or PI_OFFLINE=1 — no startup network calls at all
 { "jsonrpc": "2.0", "id": 1,
   "result": { "protocolVersion": "2025-11-25",
               "capabilities": { "tools": { "listChanged": true }, "logging": { } },
-              "serverInfo": { "name": "spec-driven-server", "title": "Spec Driven", "version": "1.0.0", "description": "Serves spec-driven TDD and BDD tools. The requirements spec is the source of truth.", "websiteUrl": "https://davidparry.github.io/spec-driven-agentic/", "icons": [{ "src": "https://davidparry.github.io/spec-driven-agentic/assets/bdd-harness-mark.png", "mimeType": "image/png", "sizes": ["1024x1024"], "theme": "dark" }] },
+              "serverInfo": { "name": "spec-driven-server", "title": "Spec Driven", "version": "1.0.0", "description": "Serves spec-driven TDD and BDD tools. The requirements spec is the source of truth.", "websiteUrl": "https://davidparry.github.io/spec-driven-agentic/", "icons": [{ "src": "https://davidparry.github.io/spec-driven-agentic/assets/spec-harness-mark.png", "mimeType": "image/png", "sizes": ["1024x1024"], "theme": "dark" }] },
               "instructions": "Drives a spec-driven TDD/BDD workflow..." } }
       </code></pre>
       <aside class="notes">The handshake negotiates protocol version and capabilities. The server's "instructions" field is prompt text the host may feed to the LLM — we use it to teach the agent our workflow.</aside>
@@ -328,7 +340,7 @@ pi --offline            # or PI_OFFLINE=1 — no startup network calls at all
     <!-- ============ 13-20 min: THE PLUMBING (pre-built) ============ -->
     <section data-track="both">
       <h2><span class="badge time">PLUMBING</span> The server — already built</h2>
-      <p class="small">One binary: <code>bdd mcp serve --root ${workspaceFolder}</code>. Composition root <code>harness/src/mcp.rs</code> plus the harness TDD services. Twenty-five tools in three groups:</p>
+      <p class="small">One binary: <code>spec mcp serve --root ${workspaceFolder}</code>. Composition root <code>harness/src/mcp.rs</code> plus the harness TDD services. Twenty-five tools in three groups:</p>
       <ul class="small">
         <li><strong>Frozen seven</strong> — <code>list_requirements</code>, <code>get_requirement</code>, <code>validate_spec</code>, <code>refine_requirement</code>, <code>run_tests</code>, <code>get_tdd_state</code>, <code>start_refactor</code></li>
         <li><strong>Authoring / staging</strong> — features, scenarios, <code>changes_*</code>, <code>requirement_mark_implemented</code>, template-only <code>step_definition_create</code> / <code>unit_test_create</code></li>
@@ -382,8 +394,8 @@ let report = tdd.run_tests(runner, &amp;TestFilter::default())?;
     <section data-track="60">
       <h2>Proof it feeds any agent: the bundled client <span class="badge time">2 min demo</span></h2>
       <pre><code class="language-java" data-trim>
-ServerLaunch launch = ServerLaunch.bdd(root, bddBinary);
-// child: bdd mcp serve --root &lt;root&gt;
+ServerLaunch launch = ServerLaunch.spec(root, specBinary);
+// child: spec mcp serve --root &lt;root&gt;
 McpSyncClient client = McpClient.sync(transport)
     .clientInfo(new McpSchema.Implementation("tdd-workshop-agent", "1.0.0"))
     .build();
@@ -392,8 +404,8 @@ var tools = client.listTools();                      // discovery — 25 tools
 var result = client.callTool(
     CallToolRequest.builder("run_tests").arguments(Map.of()).build());
       </code></pre>
-      <p class="small">Run it: <code>java -jar smoke-test/target/smoke-test.jar</code> (needs <code>bdd</code> on PATH)</p>
-      <aside class="notes">Two minutes, one run: the jar is only a client. The child is bdd mcp serve. Discovery lists 25 tools, not seven. Then move on; the workflow is next.</aside>
+      <p class="small">Run it: <code>java -jar smoke-test/target/smoke-test.jar</code> (needs <code>spec</code> on PATH)</p>
+      <aside class="notes">Two minutes, one run: the jar is only a client. The child is spec mcp serve. Discovery lists 25 tools, not seven. Then move on; the workflow is next.</aside>
     </section>
 
     <!-- ============ ACT 2 — SAME MODEL, NO SHELL ============ -->
@@ -405,7 +417,7 @@ pi install npm:pi-mcp-extension     # pi has no MCP in core — this adds it
       <pre><code class="language-json" data-trim>
 // .pi/mcp.json — already committed in this repo
 { "mcpServers": { "spec-driven-server": {
-    "transport": "stdio", "command": "bdd", "args": ["mcp", "serve"],
+    "transport": "stdio", "command": "spec", "args": ["mcp", "serve"],
     "lifecycle": "eager" } } }
       </code></pre>
       <pre><code class="language-bash" data-trim>
@@ -414,7 +426,7 @@ pi -nbt          # built-ins off, extension tools stay on
                  # /mcp shows the server; run from the repo root (no --root in args)
       </code></pre>
       <p class="small">No <code>bash</code>. No <code>write</code>. No <code>edit</code>. Twenty-five tools that enforce the loop — and <strong>nothing about the model changed</strong>.</p>
-      <p class="small muted">From here on the server is the constant: Cursor, <code>pi -nbt</code>, and the <code>bdd</code> runner all call <em>these</em> tools.</p>
+      <p class="small muted">From here on the server is the constant: Cursor, <code>pi -nbt</code>, and the <code>spec</code> runner all call <em>these</em> tools.</p>
       <aside class="notes">Run this live with the Wi-Fi off. Two things to point at: the tool names carry the mcp_&lt;server&gt;_ prefix the bridge adds, so prompts have to use them; and the same model that deleted an assertion ten minutes ago now physically cannot, because there is no tool that edits a file outside staging. Hammer the constant — whichever host wins the argument in your shop, the MCP server underneath is the same one, and that is the portable part of this talk. Then land the caveat that sets up Act 3: -nbt is a flag on one run, and the sequencing of the work is still entirely on you and your prompt.</aside>
     </section>
 
@@ -479,7 +491,7 @@ pi -nbt          # built-ins off, extension tools stay on
 {
   "mcpServers": {
     "spec-driven-server": {
-      "command": "bdd",
+      "command": "spec",
       "args": ["mcp", "serve", "--root", "${workspaceFolder}"]
     }
   }
@@ -513,7 +525,7 @@ pi -nbt          # built-ins off, extension tools stay on
         <li><strong>Ground truth</strong>: the agent doesn't guess whether code works — <code>run_tests</code> tells it</li>
         <li><strong>Guardrails in tools</strong>: refactor-on-red is impossible; the server refuses</li>
         <li><strong>Small steps</strong>: one requirement, one cycle — failures stay cheap</li>
-        <li><strong>Portable</strong>: same <code>bdd mcp serve</code> in Cursor (25 tools), <code>pi -nbt</code>, the bundled client, MCP Inspector, and the harness's scoped profiles</li>
+        <li><strong>Portable</strong>: same <code>spec mcp serve</code> in Cursor (25 tools), <code>pi -nbt</code>, the bundled client, MCP Inspector, and the harness's scoped profiles</li>
       </ul>
       <aside class="notes">This is the difference between "LLM writes code" and an engineered workflow: feedback loops and enforced invariants.</aside>
     </section>
@@ -533,7 +545,7 @@ pi -nbt          # built-ins off, extension tools stay on
           </ul>
         </div>
         <div>
-          <h3><code>bdd</code> — spec-specific runner</h3>
+          <h3><code>spec</code> — spec-specific runner</h3>
           <ul class="small">
             <li>Does one job: spec → Gherkin → RED → GREEN → REFACTOR</li>
             <li>The workflow is <strong>already encoded</strong>: per-command profiles, staging, phase gates</li>
@@ -543,19 +555,19 @@ pi -nbt          # built-ins off, extension tools stay on
         </div>
       </div>
       <blockquote class="small">Same tools either way. The question is whether the discipline is something you re-type or something that ships.</blockquote>
-      <aside class="notes">Correct the obvious misreading before it forms: this is not "pi bad, bdd good". pi is a general-purpose harness and a good one — generality is the design goal. A general harness gives you a general result until you invest in prompting and skills to specialize it, and then you own that investment forever. bdd made the opposite trade: it only knows one workflow, and because it only knows one, it can enforce it. The constant across all three acts is the MCP server — Cursor, pi -nbt, and bdd all call the same twenty-five tools.</aside>
+      <aside class="notes">Correct the obvious misreading before it forms: this is not "pi bad, spec good". pi is a general-purpose harness and a good one — generality is the design goal. A general harness gives you a general result until you invest in prompting and skills to specialize it, and then you own that investment forever. spec made the opposite trade: it only knows one workflow, and because it only knows one, it can enforce it. The constant across all three acts is the MCP server — Cursor, pi -nbt, and spec all call the same twenty-five tools.</aside>
     </section>
 
     <section data-track="both">
       <h2>The runner, concretely <span class="badge time">Wi-Fi off</span></h2>
       <pre><code class="language-bash" data-trim>
-bdd tools profiles        # spec-draft 4 · spec-reword 3 · steps-generate 4
+spec tools profiles        # spec-draft 4 · spec-reword 3 · steps-generate 4
                           # unittest-generate 4 · implement-advice 5
                           # implement 7 · status 7 · ask 12 (read-only)
-bdd mcp call get_tdd_state
-bdd spec draft …          # lookup of disk catalog; parse_proposals_checked is the gate
-bdd implement REQ-003     # run_tests sees the working tree; command_run asks you first
-bdd ask "what is pending?"
+spec mcp call get_tdd_state
+spec draft …          # lookup of disk catalog; parse_proposals_checked is the gate
+spec implement REQ-003     # run_tests sees the working tree; command_run asks you first
+spec ask "what is pending?"
       </code></pre>
       <ul class="small">
         <li>Not a second implementation — the <strong>same server</strong>, narrowed per command to the job in front of the model</li>
@@ -563,7 +575,7 @@ bdd ask "what is pending?"
         <li>Cucumber does the spec half: an executable contract that predates all of this by twenty years</li>
         <li>Follow-along: <code>student-follow-docs/pi-path.md</code>, then <code>student-follow-docs/harness-path.md</code></li>
       </ul>
-      <aside class="notes">The profile numbers are real output from bdd tools profiles — 3 to 7 for anything that generates, 12 for the read-only ask. Point at what a profile is doing: the model is not being told to behave, it is being handed the four tools that the current step can legitimately use. Stress the Cucumber point: we did not invent a spec format, we picked the one the business already reads. Conference half: switch the Wi-Fi off and run these live.</aside>
+      <aside class="notes">The profile numbers are real output from spec tools profiles — 3 to 7 for anything that generates, 12 for the read-only ask. Point at what a profile is doing: the model is not being told to behave, it is being handed the four tools that the current step can legitimately use. Stress the Cucumber point: we did not invent a spec format, we picked the one the business already reads. Conference half: switch the Wi-Fi off and run these live.</aside>
     </section>
 
     <!-- ============ WHERE THIS BREAKS — BOTH TRACKS ============ -->
@@ -603,7 +615,7 @@ bdd ask "what is pending?"
       <ul>
         <li>Drafted a requirement <em>with</em> an agent and iterated it through two server feedback loops — <code>validate_spec</code> for structure, <code>refine_requirement</code> for wording — until valid and clean</li>
         <li>Drove a full spec-to-green cycle: requirement → Gherkin (Cucumber) → RED → GREEN → refactor</li>
-        <li>Saw how MCP feeds the same <code>bdd</code> server into any agent — Cursor (25 tools), <code>pi -nbt</code> on a free local model, or the <code>bdd</code> runner's scoped profiles</li>
+        <li>Saw how MCP feeds the same <code>spec</code> server into any agent — Cursor (25 tools), <code>pi -nbt</code> on a free local model, or the <code>spec</code> runner's scoped profiles</li>
         <li>Saw the real choice: a <strong>general agent</strong> you specialize with prompts and skills, or a <strong>spec-specific runner</strong> that ships specialized — same tools underneath</li>
         <li>Kept every engineering decision: the agent turned the crank, you steered</li>
       </ul>
@@ -621,7 +633,7 @@ bdd ask "what is pending?"
       <ul class="small">
         <li>This repo: everything you used today, AGPL-3.0 licensed</li>
         <li><code>pi</code>, MIT: <a href="https://pi.dev">pi.dev</a> · MCP for it: <code>pi install npm:pi-mcp-extension</code> · runbook: <code>student-follow-docs/pi-path.md</code></li>
-        <li>Local model (every path in this deck): <code>qwen3.8-flash-next:125b-mlx</code> via Ollama — <code>ollama pull qwen3.8-flash-next:125b-mlx</code> then <code>bdd model use qwen3.8-flash-next:125b-mlx</code></li>
+        <li>Local model (every path in this deck): <code>qwen3.8-flash-next:125b-mlx</code> via Ollama — <code>ollama pull qwen3.8-flash-next:125b-mlx</code> then <code>spec model use qwen3.8-flash-next:125b-mlx</code></li>
         <li>MCP spec &amp; docs: <a href="https://modelcontextprotocol.io">modelcontextprotocol.io</a></li>
         <li>MCP Java SDK: <a href="https://github.com/modelcontextprotocol/java-sdk">github.com/modelcontextprotocol/java-sdk</a></li>
         <li>MCP Inspector: <code>npx @modelcontextprotocol/inspector</code></li>
@@ -637,11 +649,11 @@ bdd ask "what is pending?"
       <h2><span class="badge exercise">BACKUP</span> Inspect the wire <span class="badge time">if time allows</span></h2>
       <p class="small">Option A — MCP Inspector (browser UI + message log):</p>
       <pre><code class="language-bash" data-trim>
-npx @modelcontextprotocol/inspector bdd mcp serve --root $PWD
+npx @modelcontextprotocol/inspector spec mcp serve --root $PWD
       </code></pre>
       <p class="small">Option B — be the client yourself; paste one line at a time:</p>
       <pre><code class="language-bash" data-trim>
-bdd mcp serve --root $PWD
+spec mcp serve --root $PWD
 {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"me","version":"0"}}}
 {"jsonrpc":"2.0","method":"notifications/initialized"}
 {"jsonrpc":"2.0","id":2,"method":"tools/list"}
@@ -651,11 +663,16 @@ bdd mcp serve --root $PWD
         <li>The protocol is newline-delimited JSON on stdin/stdout — nothing hidden</li>
         <li>Tool results are content blocks; <code>isError: true</code> lets agents read failures and self-correct</li>
       </ul>
-      <aside class="notes">Backup material for a fast room. Option B is the aha moment: watch the tools/list response carry 25 schemas from bdd mcp serve, and the nextStep hints that nudge the agent through the cycle. Both handshakes shown here are live — the server answers the classic initialize (2025-11-25) and the newer _meta lifecycle (2026-07-28) alike, which is why .cursor/mcp.json can say protocolEra auto.</aside>
+      <aside class="notes">Backup material for a fast room. Option B is the aha moment: watch the tools/list response carry 25 schemas from spec mcp serve, and the nextStep hints that nudge the agent through the cycle. Both handshakes shown here are live — the server answers the classic initialize (2025-11-25) and the newer _meta lifecycle (2026-07-28) alike, which is why .cursor/mcp.json can say protocolEra auto.</aside>
     </section>
 
   </div>
 </div>
+
+<nav class="track-switch" aria-label="Deck cut">
+  <a href="?60" data-cut="60" title="60-minute workshop cut (t)">60 min</a>
+  <a href="?30" data-cut="30" title="30-minute session cut (t)">30 min</a>
+</nav>
 
 <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/plugin/highlight/highlight.js"></script>
@@ -665,22 +682,34 @@ bdd mcp serve --root $PWD
   // an untagged slide is treated as "both". The short cut is selected by a `?30`
   // query string or by serving this file from a path containing "talk30", so the
   // published /talk/ and /talk30/ URLs are the same file with no duplicated facts.
+  // `?60` forces the long cut, which is what lets the corner switch and the `t`
+  // key get back out of /talk30/.
   // Slides are removed before Reveal.initialize so numbering and the hash agree.
-  (function selectTrack() {
-    var isShort = new URLSearchParams(location.search).has('30')
-      || /talk-?30/.test(location.pathname);
+  var CUT = (function selectTrack() {
+    var params = new URLSearchParams(location.search);
+    var isShort = params.has('60') ? false
+      : params.has('30') || /talk-?30/.test(location.pathname);
     var want = isShort ? '30' : '60';
     document.querySelectorAll('.slides > section').forEach(function (slide) {
       var track = slide.dataset.track || 'both';
       if (track !== 'both' && track !== want) slide.remove();
     });
     document.title = (isShort ? '[30 min] ' : '') + document.title;
+    document.querySelector('.track-switch a[data-cut="' + want + '"]').classList.add('on');
+    return want;
   })();
+
+  function swapCut() {
+    // No fragment: the cuts number their slides differently, so switching
+    // starts the other deck at the top rather than at a slide that moved.
+    location.href = location.pathname + (CUT === '30' ? '?60' : '?30');
+  }
 
   Reveal.initialize({
     hash: true,
     slideNumber: 'c/t',
     transition: 'fade',
+    keyboard: { 84: swapCut },
     plugins: [RevealHighlight, RevealNotes]
   });
 </script>

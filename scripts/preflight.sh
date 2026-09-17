@@ -33,26 +33,26 @@ else
     bad "Maven not on PATH" "install Maven 3.9+"
 fi
 
-# 3. bdd on PATH, or a release/debug binary we can point the client at
-BDD=""
-if command -v bdd >/dev/null 2>&1; then
-    BDD="$(command -v bdd)"
-    ok "bdd on PATH ($BDD — $($BDD --version 2>/dev/null | head -1))"
-elif [ -x "$ROOT/harness/target/release/bdd" ]; then
-    BDD="$ROOT/harness/target/release/bdd"
-    ok "harness/target/release/bdd present"
-elif [ -x "$ROOT/harness/target/debug/bdd" ]; then
-    BDD="$ROOT/harness/target/debug/bdd"
-    ok "harness/target/debug/bdd present"
+# 3. spec on PATH, or a release/debug binary we can point the client at
+SPEC=""
+if command -v spec >/dev/null 2>&1; then
+    SPEC="$(command -v spec)"
+    ok "spec on PATH ($SPEC — $($SPEC --version 2>/dev/null | head -1))"
+elif [ -x "$ROOT/harness/target/release/spec" ]; then
+    SPEC="$ROOT/harness/target/release/spec"
+    ok "harness/target/release/spec present"
+elif [ -x "$ROOT/harness/target/debug/spec" ]; then
+    SPEC="$ROOT/harness/target/debug/spec"
+    ok "harness/target/debug/spec present"
 elif command -v cargo >/dev/null 2>&1; then
-    if cargo build --release --manifest-path harness/Cargo.toml >/tmp/preflight-bdd.log 2>&1; then
-        BDD="$ROOT/harness/target/release/bdd"
-        ok "cargo build --release produced bdd"
+    if cargo build --release --manifest-path harness/Cargo.toml >/tmp/preflight-spec.log 2>&1; then
+        SPEC="$ROOT/harness/target/release/spec"
+        ok "cargo build --release produced spec"
     else
-        bad "could not build bdd" "see /tmp/preflight-bdd.log — install Rust or a GitHub-release binary"
+        bad "could not build spec" "see /tmp/preflight-spec.log — install Rust or a GitHub-release binary"
     fi
 else
-    bad "bdd not on PATH and cargo not installed" \
+    bad "spec not on PATH and cargo not installed" \
         "cargo install --path harness  (or download a release binary and put it on PATH)"
 fi
 
@@ -78,15 +78,15 @@ else
         "check kata/src/test/java/.../RunCucumberTest.java and the cucumber dependencies"
 fi
 
-# 6. End-to-end smoke: jar launches bdd mcp serve, drives the walkthrough
-if [ -n "$BDD" ] && PATH="$(dirname "$BDD"):$PATH" java -jar smoke-test/target/smoke-test.jar >/tmp/preflight-agent.log 2>&1; then
+# 6. End-to-end smoke: jar launches spec mcp serve, drives the walkthrough
+if [ -n "$SPEC" ] && PATH="$(dirname "$SPEC"):$PATH" java -jar smoke-test/target/smoke-test.jar >/tmp/preflight-agent.log 2>&1; then
     if grep -q '"phase"' /tmp/preflight-agent.log && grep -qiE 'GREEN|RED' /tmp/preflight-agent.log; then
-        ok "end-to-end agent run talks to bdd and reports a TDD phase"
+        ok "end-to-end agent run talks to spec and reports a TDD phase"
     else
         bad "agent ran but did not report a TDD phase" "see /tmp/preflight-agent.log"
     fi
 else
-    bad "end-to-end agent run failed" "see /tmp/preflight-agent.log — bdd must be the child process"
+    bad "end-to-end agent run failed" "see /tmp/preflight-agent.log — spec must be the child process"
 fi
 
 # 7. Demo not burned: REQ-003 must still be pending with no scenario written

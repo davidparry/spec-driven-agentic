@@ -658,8 +658,8 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
             self.stage_file(catalog, target, &format!("draft {id}: {title}"))?;
         }
         let mut next_step = format!(
-            "Review with bdd changes show and apply with bdd changes commit, then add \
-             the @{id} scenario with bdd scenario add."
+            "Review with spec changes show and apply with spec changes commit, then add \
+             the @{id} scenario with spec scenario add."
         );
         let refine: Vec<String> = findings
             .into_iter()
@@ -669,8 +669,8 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
             .collect();
         if !refine.is_empty() {
             next_step = format!(
-                "Staged {id} with refine findings. Run bdd spec reword {id} to address \
-                 them, then bdd changes commit."
+                "Staged {id} with refine findings. Run spec reword {id} to address \
+                 them, then spec changes commit."
             );
         }
         if let Some(warning) = warning {
@@ -719,7 +719,7 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
             id: id.to_string(),
             feature_file: path.to_string(),
             staged: true,
-            next_step: "Review with bdd changes show, then apply with bdd changes commit."
+            next_step: "Review with spec changes show, then apply with spec changes commit."
                 .to_string(),
         })
     }
@@ -780,7 +780,7 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
                 let parent = self.catalog_relative(from);
                 catalog.file(&parent).ok_or_else(|| {
                     ServiceError(format!(
-                        "{from} is not part of the spec catalog. Run bdd spec list to \
+                        "{from} is not part of the spec catalog. Run spec list to \
                          see where requirements live, or include it first."
                     ))
                 })?;
@@ -826,8 +826,8 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
             parent: self.project_path(&parent),
             created,
             staged: true,
-            next_step: "Review with bdd changes show, apply with bdd changes commit, \
-                        then draft into it with bdd spec draft --file."
+            next_step: "Review with spec changes show, apply with spec changes commit, \
+                        then draft into it with spec draft --file."
                 .to_string(),
         })
     }
@@ -1159,8 +1159,8 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
         let feature = feature_tagged(&self.catalog, &format!("@{id}"))?.ok_or_else(|| {
             ServiceError(format!(
                 "No scenario is tagged @{id} - implemented requirements need an \
-                 executable scenario. Add one with bdd scenario add, apply it with \
-                 bdd changes commit, then mark {id} implemented."
+                 executable scenario. Add one with spec scenario add, apply it with \
+                 spec changes commit, then mark {id} implemented."
             ))
         })?;
         let requirement = catalog
@@ -1207,8 +1207,8 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
             Ok(relative)
         } else {
             Err(ServiceError(format!(
-                "{file} is not part of the spec catalog. Include it with bdd spec \
-                 include add {file}, apply with bdd changes commit, then draft into it."
+                "{file} is not part of the spec catalog. Include it with spec \
+                 include add {file}, apply with spec changes commit, then draft into it."
             )))
         }
     }
@@ -2630,8 +2630,8 @@ mod tests {
         assert_eq!(
             error.0,
             "No scenario is tagged @REQ-007 - implemented requirements need an \
-             executable scenario. Add one with bdd scenario add, apply it with \
-             bdd changes commit, then mark REQ-007 implemented."
+             executable scenario. Add one with spec scenario add, apply it with \
+             spec changes commit, then mark REQ-007 implemented."
         );
         assert_eq!(service.store.content(SPEC_PATH).unwrap(), None);
     }
@@ -2684,11 +2684,11 @@ mod tests {
     fn mark_implemented_propagates_a_failing_state_store() {
         let service = service(
             Ok(spec()),
-            FixedStateStore::failing(".bdd-state.json is not readable - boom"),
+            FixedStateStore::failing(".spec-state.json is not readable - boom"),
         );
         assert_eq!(
             service.mark_implemented("REQ-001").unwrap_err(),
-            ServiceError(".bdd-state.json is not readable - boom".into())
+            ServiceError(".spec-state.json is not readable - boom".into())
         );
     }
 

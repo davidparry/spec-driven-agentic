@@ -1,4 +1,4 @@
-# bdd model
+# spec model
 
 LLM model discovery and selection. The harness talks to a local
 [Ollama](https://ollama.com) — no cloud calls, no tokens — and uses
@@ -9,7 +9,7 @@ template quality.
 The model this harness is developed and run against is
 `qwen3.8-flash-next:125b-mlx`. Pull it with
 `ollama pull qwen3.8-flash-next:125b-mlx`, then persist the choice with
-`bdd model use qwen3.8-flash-next:125b-mlx`. Your mileage will vary with
+`spec model use qwen3.8-flash-next:125b-mlx`. Your mileage will vary with
 other models: a stronger coding model may improve drafts and
 implementations; a model trained for chat, general knowledge, or work
 other than development will typically produce weaker specs, steps,
@@ -18,7 +18,7 @@ model — it uses whatever you configure, or the first model Ollama has
 installed.
 
 ```text
-Usage: bdd model [OPTIONS] <COMMAND>
+Usage: spec model [OPTIONS] <COMMAND>
 
 Commands: list, current, use
 ```
@@ -28,8 +28,8 @@ Commands: list, current, use
 Highest priority first:
 
 1. **`--model` flag** — this invocation only, never persisted.
-2. **Configuration** — the `model` key in `.bdd.toml` under the
-   project root, written by `bdd model use`.
+2. **Configuration** — the `model` key in `.spec.toml` under the
+   project root, written by `spec model use`.
 3. **Discovery** — the first model installed in Ollama, as a
    session-only default. Nothing is written to disk.
 
@@ -38,13 +38,13 @@ back to deterministic templates.
 
 ---
 
-## bdd model list
+## spec model list
 
 List the models installed in Ollama, marking the one that would
 currently be used.
 
 ```bash
-bdd model list
+spec model list
 ```
 
 ```text
@@ -60,12 +60,12 @@ says the provider is unreachable.
 
 ---
 
-## bdd model current
+## spec model current
 
 Show the resolved model and where it came from.
 
 ```bash
-bdd model current
+spec model current
 ```
 
 ```text
@@ -76,7 +76,7 @@ With nothing configured but models installed, the first one is the
 session default and the output tells you it is not saved:
 
 ```text
-Model set for this session: qwen3.8-flash-next:125b-mlx (not saved - keep it with: bdd model use qwen3.8-flash-next:125b-mlx).
+Model set for this session: qwen3.8-flash-next:125b-mlx (not saved - keep it with: spec model use qwen3.8-flash-next:125b-mlx).
 ```
 
 The same announcement appears when the
@@ -84,21 +84,21 @@ The same announcement appears when the
 
 ---
 
-## bdd model use
+## spec model use
 
 Persist a model choice in the project's configuration.
 
 ```text
-Usage: bdd model use [OPTIONS] <MODEL_NAME>
+Usage: spec model use [OPTIONS] <MODEL_NAME>
 ```
 
 ```bash
-bdd model use qwen3.8-flash-next:125b-mlx
+spec model use qwen3.8-flash-next:125b-mlx
 ```
 
 ```text
 Configured model: qwen3.8-flash-next:125b-mlx
-Written to /Users/you/code/calculator/.bdd.toml
+Written to /Users/you/code/calculator/.spec.toml
 ```
 
 The choice is validated against Ollama's installed models — a name
@@ -106,11 +106,11 @@ Ollama does not have is rejected rather than silently saved.
 
 ## The [llm] configuration block
 
-Everything model-related lives under `[llm]` in `.bdd.toml`:
+Everything model-related lives under `[llm]` in `.spec.toml`:
 
 ```toml
 [llm]
-model = "qwen3.8-flash-next:125b-mlx"     # persisted by bdd model use
+model = "qwen3.8-flash-next:125b-mlx"     # persisted by spec model use
 endpoint = "http://localhost:11434"   # the Ollama endpoint
 timeout_seconds = 300                 # generation timeout (default 300)
 cache_ttl_seconds = 600               # response cache TTL; 0 disables
@@ -137,6 +137,6 @@ it explicitly (`no reply within 300s ... set timeout_seconds under
 ## See also
 
 - [Global flags](../global-flags.md) — the `--model` override.
-- [`bdd config`](config.md) — dump every key and where it came from.
-- [`bdd steps generate`](steps.md#source-template-or-llm) — how LLM
+- [`spec config`](config.md) — dump every key and where it came from.
+- [`spec steps generate`](steps.md#source-template-or-llm) — how LLM
   output is validated before it can stage.

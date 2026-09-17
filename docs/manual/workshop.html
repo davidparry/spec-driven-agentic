@@ -3,12 +3,12 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>This workshop’s String Calculator - bdd Harness Manual</title>
+        <title>This workshop’s String Calculator - spec Harness Manual</title>
 
 
         <!-- Custom HTML head -->
 
-        <meta name="description" content="The complete, searchable reference for the bdd harness: every command, subcommand, and flag, with in-depth examples.">
+        <meta name="description" content="The complete, searchable reference for the spec harness: every command, subcommand, and flag, with in-depth examples.">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff">
 
@@ -35,10 +35,10 @@
             const path_to_root = "";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "searchindex-aaad9ee5.js";
+            window.path_to_searchindex_js = "searchindex-5959f77b.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-9d4e1520.js"></script>
+        <script src="toc-372d77fe.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -137,7 +137,7 @@
                         </button>
                     </div>
 
-                    <h1 class="menu-title">bdd Harness Manual</h1>
+                    <h1 class="menu-title">spec Harness Manual</h1>
 
                     <div class="right-buttons">
                         <a href="print.html" title="Print this book" aria-label="Print this book">
@@ -181,17 +181,17 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="this-workshops-string-calculator-harness"><a class="header" href="#this-workshops-string-calculator-harness">This workshop’s String Calculator (harness)</a></h1>
-<p>The 60-minute class uses Cursor against <code>bdd mcp serve</code> — one Rust binary
+<p>The 60-minute class uses Cursor against <code>spec mcp serve</code> — one Rust binary
 that is both the harness and the MCP server. (The Java module in the repo
 is a smoke-test <em>client</em> of that server, not a server of its own.) The same
-kata can be finished with <code>bdd</code> commands instead, or with a free local agent
+kata can be finished with <code>spec</code> commands instead, or with a free local agent
 through the <a href="../../../student-follow-docs/pi-path.html">pi path</a>. The student
 recipe — install, branch, draft REQ-007, then drive REQ-003…007 to
 <code>implemented</code> — lives in
 <a href="../../../student-follow-docs/harness-path.html">student-follow-docs/harness-path.md</a>.</p>
 <p>Do not edit <a href="../../../student-follow-along.html">student-follow-along.md</a>
 for this path. Do not implement the kata on <code>trunk</code>.</p>
-<p>Kata files <code>bdd</code> must reuse (not parallel <code>Req00NTest</code> / <code>Kata.java</code>
+<p>Kata files <code>spec</code> must reuse (not parallel <code>Req00NTest</code> / <code>Kata.java</code>
 classes):</p>
 <ul>
 <li><code>kata/src/test/resources/features/string_calculator.feature</code></li>
@@ -199,8 +199,8 @@ classes):</p>
 <li><code>kata/src/test/java/com/davidparry/workshop/kata/StringCalculatorTest.java</code></li>
 <li><code>kata/src/main/java/com/davidparry/workshop/kata/StringCalculator.java</code></li>
 </ul>
-<p>Commit staged files <strong>before</strong> <a href="commands/test.html"><code>bdd test</code></a>. The
-runner executes Maven on the working tree. <a href="commands/spec.html"><code>bdd spec mark-implemented</code></a>
+<p>Commit staged files <strong>before</strong> <a href="commands/test.html"><code>spec test</code></a>. The
+runner executes Maven on the working tree. <a href="commands/spec.html"><code>spec mark-implemented</code></a>
 stays GREEN-gated.</p>
 
                     </main>

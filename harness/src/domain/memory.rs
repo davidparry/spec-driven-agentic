@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::domain::language::Language;
 use crate::domain::prompts::render_snippet;
 
-/// Schema version written into `.bdd-memory.json`.
+/// Schema version written into `.spec-memory.json`.
 pub const MEMORY_VERSION: u32 = 1;
 
 /// How many outline entries survive into stored memory.
@@ -44,7 +44,7 @@ pub struct ProjectStructure {
     pub outline: Vec<String>,
 }
 
-/// Durable project identity stored in `.bdd-memory.json`.
+/// Durable project identity stored in `.spec-memory.json`.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct ProjectMemory {
     pub version: u32,

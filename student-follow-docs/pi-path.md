@@ -3,13 +3,13 @@
 This is the cheapest way into the workshop. [pi](https://pi.dev) is a
 minimal, MIT-licensed coding agent; [Ollama](https://ollama.com) runs the
 model on your laptop. No account, no API key, no network — and the same
-`bdd mcp serve` the Cursor hour uses.
+`spec mcp serve` the Cursor hour uses.
 
 Read it as two steps. **Step A** is pi as it ships: a general-purpose agent
 with a shell. **Step B** takes the shell away and hands it this repo's 25
 MCP tools instead. Step B is where the workshop actually starts.
 
-> The MCP server is the constant. Cursor, `pi`, and the `bdd` runner all
+> The MCP server is the constant. Cursor, `pi`, and the `spec` runner all
 > call the same tools. What differs is how much of the workflow you supply
 > yourself — see [harness-path.md](harness-path.md) for the other end of
 > that spectrum.
@@ -97,7 +97,7 @@ This repo already ships the server registration at
   "mcpServers": {
     "spec-driven-server": {
       "transport": "stdio",
-      "command": "bdd",
+      "command": "spec",
       "args": ["mcp", "serve"],
       "lifecycle": "eager"
     }
@@ -105,9 +105,9 @@ This repo already ships the server registration at
 }
 ```
 
-There is no `--root` in those args, so `bdd` uses the current directory.
+There is no `--root` in those args, so `spec` uses the current directory.
 **Launch pi from the repository root** or the server will serve the wrong
-project. `bdd` must be on PATH (`cargo install --path harness`).
+project. `spec` must be on PATH (`cargo install --path harness`).
 
 Now start pi with its own tools switched off:
 
@@ -151,7 +151,7 @@ when, and "validate the spec before writing a scenario" is a sentence in your
 prompt rather than a property of the system.
 
 That is the difference between a **general agent** and a **spec-specific
-runner**. pi can do anything, so the discipline is your prompt's job. `bdd`
+runner**. pi can do anything, so the discipline is your prompt's job. `spec`
 does exactly one job — spec → Gherkin → RED → GREEN → REFACTOR — and because
 it only knows that one job, it can hand the model just the 3–7 tools the
 current step allows, stage every write, and refuse the illegal transitions
@@ -164,7 +164,7 @@ Continue with [harness-path.md](harness-path.md).
 | Symptom | Cause |
 | --- | --- |
 | `/mcp` shows no servers | pi was started outside the repo root, or the project was not trusted — restart with `--approve` |
-| Tools listed but every call errors | `bdd` is not on PATH; check `bdd --version` |
+| Tools listed but every call errors | `spec` is not on PATH; check `spec --version` |
 | Model missing from `/model` | No auth configured for the provider — keep the placeholder `apiKey` in `models.json` |
 | Tool calls vanish mid-stream | Ollama's OpenAI-compat shim drops `tool_calls` when streaming; use a tool-capable model and a current Ollama |
 | Server serves the wrong project | No `--root` in `.pi/mcp.json`; `cd` to the repository root first |

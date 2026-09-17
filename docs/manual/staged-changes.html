@@ -3,12 +3,12 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Staged changes - bdd Harness Manual</title>
+        <title>Staged changes - spec Harness Manual</title>
 
 
         <!-- Custom HTML head -->
 
-        <meta name="description" content="The complete, searchable reference for the bdd harness: every command, subcommand, and flag, with in-depth examples.">
+        <meta name="description" content="The complete, searchable reference for the spec harness: every command, subcommand, and flag, with in-depth examples.">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff">
 
@@ -35,10 +35,10 @@
             const path_to_root = "";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "searchindex-aaad9ee5.js";
+            window.path_to_searchindex_js = "searchindex-5959f77b.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-9d4e1520.js"></script>
+        <script src="toc-372d77fe.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -137,7 +137,7 @@
                         </button>
                     </div>
 
-                    <h1 class="menu-title">bdd Harness Manual</h1>
+                    <h1 class="menu-title">spec Harness Manual</h1>
 
                     <div class="right-buttons">
                         <a href="print.html" title="Print this book" aria-label="Print this book">
@@ -184,7 +184,7 @@
 <p>Every command that would write into your project — feature creation,
 scenario mutations, step-definition and unit-test generation, spec
 drafting, marking a requirement implemented — writes to a staging area
-instead: <code>.bdd-staged/</code> under the project root. Nothing touches your
+instead: <code>.spec-staged/</code> under the project root. Nothing touches your
 working tree until you commit the transaction.</p>
 <h2 id="why"><a class="header" href="#why">Why</a></h2>
 <ul>
@@ -196,18 +196,18 @@ step definitions) lands together or not at all.</li>
 ever holding write access to your tree.</li>
 </ul>
 <h2 id="the-lifecycle"><a class="header" href="#the-lifecycle">The lifecycle</a></h2>
-<pre><code class="language-bash">bdd feature create --path features/calculator.feature --name "String Calculator"
-bdd changes show      # review: one staged "create"
-bdd changes commit    # apply to the working tree, clear the stage
+<pre><code class="language-bash">spec feature create --path features/calculator.feature --name "String Calculator"
+spec changes show      # review: one staged "create"
+spec changes commit    # apply to the working tree, clear the stage
 # or
-bdd changes discard   # drop everything staged, tree untouched
+spec changes discard   # drop everything staged, tree untouched
 </code></pre>
-<p><code>bdd changes show</code> lists each staged entry with its action and path:</p>
+<p><code>spec changes show</code> lists each staged entry with its action and path:</p>
 <pre><code class="language-json">{
   "changes": [
     { "action": "create", "path": "features/calculator.feature" }
   ],
-  "nextStep": "Review the staged changes, then 'bdd changes commit' to apply or 'bdd changes discard' to drop them."
+  "nextStep": "Review the staged changes, then 'spec changes commit' to apply or 'spec changes discard' to drop them."
 }
 </code></pre>
 <h2 id="what-stages-and-what-doesnt"><a class="header" href="#what-stages-and-what-doesnt">What stages and what doesn’t</a></h2>
@@ -218,7 +218,7 @@ bdd changes discard   # drop everything staged, tree untouched
 </thead>
 <tbody>
 <tr><td><code>feature create</code></td><td><code>init</code> (scaffolding a fresh project)</td></tr>
-<tr><td><code>scenario add</code> / <code>update</code> / <code>delete</code></td><td><code>model use</code> (writes <code>.bdd.toml</code>)</td></tr>
+<tr><td><code>scenario add</code> / <code>update</code> / <code>delete</code></td><td><code>model use</code> (writes <code>.spec.toml</code>)</td></tr>
 <tr><td><code>steps generate</code></td><td><code>test</code> / <code>refactor</code> (phase state file)</td></tr>
 <tr><td><code>unittest generate</code></td><td></td></tr>
 <tr><td><code>spec draft</code></td><td></td></tr>
@@ -226,7 +226,7 @@ bdd changes discard   # drop everything staged, tree untouched
 </tbody>
 </table>
 </div>
-<p>Validation (<code>bdd validate</code>) checks staged Gherkin too, so you can gate
+<p>Validation (<code>spec changes validate</code>) checks staged Gherkin too, so you can gate
 a transaction before committing it.</p>
 
                     </main>

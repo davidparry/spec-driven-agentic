@@ -10,12 +10,12 @@ x86_64), or build from source:
 ```bash
 cd harness
 cargo build --release
-./target/release/bdd --help
+./target/release/spec --help
 ```
 
 The shell installer places the binary in `$CARGO_HOME/bin` (usually
-`~/.cargo/bin/bdd`) and writes an install receipt to
-`~/.config/bdd-harness/bdd-harness-receipt.json`.
+`~/.cargo/bin/spec`) and writes an install receipt to
+`~/.config/spec-harness/spec-harness-receipt.json`.
 
 ## Local LLM (Ollama)
 
@@ -25,7 +25,7 @@ instance. The model this harness is developed and run against is
 
 ```bash
 ollama pull qwen3.8-flash-next:125b-mlx
-bdd model use qwen3.8-flash-next:125b-mlx
+spec model use qwen3.8-flash-next:125b-mlx
 ```
 
 Your mileage will vary with a different model. A stronger coding model
@@ -37,22 +37,22 @@ to deterministic templates.
 
 ## Your first session
 
-Run bare `bdd` in a terminal. You get the help, the banner with the
+Run bare `spec` in a terminal. You get the help, the banner with the
 version, the model status, and an interactive prompt:
 
 ```text
-$ bdd
+$ spec
 
   ╭──────────────────────────────────╮
   │                                  ▼
-  │    > bdd  v0.4.0                 │
+  │    > spec  v0.4.0                 │
   │    spec → RED → GREEN → REFACTOR │
   ▲                                  │
   ╰──────────────────────────────────╯
 
-Model set for this session: qwen3.8-flash-next:125b-mlx (not saved - keep it with: bdd model use qwen3.8-flash-next:125b-mlx).
-Interactive shell - type commands without the bdd prefix (e.g. spec list).
-bdd>
+Model set for this session: qwen3.8-flash-next:125b-mlx (not saved - keep it with: spec model use qwen3.8-flash-next:125b-mlx).
+Interactive shell - type commands without the spec prefix (e.g. list).
+spec>
 ```
 
 ## Two ways to begin a project
@@ -63,26 +63,26 @@ tests):
 
 ```bash
 mkdir calculator && cd calculator
-bdd greenfield
+spec greenfield
 ```
 
 **Step by step** — scaffold, then drive each phase yourself:
 
 ```bash
-bdd init --language rust --name "String Calculator"
-bdd spec draft          # describe what to build in plain words; with a
+spec init --language rust --name "String Calculator"
+spec draft          # describe what to build in plain words; with a
                         # model resolved it proposes title, story, and
                         # criteria for you to edit (manual prompts otherwise)
-bdd spec validate       # structure gate
-bdd spec refine REQ-001 # wording gate
-bdd changes commit      # apply the staged spec
-bdd test                # expect RED
+spec validate       # structure gate
+spec refine REQ-001 # wording gate
+spec changes commit      # apply the staged spec
+spec test                # expect RED
 # ...implement...
-bdd test                # expect GREEN
-bdd refactor --note "extract parser"
-bdd test                # still GREEN
-bdd status              # confirm REQ-001 is ready to mark
-bdd spec mark-implemented REQ-001 && bdd changes commit
+spec test                # expect GREEN
+spec refactor --note "extract parser"
+spec test                # still GREEN
+spec status              # confirm REQ-001 is ready to mark
+spec mark-implemented REQ-001 && spec changes commit
 ```
 
 This repository’s String Calculator workshop can be finished with the
@@ -96,6 +96,6 @@ Every command takes `--root` (see [Global flags](global-flags.md)), so
 you can point the harness at any project:
 
 ```bash
-bdd --root ~/code/my-kata inspect
-bdd --root ~/code/my-kata spec validate
+spec --root ~/code/my-kata inspect
+spec --root ~/code/my-kata validate
 ```

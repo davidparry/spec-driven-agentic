@@ -1,5 +1,5 @@
 //! Disk look-aside for the external MCP tool catalog. Lives in
-//! `.bdd-cache/tools/` so the response-cache prune cannot delete it.
+//! `.spec-cache/tools/` so the response-cache prune cannot delete it.
 
 use std::fs;
 use std::path::PathBuf;
@@ -146,7 +146,7 @@ mod tests {
     fn server() -> ServerSpec {
         ServerSpec {
             name: "self".into(),
-            program: "bdd".into(),
+            program: "spec".into(),
             args: vec!["mcp".into(), "serve".into()],
             env: vec![],
         }
@@ -212,7 +212,7 @@ mod tests {
     #[test]
     fn prune_of_the_response_cache_leaves_tools_intact() {
         let dir = tempfile::tempdir().unwrap();
-        let cache_root = dir.path().join(".bdd-cache");
+        let cache_root = dir.path().join(".spec-cache");
         fs::create_dir_all(cache_root.join("tools")).unwrap();
         let catalog = cache_root.join("tools").join("keep.json");
         fs::write(&catalog, "{}").unwrap();

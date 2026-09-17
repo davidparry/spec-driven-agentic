@@ -8,7 +8,7 @@ import java.util.Objects;
 
 /**
  * How the client starts the workflow server. The only supported server
- * is {@code bdd mcp serve}; the launch decision lives here so it can be
+ * is {@code spec mcp serve}; the launch decision lives here so it can be
  * unit-tested instead of hiding inside the JaCoCo-excluded SDK glue.
  */
 public record ServerLaunch(String program, List<String> args) {
@@ -18,11 +18,11 @@ public record ServerLaunch(String program, List<String> args) {
         args = List.copyOf(Objects.requireNonNull(args, "args"));
     }
 
-    public static ServerLaunch bdd(Path workshopRoot, Path bddBinary) {
+    public static ServerLaunch spec(Path workshopRoot, Path specBinary) {
         Objects.requireNonNull(workshopRoot, "workshopRoot");
-        Objects.requireNonNull(bddBinary, "bddBinary");
+        Objects.requireNonNull(specBinary, "specBinary");
         return new ServerLaunch(
-                bddBinary.toString(),
+                specBinary.toString(),
                 List.of(
                         "mcp",
                         "serve",

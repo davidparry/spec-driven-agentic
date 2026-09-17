@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use crate::domain::tools::{ToolDefinition, find};
 
 /// Every model call the harness makes, as a profile key. The kebab-case
-/// name is what `.bdd.toml` and `--for` use.
+/// name is what `.spec.toml` and `--for` use.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Caller {
     SpecDraft,
@@ -47,14 +47,14 @@ impl Caller {
     /// The harness command whose LLM call offers this profile.
     pub fn cli_command(self) -> &'static str {
         match self {
-            Caller::SpecDraft => "bdd spec draft",
-            Caller::SpecReword => "bdd spec reword",
-            Caller::StepsGenerate => "bdd steps generate",
-            Caller::UnittestGenerate => "bdd unittest generate",
-            Caller::ImplementAdvice => "bdd implement (preflight advice)",
-            Caller::Implement => "bdd implement",
-            Caller::Status => "bdd status",
-            Caller::Ask => "bdd ask",
+            Caller::SpecDraft => "spec draft",
+            Caller::SpecReword => "spec reword",
+            Caller::StepsGenerate => "spec steps generate",
+            Caller::UnittestGenerate => "spec unittest generate",
+            Caller::ImplementAdvice => "spec implement (preflight advice)",
+            Caller::Implement => "spec implement",
+            Caller::Status => "spec status",
+            Caller::Ask => "spec ask",
         }
     }
 
@@ -288,7 +288,7 @@ mod tests {
         let mut seen = std::collections::BTreeSet::new();
         for caller in Caller::ALL {
             let command = caller.cli_command();
-            assert!(command.starts_with("bdd "), "{}: {command}", caller.key());
+            assert!(command.starts_with("spec "), "{}: {command}", caller.key());
             assert!(seen.insert(command), "duplicate cli_command {command}");
         }
     }

@@ -1,6 +1,6 @@
 # Executable spec for controlled spec authoring — the behavior of
-# `bdd spec draft`, `bdd spec mark-implemented`, `bdd feature create`,
-# and `bdd scenario add|update|delete`. All mutations land in staging.
+# `spec draft`, `spec mark-implemented`, `spec feature create`,
+# and `spec scenario add|update|delete`. All mutations land in staging.
 Feature: Spec mutations
   As a developer who owns the spec wording
   I want drafting, status flips, and scenario edits staged and gated
@@ -270,7 +270,7 @@ Feature: Spec mutations
   Scenario: Marking implemented without a tagged scenario names the recovery commands
     Given the persisted TDD phase is "GREEN"
     When marking requirement "REQ-001" implemented fails
-    Then the mutation error is "No scenario is tagged @REQ-001 - implemented requirements need an executable scenario. Add one with bdd scenario add, apply it with bdd changes commit, then mark REQ-001 implemented."
+    Then the mutation error is "No scenario is tagged @REQ-001 - implemented requirements need an executable scenario. Add one with spec scenario add, apply it with spec changes commit, then mark REQ-001 implemented."
 
   Scenario: Creating a feature stages a bare feature file
     When the feature "features/calc.feature" named "Calc" is created

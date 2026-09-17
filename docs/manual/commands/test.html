@@ -3,12 +3,12 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>bdd test - bdd Harness Manual</title>
+        <title>spec test - spec Harness Manual</title>
 
 
         <!-- Custom HTML head -->
 
-        <meta name="description" content="The complete, searchable reference for the bdd harness: every command, subcommand, and flag, with in-depth examples.">
+        <meta name="description" content="The complete, searchable reference for the spec harness: every command, subcommand, and flag, with in-depth examples.">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff">
 
@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-aaad9ee5.js";
+            window.path_to_searchindex_js = "../searchindex-5959f77b.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-9d4e1520.js"></script>
+        <script src="../toc-372d77fe.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -137,7 +137,7 @@
                         </button>
                     </div>
 
-                    <h1 class="menu-title">bdd Harness Manual</h1>
+                    <h1 class="menu-title">spec Harness Manual</h1>
 
                     <div class="right-buttons">
                         <a href="../print.html" title="Print this book" aria-label="Print this book">
@@ -180,11 +180,11 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="bdd-test"><a class="header" href="#bdd-test">bdd test</a></h1>
+                        <h1 id="spec-test"><a class="header" href="#spec-test">spec test</a></h1>
 <p>Run the project’s tests through its own build tool and update the
 persistent RED/GREEN/REFACTOR phase from the results. This is the
 heartbeat of the workflow.</p>
-<pre><code class="language-text">Usage: bdd test [OPTIONS]
+<pre><code class="language-text">Usage: spec test [OPTIONS]
 </code></pre>
 <p>MCP tool equivalent: <code>run_tests</code>.</p>
 <h2 id="flags"><a class="header" href="#flags">Flags</a></h2>
@@ -223,7 +223,7 @@ pretending</strong>:</p>
 </code></pre>
 <h2 id="examples"><a class="header" href="#examples">Examples</a></h2>
 <p>A failing run — the phase moves to RED:</p>
-<pre><code class="language-bash">bdd test
+<pre><code class="language-bash">spec test
 </code></pre>
 <pre><code class="language-json">{
   "phase": "RED",
@@ -245,12 +245,12 @@ pretending</strong>:</p>
   "errors": 0,
   "skipped": 0,
   "failureDetails": [],
-  "nextStep": "You are GREEN. Refactor with 'bdd refactor', or mark the requirement implemented and pick the next one."
+  "nextStep": "You are GREEN. Refactor with 'spec refactor', or mark the requirement implemented and pick the next one."
 }
 </code></pre>
 <p>Filtered runs:</p>
-<pre><code class="language-bash">bdd test --feature features/string_calculator.feature
-bdd test --scenario "Two numbers separated by a comma are summed"
+<pre><code class="language-bash">spec test --feature features/string_calculator.feature
+spec test --scenario "Two numbers separated by a comma are summed"
 </code></pre>
 <p>Filters are forwarded to the underlying runner (e.g. Cucumber’s name
 filter), so only the selected slice executes — useful while iterating
@@ -262,19 +262,19 @@ on one scenario.</p>
 <li>A failing run during REFACTOR drops you back to RED — the refactor
 broke behavior.</li>
 </ul>
-<p>The phase is stored in <code>.bdd-tdd-state.json</code> and read back by
-<a href="state.html"><code>bdd state</code></a> and enforced by <a href="refactor.html"><code>bdd refactor</code></a>.</p>
+<p>The phase is stored in <code>.spec-state.json</code> and read back by
+<a href="state.html"><code>spec state</code></a> and enforced by <a href="refactor.html"><code>spec refactor</code></a>.</p>
 <h2 id="see-also"><a class="header" href="#see-also">See also</a></h2>
 <ul>
 <li><a href="../workflow.html">The workflow</a> — the phase machine in full.</li>
-<li><a href="inspect.html"><code>bdd inspect</code></a> — check the runtime before expecting a run.</li>
+<li><a href="inspect.html"><code>spec inspect</code></a> — check the runtime before expecting a run.</li>
 </ul>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../commands/validate.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../commands/implement.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
@@ -288,7 +288,7 @@ broke behavior.</li>
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../commands/validate.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../commands/implement.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 

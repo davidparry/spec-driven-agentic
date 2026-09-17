@@ -4,7 +4,7 @@ Your step-by-step companion for the 60-minute workshop. Everything the
 presenter does, you do — this page has the exact commands, the exact agent
 prompts, and what you should see at every step.
 
-**The big idea:** there is one MCP server — `bdd mcp serve` (25 tools).
+**The big idea:** there is one MCP server — `spec mcp serve` (25 tools).
 Cursor talks to it, so does the bundled `smoke-test.jar`, and so does a free
 local agent if you take the [pi path](student-follow-docs/pi-path.md). Your
 hour is the workflow it enables: draft a requirement *with* an agent, let the
@@ -22,7 +22,7 @@ zero? See the greenfield build order, first file to last:
 
 You need:
 
-- **`bdd` on PATH** (`bdd --version`) — GitHub release, `cargo install --path harness`, or `harness/target/release/bdd`. Cursor will not connect without it.
+- **`spec` on PATH** (`spec --version`) — GitHub release, `cargo install --path harness`, or `harness/target/release/spec`. Cursor will not connect without it.
 - **Java 21+** (`java -version`)
 - **Maven 3.9+** (`mvn -version`)
 - **Cursor** (or any MCP-capable agent — Claude Desktop works with the same JSON)
@@ -32,13 +32,13 @@ You need:
   **same server**:
   [the pi path](student-follow-docs/pi-path.md) — a free MIT agent you run with
   `pi -nbt` so these 25 tools are all it gets — and
-  [the harness path](student-follow-docs/harness-path.md), the `bdd` runner
+  [the harness path](student-follow-docs/harness-path.md), the `spec` runner
   with narrower tools per command.
 
 Build once at home so the room's Wi-Fi never matters:
 
 ```bash
-bdd --version                     # must succeed
+spec --version                     # must succeed
 mvn -q -pl smoke-test package     # MCP-server smoke-test jar
 mvn -q -f kata/pom.xml test       # kata JUnit + Cucumber baseline
 ```
@@ -70,7 +70,7 @@ repo root:
 
 ```bash
 git checkout -b workshop trunk
-bdd --version
+spec --version
 mvn -q -pl smoke-test package && mvn -q -f kata/pom.xml test
 ```
 
@@ -140,7 +140,7 @@ To connect your own agent, the ready-to-run configuration lives at
 {
   "mcpServers": {
     "spec-driven-server": {
-      "command": "bdd",
+      "command": "spec",
       "args": ["mcp", "serve", "--root", "${workspaceFolder}"]
     }
   }
@@ -160,8 +160,8 @@ The repo already registers the server for you in `.cursor/mcp.json`. Open
 Cursor's MCP settings (see
 [student-follow-docs/setup-mcp.md](student-follow-docs/setup-mcp.md) for
 where to find them) and confirm `spec-driven-server` shows **green**. If it's red:
-`bdd` is not on PATH for GUI apps (launch Cursor from a terminal where
-`bdd --version` works, or put the absolute binary path in `command`), then
+`spec` is not on PATH for GUI apps (launch Cursor from a terminal where
+`spec --version` works, or put the absolute binary path in `command`), then
 toggle the server off/on in the settings.
 
 A green light says the server *launched* — now prove the agent can actually
@@ -201,7 +201,7 @@ fine. `get_tdd_state` is read-only, so this check never disturbs your run.)
   agent through the workflow, which is the whole trick of Exercises 1 and 2.
 
 If the agent says it can't find the tool, the connection is the problem, not
-the agent: re-check the green light, confirm `bdd --version` in a terminal,
+the agent: re-check the green light, confirm `spec --version` in a terminal,
 and toggle the server off/on.
 
 ---
@@ -521,7 +521,7 @@ are still yours: the verifier asks whether each of its two acceptance
 criteria reaches a scenario tagged `@REQ-003` and an assertion in a
 `@Test` that names the requirement. Scenario names, method names, and
 assertion style are free. The last count will read `1 @Test` if you wrote
-one method with both assertions and `2 @Test` if `bdd unittest generate`
+one method with both assertions and `2 @Test` if `spec unittest generate`
 wrote one per criterion; both pass.
 
 Any FAIL line tells you exactly which artifact to revisit, and which
@@ -567,7 +567,7 @@ and leave REQ-007 for the homework it was always meant to be.
 
 REQ-003 carries two acceptance criteria, and the agent wrote a scenario
 for one of them. Everything downstream still went green: Cucumber ran the
-scenario that exists, `bdd validate` passed, and
+scenario that exists, `spec changes validate` passed, and
 `requirement_mark_implemented` accepted REQ-003 — that gate requires *a*
 scenario tagged `@REQ-003`, not one per criterion. So the spec says
 `implemented` while half the behavior the spec asks for is only asserted
@@ -577,12 +577,12 @@ This is the gap worth seeing: a green bar measures the tests you wrote,
 never the criteria you skipped. Add the missing scenario and re-run:
 
 ```bash
-bdd scenario add --feature kata/src/test/resources/features/string_calculator.feature \
+spec scenario add --feature kata/src/test/resources/features/string_calculator.feature \
   --req REQ-003 --name "Two numbers separated by a comma are summed" \
   --step 'Given a string calculator' \
   --step 'When I add "1,2"' \
   --step 'Then the result is 3'
-bdd changes commit && bdd test
+spec changes commit && spec test
 ```
 
 ---
@@ -620,8 +620,8 @@ git checkout trunk && git branch -D workshop && git checkout -b workshop trunk
 
 - **Build red:** pair with a neighbor first; the presenter won't debug from
   stage.
-- **Cursor MCP connection red:** `bdd --version` must work. Launch Cursor
-  from that terminal or put the absolute path to `bdd` in `command`, then
+- **Cursor MCP connection red:** `spec --version` must work. Launch Cursor
+  from that terminal or put the absolute path to `spec` in `command`, then
   toggle the server off/on in Cursor's MCP settings. Note: a server restart
   resets the TDD phase — have the agent call `run_tests` once before any
   `start_refactor`, or the server will refuse.

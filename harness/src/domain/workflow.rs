@@ -11,7 +11,7 @@ use crate::domain::prompts::{RenderedPrompt, render};
 /// for prompts and advice calls.
 pub const WORKFLOW_PROCESS: &str = include_str!("../../prompts/workflow.md");
 
-/// The `bdd status` advice call: the workflow process plus the full
+/// The `spec status` advice call: the workflow process plus the full
 /// project state - phase, last run counts, staged changes, and every
 /// requirement's position - so the model names the one next command.
 pub fn next_step_prompt(
@@ -63,7 +63,7 @@ mod tests {
     fn the_workflow_document_names_the_loop_and_the_invariants() {
         assert!(WORKFLOW_PROCESS.contains("THE LOOP FOR ONE REQUIREMENT"));
         assert!(WORKFLOW_PROCESS.contains("Never refactor on RED"));
-        assert!(WORKFLOW_PROCESS.contains("bdd spec mark-implemented"));
+        assert!(WORKFLOW_PROCESS.contains("spec mark-implemented"));
         assert!(WORKFLOW_PROCESS.contains("outside-in double loop"));
     }
 

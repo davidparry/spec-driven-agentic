@@ -3,7 +3,7 @@
 //! `initialize` handshake — and assert the seven frozen tools carry the
 //! workshop server's names and reply shapes. Most tests use an in-memory
 //! duplex transport around [`WorkflowServer`]; the final test speaks raw
-//! newline-delimited JSON-RPC to the real `bdd mcp serve` child process
+//! newline-delimited JSON-RPC to the real `spec mcp serve` child process
 //! over stdio.
 
 use std::fs;
@@ -15,9 +15,9 @@ use rmcp::service::{RoleClient, RunningService};
 use rmcp::{ClientLifecycleMode, ClientServiceExt, ServiceExt as _};
 use serde_json::{Value, json};
 
-use bdd_harness::domain::model::TestRunSummary;
-use bdd_harness::mcp::WorkflowServer;
-use bdd_harness::ports::{RunnerError, TestFilter, TestRunner};
+use spec_harness::domain::model::TestRunSummary;
+use spec_harness::mcp::WorkflowServer;
+use spec_harness::ports::{RunnerError, TestFilter, TestRunner};
 
 const SPEC: &str = r#"{
   "project": "String Calculator Kata",
@@ -136,7 +136,7 @@ async fn the_server_identifies_as_the_workshop_server_and_lists_all_tools() {
     assert_eq!(icons.len(), 1);
     assert_eq!(
         icons[0].src,
-        "https://davidparry.github.io/spec-driven-agentic/assets/bdd-harness-mark.png"
+        "https://davidparry.github.io/spec-driven-agentic/assets/spec-harness-mark.png"
     );
     assert_eq!(icons[0].mime_type.as_deref(), Some("image/png"));
     assert_eq!(icons[0].sizes, Some(vec!["1024x1024".into()]));
@@ -602,7 +602,7 @@ async fn requirement_reword_stages_criteria_whose_escaping_survives_the_round_tr
     // has no shell to run.
     let next_step = body["nextStep"].as_str().unwrap();
     assert!(next_step.contains("changes_commit"), "{next_step}");
-    assert!(!next_step.contains("bdd "), "{next_step}");
+    assert!(!next_step.contains("spec "), "{next_step}");
 
     let validated = call_json(&client, "changes_validate", json!({})).await;
     assert_eq!(validated["valid"], true, "{validated}");
@@ -672,10 +672,10 @@ async fn broken_project_state_surfaces_as_tool_errors_not_crashes() {
     fs::create_dir_all(dir.path().join("features")).unwrap();
     fs::write(dir.path().join("features/broken.feature"), "not gherkin").unwrap();
     // Corrupt TDD state: get_tdd_state reports the state error.
-    fs::write(dir.path().join(".bdd-state.json"), "{{{").unwrap();
+    fs::write(dir.path().join(".spec-state.json"), "{{{").unwrap();
     // Corrupt staging manifest: the changes tools report the staging error.
-    fs::create_dir_all(dir.path().join(".bdd-staged")).unwrap();
-    fs::write(dir.path().join(".bdd-staged/manifest.json"), "{{{").unwrap();
+    fs::create_dir_all(dir.path().join(".spec-staged")).unwrap();
+    fs::write(dir.path().join(".spec-staged/manifest.json"), "{{{").unwrap();
 
     let client = connect_default(dir.path()).await;
 
@@ -915,7 +915,7 @@ async fn requirement_mark_implemented_is_gated_on_green_and_a_tagged_scenario() 
 }
 
 #[tokio::test]
-async fn generation_tools_are_template_only_and_name_bdd_inspect_without_a_language() {
+async fn generation_tools_are_template_only_and_name_spec_inspect_without_a_language() {
     let dir = tempfile::tempdir().unwrap();
     write_project(dir.path());
     fs::write(dir.path().join("pom.xml"), "<project/>").unwrap();
@@ -942,7 +942,7 @@ async fn generation_tools_are_template_only_and_name_bdd_inspect_without_a_langu
     let client = connect_default(empty.path()).await;
     let (is_error, text) = call(&client, "step_definitions_find", json!({})).await;
     assert_eq!(is_error, Some(true));
-    assert!(text.contains("bdd inspect"), "{text}");
+    assert!(text.contains("spec inspect"), "{text}");
     client.cancel().await.unwrap();
 }
 
@@ -975,7 +975,7 @@ async fn new_tool_schemas_require_the_documented_arguments() {
 
 #[tokio::test]
 async fn builtin_tool_definitions_match_the_wire_list() {
-    use bdd_harness::mcp::builtin_tool_definitions;
+    use spec_harness::mcp::builtin_tool_definitions;
     let dir = tempfile::tempdir().unwrap();
     let client = connect_default(dir.path()).await;
     let wire = client.list_all_tools().await.unwrap();
@@ -1016,20 +1016,20 @@ fn request_meta() -> Value {
 /// `initialize` handshake. Newline-delimited JSON-RPC with per-request
 /// `_meta`, the 2026-07-28 lifecycle.
 #[test]
-fn the_bdd_binary_serves_mcp_over_child_process_stdio_without_initialize() {
+fn the_spec_binary_serves_mcp_over_child_process_stdio_without_initialize() {
     use std::io::{BufRead, BufReader, Write};
     use std::process::{Command, Stdio};
 
     let dir = tempfile::tempdir().unwrap();
     write_project(dir.path());
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_bdd"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_spec"))
         .args(["--root", dir.path().to_str().unwrap(), "mcp", "serve"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
-        .expect("bdd mcp serve starts");
+        .expect("spec mcp serve starts");
 
     let mut stdin = child.stdin.take().unwrap();
     let mut stdout = BufReader::new(child.stdout.take().unwrap());

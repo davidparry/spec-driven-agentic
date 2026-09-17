@@ -329,7 +329,7 @@ mod tests {
     fn a_text_answer_is_accepted() {
         let agent = make_agent(
             vec![Ok(ChatTurn {
-                content: "run bdd test".into(),
+                content: "run spec test".into(),
                 tool_calls: vec![],
             })],
             FakeBroker::default(),
@@ -341,7 +341,7 @@ mod tests {
         let value = agent
             .ask(&mut prompter, &prompt(), parse_ok, |_, _, _| {})
             .unwrap();
-        assert_eq!(value, "run bdd test");
+        assert_eq!(value, "run spec test");
     }
 
     #[test]

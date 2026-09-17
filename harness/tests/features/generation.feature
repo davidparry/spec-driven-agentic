@@ -114,11 +114,11 @@ Feature: Hybrid generation into staging
     Given a working spec whose requirement "REQ-001" is "pending" with feature file "features/calc.feature"
     When implement readiness is checked for "REQ-001"
     Then the implement readiness is not ready
-    And a readiness finding contains "No RED test run is recorded - run bdd test first"
+    And a readiness finding contains "No RED test run is recorded - run spec test first"
     And a readiness finding contains "No scenario is tagged @REQ-001"
-    And a readiness finding contains "run bdd steps generate"
-    And a readiness finding contains "bdd unittest generate REQ-001"
-    And the readiness next step contains "bdd test"
+    And a readiness finding contains "run spec steps generate"
+    And a readiness finding contains "spec unittest generate REQ-001"
+    And the readiness next step contains "spec test"
     And the readiness asset "src/test/java/Req001Test.java" is missing
     And the readiness asset "src/main/java/Kata.java" is missing
 
@@ -152,7 +152,7 @@ Feature: Hybrid generation into staging
     And a persisted RED run failing with "Req001Test.case: TODO: assert - Given a, when b, then 3"
     When implement readiness is checked for "REQ-001"
     Then the implement readiness is ready
-    And the readiness next step contains "bdd implement REQ-001 can run"
+    And the readiness next step contains "spec implement REQ-001 can run"
     And the readiness asset "features/tagged.feature" is present
     And the readiness asset "src/test/java/Req001Test.java" is present
 
@@ -167,11 +167,11 @@ Feature: Hybrid generation into staging
     Given a working spec whose requirement "REQ-001" is "pending" with feature file "features/calc.feature"
     And the model will reply:
       """
-      Not yet - run bdd test first to record the RED bar, then bdd implement REQ-001.
+      Not yet - run spec test first to record the RED bar, then spec implement REQ-001.
       """
     When the model is asked for implement advice on "REQ-001"
     Then the implement readiness is not ready
-    And the implement advice is "Not yet - run bdd test first to record the RED bar, then bdd implement REQ-001."
+    And the implement advice is "Not yet - run spec test first to record the RED bar, then spec implement REQ-001."
 
   Scenario: Status puts staged changes before everything else
     Given a working spec whose requirement "REQ-001" is "pending" with feature file "features/calc.feature"
@@ -181,7 +181,7 @@ Feature: Hybrid generation into staging
       """
     When the project status is checked
     Then the status next step contains "1 staged file(s) await review"
-    And the status next step contains "bdd changes commit"
+    And the status next step contains "spec changes commit"
     And the status lists 1 staged file and 1 requirement
 
   Scenario: Status on GREEN points to mark-implemented for the requirement in flight
@@ -213,7 +213,7 @@ Feature: Hybrid generation into staging
       """
     And the persisted TDD phase is "GREEN"
     When the project status is checked
-    Then the status next step contains "bdd spec mark-implemented REQ-001"
+    Then the status next step contains "spec mark-implemented REQ-001"
     And the status of "REQ-001" holds 0 findings
 
   Scenario: Status names the earliest gap on the road to implemented
@@ -225,7 +225,7 @@ Feature: Hybrid generation into staging
   Scenario: An implementation attempt without a model is refused
     Given a working spec whose requirement "REQ-001" is "pending" with feature file "features/calc.feature"
     When generating an implementation for "REQ-001" without a model fails
-    Then the generation error is "No model resolved - implement by hand and rerun bdd test."
+    Then the generation error is "No model resolved - implement by hand and rerun spec test."
 
   Scenario: An implementation reply outside the project is refused
     Given a working spec whose requirement "REQ-001" is "pending" with feature file "features/calc.feature"
