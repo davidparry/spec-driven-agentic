@@ -109,10 +109,17 @@ impl<C: ChangeStore, R: SpecRepository, F: FeatureFiles> ChangeService<C, R, F> 
         let mut issues = Vec::new();
         let changes = self.store.changes()?;
         for change in changes.iter().filter(|c| c.path.ends_with(".feature")) {
-            let content = self
-                .store
-                .content(&change.path)?
-                .expect("listed changes always have content");
+            // A manifest entry with no content behind it means the staging
+            // area is half-written. That is exactly what validate exists
+            // to report, so it is an issue rather than a crash.
+            let Some(content) = self.store.content(&change.path)? else {
+                issues.push(format!(
+                    "staged {} is listed but has no content - the staging area is \
+                     incomplete. Run changes discard to clear it.",
+                    change.path
+                ));
+                continue;
+            };
             if let Err(error) = feature::parse(&change.path, &content) {
                 issues.push(error);
             }

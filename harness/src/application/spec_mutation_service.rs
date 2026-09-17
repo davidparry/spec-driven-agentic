@@ -9,7 +9,7 @@ use crate::application::agent_service::{Agent, AgentConfig, DEFAULT_MAX_ROUNDS, 
 use crate::application::assets::{feature_tagged, load_effective_catalog};
 use crate::application::spec_service::ServiceError;
 use crate::application::{DEFAULT_LLM_ATTEMPTS, LlmReplyError};
-use crate::domain::model::{Requirement, Spec, SpecCatalog};
+use crate::domain::model::{Requirement, Spec, SpecCatalog, SpecFile};
 use crate::domain::prompts::RenderedPrompt;
 use crate::domain::proposal::{
     ProposedRequirement, parse_proposals_checked, parse_rewording_checked, proposal_prompt,
@@ -381,26 +381,21 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
                 feature_file: None,
             };
             merged.requirements.push(requirement.clone());
-            catalog
-                .file_mut(&target)
-                .expect("the target is part of the catalog")
+            file_mut_or_err(&mut catalog, &target)?
                 .requirements
                 .push(requirement.clone());
             stored.push(requirement);
         }
-        let ids: Vec<&str> = stored.iter().map(|r| r.id.as_str()).collect();
+        let ids: Vec<String> = stored.iter().map(|r| r.id.clone()).collect();
         self.stage_file(
             &catalog,
             &target,
             &format!("draft {} from the description", ids.join(", ")),
         )?;
-        // Land in the working-tree spec file now, not after the refine
-        // wizard. The human already accepted these rows; they should be
-        // visible in requirements.json while the first one is reviewed.
-        self.store.commit()?;
+        let staged_path = self.project_path(&target);
         prompter.tell(&format!(
-            "Accepted requirements are now stored in {} as pending:",
-            self.project_path(&target)
+            "Accepted requirements are staged for {staged_path} as pending - nothing \
+             reaches the working spec until spec changes commit:"
         ));
         for requirement in &stored {
             prompter.tell(&format!("  {} {}", requirement.id, requirement.title));
@@ -412,7 +407,7 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
             "Walking through {chosen_id}. Each prompt shows the proposal - Enter \
              accepts it, or type your own wording."
         ));
-        self.draft_loop(
+        let report = self.draft_loop(
             prompter,
             DraftTarget {
                 catalog,
@@ -422,7 +417,28 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
             Some(proposal),
             Some((model, llm)),
             true,
-        )
+        )?;
+        if report.staged {
+            return Ok(report);
+        }
+        // Declining the reworded wording does not un-stage the rows the
+        // developer already accepted - they are still in the staging area
+        // under the model's wording, so the report has to say so rather
+        // than claiming nothing was staged.
+        Ok(DraftReport {
+            staged: true,
+            next_step: format!(
+                "The reworded wording was declined, but {} still staged for \
+                 {staged_path} under the model's wording. Review with spec changes \
+                 show, apply with spec changes commit, or drop with spec changes \
+                 discard.",
+                match ids.as_slice() {
+                    [one] => format!("{one} is"),
+                    many => format!("{} are", many.join(", ")),
+                }
+            ),
+            ..report
+        })
     }
 
     /// Which of the listed proposals to keep. Enter means all of them;
@@ -527,10 +543,7 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
                     "No requirement with id '{id}'. Call spec list to see valid ids."
                 ))
             })?;
-        let target = catalog
-            .source_of(id)
-            .expect("the id was found in the merged spec")
-            .to_string();
+        let target = source_of_or_err(&catalog, id)?;
         prompter.tell(&format!(
             "Rewording {id}. You word the spec; validate and refine findings drive \
              rewording until the wording is clean."
@@ -611,10 +624,7 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
         if !criteria.is_empty() {
             candidate.acceptance_criteria = criteria;
         }
-        let target = catalog
-            .source_of(id)
-            .expect("the id was found in the merged spec")
-            .to_string();
+        let target = source_of_or_err(&catalog, id)?;
         self.stage_direct(&mut catalog, &target, candidate, true)
     }
 
@@ -645,9 +655,7 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
             return Err(ServiceError(structural.join(" ")));
         }
         let warning = duplicate_warning(&merged, &candidate);
-        let doc = catalog
-            .file_mut(target)
-            .expect("the target is part of the catalog");
+        let doc = file_mut_or_err(catalog, target)?;
         if replace {
             if let Some(slot) = doc.requirements.iter_mut().find(|r| r.id == id) {
                 *slot = candidate;
@@ -694,13 +702,7 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
                 "No requirement with id '{id}'. Call spec list to see valid ids."
             ))
         })?;
-        let requirement = catalog
-            .file_mut(&target)
-            .expect("source_of found the file")
-            .requirements
-            .iter_mut()
-            .find(|r| r.id == id)
-            .expect("source_of found the requirement");
+        let requirement = requirement_mut_or_err(&mut catalog, &target, id)?;
         if requirement.feature_file.as_deref() == Some(path) {
             return Ok(SetFeatureReport {
                 id: id.to_string(),
@@ -811,9 +813,7 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
         }
         // The include entry is written relative to the parent document.
         let entry = relative_to(parent_dir(&parent), &child);
-        catalog
-            .file_mut(&parent)
-            .expect("checked above")
+        file_mut_or_err(&mut catalog, &parent)?
             .includes
             .push(entry.clone());
         self.stage_file(
@@ -948,9 +948,7 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
                     .into(),
             });
         }
-        let doc = catalog
-            .file_mut(&file)
-            .expect("the target is part of the catalog");
+        let doc = file_mut_or_err(&mut catalog, &file)?;
         if replace {
             if let Some(slot) = doc.requirements.iter_mut().find(|r| r.id == id) {
                 *slot = requirement;
@@ -1163,13 +1161,7 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
                  spec changes commit, then mark {id} implemented."
             ))
         })?;
-        let requirement = catalog
-            .file_mut(&target)
-            .expect("source_of found the file")
-            .requirements
-            .iter_mut()
-            .find(|r| r.id == id)
-            .expect("source_of found the requirement");
+        let requirement = requirement_mut_or_err(&mut catalog, &target, id)?;
         requirement.status = "implemented".into();
         requirement.feature_file = Some(feature);
         self.stage_file(&catalog, &target, &format!("mark {id} implemented"))?;
@@ -1275,11 +1267,9 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
         target: &str,
         summary: &str,
     ) -> Result<(), ServiceError> {
-        let doc = &catalog
-            .file(target)
-            .expect("the target is part of the catalog")
-            .spec;
-        let json = serde_json::to_string_pretty(doc).expect("spec is always serializable");
+        let doc = &file_or_err(catalog, target)?.spec;
+        let json = serde_json::to_string_pretty(doc)
+            .map_err(|e| ServiceError(format!("The spec could not be serialized - {e}")))?;
         self.store
             .stage(&self.project_path(target), &json, summary)?;
         Ok(())
@@ -1406,6 +1396,70 @@ fn parse_accept_selection(answer: &str, count: usize) -> Result<Vec<usize>, Stri
     }
     picks.sort_unstable();
     Ok(picks)
+}
+
+/// A catalog inconsistency: a path or id the caller already resolved
+/// through the same catalog no longer looks up. That means the in-memory
+/// catalog and what it was built from disagree — a half-written
+/// `.spec-staged`, a hand-edited manifest, an include tree that changed
+/// underfoot. It is a state the developer can clear, so it is reported
+/// rather than panicked on.
+fn inconsistent_file(target: &str) -> ServiceError {
+    ServiceError(format!(
+        "The spec catalog is inconsistent: '{target}' is not one of its files. \
+         Run spec changes show to inspect the staging area, or spec changes \
+         discard to clear it."
+    ))
+}
+
+fn inconsistent_requirement(id: &str, target: &str) -> ServiceError {
+    ServiceError(format!(
+        "The spec catalog is inconsistent: '{id}' is not declared in '{target}'. \
+         Run spec changes show to inspect the staging area, or spec changes \
+         discard to clear it."
+    ))
+}
+
+/// The mutable document at `target`, or the inconsistency as an error.
+fn file_mut_or_err<'a>(
+    catalog: &'a mut SpecCatalog,
+    target: &str,
+) -> Result<&'a mut Spec, ServiceError> {
+    catalog
+        .file_mut(target)
+        .ok_or_else(|| inconsistent_file(target))
+}
+
+/// The document at `target`, or the inconsistency as an error.
+fn file_or_err<'a>(catalog: &'a SpecCatalog, target: &str) -> Result<&'a SpecFile, ServiceError> {
+    catalog
+        .file(target)
+        .ok_or_else(|| inconsistent_file(target))
+}
+
+/// The path of the file declaring `id`, or the inconsistency as an error.
+fn source_of_or_err(catalog: &SpecCatalog, id: &str) -> Result<String, ServiceError> {
+    catalog.source_of(id).map(str::to_string).ok_or_else(|| {
+        ServiceError(format!(
+            "The spec catalog is inconsistent: '{id}' is in the merged spec but no \
+             file declares it. Run spec changes show to inspect the staging area, \
+             or spec changes discard to clear it."
+        ))
+    })
+}
+
+/// The requirement `id` inside the document at `target`, for the
+/// mutations that resolved `target` from `id` in the first place.
+fn requirement_mut_or_err<'a>(
+    catalog: &'a mut SpecCatalog,
+    target: &str,
+    id: &str,
+) -> Result<&'a mut Requirement, ServiceError> {
+    file_mut_or_err(catalog, target)?
+        .requirements
+        .iter_mut()
+        .find(|r| r.id == id)
+        .ok_or_else(|| inconsistent_requirement(id, target))
 }
 
 /// The directory of a catalog path ("core/math.json" -> "core").
@@ -2259,7 +2313,7 @@ mod tests {
         told("The description holds 2 requirement(s):");
         told("1. Comma separated numbers are summed");
         told("2. Empty string returns zero");
-        told("Accepted requirements are now stored in requirements/requirements.json as pending:");
+        told("Accepted requirements are staged for requirements/requirements.json as pending");
         told("REQ-008 Comma separated numbers are summed");
         told("REQ-009 Empty string returns zero");
         told("Which requirement first to review and refine?");

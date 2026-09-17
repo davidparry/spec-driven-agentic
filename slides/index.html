@@ -20,12 +20,21 @@
       --r-heading-text-transform: none;
     }
     .reveal h1 { font-size: 2.1em; }
-    .reveal h2 { font-size: 1.5em; }
-    .reveal h3 { font-size: 1.1em; color: #4fc3f7; }
-    .reveal pre { width: 100%; box-shadow: none; }
-    .reveal pre code { max-height: 560px; font-size: 0.62em; line-height: 1.35; border-radius: 8px; }
+    .reveal h2 { font-size: 1.5em; line-height: 1.15; margin-bottom: 0.4em; }
+    .reveal h3 { font-size: 1.1em; color: #4fc3f7; line-height: 1.2; }
+    .reveal pre { width: 100%; box-shadow: none; margin: 0.5em 0; }
+    /* 520px is canvas units — Reveal scales a fixed 1280x720 canvas to the
+       window, so viewport-relative caps here would drift from the layout. */
+    .reveal pre code { max-height: 520px; font-size: 0.62em; line-height: 1.35; border-radius: 8px; }
+    /* Long lines wrap instead of disappearing off the right edge — real
+       terminal output wraps too. Reveal scopes its own wrapping rule as
+       `html:not(.print-pdf) .reveal .hljs`, so match that weight to win. */
+    html:not(.print-pdf) .reveal pre code {
+      white-space: pre-wrap; overflow-wrap: anywhere;
+    }
     .reveal ul, .reveal ol { display: block; margin-left: 1em; }
-    .reveal li { margin: 0.35em 0; }
+    .reveal li { margin: 0.25em 0; }
+    .reveal p { line-height: 1.35; }
     .reveal .small { font-size: 0.65em; }
     .reveal table { font-size: 0.7em; }
     .badge {
@@ -38,14 +47,15 @@
     .badge.time { background: #333c44; color: #9fb3c8; }
     .badge.exercise { background: #e65100; color: #fff; }
     .two-col { display: flex; gap: 1.2em; align-items: flex-start; text-align: left; }
-    .two-col > div { flex: 1; }
+    .two-col > div { flex: 1; min-width: 0; }
+    .two-col h3 { margin-bottom: 0.3em; }
     .cycle { display: flex; justify-content: center; gap: 1em; margin-top: 0.8em; }
     .cycle .step {
       padding: 0.5em 1em; border-radius: 12px; font-weight: 700; font-size: 0.8em;
     }
     .cycle .arrow { align-self: center; color: #9fb3c8; }
     .muted { color: #9fb3c8; }
-    .reveal blockquote { width: 90%; font-size: 0.85em; }
+    .reveal blockquote { width: 90%; font-size: 0.85em; margin: 0.6em auto; }
     /* Which cut you are in, and the way out of it. Dimmed so it cannot
        compete with the slide, legible the moment a presenter looks for it. */
     .track-switch {
@@ -58,6 +68,10 @@
     .track-switch a { padding: 0.25em 0.8em; border-radius: 999px; color: #9fb3c8; text-decoration: none; }
     .track-switch a.on { background: #2a323a; color: #fff; }
     @media print { .track-switch { display: none; } }
+    /* Screen only: PDF export places the slide number itself, per page. */
+    @media screen {
+      .reveal .slide-number { top: 8px; bottom: auto; right: 8px; }
+    }
   </style>
 </head>
 <body>
@@ -75,7 +89,7 @@
     </section>
 
     <section data-track="30">
-      <h2>Three acts <span class="badge time">30 minutes</span></h2>
+      <h2>Three acts</h2>
       <table>
         <tr><td>0–3</td><td>What survives the agentic era, what gets amplified, and the three altitudes: spec, behaviour, unit</td></tr>
         <tr><td>3–9</td><td><strong>Act 1</strong> — <code>pi</code> on Ollama: a free, open, offline agent, and where it drifts</td></tr>
@@ -111,16 +125,17 @@
     </section>
 
     <section data-track="60">
-      <h2>The next 60 minutes <span class="badge time">agenda</span></h2>
+      <h2>The next 60 minutes</h2>
       <table>
         <tr><td>0–5</td><td>Welcome, setup check (<code>spec --version</code> and kata tests green)</td></tr>
         <tr><td>5–11</td><td>TDD refresher, agents, and the SDD → BDD → TDD stack</td></tr>
         <tr><td>11–16</td><td>Start free: <code>pi</code> on Ollama — what an open agent gives you, and where it drifts</td></tr>
         <tr><td>16–20</td><td>The plumbing: MCP, the pre-built server, and <code>pi</code> with its built-ins taken away</td></tr>
         <tr><td>20–32</td><td><span class="badge exercise">EX 1</span> Draft the spec with your agent, iterate with <code>validate_spec</code></td></tr>
-        <tr><td>32–52</td><td><span class="badge exercise">EX 2</span> Spec → Gherkin → Red/Green/Refactor, agentically</td></tr>
-        <tr><td>52–55</td><td>Why this works reliably — from a flag to a harness</td></tr>
-        <tr><td>55–60</td><td>Takeaways, where to go next, Q&amp;A</td></tr>
+        <tr><td>32–50</td><td><span class="badge exercise">EX 2</span> Spec → Gherkin → Red/Green/Refactor, agentically</td></tr>
+        <tr><td>50–53</td><td>Grade your own run — and the failure the gates cannot catch</td></tr>
+        <tr><td>53–56</td><td>Why this works reliably — from a flag to a harness</td></tr>
+        <tr><td>56–60</td><td>Takeaways, where to go next, Q&amp;A</td></tr>
       </table>
       <aside class="notes">Ask now: who has Java 21 + Maven installed and the repo building? Fix stragglers during the refresher. Three acts: pi bare, pi with only our tools, then the harness. Each act ends on the limitation that forces the next one. Wire inspection with the MCP Inspector is a backup exercise at the end if the room runs fast.</aside>
     </section>
@@ -177,7 +192,7 @@
             <td><code>requirements/requirements.json</code></td></tr>
         <tr><td><strong>BDD</strong> <span class="muted">behavior-driven</span></td>
             <td>one behavior</td><td>Gherkin scenario (Given/When/Then)</td>
-            <td><code>kata/…/features/string_calculator.feature</code> via Cucumber</td></tr>
+            <td><code>string_calculator.feature</code> via Cucumber</td></tr>
         <tr><td><strong>TDD</strong> <span class="muted">test-driven</span></td>
             <td>one unit</td><td>failing JUnit test</td>
             <td><code>StringCalculatorTest.java</code></td></tr>
@@ -213,7 +228,7 @@ requirements/
 
     <!-- ============ 11-16 min: ACT 1 — START FREE WITH pi ============ -->
     <section data-track="both">
-      <h2><span class="badge time">ACT 1</span> Start free: <code>pi</code> on Ollama</h2>
+      <h2>Start free: <code>pi</code> on Ollama</h2>
       <p class="small"><a href="https://pi.dev">pi</a> is a minimal, <strong>MIT-licensed</strong> coding agent. Ollama is a first-class provider. No account, no API key, no network.</p>
       <pre><code class="language-json" data-trim>
 // ~/.pi/agent/models.json
@@ -339,7 +354,7 @@ pi --offline            # or PI_OFFLINE=1 — no startup network calls at all
 
     <!-- ============ 13-20 min: THE PLUMBING (pre-built) ============ -->
     <section data-track="both">
-      <h2><span class="badge time">PLUMBING</span> The server — already built</h2>
+      <h2>The server — already built</h2>
       <p class="small">One binary: <code>spec mcp serve --root ${workspaceFolder}</code>. Composition root <code>harness/src/mcp.rs</code> plus the harness TDD services. Twenty-five tools in three groups:</p>
       <ul class="small">
         <li><strong>Frozen seven</strong> — <code>list_requirements</code>, <code>get_requirement</code>, <code>validate_spec</code>, <code>refine_requirement</code>, <code>run_tests</code>, <code>get_tdd_state</code>, <code>start_refactor</code></li>
@@ -392,7 +407,7 @@ let report = tdd.run_tests(runner, &amp;TestFilter::default())?;
     </section>
 
     <section data-track="60">
-      <h2>Proof it feeds any agent: the bundled client <span class="badge time">2 min demo</span></h2>
+      <h2>Proof it feeds any agent: the bundled client</h2>
       <pre><code class="language-java" data-trim>
 ServerLaunch launch = ServerLaunch.spec(root, specBinary);
 // child: spec mcp serve --root &lt;root&gt;
@@ -410,7 +425,7 @@ var result = client.callTool(
 
     <!-- ============ ACT 2 — SAME MODEL, NO SHELL ============ -->
     <section data-track="both">
-      <h2><span class="badge time">ACT 2</span> Same model, no shell: <code>pi --no-builtin-tools</code></h2>
+      <h2>Same model, no shell: <code>pi --no-builtin-tools</code></h2>
       <pre><code class="language-bash" data-trim>
 pi install npm:pi-mcp-extension     # pi has no MCP in core — this adds it
       </code></pre>
@@ -432,7 +447,7 @@ pi -nbt          # built-ins off, extension tools stay on
 
     <!-- ============ DEMO — 30-MINUTE TRACK ============ -->
     <section data-track="30">
-      <h2><span class="badge exercise">DEMO</span> The spec is the entry ticket</h2>
+      <h2>The spec is the entry ticket</h2>
       <p class="small">Nothing gets written until the spec survives two deterministic reviews. Watch the local model take the critique and reword.</p>
       <blockquote class="small">"Add a requirement to <code>requirements/requirements.json</code>: a custom delimiter may be declared on the first line, so <code>//+\n1+2</code> adds up to 3. Then call <code>validate_spec</code> and fix every issue. Then call <code>refine_requirement</code> and reword from the findings until there are none. No scenarios, no code yet."</blockquote>
       <ul class="small">
@@ -445,7 +460,7 @@ pi -nbt          # built-ins off, extension tools stay on
 
     <!-- ============ 20-32 min: EXERCISE 1 — DRAFT AND REFINE THE SPEC ============ -->
     <section data-track="60">
-      <h2><span class="badge exercise">EXERCISE 1</span> Draft the spec with your agent <span class="badge time">20–32 min</span></h2>
+      <h2>Draft the spec with your agent</h2>
       <p class="small">The spec comes first — and the agent helps write it, then <em>refine</em> it. Prompt your IDE agent:</p>
       <blockquote class="small">"Add a new requirement to <code>requirements/requirements.json</code>: a custom delimiter may be declared on the first line, so <code>//+\n1+2</code> adds up to 3. Follow the existing format — unique id, title, user story, acceptance criteria phrased Given/When/Then, status pending. Then call <code>validate_spec</code> and fix every issue until the spec is valid. Then call <code>refine_requirement</code> on the new requirement and reword it from the findings until there are none. Do not write scenarios or code yet — we are only agreeing on the spec."</blockquote>
       <ul class="small">
@@ -471,7 +486,7 @@ pi -nbt          # built-ins off, extension tools stay on
 
     <!-- ============ DEMO — 30-MINUTE TRACK ============ -->
     <section data-track="30">
-      <h2><span class="badge exercise">DEMO</span> Spec to green, Wi-Fi off</h2>
+      <h2>Spec to green, Wi-Fi off</h2>
       <p class="small">Same local model, driving REQ-003 from an approved requirement to a green bar — every mutation typed, staged, and reviewed.</p>
       <blockquote class="small">"<code>get_requirement</code> for REQ-003. Add its Gherkin with <code>scenario_add</code>, tagged with the requirement id. Add a unit test with <code>unit_test_create</code>. Show me <code>changes_show</code> and wait before <code>changes_commit</code>. Then <code>run_tests</code> — expect RED."</blockquote>
       <ul class="small">
@@ -484,7 +499,7 @@ pi -nbt          # built-ins off, extension tools stay on
 
     <!-- ============ 32-52 min: EXERCISE 2 — SPEC TO GREEN ============ -->
     <section data-track="60">
-      <h2><span class="badge exercise">EXERCISE 2</span> Spec to green, agentically <span class="badge time">32–52 min</span></h2>
+      <h2>Spec to green, agentically</h2>
       <p class="small">Wire the server into your IDE agent (Cursor shown; Claude Desktop is identical JSON):</p>
       <pre><code class="language-json" data-trim>
 // .cursor/mcp.json  (already in the repo)
@@ -499,7 +514,7 @@ pi -nbt          # built-ins off, extension tools stay on
       </code></pre>
       <p class="small">Then prompt the agent:</p>
       <blockquote class="small">"Using the spec-driven-server tools: validate the spec first, then <code>get_requirement</code> for REQ-003 &mdash; not the REQ-007 you just drafted, which stays pending until homework. Add its Gherkin with <code>scenario_add</code> (tag the requirement id), add missing steps with <code>step_definition_create</code> if <code>step_definitions_find</code> reports any, add a unit test with <code>unit_test_create</code>. Show <code>changes_show</code> and ask me before <code>changes_commit</code>. Then <code>run_tests</code> (expect RED). Implement the simplest production code in <code>StringCalculator</code>. <code>run_tests</code> (GREEN). <code>start_refactor</code> if I agree. On GREEN, <code>requirement_mark_implemented</code>. Ask me before each phase change."</blockquote>
-      <aside class="notes">Everyone drives this at their own keyboard; you demo REQ-003 (comma-separated numbers) end to end. Show the agent calling validate_spec, then get_requirement (note the featureLocation and workflowHint fields), appending the scenario and the unit test, run_tests RED (8 tests, 3 failing — 2 Cucumber failures + 1 JUnit error), implementation, run_tests GREEN (8 tests), start_refactor, then marking REQ-003 implemented in the spec. Pause after the scenario is written: that's the spec review moment. Say why the prompt names REQ-003 out loud: an earlier version said "the next pending id", and once Exercise 1 succeeds the REQ-007 they just drafted is pending too and freshest in context, so agents took that to green instead. Every gate passed — the discipline was right, the target was wrong. The phase gates police how an agent works, never what it works on; that call stays with the room.</aside>
+      <aside class="notes">Everyone drives this at their own keyboard; you demo REQ-003 (comma-separated numbers) end to end. Show the agent calling validate_spec, then get_requirement (note the featureLocation and workflowHint fields), appending the scenario and the unit test, run_tests RED, implementation, run_tests GREEN, start_refactor, then marking REQ-003 implemented in the spec. Do not promise a test count from the stage: it is 8 tests with 3 failing (2 Cucumber failures + 1 JUnit error) when the agent writes one unit test for both criteria, and 9 with 4 when it writes one per criterion — which is what unit_test_create and spec unittest generate both do. Either is a legitimate RED; what matters is that the two @REQ-003 scenarios fail. Pause after the scenario is written: that's the spec review moment. Say why the prompt names REQ-003 out loud: an earlier version said "the next pending id", and once Exercise 1 succeeds the REQ-007 they just drafted is pending too and freshest in context, so agents took that to green instead. Every gate passed — the discipline was right, the target was wrong. The phase gates police how an agent works, never what it works on; that call stays with the room.</aside>
     </section>
 
     <section data-track="both">
@@ -518,6 +533,26 @@ pi -nbt          # built-ins off, extension tools stay on
       <aside class="notes">Call out the two human checkpoints: reviewing the failing test (the spec) and approving the final code. That is "human in the loop" concretely, not as a slogan.</aside>
     </section>
 
+    <!-- ============ 50-53 min: GRADE THE RUN ============ -->
+    <section data-track="60">
+      <h2>Grade your own run</h2>
+      <pre><code class="language-bash" data-trim>
+scripts/verify-workshop-run.sh check
+      </code></pre>
+      <pre><code class="language-text" data-trim>
+  PASS  REQ-007 was drafted into the spec
+  PASS  the spec is valid
+  PASS  REQ-007 wording is refine-clean
+  PASS  REQ-007 covers the first-line delimiter declaration
+  FAIL  REQ-003 status is 'implemented' in the spec - status is pending - Exercise 2 takes REQ-003, not the REQ-007 you drafted
+  FAIL  @REQ-003 scenarios cover every acceptance criterion (0 tagged, 2 criteria) - no scenario is tagged @REQ-003
+  FAIL  REQ-003 unit test asserts every acceptance criterion (0 @Test naming REQ-003) - no @Test names REQ-003
+      </code></pre>
+      <p class="small">Three FAILs in a row and <strong>nothing is broken</strong>: the whole Red/Green/Refactor arc ran on REQ-007 — pending, and the freshest thing in the agent's context. Every gate fired in the right order and refused nothing, because nothing was out of order.</p>
+      <blockquote class="small">The gates police <em>how</em> the agent works. Which requirement deserves the next hour was always your call.</blockquote>
+      <aside class="notes">This is the slide that earns the trust the rest of the deck spends. Do not skip it to save three minutes — it is the on-stage version of the Where This Breaks row about taking the wrong requirement to green, and it is the single most common way a real run goes sideways. Point out what is deliberately NOT graded: nobody's wording, anywhere. The verifier asks the same two questions the attendee asked in Exercise 1 — does validate_spec pass, does refine_requirement come back clean — instead of diffing their prose against a recorded answer. Same for Exercise 2: each acceptance criterion has to reach a tagged scenario and an assertion, in whatever words they chose. Say the fix out loud: re-paste Exercise 2's prompt, which names REQ-003, and leave REQ-007 for the homework it was always meant to be.</aside>
+    </section>
+
     <section data-track="both">
       <h2>Why this works reliably</h2>
       <ul>
@@ -532,7 +567,7 @@ pi -nbt          # built-ins off, extension tools stay on
 
     <!-- ============ ACT 3 — GENERAL AGENT VS SPEC-SPECIFIC RUNNER ============ -->
     <section data-track="both">
-      <h2><span class="badge time">ACT 3</span> General agent, or spec-specific runner?</h2>
+      <h2>General agent, or spec-specific runner?</h2>
       <p class="small">Both of these drive <strong>the same MCP server</strong>. That never changes. What changes is how much of the workflow you have to supply yourself.</p>
       <div class="two-col">
         <div>
@@ -559,7 +594,7 @@ pi -nbt          # built-ins off, extension tools stay on
     </section>
 
     <section data-track="both">
-      <h2>The runner, concretely <span class="badge time">Wi-Fi off</span></h2>
+      <h2>The runner, concretely</h2>
       <pre><code class="language-bash" data-trim>
 spec tools profiles        # spec-draft 4 · spec-reword 3 · steps-generate 4
                           # unittest-generate 4 · implement-advice 5
@@ -631,7 +666,7 @@ spec ask "what is pending?"
     <section data-track="both">
       <h2>Resources</h2>
       <ul class="small">
-        <li>This repo: everything you used today, AGPL-3.0 licensed</li>
+        <li>This repo: <a href="https://davidparry.github.io/spec-driven-agentic/">davidparry.github.io/spec-driven-agentic</a> — everything you used today, AGPL-3.0 licensed</li>
         <li><code>pi</code>, MIT: <a href="https://pi.dev">pi.dev</a> · MCP for it: <code>pi install npm:pi-mcp-extension</code> · runbook: <code>student-follow-docs/pi-path.md</code></li>
         <li>Local model (every path in this deck): <code>qwen3.8-flash-next:125b-mlx</code> via Ollama — <code>ollama pull qwen3.8-flash-next:125b-mlx</code> then <code>spec model use qwen3.8-flash-next:125b-mlx</code></li>
         <li>MCP spec &amp; docs: <a href="https://modelcontextprotocol.io">modelcontextprotocol.io</a></li>
@@ -646,7 +681,7 @@ spec ask "what is pending?"
 
     <!-- ============ BACKUP: WIRE INSPECTION ============ -->
     <section data-track="60">
-      <h2><span class="badge exercise">BACKUP</span> Inspect the wire <span class="badge time">if time allows</span></h2>
+      <h2>Inspect the wire</h2>
       <p class="small">Option A — MCP Inspector (browser UI + message log):</p>
       <pre><code class="language-bash" data-trim>
 npx @modelcontextprotocol/inspector spec mcp serve --root $PWD
@@ -709,9 +744,45 @@ spec mcp serve --root $PWD
     hash: true,
     slideNumber: 'c/t',
     transition: 'fade',
+    // A 16:9 canvas fills a laptop screen; the 960x700 default is scaled to
+    // fit the height and leaves a dead column either side. The extra width is
+    // also what lets this content-dense deck keep the standard gutter.
+    width: 1280,
+    height: 720,
+    margin: 0.04,
     keyboard: { 84: swapCut },
     plugins: [RevealHighlight, RevealNotes]
   });
+
+  // Reveal does not scale a slide that outgrows the canvas — it just lets the
+  // slide run off the bottom of the browser, and the last bullet becomes the
+  // one nobody sees. Step the type size down on those slides until they fit.
+  // Type size rather than a transform, so Reveal keeps centering them itself;
+  // small steps rather than one computed ratio, because reflowing the text
+  // changes the height that ratio was based on.
+  function fitTallSlides() {
+    var limit = Reveal.getConfig().height;
+    var base = parseFloat(getComputedStyle(document.querySelector('.reveal')).fontSize);
+    document.querySelectorAll('.slides > section').forEach(function (slide) {
+      slide.style.fontSize = '';
+      if (slide.scrollHeight <= limit) return;
+      var size = base;
+      var guard = 0;
+      while (slide.scrollHeight > limit && size > base * 0.5 && guard++ < 30) {
+        size *= 0.97;
+        slide.style.fontSize = size.toFixed(2) + 'px';
+      }
+    });
+    Reveal.layout();
+  }
+
+  // Measured again once the web fonts land, because text metrics — and so
+  // slide heights — change under the first pass, and again on every slide
+  // change, so a slide is always re-checked before it goes on screen.
+  Reveal.on('ready', fitTallSlides);
+  Reveal.on('slidechanged', fitTallSlides);
+  window.addEventListener('resize', fitTallSlides);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(fitTallSlides);
 </script>
 </body>
 </html>

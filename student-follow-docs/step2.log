@@ -3,7 +3,7 @@
   STEP 0 — Launch the server
 ========================================================================
 The client starts spec mcp serve as a child process and talks JSON-RPC 2.0 over stdin/stdout.
-Command: /Users/davidparry/code/github/tdd-bdd-agentic/harness/target/debug/spec mcp serve --root /Users/davidparry/code/github/tdd-bdd-agentic
+Command: /Users/davidparry/.cargo/bin/spec mcp serve --root /Users/davidparry/code/github/tdd-bdd-agentic
 
 ========================================================================
   STEP 1 — tools/list (discovery)
@@ -11,7 +11,7 @@ Command: /Users/davidparry/code/github/tdd-bdd-agentic/harness/target/debug/spec
 JSON-RPC request: method="tools/list" — the agent asks what it is allowed to do.
 [boundedElastic-1] INFO io.modelcontextprotocol.client.transport.StdioClientTransport - MCP server starting.
 [boundedElastic-1] INFO io.modelcontextprotocol.client.transport.StdioClientTransport - MCP server started
-[pool-1-thread-1] INFO io.modelcontextprotocol.client.LifecycleInitializer - Server response with Protocol: 2025-11-25, Capabilities: ServerCapabilities[completions=null, experimental=null, logging=null, prompts=null, resources=null, tools=ToolCapabilities[listChanged=null]], Info: Implementation[name=spec-driven-server, title=null, version=1.0.0, description=null, icons=null, websiteUrl=null] and Instructions Drives a spec-driven TDD/BDD workflow. The requirements spec is the source of truth and the entry point. Spec iteration loop: draft or edit a requirement in the requirements file -> validate_spec until the spec is valid -> refine_requirement on the new or changed requirement and reword from its findings until there are none -> have the developer approve the wording. From an approved spec: list_requirements -> get_requirement (pick a pending one) -> write a Gherkin scenario from its acceptance criteria in the feature file (BDD level), add step definitions if needed, and/or a failing unit test -> run_tests (expect RED) -> implement (command_run can build or install what the failing tests need; it only works on a RED bar) -> run_tests (expect GREEN) -> start_refactor -> run_tests. The human developer stays in control of every engineering decision.
+[pool-1-thread-1] INFO io.modelcontextprotocol.client.LifecycleInitializer - Server response with Protocol: 2025-11-25, Capabilities: ServerCapabilities[completions=null, experimental=null, logging=null, prompts=null, resources=null, tools=ToolCapabilities[listChanged=null]], Info: Implementation[name=spec-driven-server, title=Spec Driven, version=1.0.0, description=Serves spec-driven TDD and BDD tools. The requirements spec is the source of truth., icons=[Icon[src=https://davidparry.github.io/spec-driven-agentic/assets/spec-harness-mark.png, mimeType=image/png, sizes=[1024x1024], theme=dark]], websiteUrl=https://davidparry.github.io/spec-driven-agentic/] and Instructions Drives a spec-driven TDD/BDD workflow. The requirements spec is the source of truth and the entry point. Spec iteration loop: draft or edit a requirement in the requirements file -> validate_spec until the spec is valid -> refine_requirement on the new or changed requirement and reword from its findings until there are none -> have the developer approve the wording. From an approved spec: list_requirements -> get_requirement (pick a pending one) -> write a Gherkin scenario from its acceptance criteria in the feature file (BDD level), add step definitions if needed, and/or a failing unit test -> run_tests (expect RED) -> implement (command_run can build or install what the failing tests need; it only works on a RED bar) -> run_tests (expect GREEN) -> start_refactor -> run_tests. The human developer stays in control of every engineering decision.
 - changes_commit: Apply every staged change to the working tree and clear the area.
 - changes_discard: Drop every staged change without applying it.
 - changes_show: Show every staged change waiting for review.
@@ -24,8 +24,10 @@ JSON-RPC request: method="tools/list" — the agent asks what it is allowed to d
 - get_tdd_state: Get the current phase of the Red/Green/Refactor cycle, the last test run summary, interpretation instructions, at most the three latest dated state entries, and a suggested next step.
 - list_requirements: List every requirement of the kata with its id, title, and implementation status.
 - project_inspect: Detect the project's languages, BDD frameworks, runtimes, and whether test execution is possible.
+- project_root: The absolute project root this server uses for every other tool (the --root this process was started with; default ".").
 - refine_requirement: Review one requirement's wording for quality: ambiguous language, a story missing its actor or rationale, outcomes that are not measurable, criteria covering more than one action, and missing edge cases.
 - requirement_mark_implemented: Flip a requirement's status to implemented (staged).
+- requirement_reword: Reword one requirement's title, story, or acceptance criteria (staged; apply with changes_commit).
 - run_tests: Run the project test suite and report the outcome.
 - scenario_add: Append a scenario tagged @REQ-...
 - scenario_delete: Remove a scenario from a feature file (staged; apply with changes_commit).
@@ -43,41 +45,16 @@ JSON-RPC request: method="tools/call" params={"name":"get_tdd_state","arguments"
 Result:
     {
       "instructions": "This file is the TDD phase log. `instructions` is this guide, not workflow state. `entries` is chronological, oldest first; each entry is the machine at `timestamp` (UTC RFC 3339). `phase` is START, RED, GREEN, or REFACTOR. Never refactor on RED; never mark a requirement implemented off GREEN. `lastRun` is test counts at that moment; failure details live on the test-run reply. `refactorLog` is every spec refactor --note, in order. `attemptLog` is model implementation attempts for the requirement in flight; a GREEN run clears it. Each attempt records what it wrote (`targets`), the failures it was briefed with (`failures`), and the output of the first run after it (`outcome`; empty means no run verified it). When briefing a model, include only the three most recent entries. Older entries stay on disk for humans.",
-      "phase": "GREEN",
+      "phase": "START",
       "lastRun": {
-        "tests": 5,
+        "tests": 0,
         "failures": 0,
         "errors": 0,
         "skipped": 0
       },
       "refactorLog": [],
-      "entries": [
-        {
-          "timestamp": "2026-09-14T21:31:42Z",
-          "phase": "GREEN",
-          "lastRun": {
-            "tests": 5,
-            "failures": 0,
-            "errors": 0,
-            "skipped": 0
-          },
-          "refactorLog": [],
-          "attemptLog": []
-        },
-        {
-          "timestamp": "2026-09-15T15:40:04Z",
-          "phase": "GREEN",
-          "lastRun": {
-            "tests": 5,
-            "failures": 0,
-            "errors": 0,
-            "skipped": 0
-          },
-          "refactorLog": [],
-          "attemptLog": []
-        }
-      ],
-      "nextStep": "All tests pass. Either call start_refactor to clean up, or call get_requirement for the next pending requirement and write a failing test for it."
+      "entries": [],
+      "nextStep": "No tests have been run yet. Call run_tests to establish a baseline."
     }
 
 ========================================================================
@@ -179,6 +156,12 @@ Result:
       "clean": true,
       "findings": [],
       "nextStep": "The wording reads clean. Confirm it with the developer, then write the Gherkin scenario from the acceptance criteria."
+    }
+JSON-RPC request: method="tools/call" params={"name":"project_root","arguments":{}}
+Result:
+    {
+      "nextStep": "Call list_requirements to see the backlog at this root.",
+      "root": "/Users/davidparry/code/github/tdd-bdd-agentic"
     }
 JSON-RPC request: method="tools/call" params={"name":"project_inspect","arguments":{}}
 Result:

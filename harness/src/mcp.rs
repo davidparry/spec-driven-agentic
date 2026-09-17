@@ -296,12 +296,14 @@ impl WorkflowServer {
 
     fn generation_service(&self) -> Result<McpGenerationService, String> {
         let language = primary_language(&self.root)?;
+        let layout = crate::workspace::project_layout(&self.root);
         Ok(GenerationService::new(
             wiring::overlay_catalog(&self.root),
-            wiring::overlay_sources(&self.root),
+            wiring::overlay_sources(&self.root, layout.module_root.as_deref()),
             wiring::change_store(&self.root),
             self.spec_repository(),
             language,
+            layout,
             None::<ResolvedLlm<NoLlm>>,
         ))
     }

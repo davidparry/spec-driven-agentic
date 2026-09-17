@@ -7,6 +7,9 @@ use std::collections::{HashMap, HashSet};
 
 use crate::application::generation_service::ResolvedLlm;
 use crate::domain::feature::{self, FeatureDoc, FeatureSummary};
+use crate::domain::language::Language;
+use crate::domain::layout::{LayoutInput, resolve_layout};
+use crate::domain::memory::ProjectStructure;
 use crate::domain::model::{Requirement, Spec};
 use crate::domain::tdd::TddSnapshot;
 use crate::domain::tools::{ChatMessage, ChatTurn, ToolDefinition, text_turn};
@@ -270,6 +273,19 @@ impl LlmConversation for FakeLlm {
 /// The calculator fixture shared by the generation, implement, and
 /// status service tests: one tagged feature and a three-requirement spec.
 pub const CALCULATOR_FEATURE: &str = "@REQ-001\nFeature: Calc\n\n  Scenario: Adds\n    Given a calculator\n    When add is called with \"1,2\"\n    Then the result is 3\n";
+
+/// The layout a flat single-module project resolves to, which is what
+/// the in-memory source fixtures here represent. Built through the real
+/// resolver so these tests move with it.
+pub fn flat_layout(language: Language) -> ProjectStructure {
+    resolve_layout(&LayoutInput {
+        language,
+        build_tool: None,
+        tree: &[],
+        spec_features: &[],
+    })
+    .structure
+}
 
 pub fn calculator_catalog() -> InMemoryFeatureCatalog {
     let mut catalog = InMemoryFeatureCatalog::default();

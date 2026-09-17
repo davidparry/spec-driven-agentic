@@ -6,9 +6,12 @@
 use crate::application::spec_service::ServiceError;
 use crate::domain::feature::FeatureDoc;
 use crate::domain::generation::{
-    ImplementAsset, implementation_target_path, steps_target_path, unit_test_target_path,
+    ImplementAsset, implementation_file_name, implementation_target_path, steps_target_path,
+    unit_test_file_name, unit_test_target_path,
 };
 use crate::domain::language::Language;
+use crate::domain::layout::{in_production_root, in_test_root};
+use crate::domain::memory::ProjectStructure;
 use crate::domain::model::{Requirement, Spec, SpecCatalog, resolve_catalog};
 use crate::domain::steps::{MissingStep, extract_patterns, find_missing, source_extension};
 use crate::ports::{ChangeStore, FeatureCatalog, SourceFiles, SpecRepository};
@@ -75,6 +78,7 @@ pub(crate) fn asset_survey(
     req_id: &str,
     requirement: &Requirement,
     project: &str,
+    layout: &ProjectStructure,
 ) -> Result<(Vec<ImplementAsset>, Vec<String>), ServiceError> {
     let mut assets = Vec::new();
     let mut findings = Vec::new();
@@ -107,16 +111,13 @@ pub(crate) fn asset_survey(
             missing_steps.len()
         ));
     }
-    let steps_path = steps_file(&source_files, language)
-        .map(|f| f.path.clone())
-        .unwrap_or_else(|| steps_target_path(language).to_string());
     assets.push(ImplementAsset {
         role: "step definitions (every step defined)".into(),
-        path: steps_path,
+        path: steps_path(&source_files, language, layout),
         present: missing_steps.is_empty(),
     });
 
-    let unit_path = unit_test_path(&source_files, language, req_id);
+    let unit_path = unit_test_path(&source_files, language, req_id, layout);
     let conventional_unit = unit_test_target_path(language, req_id);
     let unit_test_present = source_files.iter().any(|file| {
         file.path == conventional_unit
@@ -134,7 +135,7 @@ pub(crate) fn asset_survey(
         present: unit_test_present,
     });
 
-    let production = production_path(&source_files, language, project);
+    let production = production_path(&source_files, language, project, layout);
     assets.push(ImplementAsset {
         role: "production code (the attempt creates it when missing)".into(),
         path: production.clone(),
@@ -150,6 +151,21 @@ fn steps_file(
     files
         .iter()
         .find(|file| !extract_patterns(language, &file.content).is_empty())
+}
+
+/// Where generated step definitions go: the file that already holds
+/// them, else the path the layout resolved. Adding a second file whose
+/// patterns overlap the first is what Cucumber reports as a duplicate
+/// step definition, so an existing file always wins.
+pub(crate) fn steps_path(
+    files: &[crate::ports::SourceFile],
+    language: Language,
+    layout: &ProjectStructure,
+) -> String {
+    steps_file(files, language)
+        .map(|file| file.path.clone())
+        .or_else(|| layout.step_definitions.clone())
+        .unwrap_or_else(|| steps_target_path(language).to_string())
 }
 
 fn is_unit_test_path(path: &str) -> bool {
@@ -168,11 +184,12 @@ fn mentions_requirement(content: &str, req_id: &str) -> bool {
 
 /// Where to write or look for this requirement's unit test: an existing
 /// test that already names the id, else the project's calculator-style
-/// test class, else the greenfield `Req00NTest` path.
+/// test class, else the `Req00NTest` path inside the layout's test root.
 pub(crate) fn unit_test_path(
     files: &[crate::ports::SourceFile],
     language: Language,
     req_id: &str,
+    layout: &ProjectStructure,
 ) -> String {
     files
         .iter()
@@ -189,25 +206,33 @@ pub(crate) fn unit_test_path(
             })
         })
         .map(|file| file.path.clone())
-        .unwrap_or_else(|| unit_test_target_path(language, req_id))
+        .unwrap_or_else(|| in_test_root(layout, &unit_test_file_name(language, req_id)))
 }
 
-/// The production file: an existing `src/main` source, otherwise the
-/// conventional greenfield path named after the spec project.
+/// The production file: an existing source under the layout's production
+/// root, otherwise the conventional path named after the spec project.
 pub(crate) fn production_path(
     files: &[crate::ports::SourceFile],
     language: Language,
     project: &str,
+    layout: &ProjectStructure,
 ) -> String {
     let conventional = implementation_target_path(language, project);
     if files.iter().any(|file| file.path == conventional) {
         return conventional;
     }
+    let root = layout.production.as_deref();
     files
         .iter()
-        .find(|file| file.path.contains("src/main/"))
+        .find(|file| match root {
+            Some(root) => file.path.starts_with(&format!("{root}/")),
+            None => file.path.contains("src/main/"),
+        })
         .map(|file| file.path.clone())
-        .unwrap_or(conventional)
+        .unwrap_or_else(|| match root {
+            Some(_) => in_production_root(layout, &implementation_file_name(language, project)),
+            None => conventional,
+        })
 }
 
 /// Simple class name of the production type (`StringCalculator.java` →
@@ -262,7 +287,7 @@ pub(crate) fn load_effective_catalog(
 mod tests {
     use super::*;
     use crate::ports::SourceFile;
-    use crate::test_support::{FakeSources, calculator_catalog};
+    use crate::test_support::{FakeSources, calculator_catalog, flat_layout};
 
     fn req(id: &str) -> Requirement {
         Requirement {
@@ -288,6 +313,7 @@ mod tests {
             "REQ-003",
             &req("REQ-003"),
             "String Calculator Kata",
+            &flat_layout(Language::Java),
         )
         .unwrap();
         let unit = assets.iter().find(|a| a.role == "unit test").unwrap();
@@ -316,6 +342,7 @@ mod tests {
             "REQ-003",
             &req("REQ-003"),
             "String Calculator Kata",
+            &flat_layout(Language::Java),
         )
         .unwrap();
         let unit = assets.iter().find(|a| a.role == "unit test").unwrap();
@@ -329,7 +356,12 @@ mod tests {
             content: "class StringCalculator {}".into(),
         }];
         assert_eq!(
-            production_path(&files, Language::Java, "String Calculator Kata"),
+            production_path(
+                &files,
+                Language::Java,
+                "String Calculator Kata",
+                &flat_layout(Language::Java)
+            ),
             "src/main/java/com/example/StringCalculator.java"
         );
     }

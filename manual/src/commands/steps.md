@@ -46,6 +46,13 @@ An empty `missing` array means every step in every scenario is bound.
 Generate step definitions for the undefined steps and stage them.
 Already-defined steps are never regenerated — only the gap is filled.
 
+The target is the step-definition file the project already has, inside
+the module the build compiles (see [`spec inspect`](inspect.md)): the new
+definitions are appended to it, keeping its package and class and
+skipping any expression it already declares, so Cucumber never reports a
+duplicate step. A project with no step file yet gets the conventional one
+for its language created in the module's test root.
+
 ```bash
 spec steps generate
 ```

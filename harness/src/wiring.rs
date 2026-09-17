@@ -39,8 +39,14 @@ pub fn overlay_catalog(root: &Path) -> OverlayFeatures {
     )
 }
 
-pub fn overlay_sources(root: &Path) -> OverlayTree {
-    OverlaySources::new(FsSourceFiles::new(root.to_path_buf()), change_store(root))
+/// The module's sources with staged edits overlaid. `module_root` comes
+/// from the resolved layout, so the files a command reasons about are the
+/// files the test runner compiles.
+pub fn overlay_sources(root: &Path, module_root: Option<&str>) -> OverlayTree {
+    OverlaySources::new(
+        FsSourceFiles::in_module(root.to_path_buf(), module_root),
+        change_store(root),
+    )
 }
 
 pub fn spec_service(

@@ -1219,12 +1219,18 @@ fn reported_draft_finding_contains(world: &mut SpecWorld, fragment: String) {
     );
 }
 
-#[then(regex = r"^the staged spec has (\d+) requirements$")]
+#[then(regex = r#"^the draft next step contains "(.+)"$"#)]
+fn draft_next_step_contains(world: &mut SpecWorld, fragment: String) {
+    let report = world.draft_report.as_ref().expect("a draft report");
+    assert!(report.next_step.contains(&fragment), "report: {report:?}");
+}
+
+#[then(regex = r"^the staged spec has (\d+) requirements?$")]
 fn staged_spec_requirement_count(world: &mut SpecWorld, count: usize) {
     assert_eq!(world.staged_spec().requirements.len(), count);
 }
 
-#[then(regex = r"^the working spec has (\d+) requirements$")]
+#[then(regex = r"^the working spec has (\d+) requirements?$")]
 fn working_spec_requirement_count(world: &mut SpecWorld, count: usize) {
     assert_eq!(world.working_spec().requirements.len(), count);
 }
@@ -1936,12 +1942,14 @@ impl SpecWorld {
                 ScriptedLlm(self.llm_reply.clone().expect("a scripted model reply")),
             )
         });
+        let layout = spec_harness::workspace::project_layout(&root);
         GenerationService::new(
             GherkinFeatureCatalog::new(root.clone()),
-            FsSourceFiles::new(root.clone()),
+            FsSourceFiles::in_module(root.clone(), layout.module_root.as_deref()),
             FsChangeStore::new(root.clone()),
             FsSpecRepository::new(root.join(SPEC_PATH)),
             language,
+            layout,
             llm,
         )
     }
@@ -1967,12 +1975,14 @@ impl SpecWorld {
                 ScriptedLlm(self.llm_reply.clone().expect("a scripted model reply")),
             )
         });
+        let layout = spec_harness::workspace::project_layout(&root);
         ImplementService::new(
             GherkinFeatureCatalog::new(root.clone()),
-            FsSourceFiles::new(root.clone()),
+            FsSourceFiles::in_module(root.clone(), layout.module_root.as_deref()),
             FsChangeStore::new(root.clone()),
             FsSpecRepository::new(root.join(SPEC_PATH)),
             language,
+            layout,
             llm,
         )
     }
@@ -1991,12 +2001,14 @@ impl SpecWorld {
             .first()
             .copied()
             .expect("a project marker was written");
+        let layout = spec_harness::workspace::project_layout(&root);
         StatusService::new(
             GherkinFeatureCatalog::new(root.clone()),
-            FsSourceFiles::new(root.clone()),
+            FsSourceFiles::in_module(root.clone(), layout.module_root.as_deref()),
             FsChangeStore::new(root.clone()),
             FsSpecRepository::new(root.join(SPEC_PATH)),
             language,
+            layout,
             None,
         )
     }
@@ -2015,6 +2027,13 @@ impl SpecWorld {
 #[given("a Java project marker")]
 fn a_java_project_marker(world: &mut SpecWorld) {
     std::fs::write(world.project_root().join("pom.xml"), "<project/>").unwrap();
+}
+
+#[given(regex = r#"^a Java module "([^"]+)"$"#)]
+fn a_java_module(world: &mut SpecWorld, module: String) {
+    let pom = world.project_root().join(&module).join("pom.xml");
+    std::fs::create_dir_all(pom.parent().expect("a parent dir")).unwrap();
+    std::fs::write(pom, "<project/>").unwrap();
 }
 
 #[given(regex = r#"^a project source file "([^"]+)" containing:$"#)]

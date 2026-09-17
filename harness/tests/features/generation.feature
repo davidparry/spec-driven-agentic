@@ -35,6 +35,46 @@ Feature: Hybrid generation into staging
     When step definitions are generated without a model
     Then the staged file "src/test/java/GeneratedSteps.java" defines "@Then(\"the result is {int}\")" exactly once
 
+  # The bug this closes: the target used to be a hardcoded
+  # src/test/java path. In a project whose kata is a module, that path
+  # belongs to no build file, so Cucumber never compiled the generated
+  # steps and `steps missing` still reported the step undefined.
+  Scenario: In a multi-module project the steps join the module's own step file
+    Given a Java module "kata"
+    And a project feature file "kata/src/test/resources/features/kata.feature" containing:
+      """
+      Feature: Module calculator
+
+        Scenario: Adds in the module
+          Given a calculator
+          When add is called with "1,2"
+          Then the result is 3
+          And the total is rounded
+      """
+    And a project source file "kata/src/test/java/com/example/kata/CalculatorSteps.java" containing:
+      """
+      package com.example.kata;
+
+      import io.cucumber.java.en.Given;
+      import io.cucumber.java.en.Then;
+      import io.cucumber.java.en.When;
+
+      public class CalculatorSteps {
+          @Given("a calculator")
+          public void aCalculator() {}
+          @When("add is called with {string}")
+          public void add(String input) {}
+          @Then("the result is {int}")
+          public void result(int value) {}
+      }
+      """
+    When step definitions are generated without a model
+    Then the generation is staged at "kata/src/test/java/com/example/kata/CalculatorSteps.java" from "template"
+    And the staged file "kata/src/test/java/com/example/kata/CalculatorSteps.java" contains "package com.example.kata;"
+    And the staged file "kata/src/test/java/com/example/kata/CalculatorSteps.java" contains "@Then(\"the total is rounded\")"
+    And the staged file "kata/src/test/java/com/example/kata/CalculatorSteps.java" defines "@Given(\"a calculator\")" exactly once
+    And the working tree has no file "src/test/java/GeneratedSteps.java"
+
   Scenario: Validated model output is preferred over the template
     Given the model will reply:
       """

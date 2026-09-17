@@ -239,7 +239,7 @@ tool fails the Java build).
 
 ## The workshop
 
-### The plumbing, briefly (13–20 min)
+### The plumbing, briefly (16–20 min)
 
 The server is `spec mcp serve` — this segment is a quick tour, not an
 exercise. Composition root: `harness/src/mcp.rs` plus the harness TDD

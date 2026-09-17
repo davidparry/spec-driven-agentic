@@ -181,7 +181,19 @@ mod tests {
     #[test]
     fn a_kata_feature_root_hides_sibling_features() {
         let dir = tempfile::tempdir().unwrap();
-        let kata = dir.path().join("kata/src/test/resources/features");
+        // An aggregator root plus the module the kata lives in: the
+        // resolved layout names the module's features directory, so
+        // Cucumber features belonging to other tooling stay out.
+        fs::write(dir.path().join("pom.xml"), "<project/>").unwrap();
+        let module = dir.path().join("kata");
+        fs::create_dir_all(module.join("src/main/java")).unwrap();
+        fs::write(module.join("pom.xml"), "<project/>").unwrap();
+        fs::write(
+            module.join("src/main/java/StringCalculator.java"),
+            "class StringCalculator {}",
+        )
+        .unwrap();
+        let kata = module.join("src/test/resources/features");
         fs::create_dir_all(&kata).unwrap();
         fs::write(kata.join("calc.feature"), FEATURE).unwrap();
         let other = dir.path().join("harness/tests/features");

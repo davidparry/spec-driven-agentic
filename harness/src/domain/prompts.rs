@@ -12,7 +12,7 @@ use serde::Serialize;
 const PROMPTS_TOML: &str = include_str!("../../prompts/prompts.toml");
 
 /// The sections the catalog must hold, one per LLM call.
-pub const SECTIONS: [&str; 7] = [
+pub const SECTIONS: [&str; 8] = [
     "proposal",
     "rewording",
     "polish",
@@ -20,6 +20,7 @@ pub const SECTIONS: [&str; 7] = [
     "advice",
     "next_step",
     "ask",
+    "layout",
 ];
 
 /// One LLM call's prompts: the system prompt carries the model's role

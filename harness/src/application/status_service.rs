@@ -13,6 +13,7 @@ use crate::application::generation_service::ResolvedLlm;
 use crate::application::spec_service::ServiceError;
 use crate::domain::generation::strip_code_fences;
 use crate::domain::language::Language;
+use crate::domain::memory::ProjectStructure;
 use crate::domain::workflow::next_step_prompt;
 use crate::ports::{
     ChangeStore, FeatureCatalog, LlmConversation, Prompter, SourceFiles, SpecRepository, ToolBroker,
@@ -57,6 +58,7 @@ where
     store: C,
     spec: R,
     language: Language,
+    layout: ProjectStructure,
     llm: Option<ResolvedLlm<L, B>>,
 }
 
@@ -75,6 +77,7 @@ where
         store: C,
         spec: R,
         language: Language,
+        layout: ProjectStructure,
         llm: Option<ResolvedLlm<L, B>>,
     ) -> Self {
         Self {
@@ -83,6 +86,7 @@ where
             store,
             spec,
             language,
+            layout,
             llm,
         }
     }
@@ -120,6 +124,7 @@ where
                     &requirement.id,
                     requirement,
                     &spec.project,
+                    &self.layout,
                 )?;
                 findings = gaps;
                 if findings.is_empty() {
@@ -218,7 +223,7 @@ mod tests {
     use crate::ports::SourceFile;
     use crate::test_support::{
         FakeLlm, FakeSources, InMemoryChangeStore, InMemoryFeatureCatalog, InMemorySpecRepository,
-        calculator_catalog, calculator_spec, covered_steps_source, unit_test_source,
+        calculator_catalog, calculator_spec, covered_steps_source, flat_layout, unit_test_source,
     };
 
     fn service_with_llm(
@@ -237,6 +242,7 @@ mod tests {
             InMemoryChangeStore::default(),
             InMemorySpecRepository(Ok(calculator_spec())),
             Language::Java,
+            flat_layout(Language::Java),
             llm,
         )
     }
@@ -335,6 +341,7 @@ mod tests {
             InMemoryChangeStore::default(),
             InMemorySpecRepository(Ok(spec)),
             Language::Java,
+            flat_layout(Language::Java),
             None,
         );
         let report = service.status("GREEN").unwrap();

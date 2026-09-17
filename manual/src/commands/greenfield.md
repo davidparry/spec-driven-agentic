@@ -61,7 +61,7 @@ The description holds 2 requirement(s):
   2. Empty string returns zero
 Accept [Enter for all, or comma-separated numbers]:
 
-Accepted requirements are now stored in requirements/requirements.json as pending:
+Accepted requirements are staged for requirements/requirements.json as pending - nothing reaches the working spec until spec changes commit:
   REQ-001 Comma separated numbers are summed
   REQ-002 Empty string returns zero
 Which requirement first to review and refine? [1-2, Enter for 1]:
@@ -76,11 +76,15 @@ REQ-002 criterion 2 (leave blank to finish the criteria):
 The model must deliver each proposal complete — title, story, and at
 least one Given/When/Then criterion — or the proposal is dropped.
 The list is shown so you can accept all of them, or a comma-separated
-subset (for example `1,3,5`). Only the accepted proposals are written
-straight into `requirements.json` (the root of the
+subset (for example `1,3,5`). Only the accepted proposals are staged
+for `requirements.json` (the root of the
 [spec catalog](../spec-format.md)), each under its own sequential
-`REQ-###` id — you can open that file as soon as you hit Enter.
-You then pick which stored requirement to review and refine first.
+`REQ-###` id — read them with `spec changes show` at any point in the
+wizard. Like every other mutation they reach the working spec only on
+`spec changes commit`, so declining the last prompt leaves the batch in
+staging for `spec changes show` or `spec changes discard` rather than
+on disk.
+You then pick which staged requirement to review and refine first.
 The others wait as pending requirements — reword them any time with
 `spec reword`.
 Nothing is accepted silently: every field passes through your hands,

@@ -1,6 +1,13 @@
 //! Filesystem implementation of the [`SourceFiles`] port: walks the
-//! project tree (skipping build output and dependency directories) and
-//! reads every source file with the requested extension.
+//! module the build compiles (skipping build output and dependency
+//! directories) and reads every source file with the requested
+//! extension.
+//!
+//! The walk starts at the module root, not the project root. A source
+//! file outside the module is not on the build's compile path, so
+//! counting it would let `steps missing` report clean over a step the
+//! runner still cannot find — which is exactly the bug this scope
+//! closes. Paths stay project-root-relative so staging is unaffected.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -22,11 +29,26 @@ const SKIPPED_DIRS: [&str; 7] = [
 
 pub struct FsSourceFiles {
     root: PathBuf,
+    module: PathBuf,
 }
 
 impl FsSourceFiles {
+    /// Scan the whole project, for a project that is one module.
     pub fn new(root: PathBuf) -> Self {
-        Self { root }
+        Self {
+            module: root.clone(),
+            root,
+        }
+    }
+
+    /// Scan only `module_root` (project-root-relative), the directory
+    /// whose build file the test runner is pointed at.
+    pub fn in_module(root: PathBuf, module_root: Option<&str>) -> Self {
+        let module = match module_root {
+            Some(relative) => root.join(relative),
+            None => root.clone(),
+        };
+        Self { root, module }
     }
 }
 
@@ -34,7 +56,7 @@ impl SourceFiles for FsSourceFiles {
     fn sources(&self, extension: &str) -> Result<Vec<SourceFile>, SourceError> {
         let suffix = format!(".{extension}");
         let mut paths = Vec::new();
-        collect_sources(&self.root, &suffix, &mut paths);
+        collect_sources(&self.module, &suffix, &mut paths);
         paths.sort();
         paths
             .into_iter()
@@ -101,6 +123,40 @@ mod tests {
             .unwrap();
         let paths: Vec<&str> = sources.iter().map(|s| s.path.as_str()).collect();
         assert_eq!(paths, vec!["kept.js"]);
+    }
+
+    // The bug this scope closes: a generated file outside the module
+    // the build compiles must not be counted as a source.
+    #[test]
+    fn only_the_module_is_scanned_when_the_project_has_several() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("kata/src/test/java")).unwrap();
+        fs::create_dir_all(dir.path().join("src/test/java")).unwrap();
+        fs::write(
+            dir.path().join("kata/src/test/java/RealSteps.java"),
+            "class RealSteps {}",
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join("src/test/java/GeneratedSteps.java"),
+            "class GeneratedSteps {}",
+        )
+        .unwrap();
+        let sources = FsSourceFiles::in_module(dir.path().to_path_buf(), Some("kata"))
+            .sources("java")
+            .unwrap();
+        let paths: Vec<&str> = sources.iter().map(|s| s.path.as_str()).collect();
+        assert_eq!(paths, vec!["kata/src/test/java/RealSteps.java"]);
+    }
+
+    #[test]
+    fn no_module_root_scans_the_whole_project() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("a.java"), "class A {}").unwrap();
+        let sources = FsSourceFiles::in_module(dir.path().to_path_buf(), None)
+            .sources("java")
+            .unwrap();
+        assert_eq!(sources.len(), 1);
     }
 
     #[test]

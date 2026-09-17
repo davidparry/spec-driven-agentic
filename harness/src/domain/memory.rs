@@ -5,6 +5,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::domain::language::Language;
+use crate::domain::layout::{LayoutInput, ResolvedLayout, resolve_layout};
 use crate::domain::prompts::render_snippet;
 
 /// Schema version written into `.spec-memory.json`.
@@ -29,19 +30,56 @@ pub struct Library {
     pub scope: Option<String>,
 }
 
-/// Source layout remembered for prompts.
+/// The project's source layout: the one answer the harness uses for
+/// every path it writes, the directory it runs tests in, and the layout
+/// it briefs the model with. Resolved by
+/// [`crate::domain::layout::resolve_layout`].
+///
+/// Every field is optional with a serde default so a `.spec-memory.json`
+/// written before the layout was recorded still loads.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct ProjectStructure {
+    /// The directory whose build file the test runner is pointed at,
+    /// `None` when that is the project root.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "moduleRoot"
+    )]
+    pub module_root: Option<String>,
+    /// The production source root.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub production: Option<String>,
+    /// The test source root.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tests: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub features: Option<String>,
+    /// The step-definition file generated steps are added to.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "stepDefinitions"
+    )]
+    pub step_definitions: Option<String>,
+    /// The package or namespace existing tests declare, where the
+    /// ecosystem has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub package: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub spec: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub outline: Vec<String>,
+}
+
+impl ProjectStructure {
+    /// Whether a resolver has answered this, as opposed to a
+    /// `.spec-memory.json` written before layouts were recorded. The
+    /// resolver always names a step-definition path, so that is the
+    /// field that distinguishes the two.
+    pub fn is_resolved(&self) -> bool {
+        self.step_definitions.is_some()
+    }
 }
 
 /// Durable project identity stored in `.spec-memory.json`.
@@ -91,26 +129,45 @@ pub struct ScanInput<'a> {
     pub chosen: Option<Language>,
     pub manifests: &'a Manifests,
     pub tree: &'a [String],
+    /// Feature files the spec's requirements name, which decide the
+    /// module root when a tree holds several buildable modules.
+    pub spec_features: &'a [String],
     pub now: &'a str,
+}
+
+/// A scan: the memory to persist, plus the module roots discovery could
+/// not choose between. The candidates are deliberately not persisted —
+/// they are a question for this run, answered once and then recorded as
+/// a resolved `module_root`.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct MemoryScan {
+    pub memory: ProjectMemory,
+    pub module_candidates: Vec<String>,
 }
 
 /// Build memory from a scan. `chosen` wins over marker detection so a
 /// greenfield language pick survives a polyglot tree.
-pub fn scan_memory(input: &ScanInput<'_>) -> ProjectMemory {
+pub fn scan_memory(input: &ScanInput<'_>) -> MemoryScan {
     let language = input.chosen.or_else(|| input.languages.first().copied());
     let Some(language) = language else {
-        return ProjectMemory::default();
+        return MemoryScan::default();
     };
     let libraries = collect_libraries(input.manifests);
-    let structure = infer_structure(language, input.tree);
-    ProjectMemory {
-        version: MEMORY_VERSION,
-        language: language.display().to_string(),
-        bdd_framework: language.bdd_framework().to_string(),
-        build_tool: infer_build_tool(language, input.manifests),
-        libraries,
+    let ResolvedLayout {
         structure,
-        refreshed_at: input.now.to_string(),
+        candidates,
+    } = infer_structure(input, language);
+    MemoryScan {
+        memory: ProjectMemory {
+            version: MEMORY_VERSION,
+            language: language.display().to_string(),
+            bdd_framework: language.bdd_framework().to_string(),
+            build_tool: infer_build_tool(language, input.manifests),
+            libraries,
+            structure,
+            refreshed_at: input.now.to_string(),
+        },
+        module_candidates: candidates,
     }
 }
 
@@ -164,60 +221,22 @@ fn collect_libraries(manifests: &Manifests) -> Vec<Library> {
     libraries
 }
 
-fn infer_structure(language: Language, tree: &[String]) -> ProjectStructure {
-    let outline = capped_outline(tree);
-    let features = first_matching(tree, &["features/", "features"]);
-    let spec =
-        first_matching(tree, &["requirements/requirements.json", "requirements/"]).or_else(|| {
-            tree.iter()
-                .find(|path| path.ends_with("requirements.json"))
-                .cloned()
-        });
-    let (production, tests) = match language {
-        Language::Java => (
-            dir_if_present(tree, "src/main/java"),
-            dir_if_present(tree, "src/test/java"),
-        ),
-        Language::JavaScript | Language::TypeScript => {
-            (dir_if_present(tree, "src"), dir_if_present(tree, "tests"))
-        }
-        Language::DotNet => (None, None),
-        Language::Rust => (dir_if_present(tree, "src"), dir_if_present(tree, "tests")),
-    };
-    ProjectStructure {
-        production,
-        tests,
-        features,
-        spec,
-        outline,
-    }
+/// The layout, from the one resolver, with the tree outline attached for
+/// the prompt brief.
+fn infer_structure(input: &ScanInput<'_>, language: Language) -> ResolvedLayout {
+    let mut resolved = resolve_layout(&LayoutInput {
+        language,
+        build_tool: infer_build_tool(language, input.manifests).as_deref(),
+        tree: input.tree,
+        spec_features: input.spec_features,
+    });
+    resolved.structure.outline = capped_outline(input.tree);
+    resolved
 }
 
-fn dir_if_present(tree: &[String], prefix: &str) -> Option<String> {
-    let slash = format!("{prefix}/");
-    tree.iter()
-        .any(|path| {
-            path == prefix || path == &slash || path.starts_with(&slash) || path.starts_with(prefix)
-        })
-        .then(|| prefix.to_string())
-}
-
-fn first_matching(tree: &[String], candidates: &[&str]) -> Option<String> {
-    candidates
-        .iter()
-        .find(|candidate| {
-            let slash = if candidate.ends_with('/') {
-                (*candidate).to_string()
-            } else {
-                format!("{candidate}/")
-            };
-            tree.iter()
-                .any(|path| path == *candidate || path.starts_with(&slash))
-        })
-        .map(|candidate| candidate.trim_end_matches('/').to_string())
-}
-
-fn capped_outline(tree: &[String]) -> Vec<String> {
+/// The tree outline, capped for a prompt: shallow entries only, and a
+/// bounded count, so a large repository cannot crowd out the question.
+pub(crate) fn capped_outline(tree: &[String]) -> Vec<String> {
     tree.iter()
         .filter(|path| path_depth(path) <= MAX_OUTLINE_DEPTH)
         .take(MAX_OUTLINE_ENTRIES)
@@ -260,31 +279,30 @@ fn format_library(library: &Library) -> String {
 }
 
 fn layout_line(memory: &ProjectMemory) -> String {
+    let structure = &memory.structure;
     let mut parts = Vec::new();
-    if let Some(path) = &memory.structure.production {
+    if let Some(path) = &structure.module_root {
+        parts.push(format!("{path}/ (module the build runs in)"));
+    }
+    if let Some(path) = &structure.production {
         parts.push(format!("{path} (production)"));
     }
-    if let Some(path) = &memory.structure.tests {
+    if let Some(path) = &structure.tests {
         parts.push(format!("{path} (tests)"));
     }
-    if let Some(path) = &memory.structure.features {
+    if let Some(path) = &structure.features {
         parts.push(format!("{path}/"));
     }
-    if let Some(path) = &memory.structure.spec {
+    if let Some(path) = &structure.step_definitions {
+        parts.push(format!("{path} (step definitions)"));
+    }
+    if let Some(package) = &structure.package {
+        parts.push(format!("package {package}"));
+    }
+    if let Some(path) = &structure.spec {
         parts.push(path.clone());
     }
-    if parts.is_empty() {
-        memory
-            .structure
-            .outline
-            .iter()
-            .take(8)
-            .cloned()
-            .collect::<Vec<_>>()
-            .join(", ")
-    } else {
-        parts.join(", ")
-    }
+    parts.join(", ")
 }
 
 /// Prepend the memory brief to a system prompt, or return the system
@@ -448,8 +466,10 @@ mod tests {
             chosen: None,
             manifests: &manifests,
             tree: &tree,
+            spec_features: &[],
             now: "2026-08-21T01:00:00Z",
         })
+        .memory
     }
 
     #[test]
@@ -459,8 +479,10 @@ mod tests {
             chosen: None,
             manifests: &Manifests::default(),
             tree: &[],
+            spec_features: &[],
             now: "2026-08-21T01:00:00Z",
-        });
+        })
+        .memory;
         assert!(memory.is_empty());
         assert!(memory.brief().is_empty());
     }
@@ -473,8 +495,10 @@ mod tests {
             chosen: Some(Language::Java),
             manifests: &Manifests::default(),
             tree: &[],
+            spec_features: &[],
             now: "2026-08-21T01:00:00Z",
-        });
+        })
+        .memory;
         assert_eq!(memory.language, "Java");
         assert_eq!(memory.bdd_framework, "Cucumber-JVM");
     }
@@ -635,8 +659,10 @@ cucumber = { version = "0.23", features = ["libtest"] }
             chosen: None,
             manifests: &manifests,
             tree: &tree,
+            spec_features: &[],
             now: "2026-08-21T01:00:00Z",
         })
+        .memory
     }
 
     #[test]
@@ -696,16 +722,24 @@ cucumber = { version = "0.23", features = ["libtest"] }
         assert_eq!(rust.structure.production.as_deref(), Some("src"));
         assert_eq!(rust.structure.tests.as_deref(), Some("tests"));
 
+        // .NET used to come back with no layout at all. Its sources sit
+        // beside the project file, so a flat tree has no production
+        // subdirectory - but the tests and step definitions now resolve.
         let dotnet = scan(
             Language::DotNet,
             Manifests {
                 csproj: vec![r#"<PackageReference Include="Reqnroll" Version="2.2.1" />"#.into()],
                 ..Default::default()
             },
-            &["App.csproj"],
+            &["App.csproj", "Program.cs", "Tests/CalculatorSteps.cs"],
         );
         assert_eq!(dotnet.build_tool.as_deref(), Some("dotnet"));
-        assert!(dotnet.structure.production.is_none());
+        assert_eq!(dotnet.structure.production.as_deref(), None);
+        assert_eq!(dotnet.structure.tests.as_deref(), Some("Tests"));
+        assert_eq!(
+            dotnet.structure.step_definitions.as_deref(),
+            Some("Tests/CalculatorSteps.cs")
+        );
         assert_eq!(dotnet.libraries[0].name, "Reqnroll");
     }
 
@@ -747,10 +781,16 @@ cucumber = { version = "0.23", features = ["libtest"] }
     }
 
     #[test]
-    fn layout_falls_back_to_the_outline_when_no_source_dirs_match() {
+    fn a_project_with_no_sources_yet_is_briefed_with_the_convention() {
         let memory = java_scan(Manifests::default(), &["README.md", "docs/guide.md"]);
         let brief = memory.brief();
-        assert!(brief.contains("README.md") || brief.contains("docs/guide.md"));
+        // Nothing is on disk to observe, so the layout is where the
+        // ecosystem puts things - which is still what the model needs,
+        // because that is where generated files will land.
+        assert!(brief.contains("src/main/java (production)"), "{brief}");
+        assert!(brief.contains("src/test/java (tests)"), "{brief}");
+        // The full outline stays in memory for the layout question.
+        assert!(memory.structure.outline.contains(&"README.md".to_string()));
     }
 
     #[test]

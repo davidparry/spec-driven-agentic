@@ -68,8 +68,8 @@ not an unstaged patch. Commit before you trust the bar.
 
 ## Files this loop must reuse
 
-Do not invent parallel classes. Generation and implement look for the
-existing kata files:
+Do not invent parallel classes. Generation and implement write into the
+kata files this repository already has:
 
 | Role | Path |
 | --- | --- |
@@ -78,16 +78,47 @@ existing kata files:
 | Unit tests | `kata/src/test/java/com/davidparry/workshop/kata/StringCalculatorTest.java` |
 | Production | `kata/src/main/java/com/davidparry/workshop/kata/StringCalculator.java` |
 
-Existing steps already bind `Given a string calculator`, `When I add {string}`,
-`Then the result is {int}`, and the negatives exception step. Prefer those
-wordings so `spec steps generate` is a no-op.
+Nothing in that table is configured. The harness discovers it: this
+repository is a Maven aggregator with two buildable modules (`kata/` and
+`smoke-test/`), and the feature file your requirements name is the tiebreak
+that picks `kata`. Everything else — test root, production root, features
+directory, the package generated code declares, and the `pom.xml` `spec test`
+runs — follows from that one answer. `spec show` and `.spec-memory.json`
+report it, and `spec inspect` re-scans.
 
-Every authoring command **stages**. Review with `spec changes show`, then
+When a tree is genuinely ambiguous (several modules, and the spec names
+features in none of them) the interactive shell asks **once**: the model
+proposes one of the discovered module roots, you confirm, and the answer is
+recorded in `.spec-memory.json`. No model, or a declined prompt, leaves the
+scan's own pick in place and says which one it used.
+
+Existing steps already bind `Given a string calculator`, `When I add {string}`,
+`Then the result is {int}`, and `Then an IllegalArgumentException is thrown
+with a message containing {string}`. Prefer those four wordings and
+`spec steps generate` stays a no-op.
+
+Any other wording is a real gap, and `spec steps generate` closes it: it
+appends the missing definitions to the discovered
+`StringCalculatorSteps.java`, keeping its package and class and skipping any
+pattern the file already declares, so Cucumber never sees a duplicate
+expression. Review with `spec changes show`, commit, and fill in the
+`PendingException` bodies.
+
+Every authoring command **stages** — including the interactive `spec draft`
+wizard, with or without a model. Nothing reaches the working tree until
+`spec changes commit`; decline the wizard's last prompt and the batch it
+accepted stays in staging, where `spec changes show` and
+`spec changes discard` can reach it. Review with `spec changes show`, then
 `spec changes commit`. `spec test` runs Maven on the **working tree**, so
 commit before you trust the bar. `spec mark-implemented` is allowed
 only on GREEN. `spec implement` may offer `command_run`; confirm before it
 spawns. Optional: `spec ask "which pending requirement next?"` (read-only
 profile).
+
+`spec implement REQ-00N` also warns when the code it staged looks like it
+satisfies another requirement that is still `pending` — the drift this
+workflow exists to prevent. It is a literal check (same quoted inputs, same
+expected number), so it warns and never blocks: read the diff and decide.
 
 ## Step 1 — Branch and baseline
 
@@ -174,7 +205,7 @@ Repeat the recipe. Suggested scenarios (reuse existing steps):
 | REQ-006 | A negative number is rejected | `"1,-2"` | `Then an IllegalArgumentException is thrown with a message containing "negatives not allowed"` |
 | REQ-006 | Every negative number is listed in the error | `"-1,-2"` | two further `Then`/`And` steps containing `"-1"` and `"-2"` |
 | REQ-007 | A custom delimiter declared on the first line is used | `"//+\n1+2"` | result is 3 |
-| REQ-007 | An empty delimiter declaration is rejected | `"//\n1+2"` | `Then an IllegalArgumentException is thrown` |
+| REQ-007 | An empty delimiter declaration is rejected | `"//\n1+2"` | `Then an IllegalArgumentException is thrown` — the one wording with no step definition; `spec steps generate` appends it to `StringCalculatorSteps.java` |
 
 No earlier requirement overlaps REQ-007 — it is the behavior you drafted in
 Step 2, so both of its scenarios are new.

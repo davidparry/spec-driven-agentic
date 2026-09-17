@@ -147,6 +147,24 @@ Anything else in the reply is dropped. A reply with no usable update
 fails with `The model's reply held no usable file update.` — nothing
 is staged, and you implement by hand instead.
 
+## When an attempt reaches past its requirement
+
+The report's `warning` also calls out staged code that looks like it
+satisfies a *different* requirement still marked `pending`:
+
+```text
+The staged code also satisfies REQ-005, still pending - REQ-006 was the
+requirement asked for. Review the diff with spec changes show and drop what
+REQ-006 does not need, so each requirement keeps its own RED bar.
+```
+
+It is a literal match — the code feeds in the same quoted inputs the other
+requirement's criteria name and lands on the same expected numbers — so it
+warns and never blocks. A criterion worded without literals is invisible to
+it, and a literal two requirements share can raise it when nothing is wrong.
+Read the staged diff and decide; that is the check this is a prompt for, not
+a replacement of.
+
 The implementation prompt is the largest call the harness makes, so a
 local model can need minutes to answer. The generation timeout
 defaults to 300 seconds; if you see `no reply within ...s`, raise

@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use crate::application::spec_service::ProjectLayout;
 use crate::domain::STAGED_DIR;
 use crate::domain::language::{Language, detect_languages};
+use crate::domain::memory::ProjectStructure;
 
 /// Where the requirements spec lives, relative to the project root.
 pub const SPEC_PATH: &str = "requirements/requirements.json";
@@ -36,28 +37,70 @@ pub fn workshop_layout() -> ProjectLayout {
     }
 }
 
-/// Detect the project's source layout. When the workshop `kata/` files
-/// exist they win (this repo). Otherwise scan for steps, tests, and
-/// production sources so an extracted kata without the `kata/` prefix
-/// still names real files. MCP `get_requirement` keeps
-/// [`workshop_layout`] regardless.
+/// The project's resolved layout: the recorded one when
+/// `.spec-memory.json` holds it, else a fresh scan that is then cached.
+/// Mirrors [`primary_language`]'s precedence, so the language and the
+/// layout are answered the same way and `spec inspect` refreshes both.
+pub fn project_layout(root: &Path) -> ProjectStructure {
+    use crate::adapters::fs_memory::{FsMemoryStore, FsProjectInventory};
+    use crate::adapters::fs_project::FsProjectFiles;
+    use crate::application::memory_service::MemoryService;
+
+    let memory = MemoryService::new(
+        FsMemoryStore::new(root.to_path_buf()),
+        FsProjectInventory::new(root.to_path_buf()),
+        FsProjectFiles::new(root.to_path_buf()),
+    );
+    if let Ok(stored) = memory.load()
+        && stored.structure.is_resolved()
+    {
+        return stored.structure;
+    }
+    memory
+        .scan(None)
+        .map(|scan| scan.memory.structure)
+        .unwrap_or_default()
+}
+
+/// Detect the project's source layout for `spec show`: the three concrete
+/// files, looked up inside the module the resolved layout names. When the
+/// scan finds no usable set the workshop kata paths stand in. MCP
+/// `get_requirement` keeps [`workshop_layout`] regardless.
 pub fn detect_project_layout(root: &Path) -> ProjectLayout {
     let workshop = workshop_layout();
     if root.join(&workshop.production_location).is_file() {
         return workshop;
     }
-    scan_layout(root).unwrap_or(workshop)
+    scan_layout(root, &project_layout(root)).unwrap_or(workshop)
 }
 
-fn scan_layout(root: &Path) -> Option<ProjectLayout> {
+/// The scan is restricted to the module the build compiles: a Java file
+/// in a sibling module (or an orphan outside every module) is not what
+/// `spec show` should name.
+fn scan_layout(root: &Path, structure: &ProjectStructure) -> Option<ProjectLayout> {
+    let module = match &structure.module_root {
+        Some(relative) => root.join(relative),
+        None => root.to_path_buf(),
+    };
     let mut java = Vec::new();
-    collect_files(root, root, "java", &mut java);
-    let step_definitions = java
-        .iter()
-        .find(|path| path.rsplit('/').next().unwrap_or("").contains("Steps"))
-        .cloned();
+    collect_files(&module, root, "java", &mut java);
+    let step_definitions = structure
+        .step_definitions
+        .clone()
+        .filter(|path| java.contains(path))
+        .or_else(|| {
+            java.iter()
+                .find(|path| path.rsplit('/').next().unwrap_or("").contains("Steps"))
+                .cloned()
+        });
     let test_location = java.iter().find(|path| is_unit_test(path)).cloned();
-    let production_location = java.iter().find(|path| path.contains("src/main/")).cloned();
+    let production_location = java
+        .iter()
+        .find(|path| match &structure.production {
+            Some(root) => path.starts_with(&format!("{root}/")),
+            None => path.contains("src/main/"),
+        })
+        .cloned();
     match (step_definitions, test_location, production_location) {
         (Some(step_definitions), Some(test_location), Some(production_location)) => {
             Some(ProjectLayout {
@@ -98,17 +141,21 @@ fn collect_files(dir: &Path, root: &Path, extension: &str, into: &mut Vec<String
     }
 }
 
-/// When this workshop's kata feature directory exists, discovery is
-/// restricted to it so `spec feature list` does not pick up harness/MCP
-/// Cucumber features. Greenfield projects (no `kata/`) still walk the
-/// whole tree.
+/// Feature discovery is restricted to the features directory the layout
+/// resolved, so `spec feature list` does not pick up Cucumber features
+/// belonging to the harness or a sibling module. A project whose features
+/// directory does not exist yet still walks the whole tree.
 pub fn feature_search_root(root: &Path) -> PathBuf {
-    let kata = root.join("kata/src/test/resources/features");
-    if kata.is_dir() {
-        kata
-    } else {
-        root.to_path_buf()
-    }
+    feature_root_in(root, &project_layout(root))
+}
+
+fn feature_root_in(root: &Path, structure: &ProjectStructure) -> PathBuf {
+    structure
+        .features
+        .as_deref()
+        .map(|features| root.join(features))
+        .filter(|path| path.is_dir())
+        .unwrap_or_else(|| root.to_path_buf())
 }
 
 /// Detect the project's primary language. Memory (a greenfield choice)
@@ -203,7 +250,7 @@ mod tests {
     fn a_partial_java_tree_is_not_a_layout() {
         let dir = tempfile::tempdir().unwrap();
         fs::write(dir.path().join("Foo.java"), "class Foo {}").unwrap();
-        assert!(scan_layout(dir.path()).is_none());
+        assert!(scan_layout(dir.path(), &ProjectStructure::default()).is_none());
     }
 
     #[test]

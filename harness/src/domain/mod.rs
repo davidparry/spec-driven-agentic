@@ -28,9 +28,11 @@ pub const HISTORY_FILE: &str = ".spec-history";
 
 pub mod command_policy;
 pub mod config_report;
+pub mod coverage;
 pub mod feature;
 pub mod generation;
 pub mod language;
+pub mod layout;
 pub mod mcp_registry;
 pub mod memory;
 pub mod model;

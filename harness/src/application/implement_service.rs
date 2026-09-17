@@ -11,11 +11,14 @@ use crate::application::assets::{
 };
 use crate::application::generation_service::ResolvedLlm;
 use crate::application::spec_service::ServiceError;
+use crate::domain::coverage::covers_all;
 use crate::domain::generation::{
     FileUpdate, ImplementAsset, advice_prompt, implementation_prompt, parse_file_updates_checked,
     strip_code_fences,
 };
 use crate::domain::language::Language;
+use crate::domain::memory::ProjectStructure;
+use crate::domain::model::Spec;
 use crate::domain::steps::source_extension;
 use crate::domain::tdd::{ImplementAttempt, StateEntry};
 use crate::ports::{
@@ -62,6 +65,7 @@ where
     store: C,
     spec: R,
     language: Language,
+    layout: ProjectStructure,
     llm: Option<ResolvedLlm<L, B>>,
 }
 
@@ -80,6 +84,7 @@ where
         store: C,
         spec: R,
         language: Language,
+        layout: ProjectStructure,
         llm: Option<ResolvedLlm<L, B>>,
     ) -> Self {
         Self {
@@ -88,6 +93,7 @@ where
             store,
             spec,
             language,
+            layout,
             llm,
         }
     }
@@ -123,7 +129,7 @@ where
             .cloned()
             .map(|file| (file.path, file.content))
             .collect();
-        let production = production_path(&sources, self.language, &spec.project);
+        let production = production_path(&sources, self.language, &spec.project, &self.layout);
         let prompt = implementation_prompt(
             self.language,
             requirement,
@@ -172,13 +178,15 @@ where
         // A reply without the production file is an incomplete attempt:
         // the tests will stay RED. Stage what arrived, but say so.
         let production_written = targets.contains(&production);
-        let warning = (!production_written).then(|| {
-            format!(
+        let mut warnings = Vec::new();
+        if !production_written {
+            warnings.push(format!(
                 "The model left the production code untouched ({production}) - \
                  it only wrote: {}.",
                 targets.join(", ")
-            )
-        });
+            ));
+        }
+        warnings.extend(ran_ahead_of_the_spec(&updates, &spec, req_id));
         let next_step = if production_written {
             "Apply with spec changes commit, then spec test - the run decides.".to_string()
         } else {
@@ -192,7 +200,7 @@ where
             targets,
             staged: true,
             source: "llm".into(),
-            warning,
+            warning: (!warnings.is_empty()).then(|| warnings.join(" ")),
             next_step,
         })
     }
@@ -234,6 +242,7 @@ where
             req_id,
             requirement,
             &spec.project,
+            &self.layout,
         )?;
         findings.extend(asset_findings);
 
@@ -297,6 +306,38 @@ where
     }
 }
 
+/// Did the attempt reach past the requirement it was asked for?
+///
+/// Observed live: `spec implement REQ-006` implemented REQ-005 too, the
+/// bar went green, and nothing said a word — the run had drifted ahead
+/// of the spec it is supposed to be driven by. The staged code is
+/// matched against the other pending requirements with the literal
+/// [`covers_all`] heuristic, which is why this warns rather than
+/// blocks: a shared input literal can make two requirements look alike,
+/// and only the developer can say whether the extra code belongs.
+fn ran_ahead_of_the_spec(updates: &[FileUpdate], spec: &Spec, req_id: &str) -> Option<String> {
+    let staged: String = updates
+        .iter()
+        .map(|update| update.content.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let reached: Vec<&str> = spec
+        .requirements
+        .iter()
+        .filter(|requirement| requirement.id != req_id && requirement.status == "pending")
+        .filter(|requirement| covers_all(&staged, &requirement.acceptance_criteria))
+        .map(|requirement| requirement.id.as_str())
+        .collect();
+    (!reached.is_empty()).then(|| {
+        format!(
+            "The staged code also satisfies {}, still pending - {req_id} was the \
+             requirement asked for. Review the diff with spec changes show and drop \
+             what {req_id} does not need, so each requirement keeps its own RED bar.",
+            reached.join(", ")
+        )
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -304,7 +345,7 @@ mod tests {
     use crate::ports::SourceFile;
     use crate::test_support::{
         FakeLlm, FakeSources, InMemoryChangeStore, InMemoryFeatureCatalog, InMemorySpecRepository,
-        calculator_catalog, calculator_spec, covered_steps_source, unit_test_source,
+        calculator_catalog, calculator_spec, covered_steps_source, flat_layout, unit_test_source,
     };
 
     fn service(
@@ -323,6 +364,7 @@ mod tests {
             InMemoryChangeStore::default(),
             InMemorySpecRepository(Ok(calculator_spec())),
             Language::Java,
+            flat_layout(Language::Java),
             llm,
         )
     }
@@ -336,6 +378,53 @@ mod tests {
             error.0,
             "No model resolved - implement by hand and rerun spec test."
         );
+    }
+
+    #[test]
+    fn an_attempt_that_also_satisfies_another_pending_requirement_is_flagged() {
+        // Observed live: spec implement REQ-006 implemented REQ-005 as
+        // well, the bar went green, and nothing said a word.
+        let reply = r#"[{"path": "src/main/java/Kata.java",
+            "content": "public class Kata {\n  int add(String in) { return in.equals(\"1,2\") ? 3 : 0; }\n  int subtract(String in) { return in.equals(\"3,1\") ? 2 : 0; }\n}"}]"#;
+        let report = service(vec![], Some(FakeLlm::replying(reply)))
+            .generate(&mut NullPrompter, "REQ-001", &[], &[], &[])
+            .unwrap();
+        let warning = report.warning.expect("the scope warning");
+        assert!(warning.contains("also satisfies REQ-002"), "{warning}");
+        assert!(warning.contains("spec changes show"), "{warning}");
+        // A warning, not a gate: the work is still staged.
+        assert!(report.staged);
+    }
+
+    #[test]
+    fn an_attempt_confined_to_its_own_requirement_is_not_flagged() {
+        let reply = r#"[{"path": "src/main/java/Kata.java",
+            "content": "public class Kata {\n  int add(String in) { return in.equals(\"1,2\") ? 3 : 0; }\n}"}]"#;
+        let report = service(vec![], Some(FakeLlm::replying(reply)))
+            .generate(&mut NullPrompter, "REQ-001", &[], &[], &[])
+            .unwrap();
+        assert_eq!(report.warning, None);
+    }
+
+    #[test]
+    fn the_scope_warning_is_added_to_the_untouched_production_warning() {
+        // Both are true of the same attempt, and the report carries one
+        // warning field - neither may swallow the other.
+        let reply = r#"[{"path": "src/test/java/Steps.java",
+            "content": "assertEquals(3, calc.add(\"1,2\"));\nassertEquals(2, calc.subtract(\"3,1\"));"}]"#;
+        let sources = vec![SourceFile {
+            path: "src/test/java/Steps.java".into(),
+            content: "old steps".into(),
+        }];
+        let report = service(sources, Some(FakeLlm::replying(reply)))
+            .generate(&mut NullPrompter, "REQ-001", &[], &[], &[])
+            .unwrap();
+        let warning = report.warning.expect("both warnings");
+        assert!(
+            warning.contains("left the production code untouched"),
+            "{warning}"
+        );
+        assert!(warning.contains("also satisfies REQ-002"), "{warning}");
     }
 
     #[test]

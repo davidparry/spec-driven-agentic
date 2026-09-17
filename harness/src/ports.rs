@@ -223,6 +223,11 @@ pub struct SourceFile {
 
 /// Read access to the project's source files by extension, used to scan
 /// step definitions per framework.
+///
+/// Implementations return the sources of the module the build compiles,
+/// with project-root-relative paths. Callers may treat every file they
+/// get back as on the compile path; a file outside the module would make
+/// a discovery gate pass over code the runner never sees.
 pub trait SourceFiles {
     fn sources(&self, extension: &str) -> Result<Vec<SourceFile>, SourceError>;
 }

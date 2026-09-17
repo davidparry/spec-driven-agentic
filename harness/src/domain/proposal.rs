@@ -3,10 +3,9 @@
 //! contains; a proposal only qualifies when it arrives complete -
 //! title, story, and at least one acceptance criterion.
 
-use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-use crate::domain::generation::strip_code_fences;
+use crate::domain::generation::{decode_json, strip_code_fences};
 use crate::domain::model::Requirement;
 use crate::domain::prompts::{RenderedPrompt, render};
 use crate::domain::refiner::suggestion_for;
@@ -67,9 +66,7 @@ fn is_complete(proposal: &ProposedRequirement) -> bool {
             .all(|criterion| !criterion.trim().is_empty())
 }
 
-/// The first JSON array in `body`. Models often emit a complete array
-/// and then commentary (or a second copy); `from_str` rejects trailing
-/// data and would discard a usable split.
+/// The first JSON array in `body`.
 fn decode_json_array(body: &str) -> Option<Vec<ProposedRequirement>> {
     decode_json(body, '[')
 }
@@ -78,15 +75,6 @@ fn decode_json_array(body: &str) -> Option<Vec<ProposedRequirement>> {
 /// `parse_file_updates` already gives implementation replies.
 fn decode_json_object(body: &str) -> Option<ProposedRequirement> {
     decode_json(body, '{')
-}
-
-fn decode_json<T: DeserializeOwned>(body: &str, open: char) -> Option<T> {
-    if let Ok(parsed) = serde_json::from_str(body) {
-        return Some(parsed);
-    }
-    let start = body.find(open)?;
-    let mut deserializer = serde_json::Deserializer::from_str(&body[start..]);
-    T::deserialize(&mut deserializer).ok()
 }
 
 /// One earlier wording of the draft and the findings it produced, as

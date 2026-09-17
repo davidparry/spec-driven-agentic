@@ -19,11 +19,19 @@ use crate::ports::{RunnerError, TestRunner};
 
 /// The one language→runner dispatch table, shared by every composition
 /// root so adding a language means touching exactly one match.
-pub fn runner_for_language(root: &Path, language: Language) -> Box<dyn TestRunner> {
+///
+/// `module_root` is the directory the resolved layout named, so the
+/// runner and the discovery that reports on it look at the same module.
+pub fn runner_for_language(
+    root: &Path,
+    language: Language,
+    module_root: Option<&str>,
+) -> Box<dyn TestRunner> {
     match language {
-        Language::Java => Box::new(maven::MavenRunner::new(
+        Language::Java => Box::new(maven::MavenRunner::in_module(
             root.to_path_buf(),
             ProcessRuntimeProbe,
+            module_root,
         )),
         Language::JavaScript | Language::TypeScript => Box::new(
             cucumber_js::CucumberJsRunner::new(root.to_path_buf(), ProcessRuntimeProbe),
@@ -52,7 +60,12 @@ pub fn detect_runner(root: &Path) -> Result<Box<dyn TestRunner>, String> {
         );
     };
     tracing::info!(language = language.display(), "test runner detected");
-    Ok(runner_for_language(root, language))
+    let layout = crate::workspace::project_layout(root);
+    Ok(runner_for_language(
+        root,
+        language,
+        layout.module_root.as_deref(),
+    ))
 }
 
 /// The last `lines` lines of `text` — what the Java `MavenTestRunner`

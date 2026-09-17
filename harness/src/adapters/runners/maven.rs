@@ -18,31 +18,41 @@ pub struct MavenRunner<R: RuntimeProbe> {
     root: PathBuf,
     probe: R,
     command: Vec<String>,
-    /// True when this workshop's sibling `kata/pom.xml` exists: run that
-    /// project (parity with the Java server) instead of the aggregator.
-    kata: bool,
+    /// The module whose `pom.xml` is invoked directly, when the project
+    /// the harness works in is a module rather than the aggregator at the
+    /// project root. Its Surefire reports are the only ones that count.
+    module: Option<String>,
 }
 
 impl<R: RuntimeProbe> MavenRunner<R> {
+    /// Run Maven for the whole project at `root`.
     pub fn new(root: PathBuf, probe: R) -> Self {
-        let kata = root.join("kata/pom.xml").is_file();
-        let command = if kata {
-            vec![
+        Self::in_module(root, probe, None)
+    }
+
+    /// Run Maven for the module the resolved layout names — the same
+    /// module discovery scans, so a step it reports as defined is one
+    /// this run actually compiles.
+    pub fn in_module(root: PathBuf, probe: R, module_root: Option<&str>) -> Self {
+        let module = module_root
+            .filter(|relative| root.join(relative).join("pom.xml").is_file())
+            .map(str::to_string);
+        let command = match &module {
+            Some(module) => vec![
                 "mvn".into(),
                 "-q".into(),
                 "-B".into(),
                 "-f".into(),
-                "kata/pom.xml".into(),
+                format!("{module}/pom.xml"),
                 "test".into(),
-            ]
-        } else {
-            vec!["mvn".into(), "-q".into(), "-B".into(), "test".into()]
+            ],
+            None => vec!["mvn".into(), "-q".into(), "-B".into(), "test".into()],
         };
         Self {
             root,
             probe,
             command,
-            kata,
+            module,
         }
     }
 
@@ -82,15 +92,16 @@ impl<R: RuntimeProbe> TestRunner for MavenRunner<R> {
 
 impl<R: RuntimeProbe> MavenRunner<R> {
     fn report_dirs(&self) -> Vec<PathBuf> {
-        if self.kata {
-            vec![self.root.join("kata/target/surefire-reports")]
-        } else {
-            let mut dirs = collect_surefire_dirs(&self.root);
-            let root = self.root.join("target/surefire-reports");
-            if !dirs.contains(&root) {
-                dirs.push(root);
+        match &self.module {
+            Some(module) => vec![self.root.join(module).join("target/surefire-reports")],
+            None => {
+                let mut dirs = collect_surefire_dirs(&self.root);
+                let root = self.root.join("target/surefire-reports");
+                if !dirs.contains(&root) {
+                    dirs.push(root);
+                }
+                dirs
             }
-            dirs
         }
     }
 }

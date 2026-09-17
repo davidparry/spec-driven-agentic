@@ -328,6 +328,18 @@ else drops to the prompt. Shell start also refreshes `.spec-memory.json`
 so later model calls in the session carry this project's language,
 libraries, and layout.
 
+That layout — the module whose build file the test runner is pointed at,
+its test and production roots, its features directory, the step-definition
+file generated steps join, and the package existing tests declare — is what
+every path the harness writes is derived from. It is resolved
+deterministically from build manifests, observed sources, and the feature
+files the spec's requirements name. Only one branch can reach a model:
+several buildable modules that none of that evidence separates. Then the
+shell asks once — the model picks from the discovered module roots (nothing
+else is accepted), the developer confirms, and the answer is recorded, so a
+later session asks nothing. With no model, or on a decline, the scan's own
+pick stands and the shell says which one it used.
+
 - Commands are typed without the `spec` prefix (a pasted `spec list`
   still works), with full quoting support for arguments like
   `--step "Given a calculator"`.

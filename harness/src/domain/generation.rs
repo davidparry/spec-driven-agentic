@@ -6,7 +6,7 @@
 use crate::domain::language::Language;
 use crate::domain::model::Requirement;
 use crate::domain::prompts::{RenderedPrompt, render};
-use crate::domain::steps::{MissingStep, step_to_expression};
+use crate::domain::steps::{MissingStep, extract_patterns, step_to_expression};
 use crate::domain::tdd::{ImplementAttempt, StateEntry};
 
 /// Where generated step definitions are staged, by ecosystem convention.
@@ -25,15 +25,28 @@ pub fn steps_target_path(language: Language) -> &'static str {
     }
 }
 
-/// Where a generated unit test for one requirement is staged.
-pub fn unit_test_target_path(language: Language, req_id: &str) -> String {
+/// What a generated unit test for one requirement is called, without a
+/// directory: the resolved layout decides where it goes.
+pub fn unit_test_file_name(language: Language, req_id: &str) -> String {
     let pascal = pascal_case(req_id);
     match language {
-        Language::Java => format!("src/test/java/{pascal}Test.java"),
-        Language::JavaScript => format!("test/{}.test.js", snake_case(req_id)),
-        Language::TypeScript => format!("test/{}.test.ts", snake_case(req_id)),
-        Language::DotNet => format!("Tests/{pascal}Test.cs"),
-        Language::Rust => format!("tests/{}_test.rs", snake_case(req_id)),
+        Language::Java => format!("{pascal}Test.java"),
+        Language::JavaScript => format!("{}.test.js", snake_case(req_id)),
+        Language::TypeScript => format!("{}.test.ts", snake_case(req_id)),
+        Language::DotNet => format!("{pascal}Test.cs"),
+        Language::Rust => format!("{}_test.rs", snake_case(req_id)),
+    }
+}
+
+/// Where a generated unit test for one requirement is staged in a
+/// project with no layout of its own yet.
+pub fn unit_test_target_path(language: Language, req_id: &str) -> String {
+    let name = unit_test_file_name(language, req_id);
+    match language {
+        Language::Java => format!("src/test/java/{name}"),
+        Language::JavaScript | Language::TypeScript => format!("test/{name}"),
+        Language::DotNet => format!("Tests/{name}"),
+        Language::Rust => format!("tests/{name}"),
     }
 }
 
@@ -204,13 +217,23 @@ fn unit_test_case(language: Language, criterion: &str) -> String {
 /// Where the project's production code lives, by ecosystem convention.
 /// Named after the project - the spec's `project` field.
 pub fn implementation_target_path(language: Language, project: &str) -> String {
+    let name = implementation_file_name(language, project);
+    match language {
+        Language::Java => format!("src/main/java/{name}"),
+        Language::JavaScript | Language::TypeScript | Language::Rust => format!("src/{name}"),
+        Language::DotNet => name,
+    }
+}
+
+/// What the production file is called, without a directory.
+pub fn implementation_file_name(language: Language, project: &str) -> String {
     let pascal = pascal_case(project);
     match language {
-        Language::Java => format!("src/main/java/{pascal}.java"),
-        Language::JavaScript => format!("src/{}.js", snake_case(project)),
-        Language::TypeScript => format!("src/{}.ts", snake_case(project)),
+        Language::Java => format!("{pascal}.java"),
+        Language::JavaScript => format!("{}.js", snake_case(project)),
+        Language::TypeScript => format!("{}.ts", snake_case(project)),
         Language::DotNet => format!("{pascal}.cs"),
-        Language::Rust => "src/lib.rs".into(),
+        Language::Rust => "lib.rs".into(),
     }
 }
 
@@ -530,6 +553,18 @@ pub fn parse_file_updates_checked(reply: &str) -> Result<Vec<FileUpdate>, String
     }
 }
 
+/// The first JSON value in `body` opening with `open`. Models often
+/// emit a complete payload and then commentary (or a second copy);
+/// `from_str` rejects trailing data and would discard a usable reply.
+pub(crate) fn decode_json<T: serde::de::DeserializeOwned>(body: &str, open: char) -> Option<T> {
+    if let Ok(parsed) = serde_json::from_str(body) {
+        return Some(parsed);
+    }
+    let start = body.find(open)?;
+    let mut deserializer = serde_json::Deserializer::from_str(&body[start..]);
+    T::deserialize(&mut deserializer).ok()
+}
+
 /// Strip a surrounding Markdown code fence, which LLMs love to add,
 /// and drop a leading `<think>...</think>` block some models emit
 /// before the payload.
@@ -559,16 +594,24 @@ pub fn strip_think_block(text: &str) -> String {
 
 /// Would this code plausibly be a step-definition file for the language?
 /// The gate before LLM output may replace the deterministic template.
-pub fn looks_like_step_definitions(language: Language, code: &str) -> bool {
+///
+/// `class_name` is the target file's stem, where the ecosystem requires
+/// the public type to match it. A polish pass that renames the class can
+/// never compile (observed live: "class StringCalculatorSteps is public,
+/// should be declared in a file named ..."), so the rename is rejected
+/// and the deterministic template stands.
+pub fn looks_like_step_definitions(
+    language: Language,
+    code: &str,
+    class_name: Option<&str>,
+) -> bool {
     !code.trim().is_empty()
         && match language {
             Language::Java => {
                 (code.contains("@Given") || code.contains("@When") || code.contains("@Then"))
-                    // The file is staged at GeneratedSteps.java; a polish
-                    // pass that renames the public class (observed live:
-                    // "class StringCalculatorSteps is public, should be
-                    // declared in a file named ...") can never compile.
-                    && code.contains("public class GeneratedSteps")
+                    && class_name
+                        .map(|name| code.contains(&format!("public class {name}")))
+                        .unwrap_or(true)
             }
             Language::JavaScript | Language::TypeScript => {
                 code.contains("Given(") || code.contains("When(") || code.contains("Then(")
@@ -650,10 +693,87 @@ fn append_java_methods(existing: &str, methods: &str) -> String {
         &ensure_java_import(existing, "import org.junit.jupiter.api.DisplayName;"),
         "import static org.junit.jupiter.api.Assertions.fail;",
     );
-    match with_imports.rfind('}') {
-        Some(i) => format!("{}{}\n{}", &with_imports[..i], methods, &with_imports[i..]),
-        None => format!("{with_imports}\n{methods}"),
+    insert_into_class(&with_imports, methods)
+}
+
+/// Add members to the last class in a brace-delimited source.
+fn insert_into_class(source: &str, members: &str) -> String {
+    match source.rfind('}') {
+        Some(i) => format!("{}{}\n{}", &source[..i], members, &source[i..]),
+        None => format!("{source}\n{members}"),
     }
+}
+
+/// Add definitions for `missing` to a file that already holds step
+/// definitions, skipping every cucumber expression the file declares.
+///
+/// Generated steps have to join the existing file rather than start a
+/// new one: two files declaring the same pattern is what Cucumber
+/// refuses as a duplicate step definition.
+pub fn append_step_definitions(
+    existing: &str,
+    language: Language,
+    missing: &[MissingStep],
+) -> String {
+    let mut seen = extract_patterns(language, existing);
+    let definitions: Vec<String> = missing
+        .iter()
+        .filter(|step| {
+            let expression = step_to_expression(&step.text);
+            if seen.contains(&expression) {
+                false
+            } else {
+                seen.push(expression);
+                true
+            }
+        })
+        .map(|step| step_definition(language, step))
+        .collect();
+    if definitions.is_empty() {
+        return existing.to_string();
+    }
+    let body = definitions.join("\n");
+    match language {
+        Language::Java => insert_into_class(&ensure_cucumber_imports(existing, language), &body),
+        Language::DotNet => insert_into_class(&ensure_cucumber_imports(existing, language), &body),
+        _ => format!(
+            "{}\n\n{body}",
+            ensure_cucumber_imports(existing, language).trim_end()
+        ),
+    }
+}
+
+/// The imports a step definition needs, added only when absent.
+fn ensure_cucumber_imports(source: &str, language: Language) -> String {
+    match language {
+        Language::Java => [
+            "import io.cucumber.java.PendingException;",
+            "import io.cucumber.java.en.Given;",
+            "import io.cucumber.java.en.Then;",
+            "import io.cucumber.java.en.When;",
+        ]
+        .iter()
+        .fold(source.to_string(), |text, import| {
+            ensure_java_import(&text, import)
+        }),
+        Language::DotNet => ensure_leading_line(source, "using Reqnroll;"),
+        Language::JavaScript => ensure_leading_line(
+            source,
+            "const { Given, When, Then } = require('@cucumber/cucumber');",
+        ),
+        Language::TypeScript => ensure_leading_line(
+            source,
+            "import { Given, When, Then } from '@cucumber/cucumber';",
+        ),
+        Language::Rust => ensure_leading_line(source, "use cucumber::{given, then, when};"),
+    }
+}
+
+fn ensure_leading_line(source: &str, line: &str) -> String {
+    if source.contains(line) {
+        return source.to_string();
+    }
+    format!("{line}\n{source}")
 }
 
 fn ensure_java_import(source: &str, import: &str) -> String {
@@ -963,32 +1083,116 @@ mod tests {
         for language in Language::ALL {
             let code = step_definitions_template(language, &steps);
             assert!(
-                looks_like_step_definitions(language, &code),
+                looks_like_step_definitions(language, &code, Some("GeneratedSteps")),
                 "{language:?} template fails its own gate: {code}"
             );
         }
     }
 
     #[test]
-    fn java_steps_validation_rejects_a_renamed_public_class() {
+    fn appended_steps_join_the_existing_class_and_skip_what_it_declares() {
+        let existing = "package com.example.kata;\n\n\
+             import io.cucumber.java.en.Given;\n\n\
+             public class CalculatorSteps {\n\
+             \x20   @Given(\"a calculator\")\n\
+             \x20   public void aCalculator() {}\n\
+             }\n";
+        let appended = append_step_definitions(
+            existing,
+            Language::Java,
+            &[
+                missing("Given", "a calculator"),
+                missing("Then", "the result is 3"),
+            ],
+        );
+        // The package and class survive, so the module still compiles.
+        assert!(appended.starts_with("package com.example.kata;"));
+        assert_eq!(appended.matches("public class CalculatorSteps").count(), 1);
+        // A pattern the file already declares is not repeated - two
+        // definitions of one expression is what Cucumber refuses.
+        assert_eq!(appended.matches("@Given(\"a calculator\")").count(), 1);
+        assert!(appended.contains("@Then(\"the result is {int}\")"));
+        // The imports the new definition needs are added, once.
+        assert_eq!(
+            appended
+                .matches("import io.cucumber.java.en.Given;")
+                .count(),
+            1
+        );
+        assert!(appended.contains("import io.cucumber.java.en.Then;"));
+        assert!(appended.contains("import io.cucumber.java.PendingException;"));
+    }
+
+    #[test]
+    fn appending_nothing_new_leaves_the_file_untouched() {
+        let existing = "import io.cucumber.java.en.Given;\n\
+             public class Steps {\n\
+             \x20   @Given(\"a calculator\")\n\
+             \x20   public void aCalculator() {}\n\
+             }\n";
+        assert_eq!(
+            append_step_definitions(
+                existing,
+                Language::Java,
+                &[missing("Given", "a calculator")]
+            ),
+            existing
+        );
+    }
+
+    #[test]
+    fn appended_steps_keep_each_ecosystem_compiling() {
+        for language in Language::ALL {
+            let first = step_definitions_template(language, &[missing("Given", "a calculator")]);
+            let appended =
+                append_step_definitions(&first, language, &[missing("Then", "the result is 3")]);
+            assert!(
+                appended.contains("a calculator"),
+                "{language:?} lost the existing step: {appended}"
+            );
+            assert!(
+                looks_like_step_definitions(language, &appended, Some("GeneratedSteps")),
+                "{language:?} append fails the gate: {appended}"
+            );
+        }
+    }
+
+    #[test]
+    fn java_steps_validation_rejects_a_class_renamed_away_from_its_file() {
         // Seen live: the polish pass renamed the class while the file
-        // stays GeneratedSteps.java, which can never compile.
+        // kept its name, which can never compile.
         let renamed = "import io.cucumber.java.en.Given;\n\
              public class StringCalculatorSteps {\n\
                  @Given(\"a calculator\") public void polished() {}\n\
              }\n";
-        assert!(!looks_like_step_definitions(Language::Java, renamed));
+        assert!(!looks_like_step_definitions(
+            Language::Java,
+            renamed,
+            Some("GeneratedSteps")
+        ));
+        // The same code is fine when that *is* the target file's name,
+        // which is what appending to a discovered step file needs.
+        assert!(looks_like_step_definitions(
+            Language::Java,
+            renamed,
+            Some("StringCalculatorSteps")
+        ));
         let kept = renamed.replace("StringCalculatorSteps", "GeneratedSteps");
-        assert!(looks_like_step_definitions(Language::Java, &kept));
+        assert!(looks_like_step_definitions(
+            Language::Java,
+            &kept,
+            Some("GeneratedSteps")
+        ));
     }
 
     #[test]
     fn validation_rejects_empty_and_unrecognizable_output() {
         for language in Language::ALL {
-            assert!(!looks_like_step_definitions(language, "   "));
+            assert!(!looks_like_step_definitions(language, "   ", None));
             assert!(!looks_like_step_definitions(
                 language,
-                "I cannot help with that."
+                "I cannot help with that.",
+                None
             ));
             assert!(!looks_like_unit_test(language, ""));
             assert!(!looks_like_unit_test(language, "Sure! Here is an essay."));

@@ -9,17 +9,18 @@ use serde::Serialize;
 use crate::application::agent_service::{Agent, AgentConfig, DEFAULT_MAX_ROUNDS, NullBroker};
 use crate::application::assets::{
     find_missing_steps, find_requirement, load_effective_spec, production_path,
-    production_type_name, unit_test_path,
+    production_type_name, steps_path, unit_test_path,
 };
 use crate::application::spec_service::ServiceError;
 use crate::application::{DEFAULT_LLM_ATTEMPTS, LlmReplyError};
 use crate::domain::generation::{
-    append_unit_tests, looks_like_step_definitions, looks_like_unit_test, looks_like_unit_test_for,
-    polish_prompt, step_definitions_template, steps_target_path, strip_code_fences,
+    append_step_definitions, append_unit_tests, looks_like_step_definitions, looks_like_unit_test,
+    looks_like_unit_test_for, polish_prompt, step_definitions_template, strip_code_fences,
     unit_test_target_path, unit_test_template,
 };
 use crate::domain::language::Language;
-use crate::domain::steps::MissingStep;
+use crate::domain::memory::ProjectStructure;
+use crate::domain::steps::{MissingStep, extract_patterns, source_extension};
 use crate::ports::{
     ChangeStore, FeatureCatalog, LlmConversation, Prompter, SourceFiles, SpecRepository, ToolBroker,
 };
@@ -114,6 +115,7 @@ where
     store: C,
     spec: R,
     language: Language,
+    layout: ProjectStructure,
     llm: Option<ResolvedLlm<L, B>>,
 }
 
@@ -132,6 +134,7 @@ where
         store: C,
         spec: R,
         language: Language,
+        layout: ProjectStructure,
         llm: Option<ResolvedLlm<L, B>>,
     ) -> Self {
         Self {
@@ -140,6 +143,7 @@ where
             store,
             spec,
             language,
+            layout,
             llm,
         }
     }
@@ -164,7 +168,10 @@ where
     }
 
     /// Stage pending step definitions for every undefined step
-    /// (step_definition_create).
+    /// (step_definition_create). When the module already has a
+    /// step-definition file, the new definitions are appended to it
+    /// rather than written to a parallel file whose patterns Cucumber
+    /// would reject as duplicates.
     pub fn steps_generate(
         &self,
         prompter: &mut dyn Prompter,
@@ -175,13 +182,47 @@ where
                 "Every step already has a definition - nothing to generate.".into(),
             ));
         }
-        let template = step_definitions_template(self.language, &missing);
-        let (content, source) = self.polish(prompter, &template, |code| {
-            looks_like_step_definitions(self.language, code)
+        let sources = self.sources.sources(source_extension(self.language))?;
+        let target = steps_path(&sources, self.language, &self.layout);
+        let existing = sources.iter().find(|file| file.path == target);
+        let template = match existing {
+            Some(file) => append_step_definitions(&file.content, self.language, &missing),
+            None => step_definitions_template(self.language, &missing),
+        };
+        let package_line = existing.and_then(|file| {
+            file.content
+                .lines()
+                .find(|line| line.starts_with("package "))
+                .map(str::to_string)
         });
-        let target = steps_target_path(self.language).to_string();
+        // Appending hands the polish pass a file full of working step
+        // definitions. It may reformat them, but a pattern that
+        // disappears un-binds a scenario that passes today, so the
+        // patterns the file already declared have to all come back -
+        // as must its package and the class the file is named for, or
+        // the module stops compiling.
+        let declared = existing
+            .map(|file| extract_patterns(self.language, &file.content))
+            .unwrap_or_default();
+        let class_name = production_type_name(&target);
+        let (content, source) = self.polish(prompter, &template, |code| {
+            looks_like_step_definitions(self.language, code, class_name.as_deref())
+                && package_line
+                    .as_deref()
+                    .map(|package| code.contains(package.trim_end_matches(';')))
+                    .unwrap_or(true)
+                && {
+                    let kept = extract_patterns(self.language, code);
+                    declared.iter().all(|pattern| kept.contains(pattern))
+                }
+        });
+        let verb = if existing.is_some() {
+            "append"
+        } else {
+            "generate"
+        };
         let summary = format!(
-            "generate pending step definitions for {} missing step(s) ({source})",
+            "{verb} pending step definitions for {} missing step(s) ({source})",
             missing.len()
         );
         self.store.stage(&target, &content, &summary)?;
@@ -209,7 +250,7 @@ where
         let sources = self
             .sources
             .sources(crate::domain::steps::source_extension(self.language))?;
-        let target = unit_test_path(&sources, self.language, req_id);
+        let target = unit_test_path(&sources, self.language, req_id, &self.layout);
         let conventional = unit_test_target_path(self.language, req_id);
         let existing = sources.iter().find(|file| file.path == target);
         let append = existing.is_some() && target != conventional;
@@ -217,7 +258,7 @@ where
             Some(file) if append => append_unit_tests(&file.content, self.language, requirement),
             _ => unit_test_template(self.language, requirement),
         };
-        let production = production_path(&sources, self.language, &spec.project);
+        let production = production_path(&sources, self.language, &spec.project, &self.layout);
         let production_type = production_type_name(&production);
         let package_line = existing.filter(|_| append).and_then(|file| {
             file.content
@@ -289,7 +330,7 @@ mod tests {
     use crate::ports::StagedChange;
     use crate::test_support::{
         FailingSources, FakeLlm, FakeSources, InMemoryChangeStore, InMemoryFeatureCatalog,
-        InMemorySpecRepository, calculator_catalog, calculator_spec,
+        InMemorySpecRepository, calculator_catalog, calculator_spec, flat_layout,
     };
 
     fn service(
@@ -308,6 +349,7 @@ mod tests {
             InMemoryChangeStore::default(),
             InMemorySpecRepository(Ok(calculator_spec())),
             Language::Java,
+            flat_layout(Language::Java),
             llm,
         )
     }
@@ -420,6 +462,50 @@ mod tests {
                 && prompts[0].contains("Package names are lowercase"),
             "prompt pins the language's best practices"
         );
+    }
+
+    #[test]
+    fn polish_that_drops_an_existing_step_pattern_is_refused() {
+        // Appending puts working definitions in front of the polish
+        // pass for the first time. Reformatting them is allowed; losing
+        // a pattern un-binds a scenario that passes today.
+        let sources = vec![crate::ports::SourceFile {
+            path: "src/test/java/Steps.java".into(),
+            content: "package com.example;\n\n\
+                      public class Steps {\n\
+                      \x20   @Given(\"a calculator\")\n\
+                      \x20   public void aCalculator() {}\n\
+                      }\n"
+            .into(),
+        }];
+        let dropped = "package com.example;\n\n\
+             public class Steps {\n\
+             \x20   @When(\"add is called with {string}\")\n\
+             \x20   public void add(String input) {}\n\
+             }\n";
+        let refused = service(sources.clone(), Some(FakeLlm::replying(dropped)));
+        let report = refused
+            .steps_generate(&mut crate::application::agent_service::NullPrompter)
+            .unwrap();
+        assert_eq!(report.source, "template");
+        assert_eq!(report.target, "src/test/java/Steps.java");
+        let content = refused.store.content(&report.target).unwrap().unwrap();
+        assert!(content.contains("@Given(\"a calculator\")"), "{content}");
+        assert!(
+            content.contains("@When(\"add is called with {string}\")"),
+            "{content}"
+        );
+
+        // The same reply, keeping every prior pattern, is accepted.
+        let kept = "package com.example;\n\npublic class Steps {\n\
+             \x20   @Given(\"a calculator\")\n    public void given() {}\n\
+             \x20   @When(\"add is called with {string}\")\n    public void when(String s) {}\n\
+             \x20   @Then(\"the result is {int}\")\n    public void then(int n) {}\n}\n";
+        let accepted = service(sources, Some(FakeLlm::replying(kept)));
+        let report = accepted
+            .steps_generate(&mut crate::application::agent_service::NullPrompter)
+            .unwrap();
+        assert_eq!(report.source, "llm");
     }
 
     #[test]
@@ -544,6 +630,7 @@ mod tests {
                 InMemoryChangeStore::default(),
                 InMemorySpecRepository(Ok(Spec::default())),
                 Language::Java,
+                flat_layout(Language::Java),
                 None,
             );
         assert_eq!(service.steps_missing().unwrap_err().0, "disk on fire");

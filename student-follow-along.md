@@ -83,7 +83,7 @@ don't fall behind debugging alone.
 
 ---
 
-## Step 2 — Watch the machinery introduce itself (~minute 14)
+## Step 2 — Watch the machinery introduce itself (~minute 16)
 
 When the presenter reaches the smoke-test demo, run:
 
@@ -171,18 +171,22 @@ A green light says the server *launched* — now prove the agent can actually
 Call the get_tdd_state tool from the spec-driven-server server and show me the raw JSON result.
 ```
 
-The tool returns exactly this on a freshly started server:
+On a freshly started server the reply opens with a long `instructions`
+field — a guide to reading the phase log, not workflow state — and then the
+part you care about:
 
 ```json
 {
+  "instructions" : "This file is the TDD phase log. ...",
   "phase" : "START",
   "lastRun" : {
-    "skipped" : 0,
     "tests" : 0,
     "failures" : 0,
-    "errors" : 0
+    "errors" : 0,
+    "skipped" : 0
   },
   "refactorLog" : [ ],
+  "entries" : [ ],
   "nextStep" : "No tests have been run yet. Call run_tests to establish a baseline."
 }
 ```
@@ -378,14 +382,20 @@ levels deep. The tools merge the whole tree into one backlog. To see it:
 
 4. Expect REQ-007 still listed (merged from the included file, after
    REQ-001..006) and `"valid": true`. One catalog, many files — ids stay
-   unique across the whole tree, and a duplicated id or an include cycle
-   would come back as a validation issue naming the offending file.
+   unique across the whole tree. Duplicate the id and `validate_spec`
+   answers `REQ-007: duplicate id - every requirement needs its own`; make
+   two files include each other and it names the file instead:
+   `spec: requirements.json is included more than once`.
    Undo the split (or leave it — every later step works the same) before
    moving on if you want your file to match the walkthrough exactly.
 
+   The harness ships a command for this too: `spec include add
+   requirements/delimiters.json` stages both the include line and an empty
+   child file, so the hand-editing above is only to show you the shape.
+
 ---
 
-## Step 5 — Exercise 2: spec to green (minutes 32–52)
+## Step 5 — Exercise 2: spec to green (minutes 32–50)
 
 Paste this into your agent, word for word:
 
@@ -435,10 +445,13 @@ their edits differently):
    `changes_show` (or have the agent show it) and read the staged Gherkin
    before you allow `changes_commit`. This is the spec review — is this the
    behavior you want?
-3. `run_tests` → **RED** — 8 tests, 3 failing (2 Cucumber failures +
-   1 JUnit error). The agent sees the same bar you do. The reply is similar
-   to this (`failureDetails` stack traces trimmed here; the exact messages
-   depend on the test names your agent chose):
+3. `run_tests` → **RED**. The count depends on how many unit tests your
+   agent wrote: 8 tests with 3 failing (2 Cucumber failures + 1 JUnit
+   error) if it wrote a single test asserting both criteria, 9 with 4 if it
+   wrote one per criterion. Either is a legitimate RED — what matters is
+   that the two `@REQ-003` scenarios fail. The agent sees the same bar you
+   do. The reply is similar to this (`failureDetails` stack traces trimmed
+   here; the exact messages depend on the test names your agent chose):
 
    ```json
    {
@@ -455,7 +468,7 @@ their edits differently):
 4. The agent implements the simplest `StringCalculator.add` that passes
    (**a file edit** — there is no `implement` MCP tool). **Your checkpoint:**
    review the production diff.
-5. `run_tests` → **GREEN** — 8 tests, 0 failures:
+5. `run_tests` → **GREEN** — the same total as your RED bar, 0 failures:
 
    ```json
    {
@@ -491,7 +504,7 @@ their edits differently):
 
 ---
 
-## Step 6 — Check your work
+## Step 6 — Check your work (minutes 50–53)
 
 The repo can grade your run:
 
@@ -593,9 +606,19 @@ spec changes commit && spec test
   Exercise 2's prompt again with that id in place of REQ-003, one at a time.
 - **REQ-007** — the requirement *you* drafted — is waiting to be taken to
   green on the plane home. One warning for the unsupervised: `+` is a regex
-  metacharacter, so `"1+2".split("+")` throws `PatternSyntaxException`. Let
-  the RED bar tell you that, then reach for `Pattern.quote`.
-- Compare your final state with `git diff complete` when you finish them all.
+  metacharacter, so `"1+2".split("+")` throws
+  `PatternSyntaxException: Dangling meta character '+'`. Let the RED bar
+  tell you that, then reach for `Pattern.quote`.
+- If you phrase a `Then` step the kata has never seen — `Then an
+  IllegalArgumentException is thrown`, with no `with a message containing`
+  — `spec steps generate` appends it to the kata's own
+  `StringCalculatorSteps.java`, keeping the package and class and leaving a
+  `PendingException` body for you to fill in. It stages like everything
+  else, so read it with `spec changes show` before committing.
+- `git diff complete` shows one worked ending for REQ-004, REQ-005, and
+  REQ-006. Do **not** compare REQ-007 against it: the `complete` branch
+  predates this exercise and its REQ-007 is a newline-delimiter duplicate
+  of REQ-005, not the custom delimiter you drafted.
 
 ---
 

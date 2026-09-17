@@ -50,6 +50,7 @@ use spec_harness::domain::tool_profile::{Caller, resolve};
 use spec_harness::domain::{CACHE_DIR, HISTORY_FILE, LOG_DIR, RECOMMENDED_MODEL};
 use spec_harness::greenfield::{
     DynLlm, Greenfield, parse_language, prompt_language, refresh_project_memory,
+    settle_project_memory,
 };
 use spec_harness::mcp::{WorkflowServer, builtin_tool_definitions};
 use spec_harness::ports::{
@@ -57,7 +58,7 @@ use spec_harness::ports::{
 };
 use spec_harness::repl::{Ending, is_greenfield_start, offer_greenfield, run_shell};
 use spec_harness::wiring;
-use spec_harness::workspace::{SPEC_PATH, detect_project_layout};
+use spec_harness::workspace::{SPEC_PATH, detect_project_layout, project_layout};
 
 #[derive(Parser)]
 #[command(
@@ -778,7 +779,18 @@ fn run_shell_mode(root: &Path, model: Option<&str>, retry: Option<u32>) -> anyho
     }
     print_banner();
     let model_ready = announce_session_model(root, model);
-    refresh_project_memory(root, None);
+    // Session start is where the layout question belongs: a human is
+    // attached, and the answer is recorded for every later command.
+    let llm =
+        cached_chat(root, model).map(|(model, chat)| (model, std::sync::Arc::new(chat) as DynLlm));
+    let mut prompter = interactive_prompter();
+    settle_project_memory(
+        root,
+        llm.as_ref(),
+        resolve_llm_attempts(root, retry),
+        prompter.as_mut(),
+    );
+    drop(prompter);
     println!(
         "Interactive shell - type commands without the spec prefix \
          (e.g. list). exit, quit, or Ctrl+C leaves. The session \
@@ -882,10 +894,6 @@ fn overlay_catalog(root: &Path) -> OverlayFeatures {
     wiring::overlay_catalog(root)
 }
 
-fn overlay_sources(root: &Path) -> OverlayTree {
-    wiring::overlay_sources(root)
-}
-
 fn deterministic_status_gap(next_step: &str) -> bool {
     next_step.contains("spec scenario add")
         || next_step.contains("spec unittest generate")
@@ -912,12 +920,14 @@ fn generation_service(
     >,
 > {
     let language = primary_language(root)?;
+    let layout = project_layout(root);
     Ok(GenerationService::new(
         overlay_catalog(root),
-        overlay_sources(root),
+        wiring::overlay_sources(root, layout.module_root.as_deref()),
         wiring::change_store(root),
         wiring::spec_repository(root),
         language,
+        layout,
         connected_llm(root, model_flag, caller, attempts, tools, max_rounds),
     ))
 }
@@ -940,12 +950,14 @@ fn implement_service(
     >,
 > {
     let language = primary_language(root)?;
+    let layout = project_layout(root);
     Ok(ImplementService::new(
         overlay_catalog(root),
-        overlay_sources(root),
+        wiring::overlay_sources(root, layout.module_root.as_deref()),
         wiring::change_store(root),
         wiring::spec_repository(root),
         language,
+        layout,
         connected_llm(root, model_flag, caller, attempts, tools, max_rounds),
     ))
 }
@@ -966,12 +978,14 @@ fn status_service(
         LiveBroker,
     >,
 > {
+    let layout = project_layout(root);
     Ok(StatusService::new(
         overlay_catalog(root),
-        overlay_sources(root),
+        wiring::overlay_sources(root, layout.module_root.as_deref()),
         wiring::change_store(root),
         wiring::spec_repository(root),
         primary_language(root)?,
+        layout,
         connected_llm(
             root,
             model_flag,

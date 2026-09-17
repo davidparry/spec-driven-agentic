@@ -24,7 +24,7 @@ use crate::application::change_service::ChangeService;
 use crate::application::generation_service::{GenerationService, ResolvedLlm};
 use crate::application::implement_service::ImplementService;
 use crate::application::init_service::InitService;
-use crate::application::memory_service::{MemoryAwareConversation, MemoryService};
+use crate::application::memory_service::{LayoutAsk, MemoryAwareConversation, MemoryService};
 use crate::application::scenario_service::ScenarioService;
 use crate::application::spec_mutation_service::SpecMutationService;
 use crate::application::tdd_service::{TddError, TddService, TestReport};
@@ -58,6 +58,29 @@ pub fn refresh_project_memory(root: &Path, chosen: Option<Language>) -> ProjectM
         .refresh(chosen)
         .unwrap_or_else(|error| {
             tracing::debug!(error = %error.0, "project memory not refreshed");
+            ProjectMemory::default()
+        })
+}
+
+/// [`refresh_project_memory`] with the one layout question a scan cannot
+/// answer: which module the harness works in when the tree holds several.
+/// The model proposes, the developer confirms, and the answer is recorded,
+/// so a session on an unambiguous project asks nothing.
+pub fn settle_project_memory(
+    root: &Path,
+    llm: Option<&(String, DynLlm)>,
+    attempts: u32,
+    prompter: &mut dyn Prompter,
+) -> ProjectMemory {
+    let ask = llm.map(|(model, llm)| LayoutAsk {
+        model,
+        llm: llm.as_ref(),
+        attempts,
+    });
+    project_memory_service(root.to_path_buf())
+        .settle(None, ask, prompter)
+        .unwrap_or_else(|error| {
+            tracing::debug!(error = %error.0, "project memory not settled");
             ProjectMemory::default()
         })
 }
@@ -638,12 +661,14 @@ impl Greenfield {
         FsSpecRepository,
         DynLlm,
     > {
+        let layout = crate::workspace::project_layout(&self.root);
         GenerationService::new(
             crate::wiring::overlay_catalog(&self.root),
-            crate::wiring::overlay_sources(&self.root),
+            crate::wiring::overlay_sources(&self.root, layout.module_root.as_deref()),
             self.change_store(),
             FsSpecRepository::new(self.root.join(SPEC_PATH)),
             language,
+            layout,
             self.memory_llm().map(|(model, generator)| {
                 ResolvedLlm::with_attempts(model, generator, self.llm_attempts)
             }),
@@ -660,12 +685,14 @@ impl Greenfield {
         FsSpecRepository,
         DynLlm,
     > {
+        let layout = crate::workspace::project_layout(&self.root);
         ImplementService::new(
             crate::wiring::overlay_catalog(&self.root),
-            crate::wiring::overlay_sources(&self.root),
+            crate::wiring::overlay_sources(&self.root, layout.module_root.as_deref()),
             self.change_store(),
             FsSpecRepository::new(self.root.join(SPEC_PATH)),
             language,
+            layout,
             self.memory_llm().map(|(model, generator)| {
                 ResolvedLlm::with_attempts(model, generator, self.llm_attempts)
             }),

@@ -93,14 +93,43 @@ Feature: Spec mutations
     And the developer was told a finding containing "The description holds 2 requirement(s):"
     And the developer was told a finding containing "2. Empty string returns zero"
     And the developer was asked "Accept [Enter for all, or comma-separated numbers]:"
-    And the developer was told a finding containing "Accepted requirements are now stored in requirements/requirements.json as pending:"
+    And the developer was told a finding containing "Accepted requirements are staged for requirements/requirements.json as pending"
     And the developer was told a finding containing "REQ-002 Comma separated numbers are summed"
     And the developer was told a finding containing "REQ-003 Empty string returns zero"
     And the developer was asked "Which requirement first to review and refine? [1-2, Enter for 1]:"
     And the developer was asked "REQ-003 title [Empty string returns zero] (Enter keeps it):"
     And the developer was asked "REQ-003 criterion 1 [Given an empty string "", when add is called, then the result is 0] (Enter keeps it, '-' drops it):"
-    And the working spec has 3 requirements
     And the staged spec has 3 requirements
+    And the working spec has 1 requirement
+
+  # The assisted wizard stages the accepted batch up front so the developer
+  # can see it, but declining the wording must not leave anything applied.
+  Scenario: Declining the reworded wording keeps the batch staged and the working spec untouched
+    Given the model will reply:
+      """
+      [{"title": "Comma separated numbers are summed",
+        "story": "As a user, I want comma sums so that totals come from one input.",
+        "acceptanceCriteria": ["Given the input \"1,2\", when add is called, then the result is 3"]},
+       {"title": "Empty string returns zero",
+        "story": "As a user, I want empty input to be 0 so that no input is a safe default.",
+        "acceptanceCriteria": ["Given an empty string \"\", when add is called, then the result is 0"]}]
+      """
+    And the developer will answer:
+      """
+      sum numbers from a comma separated string, empty input means zero
+      <empty>
+      2
+      <empty>
+      <empty>
+      <empty>
+      <empty>
+      n
+      """
+    When a requirement is drafted with the model's help
+    Then the working spec has 1 requirement
+    And the staged spec has 3 requirements
+    And the draft next step contains "are still staged for requirements/requirements.json"
+    And the draft next step contains "spec changes discard"
 
   Scenario: An unusable model reply falls back to manual drafting
     Given the model will reply:

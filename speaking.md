@@ -90,6 +90,12 @@ prove the point, the demo runs with the Wi-Fi switched off.
   keeps the two from drifting apart.
 - A named catalog of local-model failure modes, each with the guardrail that
   catches it.
+- Three optional breakage demos they can run themselves, where the *human*
+  breaks the spec and the tool catches it: a criterion that is not phrased
+  Given/When/Then (`validate_spec` rejects it), a story full of *should*,
+  *handle*, and *quickly* (`refine_requirement` returns one finding per
+  offence), and a spec split across included files that still merges into one
+  backlog.
 - A repository you can run on your own machine, behind your own firewall.
 
 ## Where This Breaks
@@ -108,7 +114,8 @@ failure the project actually hit; each is now caught by a deterministic check.
 | Premature completion | Marked a requirement implemented with nothing proving it | `requirement_mark_implemented` requires GREEN plus a scenario tagged with the requirement ID |
 | Right process, wrong requirement | Asked for "the next pending id", took the requirement it had just drafted to green instead — correct discipline, every gate satisfied, an hour spent on work nobody asked for | Nothing in the loop, and that is the point: the phase gates police *how* the agent works, never *what it works on*. The prompt names the id, and the end-of-run verifier grades that id by name |
 | Tool-calling drift | Local model invented a tool, skipped staging, or called `command_run` without waiting | Per-command profiles (`spec tools profiles`) hand the generating commands 3–7 tools and the read-only `spec ask` 12; `[tool_rules]` in `harness/prompts/prompts.toml`; the harness's `command_run` asks the human to confirm |
-| Fixing the test instead of the code | Given a shell and a writable test file, the local model made the bar green by deleting the assertion | Nothing in a loose host — pi has no permission popups by design. The harness has no shell and no file-write tool at all: scenarios and tests are typed mutations that land in staging, and `run_tests` is the only thing that can report a bar |
+| Fixing the test instead of the code | Given a shell and a writable test file, the local model made the bar green by deleting the assertion | Nothing in a loose host — pi has no permission popups by design. In the harness the model never gets a shell or a free-hand write: an implementation attempt lands in staging as a reviewable diff, and `run_tests` is the only thing that can report a bar |
+| Implementing more than was asked | Asked to implement REQ-006, the local model also quietly implemented REQ-005 — the bar went green, both behaviors worked, and the spec still called REQ-005 pending | The mirror image of premature completion: the code runs ahead of the spec instead of behind it. `spec implement` now matches the staged diff against the other pending requirements and warns when it satisfies one. Literal matching — same quoted inputs, same expected value — so it warns and never blocks; reading the staged diff is still the real defense |
 
 Where a frontier model is still the better call, and where a human still has to
 be on the review, is stated plainly rather than skipped.
@@ -122,11 +129,14 @@ or LLM experience required; comfort with JUnit and Cucumber is assumed.
 
 ## Formats
 
-| Format | What it covers |
-| --- | --- |
-| **Conference session** (50 minutes) | The full narrative above — pi on Ollama, pi with its built-ins taken away, then the harness — with the live frontier-versus-local comparison and the *Where This Breaks* segment. |
-| **Short session** (30 minutes) | The same three acts, demo-driven, with no hands-on segment: pi free and offline, the one-flag change to `pi --no-builtin-tools`, then the spec-specific runner taken from requirement to green — plus *Where This Breaks*. Deck cut: [`slides/index.html?30`](slides/index.html?30), published at [/talk30/](https://davidparry.github.io/spec-driven-agentic/talk30/). |
-| **Hands-on workshop** | Attendees run the loop on their own machines against a local model: draft a requirement, refine it until the wording review is clean, take it through RED, GREEN, and REFACTOR. Companion material is the [workshop follow-along](student-follow-along.md); the [pi path](student-follow-docs/pi-path.md) is the free, no-IDE on-ramp, and the [harness path](student-follow-docs/harness-path.md) covers attendees who prefer the terminal to an IDE. |
+One deck, two cuts — [`slides/index.html`](slides/index.html) selects by
+query string, and <kbd>t</kbd> switches between them live.
+
+| Format | Deck cut | What it covers |
+| --- | --- | --- |
+| **Conference session** (50 minutes) | [`?60`](slides/index.html?60) | The full narrative above — pi on Ollama, pi with its built-ins taken away, then the harness — with the live frontier-versus-local comparison and the *Where This Breaks* segment. The two exercise slides are delivered as demos from the stage rather than as hands-on time, which is what makes the 60-minute cut fit in 50. |
+| **Short session** (30 minutes) | [`?30`](slides/index.html?30) | The same three acts, demo-driven, with no hands-on segment: pi free and offline, the one-flag change to `pi --no-builtin-tools`, then the spec-specific runner taken from requirement to green — plus *Where This Breaks*. Published at [/talk30/](https://davidparry.github.io/spec-driven-agentic/talk30/). |
+| **Hands-on workshop** (60 minutes) | [`?60`](slides/index.html?60) | Attendees run the loop on their own machines against a local model: draft a requirement, refine it until the wording review is clean, take it through RED, GREEN, and REFACTOR, then grade the run with `scripts/verify-workshop-run.sh check`. Companion material is the [workshop follow-along](student-follow-along.md); the [pi path](student-follow-docs/pi-path.md) is the free, no-IDE on-ramp, and the [harness path](student-follow-docs/harness-path.md) covers attendees who prefer the terminal to an IDE. |
 
 ## Technical requirements
 
@@ -154,6 +164,8 @@ or LLM experience required; comfort with JUnit and Cucumber is assumed.
 | Gherkin and JUnit generated from the spec | `kata/` |
 | The offline harness: same server, scoped profiles on `qwen3.8-flash-next:125b-mlx` | [`harness/README.md`](harness/README.md), [`student-follow-docs/harness-path.md`](student-follow-docs/harness-path.md) |
 | Every prompt sent to the model, in one auditable file | `harness/prompts/prompts.toml` |
+| The end-of-run grader that names the requirement id — where "right process, wrong requirement" is caught | [`scripts/verify-workshop-run.sh`](scripts/verify-workshop-run.sh) |
+| The bundled MCP-server smoke test: launch, discover 25 tools, invoke | `smoke-test/`, captured run in [`student-follow-docs/step2.log`](student-follow-docs/step2.log) |
 | The slide deck — one file, two cuts ([`?30`](slides/index.html?30) selects the short one, or press <kbd>t</kbd> in the deck) | [`slides/index.html`](slides/index.html) |
 
 ## Booking

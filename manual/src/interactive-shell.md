@@ -80,6 +80,31 @@ When all three signs of a brand-new project line up —
 start refreshes `.spec-memory.json` (language, libraries, layout) so
 later model calls in the session carry that brief.
 
+## The layout question
+
+That refresh resolves the project's layout: the module whose build file
+the test runner is pointed at, its test and production roots, its
+features directory, the step-definition file generated steps join, and
+the package existing tests declare. Everything the harness writes follows
+from it.
+
+It is answered deterministically — build manifests, observed source
+files, and the feature files your requirements name. A model is asked
+only when a tree holds several buildable modules and none of that
+separates them, and then only to pick one of the discovered module
+roots; anything else it replies with is refused. You confirm, and the
+answer is recorded, so the question is asked once per project:
+
+```text
+Several modules could be the one to work in: kata, smoke-test.
+Asking qwen3.8-flash-next:125b-mlx which module - working ...
+Work in kata - the module Maven compiles and runs tests in? [y/N] y
+Recorded kata as this project's module - asked once; spec inspect re-scans if that changes.
+```
+
+With no model resolved, or on a decline, the scan's own pick stands and
+the shell says which one it used.
+
 ```text
 It appears you are in a greenfield - this project has no requirements/requirements.json yet.
 Start with the greenfield command now? [y/N]

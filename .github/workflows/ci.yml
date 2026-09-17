@@ -142,7 +142,7 @@ jobs:
           name: spec-linux
           path: /tmp/spec-bin
 
-      - name: Live sweep (24 tools against the real binary)
+      - name: Live sweep (25 tools against the real binary)
         run: |
           chmod +x /tmp/spec-bin/spec
           mvn -B -pl smoke-test test -Dspec.binary=/tmp/spec-bin/spec
