@@ -3,7 +3,7 @@
 ## Install
 
 Download an installer from the
-[latest release](https://github.com/davidparry/tdd-bdd-agentic/releases/latest)
+[latest release](https://github.com/davidparry/spec-driven-agentic/releases/latest)
 (macOS Apple Silicon and Intel, Linux x86_64 and arm64, Windows
 x86_64), or build from source:
 

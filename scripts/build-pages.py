@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parent.parent
 SITE = ROOT / "_site"
 DOCS = ROOT / "docs"
 TEMPLATE = (DOCS / "assets" / "page.template.html").read_text(encoding="utf-8")
-GITHUB = "https://github.com/davidparry/tdd-bdd-agentic/blob/trunk/"
+GITHUB = "https://github.com/davidparry/spec-driven-agentic/blob/trunk/"
 
 SITE_PATHS = {
     "student-follow-along.md": "../workshop/",

@@ -1,9 +1,9 @@
 # Spec-Driven with Harness — TDD & BDD in the Agentic Era
 
-[![CI](https://github.com/davidparry/tdd-bdd-agentic/actions/workflows/ci.yml/badge.svg?branch=trunk)](https://github.com/davidparry/tdd-bdd-agentic/actions/workflows/ci.yml)
-[![Release](https://github.com/davidparry/tdd-bdd-agentic/actions/workflows/release.yml/badge.svg)](https://github.com/davidparry/tdd-bdd-agentic/actions/workflows/release.yml)
-[![spec harness](https://img.shields.io/github/v/release/davidparry/tdd-bdd-agentic?label=spec%20harness)](https://github.com/davidparry/tdd-bdd-agentic/releases/latest)
-[![Harness coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdavidparry%2Ftdd-bdd-agentic%2Fbadges%2Fcoverage.json)](https://github.com/davidparry/tdd-bdd-agentic/actions/workflows/ci.yml)
+[![CI](https://github.com/davidparry/spec-driven-agentic/actions/workflows/ci.yml/badge.svg?branch=trunk)](https://github.com/davidparry/spec-driven-agentic/actions/workflows/ci.yml)
+[![Release](https://github.com/davidparry/spec-driven-agentic/actions/workflows/release.yml/badge.svg)](https://github.com/davidparry/spec-driven-agentic/actions/workflows/release.yml)
+[![spec harness](https://img.shields.io/github/v/release/davidparry/tdd-bdd-agentic?label=spec%20harness)](https://github.com/davidparry/spec-driven-agentic/releases/latest)
+[![Harness coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdavidparry%2Ftdd-bdd-agentic%2Fbadges%2Fcoverage.json)](https://github.com/davidparry/spec-driven-agentic/actions/workflows/ci.yml)
 [![Java coverage gate](https://img.shields.io/badge/JaCoCo-100%25%20gate-brightgreen)](pom.xml)
 [![Quality gates](https://img.shields.io/badge/SpotBugs%20%7C%20PMD%20%7C%20clippy-enforced-blue)](.github/workflows/ci.yml)
 [![License: AGPL-3.0](https://img.shields.io/github/license/davidparry/tdd-bdd-agentic)](LICENSE)

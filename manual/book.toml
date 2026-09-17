@@ -12,8 +12,8 @@ build-dir = "../docs/manual"
 [output.html]
 default-theme = "ayu"
 preferred-dark-theme = "ayu"
-git-repository-url = "https://github.com/davidparry/tdd-bdd-agentic"
-edit-url-template = "https://github.com/davidparry/tdd-bdd-agentic/edit/trunk/manual/{path}"
+git-repository-url = "https://github.com/davidparry/spec-driven-agentic"
+edit-url-template = "https://github.com/davidparry/spec-driven-agentic/edit/trunk/manual/{path}"
 site-url = "/spec-driven-agentic/manual/"
 
 [output.html.search]

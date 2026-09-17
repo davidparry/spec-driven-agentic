@@ -1,8 +1,8 @@
 # spec — spec-driven BDD/TDD harness
 
-[![CI](https://github.com/davidparry/tdd-bdd-agentic/actions/workflows/ci.yml/badge.svg?branch=trunk)](https://github.com/davidparry/tdd-bdd-agentic/actions/workflows/ci.yml)
-[![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdavidparry%2Ftdd-bdd-agentic%2Fbadges%2Fcoverage.json)](https://github.com/davidparry/tdd-bdd-agentic/actions/workflows/ci.yml)
-[![Latest release](https://img.shields.io/github/v/release/davidparry/tdd-bdd-agentic)](https://github.com/davidparry/tdd-bdd-agentic/releases/latest)
+[![CI](https://github.com/davidparry/spec-driven-agentic/actions/workflows/ci.yml/badge.svg?branch=trunk)](https://github.com/davidparry/spec-driven-agentic/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdavidparry%2Ftdd-bdd-agentic%2Fbadges%2Fcoverage.json)](https://github.com/davidparry/spec-driven-agentic/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/davidparry/tdd-bdd-agentic)](https://github.com/davidparry/spec-driven-agentic/releases/latest)
 [![Clippy](https://img.shields.io/badge/clippy--D%20warnings-enforced-blue)](../.github/workflows/ci.yml)
 
 One native binary for the whole spec-driven loop (spec → Gherkin → RED →
@@ -464,7 +464,7 @@ anything it deliberately leaves alone (the shared `~/.cargo/env` PATH
 hook, which rustup also uses):
 
 ```bash
-curl -LsSf https://github.com/davidparry/tdd-bdd-agentic/releases/latest/download/spec-harness-uninstaller.sh | sh -s -- -y
+curl -LsSf https://github.com/davidparry/spec-driven-agentic/releases/latest/download/spec-harness-uninstaller.sh | sh -s -- -y
 ```
 
 Drop the `-y` to get a confirmation prompt listing what will be

@@ -5,7 +5,7 @@ edition = "2024"
 rust-version = "1.97"
 description = "Spec-driven BDD/TDD harness with an embedded MCP server"
 license = "AGPL-3.0-only"
-repository = "https://github.com/davidparry/tdd-bdd-agentic"
+repository = "https://github.com/davidparry/spec-driven-agentic"
 
 [[bin]]
 name = "spec"

@@ -60,3 +60,5 @@ _site/
 /.spec-state.json
 
 /harness/.bdd-log/
+/harness/.cargo
+/harness/.cargo/

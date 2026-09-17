@@ -65,7 +65,7 @@ equivalent):
 
 Any MCP host can drive this server. [pi](https://pi.dev) has no MCP in core,
 so it needs the `pi-mcp-extension` package; the repo ships a ready
-[`.pi/mcp.json`](https://github.com/davidparry/tdd-bdd-agentic/blob/trunk/.pi/mcp.json),
+[`.pi/mcp.json`](https://github.com/davidparry/spec-driven-agentic/blob/trunk/.pi/mcp.json),
 and `pi -nbt` disables pi's own `bash`/`write`/`edit` so these tools are all
 the model gets. The bridge registers them as `mcp_<server>_<tool>`, so
 `run_tests` arrives as `mcp_spec_driven_server_run_tests`.

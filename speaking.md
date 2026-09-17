@@ -160,5 +160,5 @@ or LLM experience required; comfort with JUnit and Cucumber is assumed.
 
 Interested in this session or the workshop for your conference or team? Open an
 issue on
-[github.com/davidparry/tdd-bdd-agentic](https://github.com/davidparry/tdd-bdd-agentic/issues)
+[github.com/davidparry/spec-driven-agentic](https://github.com/davidparry/spec-driven-agentic/issues)
 or reach out through [davidparry.com](https://davidparry.com).
