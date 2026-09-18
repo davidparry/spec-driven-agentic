@@ -1,6 +1,213 @@
 # Changelog
 
-## Unreleased
+## 0.5.3
+
+Defects found by running the full workshop end to end through the `pi`
+agent against 0.5.2. Nothing here is driven by a new feature; each item is
+something the documented path walks into on its own.
+
+- Generated unit-test methods no longer collide. Two acceptance criteria
+  differing only in punctuation slugged to the same Java method name and
+  the test class stopped compiling with `method ... is already defined in
+  class StringCalculatorTest`. The workshop reaches this without doing
+  anything unusual, because a custom-delimiter requirement produces
+  criteria that differ only by the delimiter character. Every template
+  that slugs free text into an identifier now claims its name from a
+  `MemberNames` allocator: the first claimant keeps the bare slug and
+  later collisions take `_2`, `_3`, and so on in order. Uniqueness holds
+  both within one generation batch and against the members the target file
+  already declares, so appending to a class that has `foo()` produces
+  `foo_2()`. Names are allocated in criterion order and stay the same
+  across a regenerate, so re-running the command does not churn the diff.
+  The suffix disambiguates the identifier and nothing else — the criterion
+  is already carried verbatim beside the member, in the `@DisplayName`, in
+  the comment above the body, and in the `TODO` the placeholder fails
+  with. This was never Java-only: the .NET and Rust unit-test templates
+  slug the same way, and so does step-definition generation in all three
+  languages, where two step texts differing only in punctuation collide
+  identically. JavaScript and TypeScript are structurally immune and are
+  left alone — their test names are string literals and their step
+  definitions are anonymous functions, so there is no identifier to
+  collide.
+
+- Spec JSON files end in a newline. `requirements/requirements.json` and
+  every child spec file stopped at `}`, leaving a `\ No newline at end of
+  file` marker in students' diffs and reading inconsistently against the
+  generated Java and Gherkin, which have always ended in one. Every writer
+  of a spec document now renders through a single `model::render`, so one
+  place decides what a spec file looks like on disk instead of three that
+  have to agree.
+
+- `refine_requirement` can no longer report a false `clean: true`. This is
+  the one worth reading twice. `requirement_reword` stages its edit, while
+  refinement read the committed copy, so a deliberately vague story that
+  had just been staged came back `{"clean": true, "findings": []}` — the
+  tool passed judgement on text the developer had already replaced and
+  told them their wording was fine. The same split stopped the documented
+  iterate-until-clean loop from converging: rewording changed nothing the
+  next pass could see, so identical findings came back indefinitely unless
+  an agent inserted an undocumented `changes_commit` between passes.
+  Refinement now resolves staged-first, and the reply carries a `source`
+  field reading `"staged"` or `"working tree"` so the behaviour is never
+  silent. The loop no longer needs a commit between passes — reword and
+  refine until the findings are gone, then commit once. `validate_spec`
+  deliberately still reads the committed spec, because it is the frozen
+  workshop tool and `changes_validate` is its staged-aware twin, but it
+  now discloses that: its `nextStep` names `changes_validate` whenever a
+  spec edit is waiting in staging.
+
+- Catalog-structure errors name a remedy that exists. A duplicate id and a
+  spec file included more than once were both answered with advice to call
+  the reword tool, alongside a blanket "never edit the requirements file
+  by hand". Rewording fixes neither — a duplicate id needs a requirement
+  object deleted from one of the files declaring it, a repeated include
+  needs an entry removed from an `includes` array, and no tool performs
+  either edit — so the model was told to do something impossible and
+  forbidden from doing the only thing that would work. These two classes
+  now get their own guidance, which names the file edit and states that
+  the hand-editing rule covers wording, not catalog structure; the
+  exception is written down rather than left as a rule the reader has to
+  quietly break. Mixed issues keep both remedies, with the prohibition
+  intact for the wording half. The same wrong advice also lived in
+  `changes_validate`'s `nextStep` and in the `requirement_reword` tool
+  description, which claimed it repairs whatever validation reported; both
+  now agree with the rest.
+
+- `changes_show` counts every edit it elides. The six-edit case that
+  prompted the investigation was in fact correct — `(1 earlier edit(s))`
+  plus five named edits is six, and nothing was lost. The real defect
+  started at the eighth edit: the `(N earlier edit(s))` marker became an
+  ordinary element of the summary on the next merge and was re-counted as
+  a single dropped edit, so the total pegged at 2 and understated the
+  batch for as long as the run went on. The count now round-trips, and
+  the phrasing states the total outright, reading
+  `(9 edits in all, 4 not shown); ...` — because `changes_show` is the
+  human review checkpoint and a reviewer should not have to add a prefix
+  to a list to learn what they are approving. The cap stays at five named
+  edits, so one file's review line still cannot grow without bound.
+
+- The MCP `list_requirements` tool reports the spec file each requirement
+  lives in, matching the `file` field `spec list` has always returned.
+  Once the workshop splits the catalog across included files, an agent
+  driving over MCP could see that a requirement existed but not which
+  document held it. The field is declared last, so the existing `id`,
+  `title`, and `status` keep their names and their wire order and nothing
+  downstream shifts.
+
+The six fixes are covered by 802 unit tests, 228 Cucumber scenarios, and
+23 MCP conformance tests. Anything describing the old `refine_requirement`
+loop — a `changes_commit` between refinement passes in particular — the
+old `changes_show` phrasing, or generated member names without a `_2`
+suffix is stale against this release.
+
+## 0.5.2
+
+The version the student follow-alongs and the two records in `notes/` are
+written against. Check with `spec --version`; a binary reporting anything
+lower does not have the generation fixes below.
+
+- `spec steps generate` and `spec unittest generate` send the model only
+  the newly generated class members, never the file they are spliced into.
+  The append itself is deterministic Rust (`splice_step_definitions`,
+  `splice_unit_tests`), so every byte outside the insertion point is
+  carried over rather than retyped, and the model cannot rename a field or
+  an existing step method on the way past. Measured for one new step
+  definition: 7 added lines, 0 removed, against a 48-line whole-file
+  baseline. A reply that hands back a whole file, alters a generated step
+  expression, or drops a definition is refused, and the deterministic
+  members are staged instead (`"source": "template"`). The pre-existing
+  whole-file gate still runs on the assembled result as defence in depth.
+  Greenfield generation, which has no existing file to protect, still goes
+  through the whole-file polish pass.
+
+- Appended members are separated from whatever the class already declares
+  by exactly one blank line, collapsing a pre-existing trailing blank so a
+  second append never leaves two.
+
+- Spec text is backslash- and control-character-escaped wherever it crosses
+  into generated source, through one `escape_literal(text, quote)` helper
+  parameterised on the quote character. Only double quotes were escaped
+  before, at seventeen interpolation points across the Java, Rust, C#, and
+  JS/TS templates. A criterion holding the two-character `\n` escape —
+  REQ-005 does — broke the Maven failure message across two lines; a
+  criterion holding a real newline turned the `// criterion` comment into
+  stray Java and failed compilation outright. The Rust step-definition arm
+  was worse: it interpolated step text raw, so any step with a quoted
+  argument emitted a `todo!` that could not compile.
+
+- `extract_patterns` un-escapes symmetrically with `escape_literal`,
+  including `\\`. Unknown escapes are deliberately left alone, so the `\d`
+  in a hand-written regex step stays a regex atom. Without this a generated
+  pattern would not match itself, would read as missing, and the next
+  `spec steps generate` would append a duplicate definition — which makes
+  Cucumber refuse every scenario that uses it.
+
+- A staging lock serialises concurrent mutating MCP tool calls. Staging a
+  mutation is a read-modify-write spread across a service and an adapter,
+  so a host that batches tool calls in parallel could interleave two of
+  them, let the second write win, and lose one edit while both calls
+  reported success.
+
+- `changes_show` summaries accumulate when several edits hit one file: two
+  `scenario_add` calls on the same feature file now produce one entry
+  naming both scenarios. The summary used to be overwritten, understating
+  the review surface at the exact moment a human is asked to approve it.
+
+- Feature-file header comments and the `As a / I want / So that` narrative
+  under `Feature:` survive `scenario_add`. The Gherkin parser discards
+  comments and the description was never round-tripped, so both vanished on
+  the first append.
+
+- Model replies are re-escaped before they are staged, so a reworded
+  requirement keeps the two-character `\n` the canonical spec uses instead
+  of deserialising it into a real newline.
+
+- The `command_run` confirmation no longer renders its `[y/N]` suffix
+  twice.
+
+- The wizards warn on stderr when stdin is not a terminal, and the reply's
+  `nextStep` says that nothing was staged. A read past the end of a pipe is
+  indistinguishable from pressing Enter, so `spec reword` used to take
+  defaults for what it could not read, decline at the final confirmation,
+  and exit 0 without explaining itself.
+
+- Polished fragments are guaranteed to end in a newline and to keep the
+  template's leading indent, both of which the splice point relies on and
+  code-fence stripping removes.
+
+- `scripts/verify-workshop-run.sh check` resolves the spec catalog's
+  `includes` recursively, with a circular-include guard, so a requirement
+  moved into a child spec file is still graded.
+
+One note on version strings, since it is the reason this bump exists. Four
+of the items above — the staging lock, the feature-header preservation, the
+recursive `includes` in the verifier, and the first version of the
+piped-stdin warning — landed one commit before the bump, while the crate
+still reported `0.5.0`. Two materially different builds therefore answer
+`spec --version` with `0.5.0`.
+
+It then happened a second time at `0.5.1`. That version was built and
+installed from an uncommitted working tree and never committed, so
+`git log -S 'version = "0.5.1"'` finds nothing — but binaries reporting
+`0.5.1` were installed and used, and they predate the generation fixes
+above. So a `0.5.1` in the wild is not a phantom; it is a build from
+before this entry. If a symptom recorded in
+`notes/workshop-validation-runs.md` reappears, check the version first and
+rebuild anything below `0.5.2`.
+
+## 0.2.6 – 0.5.0
+
+These releases were never split into per-version entries. Three headline
+changes in the range can be dated from the crate version at the time:
+
+- `0.4.0` consolidated the workshop MCP server into the binary, deleting the
+  Java `mcp-server/` module and renaming `mcp-client/` to `smoke-test/`.
+- `0.4.1` renamed `cli/` to `harness/` and the crate to `bdd-harness`.
+- `0.5.0` renamed the binary to `spec` and the crate to `spec-harness`.
+
+Everything from `0.2.6` through `0.3.3` was tagged and released without
+changelog entries, and those releases are not reconstructed here. The list
+below is the accumulated backlog for the whole range, roughly newest first.
 
 - The binary is now `spec` and the crate is `spec-harness`. What the tool
   does is author, gate, and drive a requirements spec; `bdd` named the

@@ -97,6 +97,11 @@ impl<L: LlmConversation, B: ToolBroker> ResolvedLlm<L, B> {
         self.agent.ask(prompter, prompt, parse, on_retry)
     }
 
+    /// Who is being asked, for the "working" line while they think.
+    pub fn model(&self) -> &str {
+        self.agent.model()
+    }
+
     #[cfg(test)]
     pub(crate) fn chat(&self) -> &L {
         self.agent.chat()
@@ -225,6 +230,7 @@ where
                 let expected = extract_patterns(self.language, fragment);
                 self.polish_fragment(
                     prompter,
+                    "the step definitions",
                     fragment,
                     |code| looks_like_step_fragment(self.language, code, &expected),
                     |members| splice_step_definitions(&file.content, self.language, members),
@@ -239,7 +245,7 @@ where
                     Some(file) => append_step_definitions(&file.content, self.language, &missing),
                     None => step_definitions_template(self.language, &missing),
                 };
-                self.polish(prompter, &template, valid_file)
+                self.polish(prompter, "the step definitions", &template, valid_file)
             }
         };
         let verb = if existing.is_some() {
@@ -303,11 +309,12 @@ where
             // Brownfield: the model sees only the test methods being
             // added, never the class they join.
             Some(file) => {
-                let fragment = unit_test_fragment(self.language, requirement);
+                let fragment = unit_test_fragment(&file.content, self.language, requirement);
                 let placeholders = todo_placeholders(&fragment);
                 let cases = requirement.acceptance_criteria.len();
                 self.polish_fragment(
                     prompter,
+                    "the unit test",
                     &fragment,
                     |code| looks_like_unit_test_fragment(self.language, code, &placeholders, cases),
                     |members| splice_unit_tests(&file.content, self.language, members),
@@ -318,7 +325,7 @@ where
             // whole-file polish pass still applies.
             None => {
                 let template = unit_test_template(self.language, requirement);
-                self.polish(prompter, &template, valid_file)
+                self.polish(prompter, "the unit test", &template, valid_file)
             }
         };
         let summary = format!(
@@ -341,6 +348,7 @@ where
     fn polish(
         &self,
         prompter: &mut dyn Prompter,
+        what: &str,
         template: &str,
         valid: impl Fn(&str) -> bool,
     ) -> (String, String) {
@@ -348,7 +356,9 @@ where
             return (template.to_string(), "template".into());
         };
         let prompt = polish_prompt(self.language, template);
-        match llm.ask(
+        let work = prompter.working(&format!("Asking {} to write {what} - working", llm.model()));
+        let retries = std::cell::RefCell::new(Vec::<String>::new());
+        let outcome = llm.ask(
             prompter,
             &prompt,
             |response| {
@@ -359,8 +369,17 @@ where
                     Err("the reply was not a valid file for this language".into())
                 }
             },
-            |_, _, _| {},
-        ) {
+            |attempt, of, reason| {
+                retries
+                    .borrow_mut()
+                    .push(retry_note(attempt, of, reason, what));
+            },
+        );
+        drop(work);
+        for message in retries.into_inner() {
+            prompter.warn(&message);
+        }
+        match outcome {
             // `strip_code_fences` leaves whatever the model ended on, and it
             // often ends on the closing brace. These are source files; give
             // them the final newline every tool expects.
@@ -381,6 +400,7 @@ where
     fn polish_fragment(
         &self,
         prompter: &mut dyn Prompter,
+        what: &str,
         fragment: &str,
         valid_fragment: impl Fn(&str) -> bool,
         splice: impl Fn(&str) -> String,
@@ -391,7 +411,9 @@ where
             return (ending_in_newline(template), "template".into());
         };
         let prompt = polish_fragment_prompt(self.language, fragment, count_members(fragment));
-        match llm.ask(
+        let work = prompter.working(&format!("Asking {} to write {what} - working", llm.model()));
+        let retries = std::cell::RefCell::new(Vec::<String>::new());
+        let outcome = llm.ask(
             prompter,
             &prompt,
             |response| {
@@ -402,8 +424,17 @@ where
                     Err("the reply was not the set of members that were asked for".into())
                 }
             },
-            |_, _, _| {},
-        ) {
+            |attempt, of, reason| {
+                retries
+                    .borrow_mut()
+                    .push(retry_note(attempt, of, reason, what));
+            },
+        );
+        drop(work);
+        for message in retries.into_inner() {
+            prompter.warn(&message);
+        }
+        match outcome {
             Ok(polished) => {
                 let assembled = splice(&shaped_like(fragment, &polished));
                 if valid_file(&assembled) {
@@ -415,6 +446,14 @@ where
             Err(_) => (ending_in_newline(template), "template".into()),
         }
     }
+}
+
+/// A rejected reply costs another full model call. Saying so is the
+/// difference between a command that is working and one that looks
+/// stuck: three silent attempts at six seconds each is where most of
+/// the wait in `spec unittest generate` goes.
+fn retry_note(attempt: u32, of: u32, reason: &str, what: &str) -> String {
+    format!("The reply was not usable as {what} ({reason}) - asking again ({attempt} of {of})")
 }
 
 /// How many members a generated fragment holds, for the prompt's count.
@@ -595,6 +634,76 @@ mod tests {
             prompts[0].contains("Java best practices to follow:")
                 && prompts[0].contains("Package names are lowercase"),
             "prompt pins the language's best practices"
+        );
+    }
+
+    /// A prompter that keeps what it was told, so a test can see what
+    /// a student would.
+    #[derive(Default)]
+    struct Watching(Vec<String>);
+
+    impl Prompter for Watching {
+        fn tell(&mut self, message: &str) {
+            self.0.push(message.to_string());
+        }
+
+        fn working(&mut self, message: &str) -> Box<dyn crate::ports::Working> {
+            self.0.push(format!("working: {message}"));
+            Box::new(crate::ports::ToldOnce)
+        }
+
+        fn ask(&mut self, _question: &str) -> Result<String, crate::ports::PromptError> {
+            Err(crate::ports::PromptError("nobody to ask".into()))
+        }
+
+        fn confirm(&mut self, _question: &str) -> Result<bool, crate::ports::PromptError> {
+            Ok(false)
+        }
+    }
+
+    /// A local model takes tens of seconds to answer, and this was the
+    /// only model-backed command that said nothing at all while it
+    /// waited - the command read as hung.
+    #[test]
+    fn the_wait_for_the_model_is_narrated() {
+        let llm = FakeLlm::replying(
+            "public class GeneratedSteps {\n    @Given(\"a calculator\") public void p() {}\n}",
+        );
+        let mut prompter = Watching::default();
+        service(vec![], Some(llm))
+            .steps_generate(&mut prompter)
+            .unwrap();
+        assert!(
+            prompter
+                .0
+                .iter()
+                .any(|line| line.starts_with("working: Asking ")
+                    && line.contains("the step definitions")),
+            "{:?}",
+            prompter.0
+        );
+    }
+
+    /// Without a model there is no wait, so there is nothing to say.
+    #[test]
+    fn the_template_path_has_no_wait_to_narrate() {
+        let mut prompter = Watching::default();
+        service(vec![], None).steps_generate(&mut prompter).unwrap();
+        assert!(prompter.0.is_empty(), "{:?}", prompter.0);
+    }
+
+    /// Each rejected reply costs another full model call. Three silent
+    /// retries is most of the wait.
+    #[test]
+    fn a_rejected_reply_says_that_it_is_asking_again() {
+        let mut prompter = Watching::default();
+        service(vec![], Some(FakeLlm::replying("not code at all")))
+            .steps_generate(&mut prompter)
+            .unwrap();
+        assert!(
+            prompter.0.iter().any(|line| line.contains("asking again")),
+            "{:?}",
+            prompter.0
         );
     }
 

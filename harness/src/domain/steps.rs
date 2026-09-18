@@ -345,6 +345,7 @@ mod tests {
             tags: vec![],
             comments: Vec::new(),
             description: Vec::new(),
+            trailing: Vec::new(),
             scenarios: vec![ScenarioDoc {
                 name: "Adds".into(),
                 tags: vec![],

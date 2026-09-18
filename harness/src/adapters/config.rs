@@ -354,24 +354,95 @@ impl ModelStore for TomlModelStore {
         model
     }
 
+    /// Edit the `model` key and nothing else.
+    ///
+    /// Re-rendering the parsed table used to rewrite the whole file:
+    /// `spec model use` turned a 3322-byte `.spec.toml` into 1319 bytes
+    /// and threw away every comment in it, including the block that
+    /// documents the `server:tool` naming scheme and all the
+    /// commented-out defaults. That is the first command of the
+    /// workshop, so the first thing a student saw `spec` do was delete
+    /// their configuration's documentation.
     fn persist(&self, model: &str) -> Result<(), LlmError> {
         tracing::debug!(model, file = %self.config_file.display(), "config: persisting model");
-        let mut table = self.read_table().unwrap_or_default();
-        let llm = table
-            .entry("llm".to_string())
-            .or_insert_with(|| toml::Value::Table(toml::Table::new()));
-        let llm_table = llm
-            .as_table_mut()
-            .ok_or_else(|| LlmError("config: [llm] is not a table".into()))?;
-        llm_table.insert("model".to_string(), toml::Value::String(model.to_string()));
-        let rendered = toml::to_string_pretty(&table).expect("a plain TOML table always renders");
-        fs::write(&self.config_file, rendered).map_err(|e| {
+        // Parsed only to refuse a file the edit would corrupt; the
+        // parse result is deliberately not what gets written back.
+        if let Some(table) = self.read_table()
+            && let Some(llm) = table.get("llm")
+            && !llm.is_table()
+        {
+            return Err(LlmError("config: [llm] is not a table".into()));
+        }
+        let current = fs::read_to_string(&self.config_file).unwrap_or_default();
+        fs::write(&self.config_file, set_model(&current, model)).map_err(|e| {
             LlmError(format!(
                 "config: cannot write {} - {e}",
                 self.config_file.display()
             ))
         })
     }
+}
+
+/// The file with its `model` line replaced, and every other byte of it
+/// left exactly as the author wrote it - comments, key order, blank
+/// lines and all.
+///
+/// A file with no `model` key under `[llm]` gains one directly below
+/// the header; a file with no `[llm]` section gains the section at the
+/// end. A commented-out `# model = ...` is a comment, not the key, and
+/// is left alone.
+fn set_model(current: &str, model: &str) -> String {
+    let assignment = format!("model = {}", toml::Value::String(model.to_string()));
+    let mut lines: Vec<String> = current.lines().map(str::to_string).collect();
+    match find_model_line(&lines) {
+        Some(at) => {
+            let indent = leading_space(&lines[at]).to_string();
+            lines[at] = format!("{indent}{assignment}");
+        }
+        None => match find_llm_header(&lines) {
+            Some(at) => lines.insert(at + 1, assignment),
+            None => {
+                if !lines.is_empty() {
+                    lines.push(String::new());
+                }
+                lines.push("[llm]".to_string());
+                lines.push(assignment);
+            }
+        },
+    }
+    let mut text = lines.join("\n");
+    text.push('\n');
+    text
+}
+
+/// The index of the line assigning `model` inside `[llm]`, if the file
+/// has one.
+fn find_model_line(lines: &[String]) -> Option<usize> {
+    let mut in_llm = false;
+    lines.iter().position(|line| {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') {
+            in_llm = trimmed == "[llm]";
+        }
+        in_llm && is_key_assignment(trimmed, "model")
+    })
+}
+
+/// The index of the `[llm]` header line, if the file has one.
+fn find_llm_header(lines: &[String]) -> Option<usize> {
+    lines.iter().position(|line| line.trim() == "[llm]")
+}
+
+fn leading_space(line: &str) -> &str {
+    &line[..line.len() - line.trim_start().len()]
+}
+
+/// Whether a line assigns `key`, rather than mentioning it in a comment
+/// or being a longer key that starts with the same letters.
+fn is_key_assignment(trimmed: &str, key: &str) -> bool {
+    trimmed
+        .strip_prefix(key)
+        .is_some_and(|rest| rest.trim_start().starts_with('='))
 }
 
 #[cfg(test)]
@@ -494,6 +565,99 @@ mod tests {
         assert!(content.contains("strict"), "policy kept: {content}");
         assert_eq!(store.configured(), Some("qwen3:8b".to_string()));
         assert_eq!(store.endpoint(), Some("http://box:11434".to_string()));
+    }
+
+    /// The shipped `.spec.toml` is mostly prose: a comment block
+    /// explaining `server:tool`, and defaults left commented out so a
+    /// student can see what is available. Choosing a model must not
+    /// cost them that.
+    #[test]
+    fn choosing_a_model_changes_one_line_and_leaves_the_rest_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(CONFIG_FILE);
+        let original = "# The model the harness talks to.\n\
+                        [llm]\n\
+                        model = \"old-model\"\n\
+                        # endpoint = \"http://localhost:11434\"\n\
+                        endpoint = \"http://box:11434\"\n\
+                        \n\
+                        # Tools are named server:tool.\n\
+                        [tools]\n\
+                        implement = [\"fs:read\"]\n";
+        fs::write(&path, original).unwrap();
+        TomlModelStore::new(path.clone())
+            .persist("qwen3:8b")
+            .unwrap();
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            original.replace("model = \"old-model\"", "model = \"qwen3:8b\""),
+        );
+    }
+
+    #[test]
+    fn a_config_without_a_model_key_gains_one_under_the_existing_header() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(CONFIG_FILE);
+        fs::write(&path, "[llm]\n# model = \"commented-out\"\nretry = 2\n").unwrap();
+        let store = TomlModelStore::new(path.clone());
+        store.persist("qwen3:8b").unwrap();
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            "[llm]\nmodel = \"qwen3:8b\"\n# model = \"commented-out\"\nretry = 2\n"
+        );
+        assert_eq!(store.retry(), Some(2));
+    }
+
+    #[test]
+    fn a_config_with_no_llm_section_gains_one_at_the_end() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(CONFIG_FILE);
+        fs::write(&path, "[policy]\nstrict = true\n").unwrap();
+        let store = TomlModelStore::new(path.clone());
+        store.persist("qwen3:8b").unwrap();
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            "[policy]\nstrict = true\n\n[llm]\nmodel = \"qwen3:8b\"\n"
+        );
+        assert_eq!(store.configured(), Some("qwen3:8b".to_string()));
+    }
+
+    /// A `model` key in some other section is not the one being set.
+    #[test]
+    fn a_model_key_in_another_section_is_left_where_it_is() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(CONFIG_FILE);
+        fs::write(&path, "[report]\nmodel = \"mine\"\n\n[llm]\nretry = 1\n").unwrap();
+        let store = TomlModelStore::new(path.clone());
+        store.persist("qwen3:8b").unwrap();
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            "[report]\nmodel = \"mine\"\n\n[llm]\nmodel = \"qwen3:8b\"\nretry = 1\n"
+        );
+        assert_eq!(store.configured(), Some("qwen3:8b".to_string()));
+    }
+
+    #[test]
+    fn a_model_name_needing_quoting_is_written_as_valid_toml() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(CONFIG_FILE);
+        fs::write(&path, "[llm]\nmodel = \"old\"\n").unwrap();
+        let store = TomlModelStore::new(path.clone());
+        store.persist("weird\"name\\here").unwrap();
+        assert_eq!(store.configured(), Some("weird\"name\\here".to_string()));
+    }
+
+    #[test]
+    fn persisting_twice_does_not_accumulate_model_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(CONFIG_FILE);
+        fs::write(&path, "[llm]\nretry = 1\n").unwrap();
+        let store = TomlModelStore::new(path.clone());
+        store.persist("first").unwrap();
+        store.persist("second").unwrap();
+        let content = fs::read_to_string(&path).unwrap();
+        assert_eq!(content.matches("model =").count(), 1, "got: {content}");
+        assert_eq!(store.configured(), Some("second".to_string()));
     }
 
     #[test]

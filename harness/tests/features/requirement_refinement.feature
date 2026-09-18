@@ -78,3 +78,36 @@ Feature: Requirement refinement
     When the requirement "REQ-007" is refined
     Then the requirement is not clean
     And a finding is "criterion "Given a calculator, when I add, then it works": the outcome is not concrete - state the exact expected value after 'then'"
+
+  # requirement_reword stages its edit. Refining the working tree behind
+  # it cannot converge - the same findings come back forever - and, worse,
+  # calls vague staged wording clean because it never saw it.
+  Scenario: Vague wording staged over a clean requirement is not called clean
+    Given a requirement "REQ-007" with story "As a user, I want newlines to separate numbers so that multi-line input works."
+    And the requirement has criterion "Given the input "1\n2,3", when add is called, then the result is 6"
+    And the requirement has criterion "Given an empty string "", when add is called, then the result is 0"
+    And the requirement "REQ-007" has a staged story "the calculator should handle newlines quickly"
+    When the requirement "REQ-007" is refined
+    Then the requirement is not clean
+    And the refinement read the "staged" wording
+    And a finding is "story: missing the actor - start with 'As a ...' so we know who this is for"
+    And the next step says a commit is not needed between passes
+
+  Scenario: A staged rewording that fixed the findings reads clean and points at the commit
+    Given a requirement "REQ-007" with story "the calculator should handle newlines quickly"
+    And the requirement has criterion "Given the input "1\n2,3", when add is called, then the result is 6"
+    And the requirement has criterion "Given an empty string "", when add is called, then the result is 0"
+    And the requirement "REQ-007" has a staged story "As a user, I want newlines to separate numbers so that multi-line input works."
+    When the requirement "REQ-007" is refined
+    Then the requirement is clean
+    And the refinement read the "staged" wording
+    And the next step advises applying the staged wording with changes_commit
+
+  Scenario: With nothing staged the committed wording is what gets the verdict
+    Given a requirement "REQ-007" with story "As a user, I want newlines to separate numbers so that multi-line input works."
+    And the requirement has criterion "Given the input "1\n2,3", when add is called, then the result is 6"
+    And the requirement has criterion "Given an empty string "", when add is called, then the result is 0"
+    When the requirement "REQ-007" is refined
+    Then the requirement is clean
+    And the refinement read the "working tree" wording
+    And the next step advises confirming the wording with the developer

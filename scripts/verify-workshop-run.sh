@@ -64,12 +64,13 @@ def local(path):
 def harness(*args):
     """Ask the spec harness, so Exercise 1 is graded by the same deterministic
     validator and refiner the workshop tools use. None when spec is missing
-    or did not answer with JSON."""
+    or did not answer with JSON. A non-zero exit is expected and fine -
+    spec validate exits 1 on an invalid spec and still prints the issues."""
     try:
         out = subprocess.run(["spec", *args, "--root", root],
-                             capture_output=True, text=True, check=True).stdout
+                             capture_output=True, text=True).stdout
         return json.loads(out)
-    except (OSError, subprocess.CalledProcessError, json.JSONDecodeError):
+    except (OSError, json.JSONDecodeError):
         return None
 
 fail = 0

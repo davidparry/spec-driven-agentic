@@ -83,23 +83,20 @@
       <h1>Spec-Driven with Harness</h1>
       <h3>TDD and BDD in the agentic era — with the Wi-Fi switched off</h3>
       <p class="muted">30-minute session &nbsp;·&nbsp; every layer free and open source &nbsp;·&nbsp; every layer on this laptop</p>
-      <p class="muted">Start free: <code>pi</code> + Ollama &nbsp;·&nbsp; one server: <code>spec mcp serve</code> (25 tools) &nbsp;·&nbsp; local model: <code>qwen3.8-flash-next:125b-mlx</code></p>
       <p><span class="badge red">RED</span> <span class="badge green">GREEN</span> <span class="badge refactor">REFACTOR</span> — now with agents</p>
-      <aside class="notes">Thirty minutes, three acts, no slideware promises: everything here runs on this machine with the network off, and I will prove it before the end. Act one is free and takes five minutes to install. Act two costs one flag. Act three is the repo. Tell the room up front that the deck, the server, and the model are all open source and they can rebuild the whole thing tonight.</aside>
     </section>
 
     <section data-track="30">
       <h2>Three acts</h2>
       <table>
-        <tr><td>0–3</td><td>What survives the agentic era, what gets amplified, and the three altitudes: spec, behaviour, unit</td></tr>
-        <tr><td>3–9</td><td><strong>Act 1</strong> — <code>pi</code> on Ollama: a free, open, offline agent, and where it drifts</td></tr>
-        <tr><td>9–15</td><td><strong>Act 2</strong> — the same model with no shell: MCP, and <code>pi --no-builtin-tools</code></td></tr>
-        <tr><td>15–23</td><td><strong>Act 3</strong> — general agent vs spec-specific runner, demoed spec → RED → GREEN</td></tr>
-        <tr><td>23–27</td><td>Where this breaks — the failures this project actually hit</td></tr>
+        <tr><td>0–3</td><td>What survives, what gets amplified, and the three altitudes</td></tr>
+        <tr><td>3–9</td><td><strong>Act 1</strong> — <code>pi</code> on Ollama: a free offline agent, and where it drifts</td></tr>
+        <tr><td>9–15</td><td><strong>Act 2</strong> — the same model with no shell: MCP and <code>-nbt</code></td></tr>
+        <tr><td>15–23</td><td><strong>Act 3</strong> — general agent vs spec-specific runner, spec → RED → GREEN</td></tr>
+        <tr><td>23–27</td><td>Where this breaks</td></tr>
         <tr><td>27–30</td><td>Takeaways and Q&amp;A</td></tr>
       </table>
       <p class="small muted">Slides, harness, and prompts: <code>github.com/davidparry/spec-driven-agentic</code></p>
-      <aside class="notes">Each act ends on the limitation that forces the next one — say that out loud now so the structure is legible. Keep acts one and two tight; the demo in act three is what people remember. If you are running long, the thing to cut is the spec-iteration slide, not Where This Breaks.</aside>
     </section>
 
     <!-- ============ 0-5 min: OPENING — 60-MINUTE TRACK ============ -->
@@ -107,21 +104,19 @@
       <h1>Spec-Driven with Harness</h1>
       <h3>TDD and BDD in the agentic era — one MCP-powered workflow, hands on</h3>
       <p class="muted">60-minute workshop &nbsp;·&nbsp; bring your laptop &nbsp;·&nbsp; you drive an agent from exercise one</p>
-      <p class="muted">Start free: <code>pi</code> + Ollama &nbsp;·&nbsp; one server: <code>spec mcp serve</code> (25 tools) &nbsp;·&nbsp; local model: <code>qwen3.8-flash-next:125b-mlx</code></p>
+      <p class="muted">Start free: <code>pi</code> + Ollama &nbsp;·&nbsp; local model: <code>qwen3.8-flash-next:125b-mlx</code></p>
       <p><span class="badge red">RED</span> <span class="badge green">GREEN</span> <span class="badge refactor">REFACTOR</span> — now with agents</p>
-      <aside class="notes">Welcome. Promise of the hour: everyone here has watched an agent demo — nobody leaves having only watched one. We start from the cheapest possible setup — pi, MIT-licensed, on a local Ollama model, no account and no key — and build up to the harness. The MCP server and client in the repo are finished infrastructure; the hour is spent on the workflow they enable: drafting a spec with an agent, validating it through a tool, and driving spec to green. Everything is in the repo you cloned. The local model on this machine is qwen3.8-flash-next:125b-mlx through Ollama — Wi-Fi off still works. Attendees on Cursor can stay on their IDE agent; the pi path and the harness path use this same local model.</aside>
     </section>
 
     <section data-track="60">
       <h2>What you will leave with</h2>
       <ul>
-        <li>A <strong>free offline agent</strong> you can install this afternoon: <code>pi</code> on Ollama — and a clear read on what it gives you and what it does not</li>
+        <li>A <strong>free offline agent</strong> you can install this afternoon: <code>pi</code> on Ollama</li>
         <li>A <strong>spec-authoring loop</strong>: you and an AI agent draft a requirement, <code>validate_spec</code> checks its structure, <code>refine_requirement</code> critiques its wording — and the agent iterates until both are clean</li>
         <li>A complete <strong>spec-to-green workflow</strong> you drove yourself: requirement → Gherkin → RED → GREEN → refactor</li>
-        <li>A working grasp of how <strong>MCP feeds your tools into any agent</strong> — Cursor (all 25 tools), <code>pi --no-builtin-tools</code>, or the harness on <code>qwen3.8-flash-next:125b-mlx</code> (scoped profiles, same server)</li>
+        <li>A working grasp of how <strong>MCP feeds your tools into any agent</strong></li>
         <li>A completed, fully tested <strong>MCP server in <code>spec</code></strong> to point at your own project</li>
       </ul>
-      <aside class="notes">Set expectations up front: the MCP server and client are already built — we use them, we don't build them. MCP gets about four minutes as plumbing; the workflow gets the hour. ~35 of the 60 minutes are keyboard time. The pi segment is the giveaway — nobody needs a licence to reproduce the first half of this deck.</aside>
     </section>
 
     <section data-track="60">
@@ -137,7 +132,6 @@
         <tr><td>53–56</td><td>Why this works reliably — from a flag to a harness</td></tr>
         <tr><td>56–60</td><td>Takeaways, where to go next, Q&amp;A</td></tr>
       </table>
-      <aside class="notes">Ask now: who has Java 21 + Maven installed and the repo building? Fix stragglers during the refresher. Three acts: pi bare, pi with only our tools, then the harness. Each act ends on the limitation that forces the next one. Wire inspection with the MCP Inspector is a backup exercise at the end if the room runs fast.</aside>
     </section>
 
     <!-- ============ 5-12 min: TDD REFRESHER ============ -->
@@ -155,7 +149,6 @@
         <li>Never refactor on a red bar</li>
         <li>Small steps, fast feedback, permanent safety net</li>
       </ul>
-      <aside class="notes">2 minutes max. Most of the room knows this; the point is vocabulary we will reuse: bar color, cycle, executable specification.</aside>
     </section>
 
     <section data-track="both">
@@ -172,15 +165,13 @@
         <div>
           <h3>Gets amplified</h3>
           <ul class="small">
-            <li><strong>Spec authoring</strong>: you describe intent, the agent drafts the requirement, tools validate and critique it</li>
+            <li><strong>Spec authoring</strong>: you describe intent, the agent drafts, tools critique</li>
             <li><strong>Requirements → tests</strong>: agents draft failing tests from acceptance criteria</li>
             <li><strong>Green phase</strong>: a developer agent proposes the implementation</li>
-            <li><strong>Feedback loop</strong>: tools report bar color back to the agent automatically</li>
           </ul>
         </div>
       </div>
       <blockquote>The agent turns the crank. You steer.</blockquote>
-      <aside class="notes">Key framing: agents don't replace the discipline — they make the discipline cheaper to follow. The failing test becomes the contract between human and agent.</aside>
     </section>
 
     <section data-track="both">
@@ -198,17 +189,13 @@
             <td><code>StringCalculatorTest.java</code></td></tr>
       </table>
       <ul class="small" style="margin-top:0.6em">
-        <li>Same "specify first" idea at three levels — they <strong>stack</strong>, they don't compete</li>
         <li>Agentic SDD: the spec is the source of truth; agents generate scenarios, tests, and code <em>from</em> it</li>
-        <li>Our <code>run_tests</code> tool runs Cucumber + JUnit together: one bar, one color</li>
       </ul>
-      <blockquote class="small">TDD pins the unit. BDD pins the behavior. SDD pins the feature.</blockquote>
-      <aside class="notes">Key research-backed point: BDD/Gherkin is the direct ancestor of modern spec-driven development; what's new is that agents now write the glue and the implementation. In our workshop the acceptance criteria are already Given/When/Then — the agent's first job is turning them into executable Gherkin.</aside>
     </section>
 
     <section data-track="60">
       <h2>The spec is a catalog</h2>
-      <p class="small"><code>requirements/requirements.json</code> is <strong>always the entry point</strong> — but it doesn't have to hold every requirement itself. It carries its own <code>requirements</code> <em>plus</em> an <code>includes</code> list of child spec files, and children can include further files, N levels deep.</p>
+      <p class="small"><code>requirements/requirements.json</code> is <strong>always the entry point</strong>, but need not hold every requirement: it carries its own <code>requirements</code> <em>plus</em> an <code>includes</code> list of child spec files, N levels deep.</p>
       <pre><code class="language-text" data-trim>
 requirements/
 ├── requirements.json      ← the catalog: own requirements + includes
@@ -221,9 +208,8 @@ requirements/
       <ul class="small">
         <li>Tooling merges the tree <strong>depth-first</strong> into one backlog — <code>list_requirements</code>, <code>validate_spec</code>, and the agents all drive from the merged view</li>
         <li>Ids stay unique <em>across the whole tree</em>; cycles and missing files are validation issues, not crashes</li>
-        <li>Mutations write back to the file a requirement lives in — the kata fits in one file; real backlogs don't</li>
+        <li>Mutations write back to the file a requirement lives in</li>
       </ul>
-      <aside class="notes">This is the scaling story for SDD: one fixed entry point (requirements.json), a hierarchy of included spec files behind it. Cucumber never reads any of these — the spec drives the tooling, the tooling drives the Gherkin. Note the parallel to how big Gherkin suites split into many .feature files.</aside>
     </section>
 
     <!-- ============ 11-16 min: ACT 1 — START FREE WITH pi ============ -->
@@ -244,8 +230,6 @@ requirements/
 ollama pull qwen3.8-flash-next:125b-mlx
 pi --offline            # or PI_OFFLINE=1 — no startup network calls at all
       </code></pre>
-      <p class="small">This is the same model the <code>spec</code> runner uses later — <strong>one local model, two hosts</strong>, and the same server Cursor talks to.</p>
-      <aside class="notes">This is the giveaway slide — photograph it. Everything from here to the end of Act 2 costs nothing and needs no licence. Say the number out loud: this model is 104 GB on disk and runs on the laptop in front of you. --offline is not a gimmick, it is a documented flag; the thesis of this deck is that the network is optional.</aside>
     </section>
 
     <section data-track="both">
@@ -253,12 +237,10 @@ pi --offline            # or PI_OFFLINE=1 — no startup network calls at all
       <blockquote class="small">"Pi is aggressively extensible so it doesn't have to dictate your workflow."<br>
         <strong>"No MCP."</strong> &nbsp; <strong>"No permission popups."</strong> &nbsp; "No sub-agents." &nbsp; "No plan mode." &nbsp; "No built-in to-dos." &nbsp; "No background bash."</blockquote>
       <ul class="small">
-        <li>Eight built-in tools: <code>read</code>, <code>bash</code>, <code>powershell</code> <span class="muted">(Windows)</span>, <code>edit</code>, <code>write</code>, <code>grep</code>, <code>find</code>, <code>ls</code></li>
+        <li>Eight built-in tools — among them <code>bash</code>, <code>write</code>, and <code>edit</code></li>
         <li>MCP is <strong>not in core</strong> — a third-party extension adds it. We install that in Act 2</li>
-        <li>Everything else is an extension, a skill, or a package. The core stays small on purpose</li>
       </ul>
       <p class="small muted">This is a deliberate engineering trade, not a defect. It is also the trade you inherit.</p>
-      <aside class="notes">Read the "No permission popups" line straight off their README — do not editorialize, the quote does the work. Be fair to pi here: minimalism is the design goal and the extensibility is real. The point is not that pi is bad; the point is that the discipline is your problem, and the agent will happily run bash without asking. Correct the room if someone repeats the widely-blogged "pi has four tools" — that was an older version.</aside>
     </section>
 
     <section data-track="both">
@@ -282,17 +264,15 @@ pi --offline            # or PI_OFFLINE=1 — no startup network calls at all
           </ul>
         </div>
       </div>
-      <p class="small">You <em>can</em> close that gap in pi — with prompting, <code>--skill</code> files, templates, and extensions. That is real work, and then you own it.</p>
+      <p class="small muted">Both columns are System 1: fast, fluent, confident, holding no ground truth of its own. A bigger model is a better System 1.</p>
       <blockquote>The answer is not a bigger model. It is a narrower job.</blockquote>
-      <aside class="notes">This is the hinge of the whole talk. Show the actual transcript if the room is awake: the assertion was deleted, the bar went green, every step was locally reasonable. Be scrupulously fair here — this is not pi failing, it is a general-purpose agent doing general-purpose things, which is exactly what it advertises. pi hands you skills, prompt templates and extensions to specialize it, and they work. The question for the rest of the hour is whether you want to build and maintain that specialization yourself, or run something that already is specialized. Either way the next step is the same: give the model tools that only do the right thing.</aside>
     </section>
 
     <section data-track="both">
       <h2>The missing piece: a protocol</h2>
-      <p>For an agent to run <em>your</em> tests, read <em>your</em> requirements, and respect <em>your</em> workflow, it needs a standard way to discover and call your tools.</p>
+      <p>For an agent to run <em>your</em> tests and respect <em>your</em> workflow, it needs a standard way to discover and call your tools.</p>
       <p style="margin-top:0.8em">That standard is the <strong>Model Context Protocol</strong>.</p>
-      <p class="muted small">Think "USB-C for AI tooling": one connector, any host (Cursor, Claude, <code>pi</code> + extension, your own client), any tool.</p>
-      <aside class="notes">Transition to MCP fundamentals. Without a protocol, every IDE×agent×tool pairing is a custom integration. Frame it as the answer to the slide before: we are about to take pi's shell away and hand it twenty-five tools that cannot misbehave.</aside>
+      <p class="muted small">Think "USB-C for AI tooling": one connector, any host, any tool.</p>
     </section>
 
     <!-- ============ 12-20 min: MCP FUNDAMENTALS ============ -->
@@ -302,22 +282,18 @@ pi --offline            # or PI_OFFLINE=1 — no startup network calls at all
 +-----------------------------+          +---------------------------+
 |  HOST (Cursor, Claude, ...) |          |  MCP SERVER (yours!)      |
 |                             |  stdio / |                           |
-|   +---------------------+   |   HTTP   |  tools:                   |
-|   | MCP CLIENT          |&lt;--+----------+&gt;  list_requirements       |
-|   | (one per server)    |   | JSON-RPC |   get_requirement         |
-|   +---------------------+   |   2.0    |   validate_spec           |
-|            ^                |          |   refine_requirement      |
-|            |                |          |   run_tests               |
-|         LLM agent           |          |   get_tdd_state           |
-+-----------------------------+          |   start_refactor          |
-                                         +---------------------------+
+|   +---------------------+   |   HTTP   |  25 tools                 |
+|   | MCP CLIENT          |&lt;--+----------+&gt;  resources               |
+|   | (one per server)    |   | JSON-RPC |  prompts                  |
+|   +---------------------+   |   2.0    |                           |
+|            ^                |          +---------------------------+
+|            |                |
+|         LLM agent           |
++-----------------------------+
       </code></pre>
       <ul class="small">
         <li><strong>Host</strong> embeds an LLM and one MCP <strong>client</strong> per connection</li>
-        <li><strong>Server</strong> exposes <em>tools</em>, <em>resources</em>, and <em>prompts</em></li>
-        <li>Transports: <strong>stdio</strong> (today) or Streamable HTTP</li>
       </ul>
-      <aside class="notes">Both boxes are complete and in the repo — the right-hand box is our server, the left-hand box is any agent you like: Cursor, Claude, or the bundled Java client. Today we use them; the code is there to read afterward.</aside>
     </section>
 
     <section data-track="60">
@@ -333,94 +309,49 @@ pi --offline            # or PI_OFFLINE=1 — no startup network calls at all
 { "jsonrpc": "2.0", "id": 1,
   "result": { "protocolVersion": "2025-11-25",
               "capabilities": { "tools": { "listChanged": true }, "logging": { } },
-              "serverInfo": { "name": "spec-driven-server", "title": "Spec Driven", "version": "1.0.0", "description": "Serves spec-driven TDD and BDD tools. The requirements spec is the source of truth.", "websiteUrl": "https://davidparry.github.io/spec-driven-agentic/", "icons": [{ "src": "https://davidparry.github.io/spec-driven-agentic/assets/spec-harness-mark.png", "mimeType": "image/png", "sizes": ["1024x1024"], "theme": "dark" }] },
+              "serverInfo": { "name": "spec-driven-server", "title": "Spec Driven", "version": "1.0.0" },
               "instructions": "Drives a spec-driven TDD/BDD workflow..." } }
       </code></pre>
-      <aside class="notes">The handshake negotiates protocol version and capabilities. The server's "instructions" field is prompt text the host may feed to the LLM — we use it to teach the agent our workflow.</aside>
-    </section>
-
-    <section data-track="60">
-      <h2>Lifecycle of every MCP session</h2>
-      <ol>
-        <li><code>initialize</code> — version + capability negotiation</li>
-        <li><code>notifications/initialized</code> — client says "ready"</li>
-        <li><code>tools/list</code> — <strong>discovery</strong>: what am I allowed to do?</li>
-        <li><code>tools/call</code> — <strong>invocation</strong>: do it</li>
-        <li>Repeat 3–4; notifications flow both ways (logging, list changes)</li>
-      </ol>
-      <p class="muted small">Discovery is the superpower: the agent adapts to whatever tools the server offers — no hardcoding.</p>
-      <aside class="notes">Emphasize: tool descriptions and JSON schemas ARE the API docs the LLM reads. Writing them well is prompt engineering.</aside>
     </section>
 
     <!-- ============ 13-20 min: THE PLUMBING (pre-built) ============ -->
     <section data-track="both">
       <h2>The server — already built</h2>
-      <p class="small">One binary: <code>spec mcp serve --root ${workspaceFolder}</code>. Composition root <code>harness/src/mcp.rs</code> plus the harness TDD services. Twenty-five tools in three groups:</p>
+      <p class="small">One binary: <code>spec mcp serve --root ${workspaceFolder}</code>. Twenty-five tools in three groups:</p>
       <ul class="small">
         <li><strong>Frozen seven</strong> — <code>list_requirements</code>, <code>get_requirement</code>, <code>validate_spec</code>, <code>refine_requirement</code>, <code>run_tests</code>, <code>get_tdd_state</code>, <code>start_refactor</code></li>
         <li><strong>Authoring / staging</strong> — features, scenarios, <code>changes_*</code>, <code>requirement_mark_implemented</code>, template-only <code>step_definition_create</code> / <code>unit_test_create</code></li>
         <li><strong>Inspect</strong> — <code>project_root</code>, <code>project_inspect</code>, <code>command_run</code> (allowlisted, RED-gated)</li>
       </ul>
-      <p class="small">A stdio server must <strong>never print to stdout</strong> — that corrupts the JSON-RPC stream. Diagnostics go to stderr. Wire identity is <code>spec-driven-server</code> / <code>1.0.0</code> (title <code>Spec Driven</code>).</p>
-      <aside class="notes">Do not linger — this is infrastructure, not the point of the hour. There is no spec_draft or implement MCP tool. Attendees see all 25 in Cursor, and pi -nbt sees the same 25. The harness path later narrows that to 3–7 per generating command (12 for the read-only ask).</aside>
+      <p class="small">A stdio server must <strong>never print to stdout</strong> — that corrupts the JSON-RPC stream. Diagnostics go to stderr.</p>
     </section>
 
     <section data-track="60">
       <h2>Anatomy of a tool — what the agent sees</h2>
-      <pre><code class="language-rust" data-trim>
-#[tool(
-    description = "Get the user story and acceptance criteria for one requirement. \
-    Turn each acceptance criterion into a failing test before writing production code."
-)]
-async fn get_requirement(
-    &self,
-    Parameters(params): Parameters&lt;IdParam&gt;,
-) -> Result&lt;CallToolResult, McpError&gt; {
-    match self.spec_service().get_requirement(&amp;params.id) {
-        Ok(requirement) => json_result(&amp;requirement),
-        Err(e) => error_result(&amp;e.0),
-    }
-}
+      <p class="small">One entry from <code>tools/list</code> — see them all with <code>spec mcp tools</code>:</p>
+      <pre><code class="language-json" data-trim>
+{ "name": "get_requirement",
+  "description": "Get the user story and acceptance criteria for one requirement. Turn each acceptance criterion into a failing test before writing production code.",
+  "inputSchema": { "type": "object", "required": ["id"],
+    "properties": { "id": { "type": "string", "description": "The requirement id, e.g. REQ-003" } } } }
       </code></pre>
       <ul class="small">
-        <li><strong>Name + JSON Schema + description</strong> → the API docs the LLM reads at discovery</li>
-        <li><strong>Handler</strong> → the same harness services; return content + <code>isError</code></li>
-        <li>This is how MCP feeds <em>your</em> tools into <em>whatever</em> agent your team uses</li>
+        <li><strong>Name, schema, description</strong> → the API docs the LLM reads at discovery. Writing them well <em>is</em> prompt engineering</li>
+        <li>Failures come back as results with <code>isError: true</code>, so the agent reads them and recovers</li>
       </ul>
-      <aside class="notes">The one MCP idea worth two minutes: descriptions double as agent guidance. Tool errors are results with isError=true, not protocol errors — the agent reads and recovers.</aside>
     </section>
 
     <section data-track="both">
       <h2>The tool that closes the loop: <code>run_tests</code></h2>
-      <pre><code class="language-rust" data-trim>
-// TddService::run_tests — Maven / cucumber-js / dotnet / cargo
-let report = tdd.run_tests(runner, &amp;TestFilter::default())?;
-// failures -> RED, all pass -> GREEN
-// body.phase is the bar color the agent literally sees
-// body.nextStep coaches the next legal move
+      <pre><code class="language-bash" data-trim>
+spec mcp call run_tests          # the tool takes no arguments
       </code></pre>
-      <p class="small">The <code>TddStateMachine</code> in <code>harness/src/domain/tdd.rs</code> enforces the discipline:
-        <code>start_refactor</code> refuses unless the bar is GREEN.
-        <code>requirement_mark_implemented</code> is GREEN-gated too. Conformance:
-        <code>harness/tests/mcp_conformance.rs</code>.</p>
-      <aside class="notes">This is the workshop thesis in one slide: the workflow rules live in the tool, so any agent that connects inherits the discipline.</aside>
-    </section>
-
-    <section data-track="60">
-      <h2>Proof it feeds any agent: the bundled client</h2>
-      <pre><code class="language-java" data-trim>
-ServerLaunch launch = ServerLaunch.spec(root, specBinary);
-// child: spec mcp serve --root &lt;root&gt;
-McpSyncClient client = McpClient.sync(transport)
-    .clientInfo(new McpSchema.Implementation("tdd-workshop-agent", "1.0.0"))
-    .build();
-client.initialize();                                 // the handshake
-var tools = client.listTools();                      // discovery — 25 tools
-var result = client.callTool(
-    CallToolRequest.builder("run_tests").arguments(Map.of()).build());
+      <pre><code class="language-json" data-trim>
+{ "phase": "RED",
+  "lastRun": { "tests": 8, "failures": 2, "errors": 1, "skipped": 0 },
+  "nextStep": "make the failing tests pass — do not refactor on RED" }
       </code></pre>
-      <p class="small">Run it: <code>java -jar smoke-test/target/smoke-test.jar</code> (needs <code>spec</code> on PATH)</p>
-      <aside class="notes">Two minutes, one run: the jar is only a client. The child is spec mcp serve. Discovery lists 25 tools, not seven. Then move on; the workflow is next.</aside>
+      <p class="small"><code>phase</code> is the bar color the agent sees; <code>nextStep</code> is the next legal move. The server enforces the rest: <code>start_refactor</code> refuses on any bar but GREEN, <code>requirement_mark_implemented</code> is GREEN-gated.</p>
     </section>
 
     <!-- ============ ACT 2 — SAME MODEL, NO SHELL ============ -->
@@ -438,24 +369,21 @@ pi install npm:pi-mcp-extension     # pi has no MCP in core — this adds it
       <pre><code class="language-bash" data-trim>
 pi -nbt          # built-ins off, extension tools stay on
                  # tools arrive as mcp_spec_driven_server_&lt;tool&gt;
-                 # /mcp shows the server; run from the repo root (no --root in args)
       </code></pre>
       <p class="small">No <code>bash</code>. No <code>write</code>. No <code>edit</code>. Twenty-five tools that enforce the loop — and <strong>nothing about the model changed</strong>.</p>
       <p class="small muted">From here on the server is the constant: Cursor, <code>pi -nbt</code>, and the <code>spec</code> runner all call <em>these</em> tools.</p>
-      <aside class="notes">Run this live with the Wi-Fi off. Two things to point at: the tool names carry the mcp_&lt;server&gt;_ prefix the bridge adds, so prompts have to use them; and the same model that deleted an assertion ten minutes ago now physically cannot, because there is no tool that edits a file outside staging. Hammer the constant — whichever host wins the argument in your shop, the MCP server underneath is the same one, and that is the portable part of this talk. Then land the caveat that sets up Act 3: -nbt is a flag on one run, and the sequencing of the work is still entirely on you and your prompt.</aside>
     </section>
 
     <!-- ============ DEMO — 30-MINUTE TRACK ============ -->
     <section data-track="30">
       <h2>The spec is the entry ticket</h2>
-      <p class="small">Nothing gets written until the spec survives two deterministic reviews. Watch the local model take the critique and reword.</p>
+      <p class="small">Nothing gets written until the spec survives two deterministic reviews.</p>
       <blockquote class="small">"Add a requirement to <code>requirements/requirements.json</code>: a custom delimiter may be declared on the first line, so <code>//+\n1+2</code> adds up to 3. Then call <code>validate_spec</code> and fix every issue. Then call <code>refine_requirement</code> and reword from the findings until there are none. No scenarios, no code yet."</blockquote>
       <ul class="small">
         <li><code>validate_spec</code> owns <strong>structure</strong> — unique id, a real user story, criteria phrased Given/When/Then</li>
         <li><code>refine_requirement</code> owns <strong>wording</strong> — rejects "should", "handle", "quickly", stories with no why, happy-path-only coverage</li>
-        <li>Neither is a model call. Both are deterministic, and both re-read the file the agent just wrote</li>
+        <li>Neither is a model call — both are deterministic</li>
       </ul>
-      <aside class="notes">Run this live. The beat that lands is the refiner rejecting a word — the room recognizes "handles negatives properly" from their own backlog. Emphasize that no LLM is grading the LLM here: the critique is a fixed list and a parser, which is exactly why it works the same on a 104 GB local model as on a frontier one. Then say the human still approves the final wording; the server owns the critique, not the intent.</aside>
     </section>
 
     <!-- ============ 20-32 min: EXERCISE 1 — DRAFT AND REFINE THE SPEC ============ -->
@@ -464,11 +392,8 @@ pi -nbt          # built-ins off, extension tools stay on
       <p class="small">The spec comes first — and the agent helps write it, then <em>refine</em> it. Prompt your IDE agent:</p>
       <blockquote class="small">"Add a new requirement to <code>requirements/requirements.json</code>: a custom delimiter may be declared on the first line, so <code>//+\n1+2</code> adds up to 3. Follow the existing format — unique id, title, user story, acceptance criteria phrased Given/When/Then, status pending. Then call <code>validate_spec</code> and fix every issue until the spec is valid. Then call <code>refine_requirement</code> on the new requirement and reword it from the findings until there are none. Do not write scenarios or code yet — we are only agreeing on the spec."</blockquote>
       <ul class="small">
-        <li>Two feedback loops: <code>validate_spec</code> owns <strong>structure</strong>, <code>refine_requirement</code> owns <strong>wording quality</strong></li>
         <li>The agent drafts, the server critiques, the agent rewords — <strong>you approve the final wording</strong></li>
-        <li>The kata's backlog fits in the root catalog; a real one splits into included spec files — same loop, same entry point</li>
       </ul>
-      <aside class="notes">The heart of the hour: requirements gathering with an AI pair, with the server as the critic. Stage 1 validity is table stakes; stage 2 is where it gets interesting — the refiner flags "should", "handle", "quickly", stories missing their why, outcomes with no concrete value, happy-path-only criteria. Watch the LLM reword against deterministic feedback.</aside>
     </section>
 
     <section data-track="both">
@@ -476,31 +401,29 @@ pi -nbt          # built-ins off, extension tools stay on
       <table class="small">
         <tr><td><span class="badge time">you</span></td><td>describe the feature in a sentence of intent</td></tr>
         <tr><td><span class="badge time">agent</span></td><td>drafts the requirement into <code>requirements.json</code></td></tr>
-        <tr><td><span class="badge red">structure</span></td><td><code>validate_spec</code> → "criterion must be phrased Given/When/Then" → agent fixes → <code>"valid": true</code> <span class="muted">(a well-formed draft is often valid on the first call — force an issue to demo the loop)</span></td></tr>
+        <tr><td><span class="badge red">structure</span></td><td><code>validate_spec</code> → "criterion must be phrased Given/When/Then" → agent fixes → <code>"valid": true</code></td></tr>
         <tr><td><span class="badge refactor">wording</span></td><td><code>refine_requirement</code> → "'quickly' is ambiguous", "only happy paths — add an edge case" → agent rewords → validates → refines → <code>"clean": true</code></td></tr>
         <tr><td><span class="badge time">you</span></td><td>read the story and criteria aloud — <em>is this what we meant?</em> Approve.</td></tr>
       </table>
-      <p class="small">The server re-reads the file on every call, so the spec the agent just wrote is the spec that gets critiqued. A valid, clean, approved spec is the <strong>entry ticket</strong> — no scenario or code before it.</p>
-      <aside class="notes">Division of labor: the human owns intent, the agent owns wording and iteration speed, the server owns the feedback — deterministic, repeatable, no vibes. The LLM refining its own spec against tool feedback is the exact shape of the code loop coming next: write, check, fix, repeat.</aside>
+      <p class="small">A valid, clean, approved spec is the <strong>entry ticket</strong> — no scenario or code before it.</p>
     </section>
 
     <!-- ============ DEMO — 30-MINUTE TRACK ============ -->
     <section data-track="30">
       <h2>Spec to green, Wi-Fi off</h2>
-      <p class="small">Same local model, driving REQ-003 from an approved requirement to a green bar — every mutation typed, staged, and reviewed.</p>
+      <p class="small">REQ-003, approved requirement to green bar — every mutation staged and reviewed.</p>
       <blockquote class="small">"<code>get_requirement</code> for REQ-003. Add its Gherkin with <code>scenario_add</code>, tagged with the requirement id. Add a unit test with <code>unit_test_create</code>. Show me <code>changes_show</code> and wait before <code>changes_commit</code>. Then <code>run_tests</code> — expect RED."</blockquote>
       <ul class="small">
-        <li><span class="badge red">RED</span> Cucumber and JUnit come back as <strong>one bar</strong> — the agent does not get to guess whether the code works</li>
-        <li><span class="badge green">GREEN</span> the simplest passing implementation, then <code>start_refactor</code> — refused on any bar but green</li>
-        <li><code>requirement_mark_implemented</code> needs GREEN <em>and</em> a scenario tagged with the id. No green bar, no "done"</li>
+        <li><span class="badge red">RED</span> Cucumber and JUnit come back as <strong>one bar</strong> — the agent does not get to guess</li>
+        <li><span class="badge green">GREEN</span> the simplest passing implementation, then <code>start_refactor</code></li>
+        <li><code>requirement_mark_implemented</code> needs GREEN <em>and</em> a scenario tagged with the id</li>
       </ul>
-      <aside class="notes">This is the demo to protect if you are running short — cut anything else first. Two moments to narrate: the staged diff before commit (that is the human checkpoint, not a slogan) and the refactor refusal on red if you can provoke it. Name REQ-003 explicitly and say why: point at the requirement id in the prompt and tell them an earlier version said "the next pending id" and the agent took the wrong one to green, with every gate satisfied.</aside>
     </section>
 
     <!-- ============ 32-52 min: EXERCISE 2 — SPEC TO GREEN ============ -->
     <section data-track="60">
       <h2>Spec to green, agentically</h2>
-      <p class="small">Wire the server into your IDE agent (Cursor shown; Claude Desktop is identical JSON):</p>
+      <p class="small">Wire the server into your IDE agent:</p>
       <pre><code class="language-json" data-trim>
 // .cursor/mcp.json  (already in the repo)
 {
@@ -514,23 +437,6 @@ pi -nbt          # built-ins off, extension tools stay on
       </code></pre>
       <p class="small">Then prompt the agent:</p>
       <blockquote class="small">"Using the spec-driven-server tools: validate the spec first, then <code>get_requirement</code> for REQ-003 &mdash; not the REQ-007 you just drafted, which stays pending until homework. Add its Gherkin with <code>scenario_add</code> (tag the requirement id), add missing steps with <code>step_definition_create</code> if <code>step_definitions_find</code> reports any, add a unit test with <code>unit_test_create</code>. Show <code>changes_show</code> and ask me before <code>changes_commit</code>. Then <code>run_tests</code> (expect RED). Implement the simplest production code in <code>StringCalculator</code>. <code>run_tests</code> (GREEN). <code>start_refactor</code> if I agree. On GREEN, <code>requirement_mark_implemented</code>. Ask me before each phase change."</blockquote>
-      <aside class="notes">Everyone drives this at their own keyboard; you demo REQ-003 (comma-separated numbers) end to end. Show the agent calling validate_spec, then get_requirement (note the featureLocation and workflowHint fields), appending the scenario and the unit test, run_tests RED, implementation, run_tests GREEN, start_refactor, then marking REQ-003 implemented in the spec. Do not promise a test count from the stage: it is 8 tests with 3 failing (2 Cucumber failures + 1 JUnit error) when the agent writes one unit test for both criteria, and 9 with 4 when it writes one per criterion — which is what unit_test_create and spec unittest generate both do. Either is a legitimate RED; what matters is that the two @REQ-003 scenarios fail. Pause after the scenario is written: that's the spec review moment. Say why the prompt names REQ-003 out loud: an earlier version said "the next pending id", and once Exercise 1 succeeds the REQ-007 they just drafted is pending too and freshest in context, so agents took that to green instead. Every gate passed — the discipline was right, the target was wrong. The phase gates police how an agent works, never what it works on; that call stays with the room.</aside>
-    </section>
-
-    <section data-track="both">
-      <h2>The loop, step by step</h2>
-      <table class="small">
-        <tr><td><span class="badge time">agent</span></td><td><code>validate_spec</code> → the spec (including your new requirement) is valid</td></tr>
-        <tr><td><span class="badge time">agent</span></td><td><code>get_requirement("REQ-003")</code> → acceptance criteria + feature file location</td></tr>
-        <tr><td><span class="badge time">agent</span></td><td><code>scenario_add</code> / <code>unit_test_create</code> — staged; <code>changes_show</code></td></tr>
-        <tr><td><span class="badge time">you</span></td><td>review staged Gherkin — then allow <code>changes_commit</code></td></tr>
-        <tr><td><span class="badge red">RED</span></td><td><code>run_tests</code> → Cucumber + JUnit failures returned to the agent</td></tr>
-        <tr><td><span class="badge time">agent</span></td><td>implements the simplest passing code in <code>StringCalculator</code></td></tr>
-        <tr><td><span class="badge green">GREEN</span></td><td><code>run_tests</code> → all pass</td></tr>
-        <tr><td><span class="badge refactor">REFACTOR</span></td><td><code>start_refactor</code> → clean up → <code>run_tests</code> stays green</td></tr>
-        <tr><td><span class="badge time">you</span></td><td>approve; <code>requirement_mark_implemented</code> (GREEN-gated); repeat with REQ-004..006</td></tr>
-      </table>
-      <aside class="notes">Call out the two human checkpoints: reviewing the failing test (the spec) and approving the final code. That is "human in the loop" concretely, not as a slogan.</aside>
     </section>
 
     <!-- ============ 50-53 min: GRADE THE RUN ============ -->
@@ -548,9 +454,7 @@ scripts/verify-workshop-run.sh check
   FAIL  @REQ-003 scenarios cover every acceptance criterion (0 tagged, 2 criteria) - no scenario is tagged @REQ-003
   FAIL  REQ-003 unit test asserts every acceptance criterion (0 @Test naming REQ-003) - no @Test names REQ-003
       </code></pre>
-      <p class="small">Three FAILs in a row and <strong>nothing is broken</strong>: the whole Red/Green/Refactor arc ran on REQ-007 — pending, and the freshest thing in the agent's context. Every gate fired in the right order and refused nothing, because nothing was out of order.</p>
-      <blockquote class="small">The gates police <em>how</em> the agent works. Which requirement deserves the next hour was always your call.</blockquote>
-      <aside class="notes">This is the slide that earns the trust the rest of the deck spends. Do not skip it to save three minutes — it is the on-stage version of the Where This Breaks row about taking the wrong requirement to green, and it is the single most common way a real run goes sideways. Point out what is deliberately NOT graded: nobody's wording, anywhere. The verifier asks the same two questions the attendee asked in Exercise 1 — does validate_spec pass, does refine_requirement come back clean — instead of diffing their prose against a recorded answer. Same for Exercise 2: each acceptance criterion has to reach a tagged scenario and an assertion, in whatever words they chose. Say the fix out loud: re-paste Exercise 2's prompt, which names REQ-003, and leave REQ-007 for the homework it was always meant to be.</aside>
+      <p class="small">Three FAILs and <strong>nothing is broken</strong>: the whole Red/Green/Refactor arc ran on REQ-007 — pending, and the freshest thing in the agent's context. Every gate fired in the right order, because nothing was out of order.</p>
     </section>
 
     <section data-track="both">
@@ -560,15 +464,15 @@ scripts/verify-workshop-run.sh check
         <li><strong>Ground truth</strong>: the agent doesn't guess whether code works — <code>run_tests</code> tells it</li>
         <li><strong>Guardrails in tools</strong>: refactor-on-red is impossible; the server refuses</li>
         <li><strong>Small steps</strong>: one requirement, one cycle — failures stay cheap</li>
-        <li><strong>Portable</strong>: same <code>spec mcp serve</code> in Cursor (25 tools), <code>pi -nbt</code>, the bundled client, MCP Inspector, and the harness's scoped profiles</li>
+        <li><strong>Portable</strong>: one server, any host</li>
       </ul>
-      <aside class="notes">This is the difference between "LLM writes code" and an engineered workflow: feedback loops and enforced invariants.</aside>
+      <blockquote class="small">The model supplies System 1. The tools and the human supply System 2.</blockquote>
     </section>
 
     <!-- ============ ACT 3 — GENERAL AGENT VS SPEC-SPECIFIC RUNNER ============ -->
     <section data-track="both">
       <h2>General agent, or spec-specific runner?</h2>
-      <p class="small">Both of these drive <strong>the same MCP server</strong>. That never changes. What changes is how much of the workflow you have to supply yourself.</p>
+      <p class="small">What changes is how much of the workflow you have to supply yourself.</p>
       <div class="two-col">
         <div>
           <h3><code>pi</code> — general agent harness</h3>
@@ -576,7 +480,6 @@ scripts/verify-workshop-run.sh check
             <li>Works on <em>any</em> task, which is the point</li>
             <li>The workflow is <strong>yours to build</strong>: prompts, <code>--skill</code>, prompt templates, extensions</li>
             <li><code>-nbt</code> is a flag on one run — you re-supply it, and the sequencing, every time</li>
-            <li>You can absolutely get a checked result. You are the one maintaining it</li>
           </ul>
         </div>
         <div>
@@ -585,12 +488,10 @@ scripts/verify-workshop-run.sh check
             <li>Does one job: spec → Gherkin → RED → GREEN → REFACTOR</li>
             <li>The workflow is <strong>already encoded</strong>: per-command profiles, staging, phase gates</li>
             <li>Prompts live in one auditable file, not in your head</li>
-            <li>Narrower on purpose — that narrowness is the guarantee</li>
           </ul>
         </div>
       </div>
-      <blockquote class="small">Same tools either way. The question is whether the discipline is something you re-type or something that ships.</blockquote>
-      <aside class="notes">Correct the obvious misreading before it forms: this is not "pi bad, spec good". pi is a general-purpose harness and a good one — generality is the design goal. A general harness gives you a general result until you invest in prompting and skills to specialize it, and then you own that investment forever. spec made the opposite trade: it only knows one workflow, and because it only knows one, it can enforce it. The constant across all three acts is the MCP server — Cursor, pi -nbt, and spec all call the same twenty-five tools.</aside>
+      <blockquote class="small">The question is whether the discipline is something you re-type or something that ships.</blockquote>
     </section>
 
     <section data-track="both">
@@ -605,28 +506,26 @@ spec implement REQ-003     # run_tests sees the working tree; command_run asks y
 spec ask "what is pending?"
       </code></pre>
       <ul class="small">
-        <li>Not a second implementation — the <strong>same server</strong>, narrowed per command to the job in front of the model</li>
-        <li>Frontier: Cursor + all 25, including staging. Local: <code>qwen3.8-flash-next:125b-mlx</code> + profiles; <code>[tool_rules]</code> if the model drifts</li>
+        <li>Narrowed per command to the job in front of the model</li>
+        <li>Drifting local model? <code>[tool_rules]</code> in the prompts file</li>
         <li>Cucumber does the spec half: an executable contract that predates all of this by twenty years</li>
-        <li>Follow-along: <code>student-follow-docs/pi-path.md</code>, then <code>student-follow-docs/harness-path.md</code></li>
       </ul>
-      <aside class="notes">The profile numbers are real output from spec tools profiles — 3 to 7 for anything that generates, 12 for the read-only ask. Point at what a profile is doing: the model is not being told to behave, it is being handed the four tools that the current step can legitimately use. Stress the Cucumber point: we did not invent a spec format, we picked the one the business already reads. Conference half: switch the Wi-Fi off and run these live.</aside>
     </section>
 
     <!-- ============ WHERE THIS BREAKS — BOTH TRACKS ============ -->
     <section data-track="both">
       <h2>Where this breaks</h2>
-      <p class="small">Every row is a failure this project actually hit on a local model. Every row is now caught by a deterministic check — or honestly, isn't.</p>
+      <p class="small">Real failures on a local model — what catches them, or honestly doesn't.</p>
       <table class="small">
         <tr><th>Failure</th><th>What caught it</th></tr>
-        <tr><td>Wrapped required JSON in markdown fences, emitted <code>&lt;think&gt;</code> blocks</td><td>The parser rejects it and feeds the invalid reply back with a correction prompt</td></tr>
-        <tr><td>Rewrote the production class repeatedly — the real bug was a step expression missing a trailing period</td><td>Failure output is scanned for implicated files; the reply must include them</td></tr>
+        <tr><td>Wrapped required JSON in fences, emitted <code>&lt;think&gt;</code> blocks</td><td>Rejected by the parser, fed back with a correction prompt</td></tr>
+        <tr><td>Rewrote production code repeatedly — the real bug was a step expression missing a period</td><td>Failures are scanned for implicated files; the reply must include them</td></tr>
         <tr><td>Dropped an acceptance criterion while rewording</td><td>Rewording takes <strong>one</strong> finding at a time and must return every criterion</td></tr>
-        <tr><td>Repeated an attempt that had already failed</td><td>Attempt history — what it wrote, what the test run then said — goes into the next prompt</td></tr>
-        <tr><td>Made a red bar green by <strong>editing the test</strong></td><td>Nothing, in a loose host. The runner has no shell and no file-write tool</td></tr>
+        <tr><td>Repeated an attempt that had already failed</td><td>Attempt history — what it wrote, what the run said — goes into the next prompt</td></tr>
+        <tr><td>Made a red bar green by <strong>editing the test</strong></td><td>Nothing in a loose host. In the runner it lands in staging, and skipping the production file is flagged incomplete</td></tr>
+        <tr><td>Implemented the <em>next</em> requirement too — bar green, nothing said a word</td><td>Matched against other pending requirements — warned, not blocked</td></tr>
         <tr><td>Took the wrong requirement to green — every gate satisfied, an hour wasted</td><td><strong>Nothing, and that is the point:</strong> the gates police <em>how</em> an agent works, never <em>what</em> it works on</td></tr>
       </table>
-      <aside class="notes">The segment most talks skip, and the reason to trust the rest. Do not rush it — a room that has been burned by agents relaxes here. The last two rows are the honest ones: say plainly that a tool surface cannot tell you the agent is building the wrong thing, that naming the requirement id in the prompt is the mitigation, and that a human on the review is still not optional. If someone asks when to reach for a frontier model, the answer is ambiguous requirements and unfamiliar domains — the local model is good at following a contract, not at inventing one.</aside>
     </section>
 
     <!-- ============ WRAP — 30-MINUTE TRACK ============ -->
@@ -636,22 +535,20 @@ spec ask "what is pending?"
         <li><strong>Start tonight, for free:</strong> <code>pi</code> plus Ollama is an agent on your laptop with no account, no key, and no network</li>
         <li><strong>Tool surface beats model size:</strong> the same local model, one <code>-nbt</code> flag apart, is a different colleague</li>
         <li><strong>Put the discipline in the tooling:</strong> a prompt is a suggestion; a tool that refuses is a guarantee</li>
-        <li><strong>Pick your altitude:</strong> a general agent you specialize with prompts and skills, or a spec-specific runner that ships specialized — same MCP server either way</li>
+        <li><strong>Pick your altitude:</strong> a general agent you specialize, or a runner that ships specialized</li>
         <li><strong>Cucumber already won this argument:</strong> the executable contract did not need reinventing</li>
       </ul>
-      <p class="small">Everything shown: <code>github.com/davidparry/spec-driven-agentic</code> — AGPL-3.0, and it runs on your hardware behind your firewall.</p>
+      <p class="small"><code>github.com/davidparry/spec-driven-agentic</code> — AGPL-3.0, and it runs on your hardware.</p>
       <h1 style="margin-top:0.5em">Thank you!</h1>
-      <aside class="notes">Land on the first bullet — it is the one that costs them nothing and the one they can act on before dinner. If there is time for exactly one question, hope for "does this work on our codebase?" and answer with --root pointed at a real project. Wi-Fi has been off this whole time; say so.</aside>
     </section>
 
     <!-- ============ 55-60 min: WRAP ============ -->
     <section data-track="60">
       <h2>What you accomplished in 60 minutes</h2>
       <ul>
-        <li>Drafted a requirement <em>with</em> an agent and iterated it through two server feedback loops — <code>validate_spec</code> for structure, <code>refine_requirement</code> for wording — until valid and clean</li>
-        <li>Drove a full spec-to-green cycle: requirement → Gherkin (Cucumber) → RED → GREEN → refactor</li>
-        <li>Saw how MCP feeds the same <code>spec</code> server into any agent — Cursor (25 tools), <code>pi -nbt</code> on a free local model, or the <code>spec</code> runner's scoped profiles</li>
-        <li>Saw the real choice: a <strong>general agent</strong> you specialize with prompts and skills, or a <strong>spec-specific runner</strong> that ships specialized — same tools underneath</li>
+        <li>Drafted a requirement <em>with</em> an agent and iterated it to valid and clean</li>
+        <li>Drove a full spec-to-green cycle: requirement → Gherkin → RED → GREEN → refactor</li>
+        <li>Saw one server feed any agent, and the choice between a general one and a specialized one</li>
         <li>Kept every engineering decision: the agent turned the crank, you steered</li>
       </ul>
       <h3 style="margin-top:0.8em">Keep building</h3>
@@ -660,7 +557,6 @@ spec ask "what is pending?"
         <li>Swap stdio for Streamable HTTP and share one server across the team</li>
         <li>Point the server at <em>your</em> real project instead of the kata</li>
       </ul>
-      <aside class="notes">Homework ideas in the README. REQ-004 through REQ-006 are still pending — and the requirement you drafted in Exercise 1 is waiting to be taken to green on the plane home.</aside>
     </section>
 
     <section data-track="both">
@@ -668,15 +564,13 @@ spec ask "what is pending?"
       <ul class="small">
         <li>This repo: <a href="https://davidparry.github.io/spec-driven-agentic/">davidparry.github.io/spec-driven-agentic</a> — everything you used today, AGPL-3.0 licensed</li>
         <li><code>pi</code>, MIT: <a href="https://pi.dev">pi.dev</a> · MCP for it: <code>pi install npm:pi-mcp-extension</code> · runbook: <code>student-follow-docs/pi-path.md</code></li>
-        <li>Local model (every path in this deck): <code>qwen3.8-flash-next:125b-mlx</code> via Ollama — <code>ollama pull qwen3.8-flash-next:125b-mlx</code> then <code>spec model use qwen3.8-flash-next:125b-mlx</code></li>
+        <li>Local model: <code>qwen3.8-flash-next:125b-mlx</code> via Ollama</li>
         <li>MCP spec &amp; docs: <a href="https://modelcontextprotocol.io">modelcontextprotocol.io</a></li>
-        <li>MCP Java SDK: <a href="https://github.com/modelcontextprotocol/java-sdk">github.com/modelcontextprotocol/java-sdk</a></li>
         <li>MCP Inspector: <code>npx @modelcontextprotocol/inspector</code></li>
         <li>Kent Beck, <em>Test-Driven Development: By Example</em> — still the book</li>
       </ul>
       <h1 style="margin-top:0.6em">Thank you!</h1>
       <p class="muted">Questions — and let's see your green bars.</p>
-      <aside class="notes">Q&A. If time remains, take a volunteer's laptop and do REQ-006 (negatives) live — it has the most interesting failure messages.</aside>
     </section>
 
     <!-- ============ BACKUP: WIRE INSPECTION ============ -->
@@ -698,7 +592,6 @@ spec mcp serve --root $PWD
         <li>The protocol is newline-delimited JSON on stdin/stdout — nothing hidden</li>
         <li>Tool results are content blocks; <code>isError: true</code> lets agents read failures and self-correct</li>
       </ul>
-      <aside class="notes">Backup material for a fast room. Option B is the aha moment: watch the tools/list response carry 25 schemas from spec mcp serve, and the nextStep hints that nudge the agent through the cycle. Both handshakes shown here are live — the server answers the classic initialize (2025-11-25) and the newer _meta lifecycle (2026-07-28) alike, which is why .cursor/mcp.json can say protocolEra auto.</aside>
     </section>
 
   </div>

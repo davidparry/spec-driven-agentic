@@ -100,6 +100,12 @@ impl<C: LlmConversation, B: ToolBroker> Agent<C, B> {
         &self.chat
     }
 
+    /// Who is being asked. Callers name them in the line they show
+    /// while the model thinks.
+    pub fn model(&self) -> &str {
+        &self.model
+    }
+
     pub fn ask<T>(
         &self,
         prompter: &mut dyn Prompter,

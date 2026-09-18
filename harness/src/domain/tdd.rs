@@ -272,9 +272,9 @@ impl TddStateMachine {
     pub fn start_refactor(&mut self, note: Option<&str>) -> Result<TddPhase, String> {
         if self.phase != TddPhase::Green {
             return Err(format!(
-                "Refactoring is only allowed from GREEN (current phase: {}). \
-                 Never refactor on a red bar — make the tests pass first.",
-                self.phase
+                "Refactoring is only allowed from GREEN (current phase: {}). {}",
+                self.phase,
+                refusal_advice(self.phase)
             ));
         }
         let entry = match note.map(str::trim).filter(|n| !n.is_empty()) {
@@ -300,6 +300,9 @@ impl TddStateMachine {
     }
 
     /// A human/agent-readable hint about what to do next.
+    ///
+    /// Worded for the MCP agent, which calls tools. The shell rewrites
+    /// it to name commands - see `cli_next_step` in `main.rs`.
     pub fn suggestion(&self) -> &'static str {
         match self.phase {
             TddPhase::Start => {
@@ -319,6 +322,20 @@ impl TddStateMachine {
                  bar green."
             }
         }
+    }
+}
+
+/// Why refactoring is refused, said in terms of the phase the developer
+/// is actually in. "Never refactor on a red bar" is the right sentence
+/// on RED and nonsense anywhere else: at START there is no bar yet, and
+/// in REFACTOR there is already one open.
+fn refusal_advice(phase: TddPhase) -> &'static str {
+    match phase {
+        TddPhase::Red => "Never refactor on a red bar — make the tests pass first.",
+        TddPhase::Start => "No tests have been run yet — run them to find out where you are.",
+        TddPhase::Refactor => "A refactor is already in progress — run the tests to close it.",
+        // The caller only asks once the phase is not GREEN.
+        TddPhase::Green => "",
     }
 }
 
@@ -424,12 +441,30 @@ mod tests {
         assert!(machine.refactor_log().is_empty());
     }
 
+    /// The red-bar sentence belongs to RED. Before any run there is no
+    /// bar to be on, and the refusal used to say there was.
     #[test]
-    fn refactor_is_refused_before_any_run() {
+    fn refactor_is_refused_before_any_run_without_inventing_a_red_bar() {
         let mut machine = TddStateMachine::new();
         let error = machine.start_refactor(None).unwrap_err();
-        assert!(error.contains("current phase: START"));
+        assert_eq!(
+            error,
+            "Refactoring is only allowed from GREEN (current phase: START). \
+             No tests have been run yet — run them to find out where you are."
+        );
         assert!(machine.snapshot().entries.is_empty());
+    }
+
+    #[test]
+    fn a_second_refactor_is_refused_by_naming_the_one_already_open() {
+        let mut machine = TddStateMachine::new();
+        machine.record_test_run(passing_run());
+        machine.start_refactor(Some("extract parser")).unwrap();
+        assert_eq!(
+            machine.start_refactor(Some("again")).unwrap_err(),
+            "Refactoring is only allowed from GREEN (current phase: REFACTOR). \
+             A refactor is already in progress — run the tests to close it."
+        );
     }
 
     #[test]

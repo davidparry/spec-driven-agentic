@@ -52,8 +52,13 @@ pub fn overlay_sources(root: &Path, module_root: Option<&str>) -> OverlayTree {
 pub fn spec_service(
     root: &Path,
     layout: ProjectLayout,
-) -> SpecService<FsSpecRepository, FsFeatureFiles> {
-    SpecService::new(spec_repository(root), feature_files(root), layout)
+) -> SpecService<FsSpecRepository, FsFeatureFiles, FsChangeStore> {
+    SpecService::new(
+        spec_repository(root),
+        feature_files(root),
+        change_store(root),
+        layout,
+    )
 }
 
 pub fn change_service(

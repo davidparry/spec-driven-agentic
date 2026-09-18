@@ -172,6 +172,14 @@ where
         let summary = format!("implementation attempt for {req_id} (llm)");
         let mut targets = Vec::new();
         for update in &updates {
+            // The model is shown every source file and often hands one
+            // back word for word. Staging that puts a "modify" on the
+            // review surface with nothing in it to review, and the
+            // reviewer has to diff it to find out.
+            if is_unchanged(&files, update) {
+                tracing::debug!(path = %update.path, "implement: reply matches the file on disk");
+                continue;
+            }
             self.store.stage(&update.path, &update.content, &summary)?;
             targets.push(update.path.clone());
         }
@@ -180,15 +188,27 @@ where
         let production_written = targets.contains(&production);
         let mut warnings = Vec::new();
         if !production_written {
-            warnings.push(format!(
-                "The model left the production code untouched ({production}) - \
-                 it only wrote: {}.",
-                targets.join(", ")
-            ));
+            warnings.push(if targets.is_empty() {
+                format!(
+                    "The model left every file as it found it, including the \
+                     production code ({production}) - nothing was staged."
+                )
+            } else {
+                format!(
+                    "The model left the production code untouched ({production}) - \
+                     it only wrote: {}.",
+                    targets.join(", ")
+                )
+            });
         }
         warnings.extend(ran_ahead_of_the_spec(&updates, &spec, req_id));
         let next_step = if production_written {
             "Apply with spec changes commit, then spec test - the run decides.".to_string()
+        } else if targets.is_empty() {
+            format!(
+                "There is nothing to apply. Run spec implement {req_id} again - \
+                 or implement {production} by hand."
+            )
         } else {
             format!(
                 "The attempt is incomplete without {production}. Apply what was \
@@ -197,8 +217,8 @@ where
             )
         };
         Ok(ImplementationReport {
+            staged: !targets.is_empty(),
             targets,
-            staged: true,
             source: "llm".into(),
             warning: (!warnings.is_empty()).then(|| warnings.join(" ")),
             next_step,
@@ -312,6 +332,17 @@ where
 /// bar went green, and nothing said a word — the run had drifted ahead
 /// of the spec it is supposed to be driven by. The staged code is
 /// matched against the other pending requirements with the literal
+/// Whether the model handed back a file exactly as it was given it.
+///
+/// `files` is what the prompt showed the model, which is the working
+/// tree with any staged changes already applied - so a match means
+/// staging this update would change nothing.
+fn is_unchanged(files: &[(String, String)], update: &FileUpdate) -> bool {
+    files
+        .iter()
+        .any(|(path, content)| *path == update.path && *content == update.content)
+}
+
 /// [`covers_all`] heuristic, which is why this warns rather than
 /// blocks: a shared input literal can make two requirements look alike,
 /// and only the developer can say whether the extra code belongs.
@@ -377,6 +408,69 @@ mod tests {
         assert_eq!(
             error.0,
             "No model resolved - implement by hand and rerun spec test."
+        );
+    }
+
+    /// Observed live on REQ-003: the model was shown the step
+    /// definitions, handed them straight back, and spec staged them as
+    /// a "modify" that was byte-identical to the working tree. The
+    /// reviewer had to diff it to discover there was nothing in it.
+    #[test]
+    fn a_file_handed_back_word_for_word_is_not_staged_as_a_change() {
+        let steps = SourceFile {
+            path: "src/test/java/KataSteps.java".into(),
+            content: "public class KataSteps {}".into(),
+        };
+        let reply = format!(
+            r#"[{{"path": "src/test/java/KataSteps.java", "content": {}}},
+                {{"path": "src/main/java/Kata.java", "content": "public class Kata {{}}"}}]"#,
+            serde_json::to_string(&steps.content).unwrap()
+        );
+        let report = service(vec![steps], Some(FakeLlm::replying(&reply)))
+            .generate(&mut NullPrompter, "REQ-001", &[], &[], &[])
+            .unwrap();
+        assert_eq!(report.targets, vec!["src/main/java/Kata.java".to_string()]);
+        assert!(report.staged);
+    }
+
+    /// A file changed only in whitespace is still a change - the model
+    /// meant it, and the reviewer should see it.
+    #[test]
+    fn a_file_returned_with_any_difference_at_all_is_still_staged() {
+        let steps = SourceFile {
+            path: "src/main/java/Kata.java".into(),
+            content: "public class Kata {}".into(),
+        };
+        let reply = r#"[{"path": "src/main/java/Kata.java", "content": "public class Kata { }"}]"#;
+        let report = service(vec![steps], Some(FakeLlm::replying(reply)))
+            .generate(&mut NullPrompter, "REQ-001", &[], &[], &[])
+            .unwrap();
+        assert_eq!(report.targets, vec!["src/main/java/Kata.java".to_string()]);
+    }
+
+    /// If every file came back unchanged there is nothing to review,
+    /// and saying "staged" would send the student to an empty diff.
+    #[test]
+    fn a_reply_that_changes_nothing_stages_nothing_and_says_so() {
+        let production = SourceFile {
+            path: "src/main/java/Kata.java".into(),
+            content: "public class Kata {}".into(),
+        };
+        let reply = r#"[{"path": "src/main/java/Kata.java", "content": "public class Kata {}"}]"#;
+        let report = service(vec![production], Some(FakeLlm::replying(reply)))
+            .generate(&mut NullPrompter, "REQ-001", &[], &[], &[])
+            .unwrap();
+        assert!(report.targets.is_empty());
+        assert!(!report.staged);
+        let warning = report.warning.expect("a warning that nothing landed");
+        assert!(
+            warning.contains("left every file as it found it"),
+            "{warning}"
+        );
+        assert!(
+            report.next_step.contains("nothing to apply"),
+            "{}",
+            report.next_step
         );
     }
 

@@ -9,7 +9,7 @@ use serde::Serialize;
 use crate::application::assets::load_effective_catalog;
 use crate::application::spec_service::{ServiceError, ValidationReport};
 use crate::domain::feature;
-use crate::domain::spec_validator::SpecValidator;
+use crate::domain::spec_validator::{SpecValidator, is_structural_issue, structural_repair};
 use crate::ports::{ChangeStore, FeatureFiles, SpecRepository, StagedChange};
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
@@ -137,17 +137,25 @@ impl<C: ChangeStore, R: SpecRepository, F: FeatureFiles> ChangeService<C, R, F> 
             Err(spec_issue) => issues.push(spec_issue.0),
         }
         let valid = issues.is_empty();
-        let next_step = if valid {
-            "Spec and staged Gherkin are valid. Apply the staged changes with \
-             changes commit."
-        } else {
-            "Fix the issues (restage as needed), then run validate again before \
-             committing."
+        // Restaging cannot repair a duplicate id or a repeated include -
+        // no tool writes either edit - so those issues get the guidance
+        // that names what does.
+        let next_step = match structural_repair(&issues) {
+            Some(repair) if issues.iter().all(|issue| is_structural_issue(issue)) => repair,
+            Some(repair) => {
+                format!("{repair} Restage the remaining issues, then run validate again.")
+            }
+            None if valid => "Spec and staged Gherkin are valid. Apply the staged \
+                 changes with changes commit."
+                .to_string(),
+            None => "Fix the issues (restage as needed), then run validate again \
+                 before committing."
+                .to_string(),
         };
         Ok(ValidationReport {
             valid,
             issues,
-            next_step: next_step.to_string(),
+            next_step,
         })
     }
 }
@@ -377,6 +385,56 @@ mod tests {
             report
                 .next_step
                 .starts_with("Spec and staged Gherkin are valid.")
+        );
+    }
+
+    /// Restaging cannot repair a duplicate id either, so the staged-aware
+    /// twin gives the same structural remedy.
+    #[test]
+    fn a_staged_duplicate_id_gets_the_structural_remedy() {
+        let store = InMemoryChangeStore::default();
+        let mut spec = valid_spec();
+        spec.requirements.push(spec.requirements[0].clone());
+        store
+            .stage(SPEC_PATH, &serde_json::to_string(&spec).unwrap(), "draft")
+            .unwrap();
+        let report = service(store, Ok(valid_spec())).validate().unwrap();
+        assert!(!report.valid);
+        assert!(
+            report
+                .next_step
+                .contains("no tool can delete a requirement")
+                && report
+                    .next_step
+                    .contains("Editing the spec file directly is the remedy"),
+            "{}",
+            report.next_step
+        );
+        assert!(
+            !report.next_step.starts_with("Fix the issues"),
+            "{}",
+            report.next_step
+        );
+    }
+
+    #[test]
+    fn a_staged_duplicate_id_beside_a_wording_issue_keeps_the_restage_advice() {
+        let store = InMemoryChangeStore::default();
+        let mut spec = valid_spec();
+        let mut clash = spec.requirements[0].clone();
+        clash.title = String::new();
+        spec.requirements.push(clash);
+        store
+            .stage(SPEC_PATH, &serde_json::to_string(&spec).unwrap(), "draft")
+            .unwrap();
+        let report = service(store, Ok(valid_spec())).validate().unwrap();
+        assert!(
+            report
+                .next_step
+                .contains("no tool can delete a requirement")
+                && report.next_step.contains("Restage the remaining issues"),
+            "{}",
+            report.next_step
         );
     }
 

@@ -13,6 +13,13 @@ Feature: Spec reading
     And the listing has "REQ-001" titled "A title" with status "pending"
     And the listing has "REQ-002" titled "A title" with status "implemented"
 
+  # Without it an agent reading a split catalog knows a requirement
+  # exists but not which document to point a tool at.
+  Scenario: Listing names the spec file each requirement lives in
+    Given a valid pending requirement "REQ-001"
+    When the requirements are listed
+    Then the listing puts "REQ-001" in "requirements/requirements.json"
+
   Scenario: Showing a requirement enriches it with locations and a workflow hint
     Given a valid pending requirement "REQ-001"
     When the requirement "REQ-001" is shown

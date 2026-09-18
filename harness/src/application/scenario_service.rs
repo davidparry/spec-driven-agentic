@@ -30,6 +30,7 @@ impl<C: ChangeStore, F: FeatureCatalog> ScenarioService<C, F> {
     }
 
     pub fn create_feature(&self, path: &str, name: &str) -> Result<MutationReport, ServiceError> {
+        let _claim = self.store.claim()?;
         if self.effective_doc(path)?.is_some() {
             return Err(ServiceError(format!(
                 "{path} already exists - add scenarios to it with scenario add."
@@ -42,6 +43,7 @@ impl<C: ChangeStore, F: FeatureCatalog> ScenarioService<C, F> {
             comments: Vec::new(),
             description: Vec::new(),
             scenarios: Vec::new(),
+            trailing: Vec::new(),
         };
         self.stage(&doc, &format!("create feature \"{name}\""))?;
         Ok(self.report(path, None, "create"))
@@ -55,6 +57,11 @@ impl<C: ChangeStore, F: FeatureCatalog> ScenarioService<C, F> {
         steps: Vec<String>,
     ) -> Result<MutationReport, ServiceError> {
         check_steps(&steps)?;
+        // The claim spans the read of the base document as well as the
+        // write. Reading outside it is how six concurrent invocations
+        // appended to the same two-scenario base and lost three of the
+        // six edits without telling anybody.
+        let _claim = self.store.claim()?;
         let mut doc = self.existing_doc(path)?;
         if doc.scenarios.iter().any(|s| s.name == name) {
             return Err(ServiceError(format!(
@@ -78,6 +85,7 @@ impl<C: ChangeStore, F: FeatureCatalog> ScenarioService<C, F> {
         req_id: Option<&str>,
     ) -> Result<MutationReport, ServiceError> {
         check_steps(&steps)?;
+        let _claim = self.store.claim()?;
         let mut doc = self.existing_doc(path)?;
         let scenario = doc
             .scenarios
@@ -95,6 +103,7 @@ impl<C: ChangeStore, F: FeatureCatalog> ScenarioService<C, F> {
     }
 
     pub fn delete_scenario(&self, path: &str, name: &str) -> Result<MutationReport, ServiceError> {
+        let _claim = self.store.claim()?;
         let mut doc = self.existing_doc(path)?;
         let before = doc.scenarios.len();
         doc.scenarios.retain(|s| s.name != name);
@@ -245,6 +254,42 @@ mod tests {
             service.store.summaries()[0],
             "add scenario \"Single number\" for REQ-002"
         );
+    }
+
+    /// The workshop defect: the kata's file closes with a note telling
+    /// the reader that REQ-003+ get written live, and one `scenario
+    /// add` deleted it. The staged bytes are what the human reviews,
+    /// so this asserts on them rather than on the parsed document.
+    #[test]
+    fn add_scenario_keeps_the_note_that_closes_the_file_and_stays_above_it() {
+        const TRAILER: &str = "  # REQ-003+: scenarios are written live during the workshop.";
+        let mut catalog = InMemoryFeatureCatalog::default();
+        catalog
+            .files
+            .insert(PATH.into(), format!("{EXISTING}\n{TRAILER}\n"));
+        let service = ScenarioService::new(InMemoryChangeStore::default(), catalog);
+
+        service
+            .add_scenario(PATH, "REQ-009", "Single number", vec!["Given a".into()])
+            .unwrap();
+        let once = service.store.content(PATH).unwrap().expect("staged");
+        assert!(
+            once.contains(TRAILER),
+            "the closing note was deleted: {once}"
+        );
+        assert!(
+            once.find("Scenario: Single number") < once.find(TRAILER),
+            "the new scenario landed below the closing note: {once}"
+        );
+
+        // A second add re-reads the staged file, so this is where a
+        // duplicated or dropped trailer would show up.
+        service
+            .add_scenario(PATH, "REQ-010", "Two numbers", vec!["Given a".into()])
+            .unwrap();
+        let twice = service.store.content(PATH).unwrap().expect("staged");
+        assert_eq!(twice.matches(TRAILER).count(), 1, "got: {twice}");
+        assert_eq!(staged(&service).scenarios.len(), 3);
     }
 
     #[test]

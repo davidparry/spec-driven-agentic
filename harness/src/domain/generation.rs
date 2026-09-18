@@ -57,21 +57,8 @@ pub fn unit_test_target_path(language: Language, req_id: &str) -> String {
 /// {int}") share one definition - duplicates would make the runner
 /// refuse every scenario as ambiguous.
 pub fn step_definitions_template(language: Language, missing: &[MissingStep]) -> String {
-    let mut seen: Vec<String> = Vec::new();
-    let definitions: Vec<String> = missing
-        .iter()
-        .filter(|step| {
-            let expression = step_to_expression(&step.text);
-            if seen.contains(&expression) {
-                false
-            } else {
-                seen.push(expression);
-                true
-            }
-        })
-        .map(|step| step_definition(language, step))
-        .collect();
-    let body = definitions.join("\n");
+    let body =
+        step_definitions(language, missing, Vec::new(), &mut MemberNames::in_file("")).join("\n");
     match language {
         Language::Java => format!(
             "import io.cucumber.java.PendingException;\n\
@@ -99,7 +86,31 @@ pub fn step_definitions_template(language: Language, missing: &[MissingStep]) ->
     }
 }
 
-fn step_definition(language: Language, step: &MissingStep) -> String {
+/// One definition per missing step whose cucumber expression `seen` does
+/// not already cover, each named through `names` so no two definitions in
+/// the finished file declare the same member.
+fn step_definitions(
+    language: Language,
+    missing: &[MissingStep],
+    mut seen: Vec<String>,
+    names: &mut MemberNames,
+) -> Vec<String> {
+    missing
+        .iter()
+        .filter(|step| {
+            let expression = step_to_expression(&step.text);
+            if seen.contains(&expression) {
+                false
+            } else {
+                seen.push(expression);
+                true
+            }
+        })
+        .map(|step| step_definition(language, step, names))
+        .collect()
+}
+
+fn step_definition(language: Language, step: &MissingStep, names: &mut MemberNames) -> String {
     let expression = step_to_expression(&step.text);
     let placeholders = count_placeholders(&expression);
     match language {
@@ -112,7 +123,7 @@ fn step_definition(language: Language, step: &MissingStep) -> String {
                 "    @{keyword}(\"{expr}\")\n    public void {name}({params}) {{\n        throw new PendingException();\n    }}\n",
                 keyword = step.keyword,
                 expr = escape_literal(&expression, '"'),
-                name = camel_case(&name_source(&step.text)),
+                name = names.claim(camel_case(&name_source(&step.text))),
             )
         }
         Language::JavaScript | Language::TypeScript => {
@@ -133,7 +144,7 @@ fn step_definition(language: Language, step: &MissingStep) -> String {
                 "    [{keyword}(\"{expr}\")]\n    public void {name}({params})\n    {{\n        throw new PendingStepException();\n    }}\n",
                 keyword = step.keyword,
                 expr = escape_literal(&expression, '"'),
-                name = pascal_case(&name_source(&step.text)),
+                name = names.claim(pascal_case(&name_source(&step.text))),
             )
         }
         Language::Rust => {
@@ -145,7 +156,7 @@ fn step_definition(language: Language, step: &MissingStep) -> String {
                 "#[{keyword}(expr = \"{expr}\")]\nfn {name}(_world: &mut World{params}) {{\n    todo!(\"implement step: {text}\");\n}}\n",
                 keyword = step.keyword.to_lowercase(),
                 expr = escape_literal(&expression, '"'),
-                name = snake_case(&name_source(&step.text)),
+                name = names.claim(snake_case(&name_source(&step.text))),
                 text = escape_literal(&step.text, '"'),
             )
         }
@@ -154,10 +165,11 @@ fn step_definition(language: Language, step: &MissingStep) -> String {
 
 /// A failing (RED) unit-test file with one test per acceptance criterion.
 pub fn unit_test_template(language: Language, requirement: &Requirement) -> String {
+    let mut names = MemberNames::in_file("");
     let tests: Vec<String> = requirement
         .acceptance_criteria
         .iter()
-        .map(|criterion| unit_test_case(language, criterion))
+        .map(|criterion| unit_test_case(language, criterion, &mut names))
         .collect();
     let body = tests.join("\n");
     let header = format!("Generated from {}: {}", requirement.id, requirement.title);
@@ -190,14 +202,17 @@ pub fn unit_test_template(language: Language, requirement: &Requirement) -> Stri
     }
 }
 
-fn unit_test_case(language: Language, criterion: &str) -> String {
+fn unit_test_case(language: Language, criterion: &str, names: &mut MemberNames) -> String {
     let commented = escape_controls(criterion);
     match language {
         Language::Java => format!(
             "    @Test\n    void {name}() {{\n        // {commented}\n        fail(\"TODO: assert - {escaped}\");\n    }}\n",
-            name = snake_case(criterion),
+            name = names.claim(snake_case(criterion)),
             escaped = escape_literal(criterion, '"'),
         ),
+        // The JavaScript and TypeScript case name is a string, not an
+        // identifier, so two criteria that read alike stay legal - there
+        // is no slug here to collide.
         Language::JavaScript | Language::TypeScript => format!(
             "test('{name}', () => {{\n  // {commented}\n  assert.fail('TODO: assert - {escaped}');\n}});\n",
             name = escape_literal(criterion, '\''),
@@ -205,12 +220,12 @@ fn unit_test_case(language: Language, criterion: &str) -> String {
         ),
         Language::DotNet => format!(
             "    [Fact]\n    public void {name}()\n    {{\n        // {commented}\n        Assert.Fail(\"TODO: assert - {escaped}\");\n    }}\n",
-            name = pascal_case(criterion),
+            name = names.claim(pascal_case(criterion)),
             escaped = escape_literal(criterion, '"'),
         ),
         Language::Rust => format!(
             "#[test]\nfn {name}() {{\n    // {commented}\n    unimplemented!(\"TODO: assert - {escaped}\");\n}}\n",
-            name = snake_case(criterion),
+            name = names.claim(snake_case(criterion)),
             escaped = escape_literal(criterion, '"'),
         ),
     }
@@ -780,7 +795,7 @@ pub fn append_unit_tests(existing: &str, language: Language, requirement: &Requi
     splice_unit_tests(
         existing,
         language,
-        &unit_test_fragment(language, requirement),
+        &unit_test_fragment(existing, language, requirement),
     )
 }
 
@@ -788,12 +803,15 @@ pub fn append_unit_tests(existing: &str, language: Language, requirement: &Requi
 ///
 /// Split out of [`append_unit_tests`] so the polish pass can be handed
 /// the generated members alone: a model that never sees the rest of the
-/// file cannot rename or reflow the tests already in it.
-pub fn unit_test_fragment(language: Language, requirement: &Requirement) -> String {
+/// file cannot rename or reflow the tests already in it. `existing` is
+/// still read - for the member names it spends, so the fragment cannot
+/// redeclare a method the class already has.
+pub fn unit_test_fragment(existing: &str, language: Language, requirement: &Requirement) -> String {
+    let mut names = MemberNames::in_file(existing);
     requirement
         .acceptance_criteria
         .iter()
-        .map(|criterion| unit_test_case_for(language, requirement, criterion))
+        .map(|criterion| unit_test_case_for(language, requirement, criterion, &mut names))
         .collect()
 }
 
@@ -806,17 +824,22 @@ pub fn splice_unit_tests(existing: &str, language: Language, fragment: &str) -> 
     }
 }
 
-fn unit_test_case_for(language: Language, requirement: &Requirement, criterion: &str) -> String {
+fn unit_test_case_for(
+    language: Language,
+    requirement: &Requirement,
+    criterion: &str,
+    names: &mut MemberNames,
+) -> String {
     match language {
         Language::Java => format!(
             "    @Test\n    @DisplayName(\"{id}: {title}\")\n    void {name}() {{\n        // {commented}\n        fail(\"TODO: assert - {escaped}\");\n    }}\n",
             id = requirement.id,
             title = escape_literal(criterion, '"'),
-            name = snake_case(criterion),
+            name = names.claim(snake_case(criterion)),
             commented = escape_controls(criterion),
             escaped = escape_literal(criterion, '"'),
         ),
-        _ => unit_test_case(language, criterion),
+        _ => unit_test_case(language, criterion, names),
     }
 }
 
@@ -866,20 +889,12 @@ pub fn step_definitions_fragment(
     language: Language,
     missing: &[MissingStep],
 ) -> Option<String> {
-    let mut seen = extract_patterns(language, existing);
-    let definitions: Vec<String> = missing
-        .iter()
-        .filter(|step| {
-            let expression = step_to_expression(&step.text);
-            if seen.contains(&expression) {
-                false
-            } else {
-                seen.push(expression);
-                true
-            }
-        })
-        .map(|step| step_definition(language, step))
-        .collect();
+    let definitions = step_definitions(
+        language,
+        missing,
+        extract_patterns(language, existing),
+        &mut MemberNames::in_file(existing),
+    );
     if definitions.is_empty() {
         return None;
     }
@@ -1065,6 +1080,68 @@ fn camel_case(text: &str) -> String {
         .next()
         .map(|c| c.to_lowercase().collect::<String>() + chars.as_str())
         .expect("pascal_case never returns an empty string")
+}
+
+/// The member names one generated file may still spend.
+///
+/// Java, C#, and Rust names are slugged out of free text by dropping
+/// everything that is not alphanumeric, so two texts that differ only in
+/// punctuation collapse to one identifier. REQ-007 walks straight into
+/// it: `//*` and `//;` are different delimiters and the same slug, and
+/// the class stops compiling on "method ... is already defined". The
+/// first claimant keeps the slug; every later one takes `_2`, `_3`, ...
+/// in order, which is legal in all three languages and reads the same
+/// way in each.
+///
+/// The suffix says nothing about what distinguishes the members, on
+/// purpose. Folding the punctuation into the slug instead would rename
+/// every generated member rather than only the colliding ones, and the
+/// text is already carried verbatim beside the member - in Java's
+/// `@DisplayName`, in the comment above the body, and in the TODO the
+/// placeholder fails with.
+struct MemberNames {
+    taken: Vec<String>,
+}
+
+impl MemberNames {
+    /// The names `source` already spends, so members appended to it join
+    /// without redeclaring one of them. A fresh file is `in_file("")`.
+    ///
+    /// An identifier followed by `(` is claimed whether it declares a
+    /// member or merely calls one: over-claiming costs a suffix nobody
+    /// reads, under-claiming costs the build.
+    fn in_file(source: &str) -> Self {
+        let mut taken = Vec::new();
+        let mut word = String::new();
+        let mut candidate: Option<String> = None;
+        for character in source.chars() {
+            if character.is_alphanumeric() || character == '_' {
+                word.push(character);
+                continue;
+            }
+            if !word.is_empty() {
+                candidate = Some(std::mem::take(&mut word));
+            }
+            match character {
+                '(' => taken.extend(candidate.take()),
+                c if c.is_whitespace() => {}
+                _ => candidate = None,
+            }
+        }
+        Self { taken }
+    }
+
+    /// `name`, or the first free `name_2`, `name_3`, ... after it.
+    fn claim(&mut self, name: String) -> String {
+        let mut claimed = name.clone();
+        let mut ordinal = 1u32;
+        while self.taken.contains(&claimed) {
+            ordinal += 1;
+            claimed = format!("{name}_{ordinal}");
+        }
+        self.taken.push(claimed.clone());
+        claimed
+    }
 }
 
 #[cfg(test)]
@@ -1598,6 +1675,187 @@ mod tests {
         );
     }
 
+    // ---- member-name uniqueness ---------------------------------------
+
+    /// The two REQ-007 custom-delimiter criteria, which differ only in
+    /// the delimiter character, and the slug they both reduce to.
+    const DELIMITER_CRITERIA: [&str; 2] = [
+        r#"Given "//*\n1*2*3", when add is called, then the result is 6"#,
+        r#"Given "//;\n1;2;3", when add is called, then the result is 6"#,
+    ];
+    const DELIMITER_SLUG: &str = "given_n1_2_3_when_add_is_called_then_the_result_is_6";
+
+    /// The Java methods a generated file or fragment declares.
+    fn declared_members(code: &str) -> Vec<String> {
+        code.lines()
+            .filter_map(|line| line.trim().strip_prefix("void "))
+            .filter_map(|rest| rest.split_once('('))
+            .map(|(name, _)| name.to_string())
+            .collect()
+    }
+
+    #[test]
+    fn two_criteria_differing_only_in_punctuation_get_distinct_member_names() {
+        // Observed live on REQ-007: both criteria slugged to one name,
+        // `run_tests` came back tests=0 errors=1, and javac said the
+        // method was already defined in StringCalculatorTest.
+        let code = unit_test_fragment("", Language::Java, &requirement_with(&DELIMITER_CRITERIA));
+        assert_eq!(
+            declared_members(&code),
+            vec![DELIMITER_SLUG.to_string(), format!("{DELIMITER_SLUG}_2")],
+            "{code}"
+        );
+        // The suffix disambiguates the identifier and nothing else: each
+        // criterion still reaches the reader whole.
+        assert!(code.contains(r#"//*\n1*2*3"#), "{code}");
+        assert!(code.contains(r#"//;\n1;2;3"#), "{code}");
+        assert_eq!(code.matches("@DisplayName").count(), 2, "{code}");
+    }
+
+    #[test]
+    fn a_criterion_never_redeclares_a_method_the_class_already_has() {
+        let existing = "import org.junit.jupiter.api.Test;\n\n\
+             class StringCalculatorTest {\n\n\
+             \x20   @Test\n\
+             \x20   void given_1_2_when_add_is_called_then_the_result_is_3() {\n\
+             \x20   }\n\
+             }\n";
+        let appended = append_unit_tests(
+            existing,
+            Language::Java,
+            &requirement_with(&[r#"Given "1,2", when add is called, then the result is 3"#]),
+        );
+        assert_eq!(
+            declared_members(&appended),
+            vec![
+                "given_1_2_when_add_is_called_then_the_result_is_3",
+                "given_1_2_when_add_is_called_then_the_result_is_3_2",
+            ],
+            "{appended}"
+        );
+    }
+
+    #[test]
+    fn a_three_way_collision_numbers_the_second_and_the_third() {
+        let mut criteria = DELIMITER_CRITERIA.to_vec();
+        criteria.push(r#"Given "//|\n1|2|3", when add is called, then the result is 6"#);
+        let code = unit_test_fragment("", Language::Java, &requirement_with(&criteria));
+        assert_eq!(
+            declared_members(&code),
+            vec![
+                DELIMITER_SLUG.to_string(),
+                format!("{DELIMITER_SLUG}_2"),
+                format!("{DELIMITER_SLUG}_3"),
+            ],
+            "{code}"
+        );
+    }
+
+    #[test]
+    fn generating_the_same_criteria_twice_names_them_the_same_way() {
+        let requirement = requirement_with(&DELIMITER_CRITERIA);
+        // Greenfield, and again onto a class that already holds the
+        // members of a previous run: the same inputs must give the same
+        // names, or a regenerate churns the diff for no reason.
+        let class = "class StringCalculatorTest {\n}\n";
+        let once = append_unit_tests(class, Language::Java, &requirement);
+        assert_eq!(once, append_unit_tests(class, Language::Java, &requirement));
+        assert_eq!(
+            unit_test_fragment(&once, Language::Java, &requirement),
+            unit_test_fragment(&once, Language::Java, &requirement)
+        );
+        // Appending the same criteria to the file they already produced
+        // still keeps every member apart.
+        let twice = append_unit_tests(&once, Language::Java, &requirement);
+        let members = declared_members(&twice);
+        let mut unique = members.clone();
+        unique.sort();
+        unique.dedup();
+        assert_eq!(members.len(), 4, "{twice}");
+        assert_eq!(unique.len(), members.len(), "{twice}");
+    }
+
+    #[test]
+    fn every_language_that_slugs_a_criterion_keeps_the_members_apart() {
+        let requirement = requirement_with(&DELIMITER_CRITERIA);
+        for (language, first, second) in [
+            (
+                Language::Java,
+                format!("void {DELIMITER_SLUG}()"),
+                format!("void {DELIMITER_SLUG}_2()"),
+            ),
+            (
+                Language::DotNet,
+                "public void GivenN123WhenAddIsCalledThenTheResultIs6()".to_string(),
+                "public void GivenN123WhenAddIsCalledThenTheResultIs6_2()".to_string(),
+            ),
+            (
+                Language::Rust,
+                format!("fn {DELIMITER_SLUG}()"),
+                format!("fn {DELIMITER_SLUG}_2()"),
+            ),
+        ] {
+            let code = unit_test_template(language, &requirement);
+            assert!(
+                code.contains(&first),
+                "{language:?} missing {first}:\n{code}"
+            );
+            assert!(
+                code.contains(&second),
+                "{language:?} missing {second}:\n{code}"
+            );
+        }
+        // JavaScript and TypeScript name a case with a string, not an
+        // identifier, so there is no slug to collide and both criteria
+        // keep their own words.
+        for language in [Language::JavaScript, Language::TypeScript] {
+            let code = unit_test_template(language, &requirement);
+            assert_eq!(code.matches("test('").count(), 2, "{language:?}: {code}");
+            assert!(code.contains(r#"//*\n1*2*3"#), "{language:?}: {code}");
+            assert!(code.contains(r#"//;\n1;2;3"#), "{language:?}: {code}");
+        }
+    }
+
+    #[test]
+    fn two_step_texts_that_slug_alike_get_distinct_definition_names() {
+        // Two different cucumber expressions - so both definitions are
+        // generated - that reduce to one identifier: the quoted argument
+        // and the bare asterisk are both dropped before casing.
+        let steps = [
+            missing("Then", "the delimiter is \";\""),
+            missing("Then", "the delimiter is *"),
+        ];
+        let code = step_definitions_template(Language::Java, &steps);
+        assert!(
+            code.contains("public void theDelimiterIs(String arg0)"),
+            "{code}"
+        );
+        assert!(code.contains("public void theDelimiterIs_2()"), "{code}");
+    }
+
+    #[test]
+    fn an_appended_step_definition_never_redeclares_a_method_the_file_has() {
+        let existing = "import io.cucumber.java.en.Then;\n\n\
+             public class GeneratedSteps {\n\n\
+             \x20   @Then(\"the delimiter is {string}\")\n\
+             \x20   public void theDelimiterIs(String arg0) {}\n\
+             }\n";
+        let appended = append_step_definitions(
+            existing,
+            Language::Java,
+            &[missing("Then", "the delimiter is *")],
+        );
+        assert_eq!(
+            appended.matches("public void theDelimiterIs(").count(),
+            1,
+            "{appended}"
+        );
+        assert!(
+            appended.contains("public void theDelimiterIs_2()"),
+            "{appended}"
+        );
+    }
+
     /// What `javac` makes of the body of a string literal: the value the
     /// generated test prints at runtime. Asserting on this is what pins
     /// the property the workshop actually reads off the projector.
@@ -1655,7 +1913,7 @@ mod tests {
         // real newline, and the RED bar the room is watching broke across
         // two lines mid-message.
         let criterion = r#"Given "4\n5\n6", when add is called, then the result is 15"#;
-        let code = unit_test_fragment(Language::Java, &requirement_with(&[criterion]));
+        let code = unit_test_fragment("", Language::Java, &requirement_with(&[criterion]));
         assert!(
             code.contains(r#"fail("TODO: assert - Given \"4\\n5\\n6\", when add is called, then the result is 15");"#),
             "{code}"
@@ -1679,7 +1937,7 @@ mod tests {
             r#"Given a trailing escape "1,2\", when add is called, then an error is raised"#,
             r#"Given "1\n2", when add is called, then the message is "ok""#,
         ] {
-            let code = unit_test_fragment(Language::Java, &requirement_with(&[criterion]));
+            let code = unit_test_fragment("", Language::Java, &requirement_with(&[criterion]));
             assert_eq!(
                 java_string_value(literal_body(&code, "fail(\"")),
                 format!("TODO: assert - {criterion}"),
@@ -1701,7 +1959,7 @@ mod tests {
         // above the placeholder ends mid-criterion and the rest of the
         // line is stray Java - a compile error, not a cosmetic one.
         let criterion = "Given the input \"//+\n1+2\", when add is called, then the result is 3";
-        let code = unit_test_fragment(Language::Java, &requirement_with(&[criterion]));
+        let code = unit_test_fragment("", Language::Java, &requirement_with(&[criterion]));
         assert!(
             code.contains(
                 r#"        // Given the input "//+\n1+2", when add is called, then the result is 3"#

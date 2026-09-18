@@ -33,10 +33,17 @@ cargo install --path harness
 spec --version
 ```
 
+Requires `spec` **0.5.2 or newer** — check with `spec --version`. The
+generation behavior this page describes, where the polish pass sees only
+the newly generated members, arrived in that release.
+
 A local [Ollama](https://ollama.com) model is optional. It is only
 required for `spec implement`. Without one, implement
 `StringCalculator.java` by hand after the tests go RED. The model this
-talk and workshop run against is `qwen3.8-flash-next:125b-mlx`.
+talk and workshop run against is `qwen3.8-flash-next:125b-mlx`. Pin it with
+`spec model use` rather than relying on discovery — with nothing configured
+`spec` borrows whichever model Ollama lists first, which is usually not this
+one, and the run proceeds without complaint.
 
 ```bash
 # the local model this workshop and talk run against
@@ -62,7 +69,9 @@ spec mcp tools                       # the 25 built-ins
 ```
 
 Cursor would have seen all 25. A generating command offers 3–7; the read-only
-`ask` offers 12. Default profiles contain no staging or commit tools. The only
+`ask` offers 12. Default profiles contain no staging mutation or commit
+tools — `changes_show` and `changes_validate` are in several of them, but
+both only read. The only
 mutation a harness-side model may request is `command_run` on the `implement`
 profile, and that call still asks you to confirm (piped/CI stdin declines; it
 never hangs).
@@ -179,10 +188,13 @@ spec scenario add --feature kata/src/test/resources/features/string_calculator.f
   --step 'When I add "<input>"' \
   --step 'Then the result is <n>'
 # second criterion: another scenario add with the same --req
+spec steps missing                 # empty? good. otherwise: spec steps generate
 spec unittest generate REQ-00N     # appends StringCalculatorTest, does not create Req00NTest
+spec changes show                  # your checkpoint: read the staged Gherkin and tests
 spec changes commit
 spec test                          # expect RED
 spec implement REQ-00N             # or edit StringCalculator.java by hand
+spec changes show                  # your checkpoint: read the production diff
 spec changes commit && spec test    # GREEN
 spec refactor --note "<what>" && spec test    # optional, GREEN only
 spec mark-implemented REQ-00N

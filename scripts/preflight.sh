@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Presenter preflight for the 60-minute workshop.
-# Run from anywhere inside the repo, ideally T-30 minutes before going on stage:
+# Run from the repo root, ideally T-30 minutes before going on stage:
 #   scripts/preflight.sh
+# An absolute path works from any directory; the script cds to the root itself.
 # Exits non-zero if any check fails.
 
 set -u

@@ -35,6 +35,18 @@ pub struct FeatureDoc {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub description: Vec<String>,
     pub scenarios: Vec<ScenarioDoc>,
+    /// The comment lines below the last scenario, `#` and indentation
+    /// included - the kata's file ends in a note telling the reader
+    /// that REQ-003+ get written live. Like the header these are read
+    /// off the raw text, and without them `scenario add` deleted every
+    /// one of them, silently: the staged file simply stopped where the
+    /// scenarios did, and `changes show` had nothing to report.
+    ///
+    /// New scenarios are appended to `scenarios`, which [`render`]
+    /// writes *above* this block, so a trailing note keeps pointing at
+    /// the end of the file the way its author meant it to.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub trailing: Vec<String>,
 }
 
 /// One scenario: its tags and its steps rendered as written
@@ -75,6 +87,7 @@ pub fn parse(path: &str, content: &str) -> Result<FeatureDoc, String> {
                     .collect(),
             })
             .collect(),
+        trailing: trailing_comments(content),
     })
 }
 
@@ -95,6 +108,42 @@ fn leading_comments(content: &str, feature_line: usize) -> Vec<String> {
             .collect(),
         _ => Vec::new(),
     }
+}
+
+/// The trailing comment block: the run of comment lines that closes the
+/// file, indentation kept so it re-renders as written.
+///
+/// Gherkin allows nothing but comments and blank lines after the last
+/// scenario, so scanning backwards is enough - the walk stops at the
+/// first line that is neither, and that line is always real content
+/// (a step, a table row, a docstring fence, or the feature keyword
+/// itself). That last case is what keeps a header-only file from
+/// reporting its header twice: the keyword sits between the two
+/// blocks, so they can never overlap. Comments *between* scenarios
+/// are still lost on a round trip, the same as before.
+fn trailing_comments(content: &str) -> Vec<String> {
+    let lines: Vec<&str> = content.lines().collect();
+    let is_comment = |line: &&str| line.trim_start().starts_with('#');
+    let is_blank = |line: &&str| line.trim().is_empty();
+    let Some(last) = lines.iter().rposition(is_comment) else {
+        return Vec::new();
+    };
+    if !lines[last + 1..].iter().all(is_blank) {
+        return Vec::new();
+    }
+    let mut first = last;
+    while first > 0 && (is_comment(&lines[first - 1]) || is_blank(&lines[first - 1])) {
+        first -= 1;
+    }
+    // Blank lines ahead of the block separate it from the scenarios;
+    // they are not part of it, and render puts one back.
+    while !is_comment(&lines[first]) {
+        first += 1;
+    }
+    lines[first..=last]
+        .iter()
+        .map(|line| line.trim_end().to_string())
+        .collect()
 }
 
 /// Narrative lines with their indentation dropped, so that rendering can
@@ -131,6 +180,13 @@ pub fn render(doc: &FeatureDoc) -> String {
         out.push_str(&format!("  Scenario: {}\n", scenario.name));
         for step in &scenario.steps {
             out.push_str(&format!("    {step}\n"));
+        }
+    }
+    if !doc.trailing.is_empty() {
+        out.push('\n');
+        for comment in &doc.trailing {
+            out.push_str(comment);
+            out.push('\n');
         }
     }
     out
@@ -170,6 +226,7 @@ mod tests {
             tags: vec!["@kata".into()],
             comments: Vec::new(),
             description: Vec::new(),
+            trailing: Vec::new(),
             scenarios: vec![
                 ScenarioDoc {
                     name: "Empty string".into(),
@@ -227,6 +284,7 @@ mod tests {
             tags: vec![],
             comments: Vec::new(),
             description: Vec::new(),
+            trailing: Vec::new(),
             scenarios: vec![],
         };
         assert_eq!(render(&bare), "Feature: Fresh feature\n");
@@ -240,6 +298,7 @@ mod tests {
             tags: vec![],
             comments: Vec::new(),
             description: Vec::new(),
+            trailing: Vec::new(),
             scenarios: vec![ScenarioDoc {
                 name: "S".into(),
                 tags: vec![],
@@ -333,6 +392,136 @@ Feature: String Calculator addition
         let json = serde_json::to_string(&plain).unwrap();
         assert!(!json.contains("comments"), "got: {json}");
         assert!(!json.contains("description"), "got: {json}");
+        assert!(!json.contains("trailing"), "got: {json}");
+    }
+
+    /// The shape the kata ships *below* its scenarios: a note saying
+    /// the rest gets written live. One `scenario add` used to delete
+    /// it, and `changes show` reported only the addition - the review
+    /// checkpoint could not catch the deletion because it was never
+    /// told about it.
+    const WITH_TRAILER: &str = "\
+Feature: String Calculator addition
+
+  @REQ-001
+  Scenario: An empty string returns zero
+    Given a string calculator
+    Then the result is 0
+
+  # REQ-003+: scenarios are written live during the workshop from the
+  # acceptance criteria. Ask the agent to call get_requirement(\"REQ-003\").
+";
+
+    fn added(doc: &FeatureDoc, name: &str) -> FeatureDoc {
+        let mut edited = doc.clone();
+        edited.scenarios.push(ScenarioDoc {
+            name: name.into(),
+            tags: vec!["@REQ-009".into()],
+            steps: vec!["Given a string calculator".into()],
+        });
+        edited
+    }
+
+    #[test]
+    fn a_trailing_comment_block_survives_a_round_trip_byte_for_byte() {
+        let doc = parse("features/calc.feature", WITH_TRAILER).unwrap();
+        assert_eq!(
+            doc.trailing,
+            vec![
+                "  # REQ-003+: scenarios are written live during the workshop from the",
+                "  # acceptance criteria. Ask the agent to call get_requirement(\"REQ-003\").",
+            ]
+        );
+        assert_eq!(render(&doc), WITH_TRAILER);
+    }
+
+    #[test]
+    fn adding_a_scenario_keeps_the_trailing_block_and_puts_the_scenario_above_it() {
+        let doc = parse("features/calc.feature", WITH_TRAILER).unwrap();
+        let text = render(&added(&doc, "A single number returns its value"));
+        let scenario = text
+            .find("Scenario: A single number")
+            .expect("the new scenario was written");
+        let trailer = text.find("# REQ-003+").expect("the trailing note survived");
+        assert!(
+            scenario < trailer,
+            "the new scenario landed below the closing note: {text}"
+        );
+        // Still a feature file, and the note is still the last thing in it.
+        let reparsed = parse("features/calc.feature", &text).unwrap();
+        assert_eq!(reparsed.scenarios.len(), 2);
+        assert_eq!(reparsed.trailing, doc.trailing);
+    }
+
+    #[test]
+    fn two_consecutive_adds_neither_duplicate_nor_drop_the_trailing_block() {
+        let once = render(&added(
+            &parse("features/calc.feature", WITH_TRAILER).unwrap(),
+            "First",
+        ));
+        let twice = render(&added(
+            &parse("features/calc.feature", &once).unwrap(),
+            "Second",
+        ));
+        let doc = parse("features/calc.feature", &twice).unwrap();
+        assert_eq!(doc.scenarios.len(), 3);
+        assert_eq!(twice.matches("# REQ-003+").count(), 1, "got: {twice}");
+        assert!(
+            twice.ends_with("get_requirement(\"REQ-003\").\n"),
+            "got: {twice}"
+        );
+    }
+
+    #[test]
+    fn a_feature_without_a_trailing_block_is_unchanged_by_an_add() {
+        let plain = "Feature: F\n\n  Scenario: S\n    Given a\n";
+        let doc = parse("features/calc.feature", plain).unwrap();
+        assert!(doc.trailing.is_empty());
+        assert_eq!(render(&doc), plain);
+        assert_eq!(
+            render(&added(&doc, "T")),
+            "Feature: F\n\n  Scenario: S\n    Given a\n\n  @REQ-009\n  Scenario: T\n    \
+             Given a string calculator\n"
+        );
+    }
+
+    /// The header block is not the trailing block. A file whose only
+    /// comments sit above the feature keyword must not report them
+    /// twice and must not grow a copy of them at the bottom.
+    #[test]
+    fn a_header_only_file_does_not_report_its_header_as_a_trailer() {
+        let doc = parse("features/calc.feature", WITH_HEADER).unwrap();
+        assert!(doc.trailing.is_empty(), "got: {:?}", doc.trailing);
+        assert_eq!(render(&doc), WITH_HEADER);
+
+        // ...and the two blocks stay apart when a file has both.
+        let both = format!("{WITH_HEADER}\n# and a closing note\n");
+        let doc = parse("features/calc.feature", &both).unwrap();
+        assert_eq!(doc.comments.len(), 3);
+        assert_eq!(doc.trailing, vec!["# and a closing note"]);
+        assert_eq!(render(&doc), both);
+    }
+
+    /// A `#` inside a docstring is the scenario's text, not a closing
+    /// note: the backwards walk stops at the fence below it.
+    #[test]
+    fn a_comment_inside_the_last_step_is_not_mistaken_for_a_trailer() {
+        let docstring = "Feature: F\n\n  Scenario: S\n    Given a\n      \"\"\"\n      \
+                         # not a note\n      \"\"\"\n";
+        let doc = parse("features/calc.feature", docstring).unwrap();
+        assert!(doc.trailing.is_empty(), "got: {:?}", doc.trailing);
+    }
+
+    /// A comment between two scenarios is still lost - the documented
+    /// limit of this treatment. Naming it keeps the next reader from
+    /// assuming the round trip is total.
+    #[test]
+    fn a_comment_between_scenarios_is_not_claimed_by_either_block() {
+        let between = "Feature: F\n\n  Scenario: A\n    Given a\n\n  # midway\n\n  \
+                       Scenario: B\n    Given b\n";
+        let doc = parse("features/calc.feature", between).unwrap();
+        assert!(doc.comments.is_empty());
+        assert!(doc.trailing.is_empty());
     }
 
     #[test]

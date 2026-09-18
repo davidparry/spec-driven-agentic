@@ -282,6 +282,7 @@ impl WorkflowServer {
     ) -> crate::application::spec_service::SpecService<
         FsSpecRepository,
         crate::adapters::fs_spec::FsFeatureFiles,
+        FsChangeStore,
     > {
         wiring::spec_service(&self.root, workshop_layout())
     }
@@ -335,37 +336,29 @@ impl WorkflowServer {
     // ---- the seven frozen tools (workshop server contract) ----------------
 
     #[tool(
-        description = "List every requirement of the kata with its id, title, and \
-        implementation status. Use this to find pending work."
+        description = "List every requirement of the kata with its id, title, \
+        implementation status, and the spec file it lives in. Use this to find pending \
+        work, and the file to know which document holds a requirement once the \
+        catalog is split across includes."
     )]
     async fn list_requirements(&self) -> Result<CallToolResult, McpError> {
         let _span = tool_call("list_requirements");
         // Typed body (not json!) so the field order matches the Java
         // server's LinkedHashMap output: project, then id/title/status.
         #[derive(serde::Serialize)]
-        struct Row<'a> {
-            id: &'a str,
-            title: &'a str,
-            status: &'a str,
-        }
-        #[derive(serde::Serialize)]
         struct Body<'a> {
             project: &'a str,
-            requirements: Vec<Row<'a>>,
+            requirements: Vec<crate::application::spec_service::RequirementSummary>,
         }
-        Ok(match self.spec_repository().load() {
+        let project = match self.spec_repository().load() {
+            Err(e) => return Ok(error_result(e)),
+            Ok(spec) => spec.project,
+        };
+        Ok(match self.spec_service().list_requirements() {
             Err(e) => error_result(e),
-            Ok(spec) => json_result(&Body {
-                project: &spec.project,
-                requirements: spec
-                    .requirements
-                    .iter()
-                    .map(|r| Row {
-                        id: &r.id,
-                        title: &r.title,
-                        status: &r.status,
-                    })
-                    .collect(),
+            Ok(requirements) => json_result(&Body {
+                project: &project,
+                requirements,
             }),
         })
     }
@@ -676,9 +669,11 @@ impl WorkflowServer {
 
     #[tool(
         description = "Reword one requirement's title, story, or acceptance criteria \
-        (staged; apply with changes_commit). Use this to repair whatever validate_spec \
-        or refine_requirement reported - never hand-edit the requirements file, whose \
-        JSON escaping and indentation differ from what the read tools return. Passing \
+        (staged; apply with changes_commit). Use this to repair the wording issues \
+        validate_spec or refine_requirement reported - never hand-edit the requirements \
+        file for those, since its JSON escaping and indentation differ from what the \
+        read tools return. It cannot repair catalog structure (a duplicate id, a file \
+        included twice); those replies name the file edit that can. Passing \
         acceptance_criteria replaces the whole list; status and featureFile are kept."
     )]
     async fn requirement_reword(

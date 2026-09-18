@@ -83,9 +83,9 @@ kept with the presenter, not in the repo.)
 | --- | --- |
 | `kata/` | A **standalone** Maven project — the String Calculator kata. It has its own `pom.xml` (no parent). Two requirements are implemented; the rest are driven agentically during the workshop. Gherkin feature files (`src/test/resources/features/`) are the executable behavior spec, run by Cucumber alongside the JUnit tests. Copy the folder and it still builds: `mvn -f kata/pom.xml test`. |
 | [`harness/`](harness/README.md) | The `spec` harness **and** the workshop MCP server. `spec mcp serve` exposes 25 tools over stdio (wire identity `spec-driven-server` / `1.0.0`, title `Spec Driven`, website [spec-driven-agentic](https://davidparry.github.io/spec-driven-agentic/)). Frozen seven-tool reply shapes are gated by `harness/tests/mcp_conformance.rs`. The same binary automates the spec-driven loop with per-command tool profiles (3–7 tools for a generating command, 12 for the read-only `ask`) and a local Ollama model (`qwen3.8-flash-next:125b-mlx`). See [`harness/README.md`](harness/README.md) and the searchable [command manual](https://davidparry.github.io/spec-driven-agentic/manual/). |
-| `smoke-test/` | A narrated **smoke test** of `spec mcp serve` (`smoke-test.jar`) plus an automated 25-tool sweep. It launches **only** that server as a child process — discovery, baseline `run_tests`, then remaining read-only tools (`validate_spec`, `project_root`, `project_inspect`, `feature_list` / `feature_read`, `changes_show` / `changes_validate`, `step_definitions_find`; no `initialize` handshake). Mutating tools stay behind `--sweep --include-mutating`. Own spec (`smoke-test/requirements/requirements.json`), tagged Cucumber scenarios, `SpecCompletenessTest`, 100% instruction/branch coverage (JaCoCo-enforced; excludes `TddAgent` and `SdkToolClient` only), SpotBugs + PMD gating `mvn -pl smoke-test verify`. |
+| `smoke-test/` | A narrated **smoke test** of `spec mcp serve` (`smoke-test.jar`) plus an automated 25-tool sweep. It launches **only** that server as a child process — discovery, baseline `run_tests`, then remaining read-only tools (`validate_spec`, `project_root`, `project_inspect`, `feature_list` / `feature_read`, `changes_show` / `changes_validate`, `step_definitions_find`; the narration starts at `tools/list`, since the server does not require an `initialize` handshake). Mutating tools stay behind `--sweep --include-mutating`. Own spec (`smoke-test/requirements/requirements.json`), tagged Cucumber scenarios, `SpecCompletenessTest`, 100% instruction/branch coverage (JaCoCo-enforced; excludes `TddAgent` and `SdkToolClient` only), SpotBugs + PMD gating `mvn -pl smoke-test verify`. |
 | `requirements/requirements.json` | The SDD spec: the requirements backlog, and the root of the **spec catalog** — it holds requirements of its own and may `include` child spec files (which may include further files, N levels deep); the tooling merges the tree into one backlog. Each requirement carries acceptance criteria (already phrased Given/When/Then) that agents turn into executable Gherkin scenarios and failing tests, plus a `featureFile` pointer to where its scenarios live. Full field-by-field reference: [The requirements format](https://davidparry.github.io/spec-driven-agentic/manual/spec-format.html). |
-| `slides/index.html` | The reveal.js slide deck (self-contained, CDN-based). **One file, two cuts:** every top-level `<section>` carries `data-track="60"`, `"30"`, or `"both"`, and a script strips the other track before reveal initializes. Plain URL gives the 60-minute workshop (30 slides); `?30` — or the published `/talk30/` path — gives the 30-minute demo-driven session (22 slides). Facts live in one place, so the two cuts cannot drift apart. |
+| `slides/index.html` | The reveal.js slide deck (self-contained, CDN-based). **One file, two cuts:** every top-level `<section>` carries `data-track="60"`, `"30"`, or `"both"`, and a script strips the other track before reveal initializes. Plain URL gives the 60-minute workshop (28 slides); `?30` — or the published `/talk30/` path — gives the 30-minute demo-driven session (21 slides). Facts live in one place, so the two cuts cannot drift apart. |
 | `student-follow-along.md` | The attendee's step-by-step companion: commands, prompts, expected output, self-check, homework. |
 | [`student-follow-docs/pi-path.md`](student-follow-docs/pi-path.md) | The free, offline on-ramp: pi (MIT) on a local Ollama model, first as it ships and then with `-nbt` so the same 25 MCP tools are all the model gets. |
 | [`speaking.md`](speaking.md) | The conference session built on this repo — abstract, what attendees leave with, the *Where This Breaks* catalog of local-model failure modes, formats, and stage requirements. Published at [/speaking/](https://davidparry.github.io/spec-driven-agentic/speaking/). |
@@ -247,7 +247,11 @@ services. A stdio server must never write to stdout — that corrupts the
 JSON-RPC stream.
 Prove the plumbing with the bundled **smoke test**, which does exactly what an
 IDE does: launch `spec mcp serve`, `tools/list` (25 tools),
-then `tools/call` — narrating each step. No `initialize` handshake.
+then `tools/call` — narrating each step. The walkthrough starts straight at
+`tools/list`; the server's `2026-07-28` lifecycle does not require an
+`initialize` handshake, though the Java MCP SDK still opens the stdio
+session with the classic one (protocol `2025-11-25`) on first use, and the
+server answers it normally.
 Default smoke is read-only plus the baseline `run_tests`: after
 `get_requirement` it also calls `validate_spec`, `refine_requirement`,
 `project_root`, `project_inspect`, `feature_list`, `feature_read` (workshop kata path),
@@ -279,9 +283,10 @@ captured in [student-follow-docs/step2.log](student-follow-docs/step2.log).
 ### Exercise 1 — Draft and refine the spec with your agent (20–32 min)
 
 The spec comes first, and the agent helps write it — then refine it against
-the server's feedback. `.cursor/mcp.json` (same as [`config/mcp.json`](config/mcp.json))
-already registers `spec mcp serve` with Cursor — `spec` must be on PATH. Prompt
-your agent:
+the server's feedback. `.cursor/mcp.json` (the same entry as
+[`config/mcp.json`](config/mcp.json), plus a `"protocolEra": "auto"` hint
+for the host) already registers `spec mcp serve` with Cursor — `spec` must
+be on PATH. Prompt your agent:
 
 > Add a new requirement to requirements/requirements.json: a custom delimiter
 > may be declared on the first line, so "//+\n1+2" adds up to 3. Follow the

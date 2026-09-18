@@ -58,7 +58,7 @@ use spec_harness::domain::CONFIG_FILE;
 use spec_harness::domain::feature::{FeatureDoc, FeatureSummary};
 use spec_harness::domain::language::detect_languages;
 use spec_harness::domain::mcp_registry::{RegistryLoad, ServerSpec, parse_registry};
-use spec_harness::domain::model::{Requirement, Spec, TestRunSummary};
+use spec_harness::domain::model::{self, Requirement, Spec, TestRunSummary};
 use spec_harness::domain::tdd::{
     ImplementAttempt, StateEntry, TddPhase, TddSnapshot, TddStateMachine,
 };
@@ -76,7 +76,8 @@ use spec_harness::ports::{
     ChangeStore, FeatureCatalog, FeatureError, FeatureFiles, InteractiveShell, LlmConversation,
     LlmError, McpRegistrySource, ModelCatalog, ModelInfo, ModelStore, ProjectFiles, PromptError,
     Prompter, RunnerError, RuntimeProbe, ShellError, ShellLine, SpecError, SpecRepository,
-    StateStore, TestFilter, TestRunner, ToolBroker, ToolDiscovery, ToolError,
+    StageError, StagedChange, StateStore, TestFilter, TestRunner, ToolBroker, ToolDiscovery,
+    ToolError,
 };
 use spec_harness::repl::{Ending, ShellSummary, offer_greenfield, run_shell};
 
@@ -182,6 +183,7 @@ struct SpecWorld {
     oversized_tool: bool,
     registry: Option<spec_harness::domain::mcp_registry::RegistryLoad>,
     config_text: Option<String>,
+    staged_spec: Option<Spec>,
 }
 
 // ---- fakes implementing the ports ----------------------------------------
@@ -191,6 +193,46 @@ struct InMemorySpec(Spec);
 impl SpecRepository for InMemorySpec {
     fn load(&self) -> Result<Spec, SpecError> {
         Ok(self.0.clone())
+    }
+}
+
+/// The staging area of the in-memory spec world: at most one
+/// uncommitted edit of the root spec document. Enough to tell a tool
+/// that reads staged-first from one that reads the working tree.
+#[derive(Default)]
+struct StagedSpec(Option<String>);
+
+impl ChangeStore for StagedSpec {
+    fn stage(&self, _: &str, _: &str, _: &str) -> Result<StagedChange, StageError> {
+        unimplemented!("the in-memory spec world stages through the world, not the store")
+    }
+
+    fn changes(&self) -> Result<Vec<StagedChange>, StageError> {
+        Ok(self
+            .0
+            .iter()
+            .map(|_| StagedChange {
+                path: SPEC_PATH.into(),
+                action: "modify".into(),
+                summary: "reword".into(),
+            })
+            .collect())
+    }
+
+    fn content(&self, path: &str) -> Result<Option<String>, StageError> {
+        Ok(if path == SPEC_PATH {
+            self.0.clone()
+        } else {
+            None
+        })
+    }
+
+    fn commit(&self) -> Result<Vec<StagedChange>, StageError> {
+        Ok(Vec::new())
+    }
+
+    fn discard(&self) -> Result<Vec<StagedChange>, StageError> {
+        Ok(Vec::new())
     }
 }
 
@@ -270,17 +312,25 @@ fn base_requirement(id: &str) -> Requirement {
 }
 
 impl SpecWorld {
-    fn spec_service(&self) -> SpecService<InMemorySpec, InMemoryFeatures> {
-        let mut spec = self.spec.clone();
-        if spec.project.trim().is_empty() {
-            spec.project = "Test Project".into();
-        }
+    fn spec_service(&self) -> SpecService<InMemorySpec, InMemoryFeatures, StagedSpec> {
+        let named = |spec: &Spec| {
+            let mut spec = spec.clone();
+            if spec.project.trim().is_empty() {
+                spec.project = "Test Project".into();
+            }
+            spec
+        };
         SpecService::new(
-            InMemorySpec(spec),
+            InMemorySpec(named(&self.spec)),
             InMemoryFeatures {
                 existing: self.existing_features.clone(),
                 tags: self.feature_tags.clone(),
             },
+            StagedSpec(
+                self.staged_spec
+                    .as_ref()
+                    .map(|spec| model::render(&named(spec)).expect("a spec always renders")),
+            ),
             ProjectLayout {
                 step_definitions: "steps/Steps.java".into(),
                 test_location: "tests/Test.java".into(),
@@ -525,6 +575,42 @@ fn next_step_advises_confirming(world: &mut SpecWorld) {
             .next_step
             .starts_with("The wording reads clean.")
     );
+}
+
+#[given(regex = r#"^the requirement "([^"]+)" has a staged story "(.+)"$"#)]
+fn the_requirement_has_a_staged_story(world: &mut SpecWorld, id: String, story: String) {
+    let mut staged = world.spec.clone();
+    staged
+        .requirements
+        .iter_mut()
+        .find(|r| r.id == id)
+        .unwrap_or_else(|| panic!("{id} is not in the spec"))
+        .story = story;
+    world.staged_spec = Some(staged);
+}
+
+#[then(regex = r#"^the refinement read the "([^"]+)" wording$"#)]
+fn the_refinement_read(world: &mut SpecWorld, source: String) {
+    assert_eq!(world.refinement().source, source);
+}
+
+#[then("the next step says a commit is not needed between passes")]
+fn next_step_says_no_commit_needed(world: &mut SpecWorld) {
+    let next_step = &world.refinement().next_step;
+    assert!(
+        next_step.contains("no need to commit between passes"),
+        "{next_step}"
+    );
+}
+
+#[then("the next step advises applying the staged wording with changes_commit")]
+fn next_step_advises_committing(world: &mut SpecWorld) {
+    let next_step = &world.refinement().next_step;
+    assert!(
+        next_step.starts_with("The staged wording reads clean."),
+        "{next_step}"
+    );
+    assert!(next_step.contains("changes_commit"), "{next_step}");
 }
 
 #[then("the next step advises requirement_reword and iterating")]
@@ -2645,9 +2731,27 @@ fn the_listing_has(world: &mut SpecWorld, id: String, title: String, status: Str
         .as_ref()
         .expect("the requirements were listed");
     assert!(
-        list.contains(&RequirementSummary { id, title, status }),
+        list.contains(&RequirementSummary {
+            id,
+            title,
+            status,
+            file: SPEC_PATH.into(),
+        }),
         "listed: {list:?}"
     );
+}
+
+#[then(regex = r#"^the listing puts "([^"]+)" in "([^"]+)"$"#)]
+fn the_listing_puts_in(world: &mut SpecWorld, id: String, file: String) {
+    let list = world
+        .requirement_list
+        .as_ref()
+        .expect("the requirements were listed");
+    let listed = list
+        .iter()
+        .find(|r| r.id == id)
+        .unwrap_or_else(|| panic!("{id} was not listed: {list:?}"));
+    assert_eq!(listed.file, file);
 }
 
 #[when(regex = r#"^the requirement "([^"]+)" is shown$"#)]

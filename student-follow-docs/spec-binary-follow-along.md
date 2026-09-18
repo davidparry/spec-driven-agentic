@@ -54,7 +54,7 @@ You need:
 - **This repository cloned**, and a branch of your own. Never work on
   `trunk`.
 
-Then run the preflight, from anywhere inside the repository:
+Then run the preflight from the repository root:
 
 ```bash
 scripts/preflight.sh
@@ -67,8 +67,9 @@ Result: 10 passed, 0 failed.
 ```
 
 It checks Java, Maven, `spec`, the Maven build, the Cucumber surefire
-report, an end-to-end MCP run, and that the REQ-003 demo has not been
-burned by an earlier rehearsal. Any FAIL line names the fix. If it tells
+report, an end-to-end MCP run, that the REQ-003 demo has not been
+burned by an earlier rehearsal, that `smoke-test.jar` was built, and that
+the slide deck is present. Any FAIL line names the fix. If it tells
 you `REQ-003 status is 'implemented'` or that the feature file already has
 an `@REQ-003` scenario, you have leftovers from a previous run: reset with
 `git checkout -- kata requirements`.
@@ -120,9 +121,21 @@ Configured model: qwen3.8-flash-next:125b-mlx
 Written to: /path/to/tdd-bdd-agentic/.spec.toml
 ```
 
-Do this even if you plan to implement by hand — `spec implement` and the
-assisted `spec reword` will not find a model otherwise, and they degrade
-quietly rather than complaining.
+Do this even if you plan to implement by hand. Skipping it does **not**
+leave you without a model — `spec` falls back to the first model Ollama
+lists and announces it as a session-only default:
+
+```text
+Model set for this session: qwen3.6:35b-mlx (not saved - keep it with: spec model use qwen3.6:35b-mlx).
+```
+
+That is the trap. The first installed model is whatever Ollama happens to
+return first, which is usually not the one this workshop was written
+against, and nothing stops the run — you just get different quality for
+an hour and no warning beyond that one line. `spec model use` pins it, and
+`spec model current` tells you at any point which model resolved and where
+it came from. Deterministic templates only take over when Ollama is
+unreachable or has no models at all.
 
 **Expect, in order:**
 
@@ -190,12 +203,14 @@ spec draft \
   --criterion 'Given an empty delimiter declaration "//\n1+2", when add is called, then an IllegalArgumentException is thrown'
 ```
 
-Worth calling out before you run it: **with all four flags supplied,
-`spec draft` is fully non-interactive.** No wizard, no prompts, no
-terminal required. It assigns the next id, checks the structure, and
-stages. That makes it the one authoring command you can safely put in a
-script. (`spec draft` with *no* flags is the interactive wizard, and it
-does need a terminal.)
+Worth calling out before you run it: **with `--title`, `--story`, and at
+least one `--criterion`, `spec draft` is fully non-interactive.** No
+wizard, no prompts, no terminal required. It assigns the next id, checks
+the structure, and stages. That makes it the one authoring command you can
+safely put in a script. (`spec draft` with *no* flags is the interactive
+wizard, and it does need a terminal.) Supply one of those three and you
+must supply all three: a partial set is a hard error — `spec draft --title
+requires --story and --criterion` — not a fallback to the wizard.
 
 **Expect:**
 
@@ -1266,9 +1281,23 @@ read the phase from `.spec-state.json`, which is per-directory, so the new
 worktree starts at phase `START` — run `spec test` once to establish a bar
 before you try to trip anything.
 
+That first bar is GREEN, because you cut the worktree from a finished run.
+Two of the four gates need RED, so stage a scenario for behavior nobody
+implemented and commit it:
+
+```bash
+spec scenario add --feature kata/src/test/resources/features/string_calculator.feature \
+  --req REQ-003 --name "Gate demo: a behavior nobody implemented" \
+  --step 'Given a string calculator' \
+  --step 'When I add "9,9"' \
+  --step 'Then the result is 99'
+spec changes commit
+spec test                     # RED
+```
+
 All four messages are exact.
 
-**Refactoring on a red bar.** Get to RED, then:
+**Refactoring on a red bar.**
 
 ```bash
 spec refactor --note "tidy up"

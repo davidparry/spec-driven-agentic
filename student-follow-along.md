@@ -22,7 +22,7 @@ zero? See the greenfield build order, first file to last:
 
 You need:
 
-- **`spec` on PATH** (`spec --version`) — GitHub release, `cargo install --path harness`, or `harness/target/release/spec`. Cursor will not connect without it.
+- **`spec` on PATH** (`spec --version`) — GitHub release, `cargo install --path harness`, or `harness/target/release/spec`. Cursor will not connect without it, and it must report **0.5.2 or newer** — the homework's account of how `spec steps generate` behaves is only true from that release on.
 - **Java 21+** (`java -version`)
 - **Maven 3.9+** (`mvn -version`)
 - **Cursor** (or any MCP-capable agent — Claude Desktop works with the same JSON)
@@ -104,12 +104,12 @@ The smoke test narrates every step of the protocol exchange. It starts like this
 ========================================================================
 ```
 
-…and walks through discovery and tool calls. This client skips the
-`initialize` handshake — the server's newer `2026-07-28` lifecycle does not
-need one — but the classic `initialize` (protocol `2025-11-25`) is answered
-just as well, which is why `.cursor/mcp.json` can say
-`"protocolEra": "auto"` and let the host choose. Compare yours
-against the full captured run:
+…and walks through discovery and tool calls. This walkthrough starts
+straight at `tools/list` — the server's `2026-07-28` lifecycle does not
+require an `initialize` handshake. The Java MCP SDK still opens the stdio
+session with the classic `initialize` (protocol `2025-11-25`) on first use,
+which you will see in the log, and the server answers it normally. Compare
+yours against the full captured run:
 [student-follow-docs/step2.log](student-follow-docs/step2.log). (The
 interleaved `INFO io.modelcontextprotocol...` lines are SDK logging — normal —
 and the absolute repo paths in the log will differ on your machine.)
@@ -153,7 +153,8 @@ To connect your own agent, the ready-to-run configuration lives at
 ```
 
 Cursor users get this automatically — the repo ships `.cursor/mcp.json`
-(same as [`config/mcp.json`](config/mcp.json)). For every other client
+(the same entry as [`config/mcp.json`](config/mcp.json), plus a
+`"protocolEra": "auto"` hint for the host). For every other client
 (Claude Desktop, Claude Code, Codex, VS Code, Windsurf, Gemini CLI), see
 [student-follow-docs/setup-mcp.md](student-follow-docs/setup-mcp.md).
 
@@ -485,6 +486,9 @@ their edits differently):
    `fail("TODO: assert - Given \"1,2\", ...")` for you to sharpen, so that
    line reads `TODO: assert - ...` instead. Both are a real RED on the same
    count — fill the assertions in when you write the production code.
+   Over MCP, `unit_test_create` and `step_definition_create` always stage
+   the deterministic template; the model-polished version is only on the
+   `spec unittest generate` / `spec steps generate` CLI path.
 
 4. The agent implements the simplest `StringCalculator.add` that passes
    (**a file edit** — there is no `implement` MCP tool). **Your checkpoint:**

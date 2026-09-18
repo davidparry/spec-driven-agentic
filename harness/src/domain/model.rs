@@ -129,6 +129,17 @@ impl SpecCatalog {
     }
 }
 
+/// One spec document as a file holds it: pretty-printed, and ending in
+/// a newline.
+///
+/// Every writer of a spec file renders through here. The newline is the
+/// point: a document that stops at `}` leaves `\ No newline at end of
+/// file` in the student's diff on every reword, and reads differently
+/// from the Gherkin and Java the same run generates, which do end in one.
+pub fn render(spec: &Spec) -> Result<String, serde_json::Error> {
+    serde_json::to_string_pretty(spec).map(|json| json + "\n")
+}
+
 /// Reads one spec file's raw JSON by catalog-relative path, returning
 /// the content plus the label error messages should call the file, or
 /// an already formatted `spec: ...` error.
@@ -472,6 +483,21 @@ mod tests {
         let out = serde_json::to_string(&spec).unwrap();
         assert!(out.contains("acceptanceCriteria"));
         assert!(out.contains("featureFile"));
+
+        // What a writer puts on disk: the same field names, pretty
+        // printed, ending in a newline. Without the 0a every reword
+        // leaves "\ No newline at end of file" in the student's diff,
+        // and the spec reads differently from the Gherkin and Java the
+        // same run generates.
+        let written = render(&spec).unwrap();
+        assert_eq!(written.as_bytes().last(), Some(&b'\n'), "{written:?}");
+        assert!(!written.ends_with("\n\n"), "exactly one: {written:?}");
+        assert!(written.contains("\n  \"requirements\": ["), "{written}");
+        assert_eq!(
+            serde_json::from_str::<Spec>(&written).unwrap(),
+            spec,
+            "the written bytes still parse back to the same spec"
+        );
     }
 
     pub fn requirement(id: &str) -> Requirement {

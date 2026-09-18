@@ -18,9 +18,17 @@ impl<R: BufRead, W: Write> ConsolePrompter<R, W> {
 
     fn read_line(&mut self) -> Result<String, PromptError> {
         let mut line = String::new();
-        self.input
+        let read = self
+            .input
             .read_line(&mut line)
             .map_err(|e| PromptError(format!("input is not readable - {e}")))?;
+        // Zero bytes is end of input, not a blank line. Returning an
+        // empty string for both is what let a wizard re-ask the same
+        // question forever once the pipe ran dry - the readline
+        // prompter has always told them apart, and now so does this.
+        if read == 0 {
+            return Err(PromptError::ended("the pipe ran out"));
+        }
         Ok(line.trim().to_string())
     }
 }

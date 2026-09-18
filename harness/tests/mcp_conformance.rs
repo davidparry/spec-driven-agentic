@@ -232,6 +232,20 @@ async fn list_requirements_returns_the_java_shaped_body() {
         "Empty string returns zero"
     );
     assert_eq!(body["requirements"][0]["status"], "pending");
+    assert_eq!(
+        body["requirements"][0]["file"],
+        "requirements/requirements.json"
+    );
+    // The frozen fields keep their names and their wire order; file is
+    // added after them, so nothing downstream shifts. Checked on the raw
+    // text because a parsed map sorts its keys.
+    let (_, text) = call(&client, "list_requirements", json!({})).await;
+    let at = |field: &str| text.find(&format!("\"{field}\"")).expect(field);
+    assert!(at("project") < at("id") && at("id") < at("title"), "{text}");
+    assert!(
+        at("title") < at("status") && at("status") < at("file"),
+        "{text}"
+    );
 
     client.cancel().await.unwrap();
 }
@@ -286,6 +300,17 @@ async fn a_spec_split_across_included_files_serves_the_merged_view() {
     assert_eq!(body["project"], "String Calculator Kata");
     assert_eq!(body["requirements"][0]["id"], "REQ-001");
     assert_eq!(body["requirements"][1]["id"], "REQ-002");
+    // Merged is not enough once the catalog is split: an agent over MCP
+    // has to know which document holds a requirement, the way spec list
+    // has always told the shell.
+    assert_eq!(
+        body["requirements"][0]["file"],
+        "requirements/requirements.json"
+    );
+    assert_eq!(
+        body["requirements"][1]["file"],
+        "requirements/core/math.json"
+    );
 
     let shown = call_json(&client, "get_requirement", json!({"id": "REQ-002"})).await;
     assert_eq!(shown["id"], "REQ-002");
@@ -353,6 +378,57 @@ async fn refine_requirement_reports_clean_and_unknown_ids_error() {
     assert_eq!(body["id"], "REQ-001");
     assert_eq!(body["clean"], true);
     assert_eq!(body["findings"], json!([]));
+    assert_eq!(body["source"], "working tree");
+
+    // requirement_reword stages. Refining after it has to review the
+    // staged wording, or vague text the developer just wrote comes back
+    // clean because only the untouched on-disk copy was ever read.
+    call_json(
+        &client,
+        "requirement_reword",
+        json!({"id": "REQ-001", "story": "the calculator should handle newlines quickly"}),
+    )
+    .await;
+    let body = call_json(&client, "refine_requirement", json!({"id": "REQ-001"})).await;
+    assert_eq!(body["clean"], false, "{body}");
+    assert_eq!(body["source"], "staged", "{body}");
+    assert!(
+        body["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f.as_str().unwrap().contains("missing the actor")),
+        "{body}"
+    );
+    // And the loop converges without the agent inventing a commit.
+    let next_step = body["nextStep"].as_str().unwrap();
+    assert!(
+        next_step.contains("no need to commit between passes"),
+        "{next_step}"
+    );
+
+    // The pass right after a fixing reword is clean, still with nothing
+    // committed, and points at the commit as the way to apply it.
+    call_json(
+        &client,
+        "requirement_reword",
+        json!({
+            "id": "REQ-001",
+            "story": "As a user, I want newline sums so that multi-line input works.",
+        }),
+    )
+    .await;
+    let body = call_json(&client, "refine_requirement", json!({"id": "REQ-001"})).await;
+    assert_eq!(body["clean"], true, "{body}");
+    assert_eq!(body["source"], "staged", "{body}");
+    assert!(
+        body["nextStep"]
+            .as_str()
+            .unwrap()
+            .contains("changes_commit"),
+        "{body}"
+    );
+    call_json(&client, "changes_discard", json!({})).await;
 
     let (is_error, text) = call(&client, "refine_requirement", json!({"id": "REQ-999"})).await;
     assert_eq!(is_error, Some(true));
@@ -621,6 +697,14 @@ async fn requirement_reword_stages_criteria_whose_escaping_survives_the_round_tr
     assert!(
         on_disk.contains(r#""Given \"//+\\n1+2\", when add is called, then the result is 3""#),
         "escaping was mangled on disk: {on_disk}"
+    );
+    // Spec JSON is a text file like the Gherkin and Java the harness
+    // writes: it ends in a newline, so students' diffs do not carry a
+    // "\ No newline at end of file" marker.
+    assert!(
+        on_disk.ends_with("}\n") && !on_disk.ends_with("}\n\n"),
+        "spec file does not end in exactly one newline: {:?}",
+        &on_disk[on_disk.len().saturating_sub(16)..]
     );
 
     client.cancel().await.unwrap();

@@ -15,7 +15,9 @@ it starts from — [pi](https://pi.dev) and its MCP extension — under MIT.
 Your agent just produced 400 lines that compile, pass tests nobody asked for,
 and encode a design you never approved. The industry's answer is "use a bigger
 model." That answer costs you your budget, your code's confidentiality, and
-your ability to reproduce a result six months from now.
+your ability to reproduce a result six months from now. It also misreads the
+problem: a bigger model is a better System 1, and System 2 has to come from
+somewhere else.
 
 There is a better answer, and Java developers have had it for twenty years:
 write the specification first, and make the tests the contract. This session

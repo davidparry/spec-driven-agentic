@@ -3,6 +3,7 @@
 //! This binary is a composition root: it names concrete adapters and
 //! wires them into application services, and nothing else.
 
+use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
 use clap::{Args, Parser, Subcommand};
@@ -21,10 +22,11 @@ use spec_harness::adapters::mcp_config::FsMcpRegistry;
 use spec_harness::adapters::ollama::{DEFAULT_ENDPOINT, DEFAULT_GENERATION_TIMEOUT, OllamaCatalog};
 use spec_harness::adapters::ollama_chat::OllamaChat;
 use spec_harness::adapters::process_runtime::ProcessRuntimeProbe;
+use spec_harness::adapters::prompt_end::AbortOnEndOfInput;
 use spec_harness::adapters::readline_prompt::ReadlinePrompter;
 use spec_harness::adapters::readline_shell::ReadlineShell;
 use spec_harness::adapters::runners::detect_runner;
-use spec_harness::adapters::spinner::Spinner;
+use spec_harness::adapters::spinner::{HushingPrompter, Spinner};
 use spec_harness::adapters::tool_cache::CachedDiscovery;
 use spec_harness::application::DEFAULT_LLM_ATTEMPTS;
 use spec_harness::application::agent_service::AgentConfig;
@@ -37,6 +39,7 @@ use spec_harness::application::model_service::{
     ModelResolution, ModelService, ModelSource, SessionModel,
 };
 use spec_harness::application::spec_mutation_service::SpecMutationService;
+use spec_harness::application::spec_service::STAGED;
 use spec_harness::application::status_service::StatusService;
 use spec_harness::application::tdd_service::TddError;
 use spec_harness::application::tool_call_service::ToolCallService;
@@ -45,6 +48,7 @@ use spec_harness::domain::config_report::{ConfigSource, LLM_MODEL_KEY};
 use spec_harness::domain::language::Language;
 use spec_harness::domain::mcp_registry::ServerSpec;
 use spec_harness::domain::prompts::ask_prompt;
+use spec_harness::domain::spec_validator::{is_structural_issue, structural_repair};
 use spec_harness::domain::tdd::ImplementAttempt;
 use spec_harness::domain::tool_profile::{Caller, resolve};
 use spec_harness::domain::{CACHE_DIR, HISTORY_FILE, LOG_DIR, RECOMMENDED_MODEL};
@@ -562,7 +566,7 @@ fn execute(
                 const RED: &str = "\x1b[31m";
                 const RESET: &str = "\x1b[0m";
                 let work = Spinner::start("Asking the model for the next step - working");
-                let mut prompter = interactive_prompter();
+                let mut prompter = interactive_prompter(Prompts::Incidental);
                 let advice = service.advice(prompter.as_mut(), &report, &state.last_run);
                 drop(work);
                 match advice {
@@ -586,7 +590,7 @@ fn execute(
             match command {
                 StepsCommand::Missing => print_json(&service.steps_missing()?),
                 StepsCommand::Generate => {
-                    let mut prompter = interactive_prompter();
+                    let mut prompter = interactive_prompter(Prompts::Incidental);
                     print_json(&service.steps_generate(prompter.as_mut())?)
                 }
             }
@@ -625,7 +629,7 @@ fn execute(
                 };
                 println!("  {}: {} - {mark}", asset.role, asset.path);
             }
-            let mut prompter = interactive_prompter();
+            let mut prompter = interactive_prompter(Prompts::Incidental);
             if !readiness.ready {
                 for finding in &readiness.findings {
                     println!("{RED}{finding}{RESET}");
@@ -702,7 +706,7 @@ fn execute(
                 max_rounds,
                 Caller::UnittestGenerate,
             )?;
-            let mut prompter = interactive_prompter();
+            let mut prompter = interactive_prompter(Prompts::Incidental);
             print_json(&service.unittest_generate(prompter.as_mut(), req_id)?)
         }
     }
@@ -783,7 +787,7 @@ fn run_shell_mode(root: &Path, model: Option<&str>, retry: Option<u32>) -> anyho
     // attached, and the answer is recorded for every later command.
     let llm =
         cached_chat(root, model).map(|(model, chat)| (model, std::sync::Arc::new(chat) as DynLlm));
-    let mut prompter = interactive_prompter();
+    let mut prompter = interactive_prompter(Prompts::Incidental);
     settle_project_memory(
         root,
         llm.as_ref(),
@@ -1002,6 +1006,7 @@ fn spec_service(
 ) -> spec_harness::application::spec_service::SpecService<
     FsSpecRepository,
     spec_harness::adapters::fs_spec::FsFeatureFiles,
+    spec_harness::adapters::fs_staging::FsChangeStore,
 > {
     wiring::spec_service(root, detect_project_layout(root))
 }
@@ -1067,9 +1072,12 @@ fn implement_follow_up(root: &Path, req_id: &str) -> anyhow::Result<()> {
     const RESET: &str = "\x1b[0m";
     use std::io::IsTerminal as _;
     let accepted = std::io::stdin().is_terminal()
-        && ConsolePrompter::new(std::io::BufReader::new(std::io::stdin()), std::io::stdout())
-            .confirm("Apply the staged files and run the tests now?")
-            .unwrap_or(false);
+        && HushingPrompter::new(ConsolePrompter::new(
+            std::io::BufReader::new(std::io::stdin()),
+            std::io::stdout(),
+        ))
+        .confirm("Apply the staged files and run the tests now?")
+        .unwrap_or(false);
     if !accepted {
         println!(
             "Next: {GREEN}changes commit && test{RESET} - then \
@@ -1188,24 +1196,51 @@ fn run_spec(
         }
         SpecCommand::Validate => {
             let mut report = service.validate_spec();
-            report.next_step = if report.valid {
-                "The spec is valid. Run spec list, pick a pending requirement, and write \
-                 its Gherkin scenario (spec scenario add)."
-                    .into()
-            } else {
-                "Run spec reword to fix the issues, then run spec validate again.".into()
+            // The service words its next step for the MCP agent; the
+            // shell gets the same advice naming commands. Catalog
+            // structure is the exception - no command repairs it, so the
+            // service's remedy stands as written.
+            report.next_step = match structural_repair(&report.issues) {
+                Some(repair) if report.issues.iter().all(|i| is_structural_issue(i)) => repair,
+                Some(repair) => {
+                    format!("{repair} Run spec reword for the remaining wording issues.")
+                }
+                None if report.valid => {
+                    "The spec is valid. Run spec list, pick a pending requirement, and write \
+                     its Gherkin scenario (spec scenario add)."
+                        .into()
+                }
+                None => "Run spec reword to fix the issues, then run spec validate again.".into(),
             };
-            print_json(&report)
+            let valid = report.valid;
+            print_json(&report)?;
+            // A gate scripted on this used to pass on an invalid spec:
+            // the report said "valid": false and the exit status said
+            // 0. `spec list` already exits 1 on a circular include, so
+            // the binary disagreed with itself as well.
+            if valid {
+                Ok(())
+            } else {
+                Err(NonzeroExit.into())
+            }
         }
         SpecCommand::Refine { req_id } => {
             let mut report = service.refine_requirement(req_id)?;
-            if !report.clean {
-                report.next_step = format!(
+            // Same advice as the service gives the agent, naming commands
+            // instead of tools.
+            report.next_step = match (report.clean, report.source) {
+                (false, _) => format!(
                     "Run spec reword {req_id} to address each finding, then run \
-                     spec validate and spec refine {req_id} again. Iterate \
-                     until there are no findings."
-                );
-            }
+                     spec refine {req_id} again - it reviews your staged edit, so \
+                     there is no need to commit between passes. Iterate until there \
+                     are no findings."
+                ),
+                (true, STAGED) => "The staged wording reads clean. Review it with spec changes \
+                     show, apply it with spec changes commit, then add the scenario \
+                     with spec scenario add."
+                    .into(),
+                (true, _) => report.next_step,
+            };
             print_json(&report)
         }
         SpecCommand::Draft {
@@ -1217,19 +1252,19 @@ fn run_spec(
             let mutations = mutation_service(root, attempts);
             let file = file.as_deref();
             if title.is_some() || story.is_some() || !criterion.is_empty() {
-                let title = title.as_deref().ok_or_else(|| {
-                    anyhow::anyhow!("spec draft --title requires --story and --criterion")
-                })?;
-                let story = story.as_deref().ok_or_else(|| {
-                    anyhow::anyhow!("spec draft --story requires --title and --criterion")
-                })?;
-                if criterion.is_empty() {
-                    anyhow::bail!("spec draft needs at least one --criterion");
+                if let Some(complaint) =
+                    missing_draft_flags(title.is_some(), story.is_some(), !criterion.is_empty())
+                {
+                    anyhow::bail!(complaint);
                 }
+                let (title, story) = (
+                    title.as_deref().expect("checked above"),
+                    story.as_deref().expect("checked above"),
+                );
                 let report = mutations.draft_direct_in(title, story, criterion.clone(), file)?;
                 return print_json(&report);
             }
-            let mut prompter = interactive_prompter();
+            let mut prompter = interactive_prompter(Prompts::Wizard);
             let report = match resolved_chat(root, model) {
                 Some((name, chat)) => {
                     let mutations =
@@ -1256,7 +1291,7 @@ fn run_spec(
                 )?;
                 return print_json(&report);
             }
-            let mut prompter = interactive_prompter();
+            let mut prompter = interactive_prompter(Prompts::Wizard);
             let report = match resolved_chat(root, model) {
                 Some((name, chat)) => {
                     let mutations =
@@ -1418,7 +1453,7 @@ fn run_init(root: &Path, args: &InitArgs) -> anyhow::Result<()> {
             )
         })?,
         None => {
-            let mut prompter = interactive_prompter();
+            let mut prompter = interactive_prompter(Prompts::Incidental);
             prompt_language(prompter.as_mut())?
         }
     };
@@ -1439,7 +1474,7 @@ fn run_init(root: &Path, args: &InitArgs) -> anyhow::Result<()> {
 fn run_greenfield(root: &Path, model_flag: Option<&str>, attempts: u32) -> anyhow::Result<()> {
     let llm = cached_chat(root, model_flag)
         .map(|(model, chat)| (model, std::sync::Arc::new(chat) as DynLlm));
-    let mut prompter = interactive_prompter();
+    let mut prompter = interactive_prompter(Prompts::Wizard);
     let report = Greenfield::new(root.to_path_buf(), llm)
         .with_llm_attempts(attempts)
         .run(prompter.as_mut())
@@ -1461,37 +1496,253 @@ fn resolve_llm_attempts(root: &Path, flag: Option<u32>) -> u32 {
 /// Warned once when a command that prompts starts on piped stdin. A read
 /// past the end of the pipe returns an empty line, which the prompter
 /// cannot tell apart from pressing Enter, so every remaining prompt takes
-/// its default and every confirmation declines. For the draft/reword wizard
-/// that means it does its model work and stages nothing while still exiting
-/// 0; for `spec implement` it only means the optional `command_run` is
-/// declined. Name the cause without promising which of the two happened.
+/// its default and every confirmation declines. True of every command
+/// that prompts, so every command that prompts says it.
 const PIPED_STDIN_WARNING: &str = "stdin is not a terminal: prompts are read from the pipe, and \
-     once it runs out every remaining prompt takes its default and every confirmation declines. \
-     A wizard that ends in \"Stage this?\" therefore stages nothing. Run this in a terminal to \
-     answer the prompts.";
+     once it runs out every remaining prompt takes its default and every confirmation declines.";
+
+/// What the warning adds for a wizard. The draft/reword wizard does its
+/// model work and then loses it: the last question is "Stage this?" and
+/// an exhausted pipe declines it, so the command stages nothing and
+/// still exits 0. `spec implement`, `spec unittest generate` and
+/// `spec steps generate` have no wizard and stage regardless - they used
+/// to print this too, which told a scripted run its staged work had been
+/// thrown away when it had not.
+const PIPED_STDIN_WIZARD_WARNING: &str =
+    "A wizard that ends in \"Stage this?\" therefore stages nothing.";
+
+const PIPED_STDIN_REMEDY: &str = "Run this in a terminal to answer the prompts.";
+
+/// Whether the command about to prompt is a wizard whose last question
+/// decides if anything is kept.
+#[derive(Clone, Copy, PartialEq)]
+enum Prompts {
+    /// Ends in "Stage this?": a declined prompt throws the work away.
+    Wizard,
+    /// Prompts along the way - an optional tool call, a setup question -
+    /// and finishes either way.
+    Incidental,
+}
 
 /// The wizard prompter. On a real terminal, rustyline gives the answers
 /// full line editing - arrow keys move the cursor anywhere in the typed
 /// text, Home/End jump, up-arrow recalls this session's answers. Piped
 /// input (scripts, CI) falls back to plain buffered reads.
-fn interactive_prompter() -> Box<dyn Prompter> {
+/// Both prompters are decorated here rather than inside themselves:
+/// this is the one place the CLI decides who asks the questions, so it
+/// is the one place that can promise every question survives the
+/// spinner running above it ([`HushingPrompter`]) and that no question
+/// is put to an input that has already ended
+/// ([`AbortOnEndOfInput`]). A wizard written later inherits both
+/// without naming either.
+fn interactive_prompter(prompts: Prompts) -> Box<dyn Prompter> {
     use std::io::IsTerminal as _;
     if std::io::stdin().is_terminal()
         && let Ok(prompter) = ReadlinePrompter::new()
     {
-        return Box::new(prompter);
+        return Box::new(AbortOnEndOfInput::new(HushingPrompter::new(prompter)));
     }
     // stderr, so a caller parsing the JSON on stdout still can.
-    eprintln!("{PIPED_STDIN_WARNING}");
-    Box::new(ConsolePrompter::new(
-        std::io::BufReader::new(std::io::stdin()),
-        std::io::stdout(),
-    ))
+    eprintln!("{}", piped_stdin_warning(prompts));
+    Box::new(AbortOnEndOfInput::new(HushingPrompter::new(
+        ConsolePrompter::new(std::io::BufReader::new(std::io::stdin()), std::io::stdout()),
+    )))
+}
+
+fn piped_stdin_warning(prompts: Prompts) -> String {
+    match prompts {
+        Prompts::Wizard => {
+            format!("{PIPED_STDIN_WARNING} {PIPED_STDIN_WIZARD_WARNING} {PIPED_STDIN_REMEDY}")
+        }
+        Prompts::Incidental => format!("{PIPED_STDIN_WARNING} {PIPED_STDIN_REMEDY}"),
+    }
 }
 
 fn print_json<T: serde::Serialize>(value: &T) -> anyhow::Result<()> {
-    println!("{}", serde_json::to_string_pretty(value)?);
+    println!("{}", speak_cli(&serde_json::to_string_pretty(value)?));
     Ok(())
+}
+
+/// What is wrong with a half-given `spec draft`, said in terms of the
+/// flags actually typed.
+///
+/// The old message picked whichever flag it happened to check first,
+/// so `--title X` on its own was answered with "spec draft --story
+/// requires --title and --criterion" - naming a flag the user had not
+/// typed and demanding one they had.
+fn missing_draft_flags(title: bool, story: bool, criterion: bool) -> Option<String> {
+    let named = |present: bool, flag: &'static str| present.then_some(flag);
+    let supplied: Vec<&str> = [
+        named(title, "--title"),
+        named(story, "--story"),
+        named(criterion, "--criterion"),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    let missing: Vec<&str> = [
+        named(!title, "--title"),
+        named(!story, "--story"),
+        named(!criterion, "--criterion"),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    if missing.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "spec draft with {} also needs {}. Give all three, or none of them \
+         to be asked question by question.",
+        list_flags(&supplied),
+        list_flags(&missing),
+    ))
+}
+
+fn list_flags(flags: &[&str]) -> String {
+    match flags {
+        [] => "nothing".into(),
+        [one] => (*one).to_string(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    }
+}
+
+/// Every MCP tool the shell has a command for.
+///
+/// The services word their advice for the agent, which calls tools.
+/// None of those names exist on the shell, so a student who follows
+/// the advice literally types something that does not run. Tools with
+/// no CLI equivalent are deliberately absent - leaving the tool name
+/// visible is better than inventing a command.
+const CLI_FOR_TOOL: [(&str, &str); 23] = [
+    ("requirement_mark_implemented", "spec mark-implemented"),
+    ("step_definitions_find", "spec steps missing"),
+    ("step_definition_create", "spec steps generate"),
+    ("requirement_reword", "spec reword"),
+    ("refine_requirement", "spec refine"),
+    ("list_requirements", "spec list"),
+    ("unit_test_create", "spec unittest generate"),
+    ("changes_validate", "spec changes validate"),
+    ("scenario_update", "spec scenario update"),
+    ("scenario_delete", "spec scenario delete"),
+    ("get_requirement", "spec show"),
+    ("changes_discard", "spec changes discard"),
+    ("project_inspect", "spec inspect"),
+    ("start_refactor", "spec refactor"),
+    ("changes_commit", "spec changes commit"),
+    ("feature_create", "spec feature create"),
+    ("get_tdd_state", "spec state"),
+    ("validate_spec", "spec validate"),
+    ("feature_list", "spec feature list"),
+    ("feature_read", "spec feature show"),
+    ("scenario_add", "spec scenario add"),
+    ("changes_show", "spec changes show"),
+    ("run_tests", "spec test"),
+];
+
+/// Command phrases the services write without their `spec ` prefix, so
+/// "Review with changes show" and "Review with spec changes show" do
+/// not both ship. Only unambiguous multi-word phrases are listed:
+/// bare words like "validate" and "list" are ordinary English as often
+/// as they are commands, and guessing wrong reads worse than leaving
+/// them be.
+const BARE_CLI_PHRASES: [&str; 6] = [
+    "changes validate",
+    "changes discard",
+    "changes commit",
+    "changes show",
+    "run validate",
+    "run list",
+];
+
+/// Rewrite every `nextStep` in a reply into the shell's dialect.
+///
+/// Done here, at the one place the CLI prints a reply, rather than in
+/// each command handler: there are two dozen replies carrying advice
+/// and they should all speak the same way. The MCP server builds its
+/// own payloads and never passes through here, so the tool-facing
+/// wording it promises is untouched.
+///
+/// Works on the rendered text rather than a parsed `serde_json::Value`
+/// because that type sorts its keys, and the order the reports declare
+/// their fields in is how they are meant to be read.
+fn speak_cli(rendered: &str) -> String {
+    rendered
+        .lines()
+        .map(translated_line)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// One rendered line. Pretty JSON puts each key and its value on a
+/// line of their own, and a string value is escaped onto that one
+/// line, so a `nextStep` can be swapped without reparsing the reply.
+fn translated_line(line: &str) -> Cow<'_, str> {
+    const KEY: &str = "\"nextStep\": ";
+    let Some((indent, rest)) = line.split_once(KEY) else {
+        return Cow::Borrowed(line);
+    };
+    // Only a key sits alone at the start of its line; an occurrence
+    // inside some other value has text in front of it.
+    if !indent.chars().all(char::is_whitespace) {
+        return Cow::Borrowed(line);
+    }
+    let (literal, tail) = match rest.strip_suffix(',') {
+        Some(literal) => (literal, ","),
+        None => (rest, ""),
+    };
+    let Ok(text) = serde_json::from_str::<String>(literal) else {
+        return Cow::Borrowed(line);
+    };
+    let spoken = serde_json::to_string(&cli_next_step(&text)).expect("a string always renders");
+    Cow::Owned(format!("{indent}{KEY}{spoken}{tail}"))
+}
+
+/// One `nextStep`, in commands a reader can paste.
+fn cli_next_step(text: &str) -> String {
+    let mut out = text.to_string();
+    for (tool, command) in CLI_FOR_TOOL {
+        if !out.contains(tool) {
+            continue;
+        }
+        out = out.replace(&format!("`{tool}`"), command);
+        out = out.replace(tool, command);
+        // "Call spec test" is not how anyone says it.
+        out = out.replace(&format!("Call {command}"), &format!("Run {command}"));
+        out = out.replace(&format!("call {command}"), &format!("run {command}"));
+    }
+    for phrase in BARE_CLI_PHRASES {
+        out = prefix_with_spec(&out, phrase);
+    }
+    out
+}
+
+/// `phrase` given its `spec ` prefix wherever it does not already have
+/// one, so no reply says "spec spec changes show".
+fn prefix_with_spec(text: &str, phrase: &str) -> String {
+    let bare = phrase.strip_prefix("run ").unwrap_or(phrase);
+    let lead = &phrase[..phrase.len() - bare.len()];
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find(phrase) {
+        let end = at + phrase.len();
+        let (before, after) = (&rest[..at], &rest[end..]);
+        // "the changes shown by" does not name the changes show command.
+        if after.starts_with(|c: char| c.is_alphanumeric() || c == '_' || c == '-') {
+            out.push_str(&rest[..end]);
+            rest = after;
+            continue;
+        }
+        out.push_str(before);
+        out.push_str(lead);
+        if !(lead.is_empty() && before.ends_with("spec ")) {
+            out.push_str("spec ");
+        }
+        out.push_str(bare);
+        rest = after;
+    }
+    out.push_str(rest);
+    out
 }
 
 type ChatLlm = MemoryAwareConversation<CachedConversation<OllamaChat>>;
@@ -1860,7 +2111,7 @@ fn run_ask(
     let Some(llm) = connected_llm(root, model, Caller::Ask, attempts, tools, max_rounds) else {
         anyhow::bail!("no model resolved - pull one with ollama and run spec model use <name>");
     };
-    let mut prompter = interactive_prompter();
+    let mut prompter = interactive_prompter(Prompts::Incidental);
     let joined = task.join(" ").trim().to_string();
     if joined.is_empty() {
         use std::io::IsTerminal as _;
@@ -1910,5 +2161,172 @@ fn ask_once(
     } else {
         println!("{answer}");
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The wording the student guides quote verbatim, for the command
+    /// they quote it about.
+    #[test]
+    fn a_wizard_on_a_pipe_is_told_its_work_will_be_thrown_away() {
+        assert_eq!(
+            piped_stdin_warning(Prompts::Wizard),
+            "stdin is not a terminal: prompts are read from the pipe, and once it runs out \
+             every remaining prompt takes its default and every confirmation declines. \
+             A wizard that ends in \"Stage this?\" therefore stages nothing. \
+             Run this in a terminal to answer the prompts."
+        );
+    }
+
+    /// `spec unittest generate` and `spec steps generate` have no
+    /// wizard and stage either way. Telling a scripted run they staged
+    /// nothing was simply false.
+    #[test]
+    fn a_command_that_stages_regardless_does_not_claim_it_stages_nothing() {
+        let warning = piped_stdin_warning(Prompts::Incidental);
+        assert!(warning.starts_with("stdin is not a terminal:"), "{warning}");
+        assert!(warning.ends_with("Run this in a terminal to answer the prompts."));
+        assert!(!warning.contains("stages nothing"), "{warning}");
+    }
+
+    #[test]
+    fn the_tdd_phase_advice_names_commands_rather_than_tools() {
+        assert_eq!(
+            cli_next_step("No tests have been run yet. Call run_tests to establish a baseline."),
+            "No tests have been run yet. Run spec test to establish a baseline."
+        );
+        assert_eq!(
+            cli_next_step(
+                "All tests pass. Either call start_refactor to clean up, or call \
+                 get_requirement for the next pending requirement and write a failing \
+                 test for it."
+            ),
+            "All tests pass. Either run spec refactor to clean up, or run spec show \
+             for the next pending requirement and write a failing test for it."
+        );
+    }
+
+    #[test]
+    fn a_tool_name_in_backticks_is_replaced_along_with_its_backticks() {
+        assert_eq!(
+            cli_next_step("Call `validate_spec`, then `get_requirement`."),
+            "Run spec validate, then spec show."
+        );
+    }
+
+    /// `spec draft` said "Review with spec changes show" and `spec
+    /// reword` said "Review with changes show". Only one of them can
+    /// be pasted.
+    #[test]
+    fn a_command_named_without_its_prefix_gains_one() {
+        assert_eq!(
+            cli_next_step(
+                "Review with changes show, run validate, then apply with changes commit."
+            ),
+            "Review with spec changes show, run spec validate, then apply with spec changes commit."
+        );
+    }
+
+    #[test]
+    fn a_command_that_already_has_its_prefix_does_not_get_a_second() {
+        let already = "Review with spec changes show, apply with spec changes commit.";
+        assert_eq!(cli_next_step(already), already);
+    }
+
+    /// The prefixer matches a phrase, not the letters that start one.
+    #[test]
+    fn an_english_word_that_starts_like_a_command_is_left_alone() {
+        let prose = "Read the changes shown above before you decide.";
+        assert_eq!(cli_next_step(prose), prose);
+    }
+
+    #[test]
+    fn a_reply_without_advice_passes_through_untouched() {
+        let reply = "{\n  \"valid\": true\n}";
+        assert_eq!(speak_cli(reply), reply);
+    }
+
+    #[test]
+    fn only_the_next_step_field_is_rewritten_and_the_rest_keeps_its_order() {
+        let rendered = "{\n  \"phase\": \"START\",\n  \
+                        \"nextStep\": \"Call run_tests to start.\",\n  \
+                        \"note\": \"Call run_tests to start.\"\n}";
+        assert_eq!(
+            speak_cli(rendered),
+            "{\n  \"phase\": \"START\",\n  \
+             \"nextStep\": \"Run spec test to start.\",\n  \
+             \"note\": \"Call run_tests to start.\"\n}"
+        );
+    }
+
+    #[test]
+    fn a_next_step_holding_quotes_survives_the_rewrite() {
+        let rendered = "{\n  \"nextStep\": \"Answer \\\"Stage this?\\\", then call run_tests.\"\n}";
+        assert_eq!(
+            speak_cli(rendered),
+            "{\n  \"nextStep\": \"Answer \\\"Stage this?\\\", then run spec test.\"\n}"
+        );
+    }
+
+    /// The old message answered `--title X` by naming `--story` as the
+    /// flag that was supplied and `--title` as the one missing.
+    #[test]
+    fn a_half_given_draft_is_told_what_it_typed_and_what_is_missing() {
+        let complaint = missing_draft_flags(true, false, false).expect("a complaint");
+        assert!(
+            complaint.starts_with("spec draft with --title also needs --story and --criterion."),
+            "{complaint}"
+        );
+        assert_eq!(
+            missing_draft_flags(false, false, true).expect("a complaint"),
+            "spec draft with --criterion also needs --title and --story. Give all three, \
+             or none of them to be asked question by question."
+        );
+        assert!(
+            missing_draft_flags(true, true, false)
+                .expect("a complaint")
+                .starts_with("spec draft with --title and --story also needs --criterion.")
+        );
+    }
+
+    #[test]
+    fn a_fully_given_draft_has_no_complaint() {
+        assert_eq!(missing_draft_flags(true, true, true), None);
+    }
+
+    /// Advice is only worth rewriting if what it names can be run.
+    /// Caught `spec project inspect`, which does not exist - the
+    /// command is `spec inspect`.
+    #[test]
+    fn every_command_the_table_names_is_a_command_that_exists() {
+        use clap::CommandFactory as _;
+        for (tool, command) in CLI_FOR_TOOL {
+            let mut node = Cli::command();
+            let words = command.strip_prefix("spec ").expect("a spec command");
+            for word in words.split(' ') {
+                node.build();
+                node = node
+                    .find_subcommand(word)
+                    .unwrap_or_else(|| panic!("{tool} -> {command:?}: no subcommand {word:?}"))
+                    .clone();
+            }
+        }
+    }
+
+    /// Two tools mapping to the same command, or a tool name that is
+    /// part of another, would make the rewrite order matter.
+    #[test]
+    fn no_tool_name_in_the_table_contains_another() {
+        for (tool, _) in CLI_FOR_TOOL {
+            for (other, _) in CLI_FOR_TOOL {
+                assert!(
+                    tool == other || !tool.contains(other),
+                    "{other} hides inside {tool}"
+                );
+            }
+        }
     }
 }

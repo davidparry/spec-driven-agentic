@@ -581,6 +581,10 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
         criteria: Vec<String>,
         file: Option<&str>,
     ) -> Result<DraftReport, ServiceError> {
+        // Claimed across the read too: `next_id` is derived from what
+        // the catalog already holds, so two of these running at once
+        // would hand out the same id and one would overwrite the other.
+        let _claim = self.store.claim()?;
         let mut catalog = self.effective_catalog()?;
         let target = self.target_file(&catalog, file)?;
         let id = next_id(&catalog.merged());
@@ -603,6 +607,7 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
         story: Option<String>,
         criteria: Vec<String>,
     ) -> Result<DraftReport, ServiceError> {
+        let _claim = self.store.claim()?;
         let mut catalog = self.effective_catalog()?;
         let mut candidate = catalog
             .merged()
@@ -696,6 +701,7 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
     /// Point a requirement at the feature file that was actually written.
     /// No-op (and unstaged) when the path is already recorded.
     pub fn set_feature(&self, id: &str, path: &str) -> Result<SetFeatureReport, ServiceError> {
+        let _claim = self.store.claim()?;
         let mut catalog = self.effective_catalog()?;
         let target = catalog.source_of(id).map(str::to_string).ok_or_else(|| {
             ServiceError(format!(
@@ -764,6 +770,8 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
         path: &str,
         from: Option<&str>,
     ) -> Result<IncludeReport, ServiceError> {
+        // Two staged files, parent and child, have to land together.
+        let _claim = self.store.claim()?;
         let mut catalog = self.effective_catalog()?;
         let child = crate::domain::model::resolve_include("", &self.catalog_relative(path))
             .ok_or_else(|| {
@@ -858,76 +866,98 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
         // is going nowhere.
         let mut passes = 0;
         let mut previous: Option<Vec<String>> = None;
-        let (requirement, title, unresolved) = loop {
-            let title = self.ask_field(
-                prompter,
-                &id,
-                "title",
-                prior.as_ref().map(|p| p.title.as_str()),
-            )?;
-            let story = self.ask_field(
-                prompter,
-                &id,
-                "story (As a ..., I want ..., so that ...)",
-                prior.as_ref().map(|p| p.story.as_str()),
-            )?;
-            let prior_criteria = prior
-                .as_ref()
-                .map(|p| p.acceptance_criteria.as_slice())
-                .unwrap_or(&[]);
-            let criteria = self.ask_criteria(prompter, &id, prior_criteria)?;
-            let candidate = Requirement {
-                id: id.clone(),
-                title: title.clone(),
-                status: "pending".into(),
-                story,
-                acceptance_criteria: criteria,
-                feature_file: prior.as_ref().and_then(|p| p.feature_file.clone()),
-            };
-            let findings = self.findings_for(&merged, &candidate);
-            if findings.is_empty() {
-                break (candidate, title, Vec::new());
-            }
-            let listed = findings.all();
-            prompter.tell("Findings to address:");
-            for finding in &listed {
-                prompter.tell(&format!("  - {finding}"));
-                if let Some(suggestion) = suggestion_for(finding) {
-                    prompter.tell(&format!("    try: {suggestion}"));
+        // The title to report if the answers run out part way through.
+        // For a reword that is the requirement's current title, which
+        // is what the declined reply has always carried.
+        let established_title = prior.as_ref().map(|p| p.title.clone()).unwrap_or_default();
+        // The wizard's questions are gathered in a closure so that one
+        // arm can catch the input ending. Every question below is
+        // written as though an answer will come; when the pipe runs
+        // out instead, the wizard declines exactly as it would if the
+        // developer had answered "no" at the end - see the match.
+        let gathered = (|| -> Result<(Requirement, String, Vec<String>), ServiceError> {
+            Ok(loop {
+                let title = self.ask_field(
+                    prompter,
+                    &id,
+                    "title",
+                    prior.as_ref().map(|p| p.title.as_str()),
+                )?;
+                let story = self.ask_field(
+                    prompter,
+                    &id,
+                    "story (As a ..., I want ..., so that ...)",
+                    prior.as_ref().map(|p| p.story.as_str()),
+                )?;
+                let prior_criteria = prior
+                    .as_ref()
+                    .map(|p| p.acceptance_criteria.as_slice())
+                    .unwrap_or(&[]);
+                let criteria = self.ask_criteria(prompter, &id, prior_criteria)?;
+                let candidate = Requirement {
+                    id: id.clone(),
+                    title: title.clone(),
+                    status: "pending".into(),
+                    story,
+                    acceptance_criteria: criteria,
+                    feature_file: prior.as_ref().and_then(|p| p.feature_file.clone()),
+                };
+                let findings = self.findings_for(&merged, &candidate);
+                if findings.is_empty() {
+                    break (candidate, title, Vec::new());
                 }
-            }
-            passes += 1;
-            let stalled = previous.as_ref() == Some(&listed);
-            previous = Some(listed.clone());
-            // Only wording findings are the developer's to wave through -
-            // a structurally invalid requirement would not validate, so
-            // those keep the loop honest however long it takes.
-            if findings.structural.is_empty() && (stalled || passes >= self.max_reword_passes) {
-                match self.stalled_choice(prompter, passes, stalled, findings.advisory.len())? {
-                    StalledChoice::Accept => break (candidate, title, findings.advisory),
-                    StalledChoice::Manual => {
-                        llm = None;
-                        passes = 0;
+                let listed = findings.all();
+                prompter.tell("Findings to address:");
+                for finding in &listed {
+                    prompter.tell(&format!("  - {finding}"));
+                    if let Some(suggestion) = suggestion_for(finding) {
+                        prompter.tell(&format!("    try: {suggestion}"));
                     }
-                    StalledChoice::Reword => passes = 0,
                 }
-            }
-            // With a model, the findings become its brief: the next pass's
-            // prompts carry its reworded proposal instead of the raw prior.
-            let reworded = llm.and_then(|aid| {
-                self.rewording(prompter, aid, &merged, &candidate, &listed, &tries)
-            });
-            tries.push((candidate.clone(), listed));
-            prior = Some(match reworded {
-                Some(requirement) => requirement,
-                None => {
-                    prompter.tell(
-                        "Reword the requirement to address each finding. Press Enter \
+                passes += 1;
+                let stalled = previous.as_ref() == Some(&listed);
+                previous = Some(listed.clone());
+                // Only wording findings are the developer's to wave through -
+                // a structurally invalid requirement would not validate, so
+                // those keep the loop honest however long it takes.
+                if findings.structural.is_empty() && (stalled || passes >= self.max_reword_passes) {
+                    match self.stalled_choice(prompter, passes, stalled, findings.advisory.len())? {
+                        StalledChoice::Accept => break (candidate, title, findings.advisory),
+                        StalledChoice::Manual => {
+                            llm = None;
+                            passes = 0;
+                        }
+                        StalledChoice::Reword => passes = 0,
+                    }
+                }
+                // With a model, the findings become its brief: the next pass's
+                // prompts carry its reworded proposal instead of the raw prior.
+                let reworded = llm.and_then(|aid| {
+                    self.rewording(prompter, aid, &merged, &candidate, &listed, &tries)
+                });
+                tries.push((candidate.clone(), listed));
+                prior = Some(match reworded {
+                    Some(requirement) => requirement,
+                    None => {
+                        prompter.tell(
+                            "Reword the requirement to address each finding. Press Enter \
                          on a prompt to keep the prior answer as-is.",
-                    );
-                    candidate
-                }
-            });
+                        );
+                        candidate
+                    }
+                });
+            })
+        })();
+        let (requirement, title, unresolved) = match gathered {
+            Ok(answers) => answers,
+            // The answers ran out. Declining is the safe end - the
+            // developer piped in what they had and nothing should be
+            // staged on a guess - and it is the outcome this wizard
+            // already knows how to report, so report that one.
+            Err(error) if error.is_end_of_input() => {
+                return Ok(nothing_staged(id, established_title, replace, Vec::new()));
+            }
+            Err(error) => return Err(error),
         };
         let question = if unresolved.is_empty() {
             "The wording reads clean. Stage this requirement?".to_string()
@@ -938,20 +968,7 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
             )
         };
         if !self.confirm(prompter, &question)? {
-            // Name the command the developer actually ran - reword reaches
-            // here too, and telling them to draft sends them the wrong way.
-            let next_step = if replace {
-                format!("Nothing was staged. Run spec reword {id} again when the wording is ready.")
-            } else {
-                "Nothing was staged. Run spec draft again when the wording is ready.".to_string()
-            };
-            return Ok(DraftReport {
-                id,
-                title,
-                staged: false,
-                findings: unresolved,
-                next_step,
-            });
+            return Ok(nothing_staged(id, title, replace, unresolved));
         }
         let doc = file_mut_or_err(&mut catalog, &file)?;
         if replace {
@@ -1153,6 +1170,7 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
                 snapshot.phase()
             )));
         }
+        let _claim = self.store.claim()?;
         let mut catalog = self.effective_catalog()?;
         let target = catalog.source_of(id).map(str::to_string).ok_or_else(|| {
             ServiceError(format!(
@@ -1273,7 +1291,7 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
         summary: &str,
     ) -> Result<(), ServiceError> {
         let doc = &file_or_err(catalog, target)?.spec;
-        let json = serde_json::to_string_pretty(doc)
+        let json = crate::domain::model::render(doc)
             .map_err(|e| ServiceError(format!("The spec could not be serialized - {e}")))?;
         self.store
             .stage(&self.project_path(target), &json, summary)?;
@@ -1350,6 +1368,27 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
 
     fn confirm(&self, prompter: &mut dyn Prompter, question: &str) -> Result<bool, ServiceError> {
         prompter.confirm(question).map_err(ServiceError::from)
+    }
+}
+
+/// The reply for a wizard that ended without staging, whether the
+/// developer declined the confirmation or the answers ran out before
+/// it was reached. One shape for both, because from the caller's side
+/// they are the same outcome: nothing was written, run it again.
+fn nothing_staged(id: String, title: String, replace: bool, findings: Vec<String>) -> DraftReport {
+    // Name the command the developer actually ran - reword reaches
+    // here too, and telling them to draft sends them the wrong way.
+    let next_step = if replace {
+        format!("Nothing was staged. Run spec reword {id} again when the wording is ready.")
+    } else {
+        "Nothing was staged. Run spec draft again when the wording is ready.".to_string()
+    };
+    DraftReport {
+        id,
+        title,
+        staged: false,
+        findings,
+        next_step,
     }
 }
 
@@ -1543,6 +1582,9 @@ mod tests {
     struct ScriptedPrompter {
         answers: VecDeque<String>,
         transcript: Vec<String>,
+        /// Whether running out is the end of the input, the way a pipe
+        /// ends, or just a script that was written too short.
+        like_a_pipe: bool,
     }
 
     impl ScriptedPrompter {
@@ -1550,6 +1592,16 @@ mod tests {
             Self {
                 answers: answers.iter().map(|a| a.to_string()).collect(),
                 transcript: Vec::new(),
+                like_a_pipe: false,
+            }
+        }
+
+        /// A script that reports the end of its input when it runs
+        /// out, as a real pipe does.
+        fn piping(answers: &[&str]) -> Self {
+            Self {
+                like_a_pipe: true,
+                ..Self::answering(answers)
             }
         }
     }
@@ -1561,9 +1613,13 @@ mod tests {
 
         fn ask(&mut self, question: &str) -> Result<String, PromptError> {
             self.transcript.push(question.to_string());
-            self.answers
-                .pop_front()
-                .ok_or_else(|| PromptError("input is not readable - script exhausted".into()))
+            self.answers.pop_front().ok_or_else(|| {
+                if self.like_a_pipe {
+                    PromptError::ended("the pipe ran out")
+                } else {
+                    PromptError("input is not readable - script exhausted".into())
+                }
+            })
         }
 
         fn confirm(&mut self, question: &str) -> Result<bool, PromptError> {
@@ -2535,6 +2591,56 @@ mod tests {
         assert_eq!(service.store.content(SPEC_PATH).unwrap(), None);
     }
 
+    /// An exhausted pipe is not an answer. The wizard used to read it
+    /// as "keep the prior" on every prompt and, once the review
+    /// stopped converging, as "reword again" forever.
+    #[test]
+    fn a_wizard_whose_answers_run_out_declines_rather_than_asking_again() {
+        let service = service(Ok(spec()), green());
+        let mut prompter = ScriptedPrompter::piping(&[]);
+        let report = service.reword(&mut prompter, "REQ-007").unwrap();
+        assert!(!report.staged);
+        assert_eq!(
+            report.next_step,
+            "Nothing was staged. Run spec reword REQ-007 again when the wording is ready."
+        );
+        // The requirement's own title, not a blank one: the reply has
+        // always carried it and the student guide quotes it.
+        assert_eq!(report.title, "A title");
+        assert_eq!(service.store.content(SPEC_PATH).unwrap(), None);
+        // One question was put to the pipe; the rest were not asked.
+        assert_eq!(
+            prompter
+                .transcript
+                .iter()
+                .filter(|line| line.contains("title"))
+                .count(),
+            1,
+            "{:?}",
+            prompter.transcript
+        );
+    }
+
+    /// Part way through counts too - the pipe answered the title and
+    /// then ended.
+    #[test]
+    fn answers_that_run_out_part_way_through_still_decline() {
+        let service = service(Ok(spec()), green());
+        let mut prompter = ScriptedPrompter::piping(&["Comma sums"]);
+        let report = service.reword(&mut prompter, "REQ-007").unwrap();
+        assert!(!report.staged);
+        assert!(report.next_step.starts_with("Nothing was staged."));
+    }
+
+    /// A script that is simply too short is a broken test, not a user
+    /// on a pipe, and must still fail loudly.
+    #[test]
+    fn an_input_that_fails_for_another_reason_is_still_an_error() {
+        let service = service(Ok(spec()), green());
+        let mut prompter = ScriptedPrompter::answering(&[]);
+        assert!(service.reword(&mut prompter, "REQ-007").is_err());
+    }
+
     #[test]
     fn drafting_stacks_on_a_previously_staged_spec() {
         let service = service(Ok(spec()), green());
@@ -2824,6 +2930,65 @@ mod tests {
             serde_json::from_str(&service.store.content(SPEC_PATH).unwrap().unwrap()).unwrap();
         assert_eq!(staged.requirements[0].title, "Comma sums");
         assert_eq!(staged.requirements.len(), 2);
+    }
+
+    /// Every path that writes a spec document ends it in a newline.
+    /// Staging is where the bytes are decided - `changes commit` copies
+    /// the staged file verbatim - so this is also what lands on disk.
+    /// Without it the student's next `git diff` carries a
+    /// `\ No newline at end of file` marker for a change they did not
+    /// make, on a file no tool lets them fix by hand.
+    #[test]
+    fn every_staged_spec_document_ends_in_a_newline() {
+        let ends_in_newline = |label: &str, content: String| {
+            assert_eq!(
+                content.as_bytes().last(),
+                Some(&b'\n'),
+                "{label} does not end in a newline: {content:?}"
+            );
+            assert!(!content.ends_with("\n\n"), "{label}: {content:?}");
+        };
+        let staged = |service: &SpecMutationService<_, _, InMemoryChangeStore, _>, path: &str| {
+            service.store.content(path).unwrap().unwrap()
+        };
+
+        let reworded = service(Ok(spec()), green());
+        reworded
+            .reword_direct("REQ-001", Some("Comma sums".into()), None, Vec::new())
+            .unwrap();
+        ends_in_newline("reword", staged(&reworded, SPEC_PATH));
+
+        let marked = service(Ok(spec()), green());
+        marked.mark_implemented("REQ-001").unwrap();
+        ends_in_newline("mark-implemented", staged(&marked, SPEC_PATH));
+
+        let drafted = service(Ok(spec()), green());
+        drafted
+            .draft_direct(
+                "Newlines as delimiters",
+                CLEAN_STORY,
+                vec![CLEAN_CRITERION.into(), EDGE_CRITERION.into()],
+            )
+            .unwrap();
+        ends_in_newline("draft", staged(&drafted, SPEC_PATH));
+
+        let pointed = service(Ok(spec()), green());
+        pointed
+            .set_feature("REQ-007", "features/calc.feature")
+            .unwrap();
+        ends_in_newline("set-feature", staged(&pointed, SPEC_PATH));
+
+        // include add writes two documents: the parent it edits and the
+        // empty child it creates.
+        let included = service(Ok(spec()), green());
+        included
+            .include_add("requirements/core/math.json", None)
+            .unwrap();
+        ends_in_newline("include add (parent)", staged(&included, SPEC_PATH));
+        ends_in_newline(
+            "include add (child)",
+            staged(&included, "requirements/core/math.json"),
+        );
     }
 
     // ---- catalog includes ---------------------------------------------------

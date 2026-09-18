@@ -14,7 +14,9 @@ For a step-by-step walkthrough of the spec-CLI run, see
 ## Which binary has these fixes
 
 Everything recorded here requires `spec` **0.5.2** or newer. A binary
-reporting 0.5.1 or below lacks every fix below.
+reporting 0.5.1 or below is missing at least the generation fixes, and
+possibly more — four of the twelve landed while the crate still reported
+`0.5.0`, so see `CHANGELOG.md` for which item shipped when.
 
 The 0.5.1 to 0.5.2 bump exists for exactly that reason. The
 previously-installed binary also reported 0.5.1, so two materially
@@ -60,10 +62,12 @@ the `implement` step of Exercise 2 therefore need
 `pi -xt bash,powershell`. This is already written up in
 `student-follow-docs/pi-path.md`.
 
-**`spec draft` is non-interactive; `spec reword` is not.** With all four
-flags supplied, `spec draft` runs straight through and stages
-immediately. `spec reword` is an interactive two-pass wizard that wants
-eleven answers, and on piped stdin it declines and stages nothing.
+**`spec draft` is non-interactive; `spec reword` is not.** With
+`--title`, `--story`, and at least one `--criterion`, `spec draft` runs
+straight through and stages immediately; a partial set of those three is a
+hard error rather than a fallback to the wizard. `spec reword` is an
+interactive two-pass wizard that wants eleven answers, and on piped stdin
+it declines and stages nothing.
 
 **Generation diff size differed sharply.** `spec steps generate` produced
 a 48-line diff where pi's equivalent produced 6. That gap is the entire

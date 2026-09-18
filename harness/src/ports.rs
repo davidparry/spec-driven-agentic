@@ -37,7 +37,7 @@ pub trait SpecRepository {
     fn read_raw(&self, path: &str) -> Result<String, SpecError> {
         if path == ROOT_SPEC_FILE {
             self.load().map(|spec| {
-                serde_json::to_string_pretty(&spec).expect("spec is always serializable")
+                crate::domain::model::render(&spec).expect("spec is always serializable")
             })
         } else {
             Err(SpecError(format!(
@@ -257,10 +257,34 @@ pub struct StagedChange {
     pub summary: String,
 }
 
+/// Exclusive use of the staging area, held for one read-modify-write
+/// cycle. Dropping it gives the area back - on a normal return, on an
+/// error, and on a panic.
+pub trait Staging {}
+
+/// The inert claim: a store no other process can reach has nothing to
+/// exclude.
+pub struct Unshared;
+
+impl Staging for Unshared {}
+
 /// The staging area: every mutation the harness authors lands here first,
 /// never directly in working files. The human reviews with
 /// `changes show` and applies with `changes commit`.
 pub trait ChangeStore {
+    /// Claim the area for the whole of one read-modify-write cycle:
+    /// read what is staged, decide the new content, stage it.
+    ///
+    /// Staging is only safe if that whole cycle is exclusive. Two
+    /// `spec` processes doing it at once against one feature file read
+    /// the same base and wrote over each other, and the loser was told
+    /// it had staged - a silent lost update in the one subsystem whose
+    /// whole promise is "spec stages, you approve". Claims nest, so a
+    /// service may hold one across calls that claim it again.
+    fn claim(&self) -> Result<Box<dyn Staging>, StageError> {
+        Ok(Box::new(Unshared))
+    }
+
     /// Stage `content` for `path`; re-staging the same path replaces it.
     fn stage(&self, path: &str, content: &str, summary: &str) -> Result<StagedChange, StageError>;
     fn changes(&self) -> Result<Vec<StagedChange>, StageError>;
@@ -326,6 +350,29 @@ pub trait Prompter {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PromptError(pub String);
 string_error!(PromptError);
+
+/// What every "there is no answer coming" error starts with, so a
+/// caller can tell the *absence* of an answer from a bad one without
+/// matching on the prose after it.
+///
+/// An empty line is an answer - the developer pressed Enter and meant
+/// the default. End of input is not: the pipe ran out, or the terminal
+/// sent Ctrl+D. A prompter that returns the same empty string for both
+/// makes any "ask until the answer is one of these" loop run forever,
+/// which is exactly what `spec reword` did on a spent pipe.
+pub const END_OF_INPUT: &str = "input is not readable - end of input";
+
+impl PromptError {
+    /// There is no answer coming. `source` names where the input ran
+    /// out, e.g. `"Ctrl+D"` or `"the pipe ran out"`.
+    pub fn ended(source: &str) -> Self {
+        Self(format!("{END_OF_INPUT} ({source})"))
+    }
+
+    pub fn is_end_of_input(&self) -> bool {
+        self.0.starts_with(END_OF_INPUT)
+    }
+}
 
 /// One read from the interactive `spec` shell.
 #[derive(Debug, Clone, PartialEq, Eq)]

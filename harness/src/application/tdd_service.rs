@@ -26,18 +26,24 @@ pub struct TestReport {
 /// details. `entries` is the LLM brief: at most the three latest dated
 /// states, plus the instructions for reading them. The on-disk log may
 /// be longer.
+/// Field order is the reading order. `instructions` is ~900 characters
+/// of unchanging guidance and it used to come first, so `spec state` -
+/// the command the guide sends a stuck student to - answered "what
+/// phase am I in?" with a page of prose before the one word they
+/// wanted. Every field is still here, so the agent reading this over
+/// MCP loses nothing.
 #[derive(Debug, Serialize, PartialEq, Eq)]
 pub struct StateReport {
-    pub instructions: String,
     pub phase: String,
     #[serde(rename = "lastRun")]
     pub last_run: LastRun,
+    #[serde(rename = "nextStep")]
+    pub next_step: String,
     #[serde(rename = "refactorLog")]
     pub refactor_log: Vec<String>,
     /// At most the three latest dated entries. Older history stays on disk.
     pub entries: Vec<ReportedStateEntry>,
-    #[serde(rename = "nextStep")]
-    pub next_step: String,
+    pub instructions: String,
 }
 
 /// One dated state as an agent/LLM sees it: counts only, no stack traces.
@@ -379,7 +385,7 @@ mod tests {
             service.refactor(None).unwrap_err(),
             TddError::Other(
                 "Refactoring is only allowed from GREEN (current phase: START). \
-                 Never refactor on a red bar — make the tests pass first."
+                 No tests have been run yet — run them to find out where you are."
                     .into()
             )
         );

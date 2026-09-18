@@ -15,6 +15,57 @@ static ID: LazyLock<Regex> =
 
 const STATUSES: [&str; 2] = ["pending", "implemented"];
 
+/// The two validation issues that are catalog structure rather than
+/// wording, matched on the text the validator and the catalog resolver
+/// produce.
+const DUPLICATE_ID: &str = "duplicate id";
+const INCLUDED_TWICE: &str = "is included more than once";
+
+/// Is this issue about the shape of the catalog rather than the words in
+/// it? Structural issues need a file edited, not a requirement reworded.
+pub fn is_structural_issue(issue: &str) -> bool {
+    issue.contains(DUPLICATE_ID) || issue.contains(INCLUDED_TWICE)
+}
+
+/// What to actually do about the catalog-structure issues in `issues`,
+/// or `None` when they are all about wording.
+///
+/// A duplicate id needs a requirement object deleted from one of the
+/// files declaring it; a file reached twice through the include tree
+/// needs an `includes` entry removed. `requirement_reword` rewrites a
+/// requirement in place and `include_add` only ever adds, so no tool
+/// performs either repair - advice that names them tells the reader to
+/// do something impossible while the blanket "never edit the
+/// requirements file by hand" forbids the one thing that works. For
+/// these two classes the hand edit *is* the remedy, and the text says
+/// so rather than leaving a rule the reader has to quietly break.
+pub fn structural_repair(issues: &[String]) -> Option<String> {
+    let mut advice: Vec<&str> = Vec::new();
+    if issues.iter().any(|issue| issue.contains(DUPLICATE_ID)) {
+        advice.push(
+            "A duplicate id is catalog structure, not wording: no tool can delete a \
+             requirement, so open the spec file the issue names and remove the \
+             duplicate requirement object, or give it an id nothing else uses.",
+        );
+    }
+    if issues.iter().any(|issue| issue.contains(INCLUDED_TWICE)) {
+        advice.push(
+            "A spec file included more than once is catalog structure, not wording: no \
+             tool can remove an include, so open the parent spec file the issue names \
+             and delete the repeated entry from its \"includes\" array.",
+        );
+    }
+    if advice.is_empty() {
+        return None;
+    }
+    advice.push(
+        "Editing the spec file directly is the remedy for these - the rule against \
+         hand-editing covers wording, not catalog structure. Validate again once the \
+         file is fixed.",
+    );
+    Some(advice.join(" "))
+}
+
 /// Validates a spec document. Feature-file questions are answered through
 /// the injected [`FeatureFiles`] port, keeping this logic free of IO.
 pub struct SpecValidator<'a> {
@@ -161,6 +212,7 @@ fn is_blank(value: &str) -> bool {
 mod tests {
     use super::*;
     use std::collections::{HashMap, HashSet};
+    use std::slice;
 
     #[derive(Default)]
     struct FakeFeatures {
@@ -422,6 +474,69 @@ mod tests {
             issues,
             vec!["REQ-001: duplicate id - also declared in requirements.json"]
         );
+    }
+
+    /// Both catalog-structure issues used to be answered with "call the
+    /// reword tool, never edit the file by hand" - impossible and
+    /// forbidding the only fix at the same time. The repair names the
+    /// edit and says the hand-edit ban does not cover it.
+    #[test]
+    fn the_two_structural_issues_get_the_repair_that_names_the_edit() {
+        let duplicate = "REQ-001: duplicate id - also declared in requirements.json".to_string();
+        let repeated = "spec: requirements.json is included more than once - include \
+             every spec file exactly once"
+            .to_string();
+        assert!(is_structural_issue(&duplicate));
+        assert!(is_structural_issue(&repeated));
+        assert!(is_structural_issue(
+            "REQ-001: duplicate id - every requirement needs its own"
+        ));
+
+        let repair =
+            structural_repair(slice::from_ref(&duplicate)).expect("duplicate id has a repair");
+        assert!(
+            repair.contains("no tool can delete a requirement"),
+            "{repair}"
+        );
+        assert!(
+            repair.contains("remove the duplicate requirement object"),
+            "{repair}"
+        );
+        assert!(!repair.contains("reword"), "{repair}");
+
+        let repair =
+            structural_repair(slice::from_ref(&repeated)).expect("a repeated include has one");
+        assert!(repair.contains("no tool can remove an include"), "{repair}");
+        assert!(repair.contains("\"includes\" array"), "{repair}");
+
+        // The exception is stated, not left for the reader to infer
+        // against a blanket prohibition.
+        for issue in [&duplicate, &repeated] {
+            let repair = structural_repair(slice::from_ref(issue)).unwrap();
+            assert!(
+                repair.contains("Editing the spec file directly is the remedy"),
+                "{repair}"
+            );
+        }
+
+        // Both at once get both remedies, each named once.
+        let repair = structural_repair(&[duplicate, repeated]).unwrap();
+        assert!(repair.contains("delete a requirement") && repair.contains("remove an include"));
+        assert_eq!(repair.matches("Editing the spec file directly").count(), 1);
+    }
+
+    #[test]
+    fn wording_issues_are_not_structural_and_get_no_repair() {
+        let wording = [
+            "REQ-001: the title is missing".to_string(),
+            "REQ-001: criterion \"it works\" must be phrased Given/When/Then".to_string(),
+            "spec: the project name is missing".to_string(),
+        ];
+        for issue in &wording {
+            assert!(!is_structural_issue(issue), "{issue}");
+        }
+        assert_eq!(structural_repair(&wording), None);
+        assert_eq!(structural_repair(&[]), None);
     }
 
     #[test]
