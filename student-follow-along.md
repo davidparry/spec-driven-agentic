@@ -191,18 +191,22 @@ part you care about:
 }
 ```
 
-(Your agent may wrap the JSON in its own prose, and if you re-run this after
-the server has already run tests the `phase` and counts will differ — that's
-fine. `get_tdd_state` is read-only, so this check never disturbs your run.)
+That is the reply on a phase log nothing has written to yet. **If you ran
+Step 2, you will not see `START`** — the smoke test called `run_tests`, so
+the log already reads `"phase": "GREEN"` with `"tests": 5` and the
+`nextStep` points at `start_refactor` or the next requirement instead.
+Either reply proves the same thing. (Your agent may also wrap the JSON in
+its own prose. `get_tdd_state` is read-only, so this check never disturbs
+your run.)
 
 **Expect:**
 
 - The agent invokes `get_tdd_state` on the `spec-driven-server` server — you'll
   see the tool call in the chat, no permission errors.
-- `"phase": "START"` with an all-zero `lastRun` — the server is up and
-  nothing has touched the kata yet.
-- The `nextStep` hint pointing at `run_tests` — the server coaching the
-  agent through the workflow, which is the whole trick of Exercises 1 and 2.
+- A `phase` and a `lastRun`: `START` with zeros on a phase log nothing has
+  touched, or `GREEN` with `"tests": 5` once Step 2's smoke test has run.
+- A `nextStep` hint — the server coaching the agent through the workflow,
+  which is the whole trick of Exercises 1 and 2.
 
 If the agent says it can't find the tool, the connection is the problem, not
 the agent: re-check the green light, confirm `spec --version` in a terminal,
@@ -383,11 +387,14 @@ levels deep. The tools merge the whole tree into one backlog. To see it:
 4. Expect REQ-007 still listed (merged from the included file, after
    REQ-001..006) and `"valid": true`. One catalog, many files — ids stay
    unique across the whole tree. Duplicate the id and `validate_spec`
-   answers `REQ-007: duplicate id - every requirement needs its own`; make
-   two files include each other and it names the file instead:
-   `spec: requirements.json is included more than once`.
-   Undo the split (or leave it — every later step works the same) before
-   moving on if you want your file to match the walkthrough exactly.
+   answers `REQ-007: duplicate id - also declared in requirements.json`,
+   naming the file that already has it; make two files include each other
+   and it names the file too:
+   `spec: requirements.json is included more than once - include every spec
+   file exactly once`.
+   Undo the split (or leave it — every later step works the same, and
+   Step 6's verifier reads the merged tree) before moving on if you want
+   your file to match the walkthrough exactly.
 
    The harness ships a command for this too: `spec include add
    requirements/delimiters.json` stages both the include line and an empty
@@ -464,6 +471,15 @@ their edits differently):
      "nextStep" : "Tests are failing. Write the simplest production code that makes them pass, then call run_tests again."
    }
    ```
+
+   The Cucumber lines read like that whatever your agent did, because the
+   scenarios call the unimplemented `add`. The **JUnit** line depends on who
+   wrote the test. An agent that wrote the assertion itself fails on the
+   `NumberFormatException` above; `unit_test_create` and
+   `spec unittest generate` both stage the criteria as
+   `fail("TODO: assert - Given \"1,2\", ...")` for you to sharpen, so that
+   line reads `TODO: assert - ...` instead. Both are a real RED on the same
+   count — fill the assertions in when you write the production code.
 
 4. The agent implements the simplest `StringCalculator.add` that passes
    (**a file edit** — there is no `implement` MCP tool). **Your checkpoint:**

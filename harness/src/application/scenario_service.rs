@@ -39,6 +39,8 @@ impl<C: ChangeStore, F: FeatureCatalog> ScenarioService<C, F> {
             path: path.to_string(),
             name: name.to_string(),
             tags: Vec::new(),
+            comments: Vec::new(),
+            description: Vec::new(),
             scenarios: Vec::new(),
         };
         self.stage(&doc, &format!("create feature \"{name}\""))?;

@@ -292,6 +292,8 @@ mod tests {
             path: "features/calc.feature".into(),
             name: "Calc".into(),
             tags: vec![],
+            comments: Vec::new(),
+            description: Vec::new(),
             scenarios: vec![ScenarioDoc {
                 name: "Adds".into(),
                 tags: vec![],

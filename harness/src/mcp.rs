@@ -152,6 +152,7 @@ pub struct RequirementRewordParams {
 pub struct WorkflowServer {
     root: PathBuf,
     runner_factory: RunnerFactory,
+    staging: StagingLock,
     // Read by the `#[tool_handler]`-generated `ServerHandler` impl.
     #[allow(dead_code)]
     tool_router: ToolRouter<Self>,
@@ -159,9 +160,26 @@ pub struct WorkflowServer {
 
 impl Clone for WorkflowServer {
     fn clone(&self) -> Self {
-        Self::with_runner_factory(self.root.clone(), self.runner_factory.clone())
+        Self {
+            root: self.root.clone(),
+            runner_factory: self.runner_factory.clone(),
+            // Every clone guards the same staging area, so the lock has to
+            // be shared rather than rebuilt.
+            staging: Arc::clone(&self.staging),
+            tool_router: Self::tool_router(),
+        }
     }
 }
+
+/// Serializes the staging area's read-modify-write cycle.
+///
+/// Staging a mutation is three steps — read the effective content, apply
+/// the edit, write the file and the manifest — spread across a service and
+/// an adapter. Hosts are free to dispatch a batch of tool calls
+/// concurrently, and two interleaved cycles silently lose one edit: both
+/// callers read the same base, and the second write wins. Tools that touch
+/// the staging area take this lock for the whole cycle.
+type StagingLock = Arc<tokio::sync::Mutex<()>>;
 
 /// JSON Schema `type: ["string","null"]` is legal but several MCP clients
 /// read `type` as a single string and drop the constraint. `anyOf` with one
@@ -245,8 +263,14 @@ impl WorkflowServer {
         Self {
             root: std::path::absolute(&root).unwrap_or(root),
             runner_factory,
+            staging: StagingLock::default(),
             tool_router: Self::tool_router(),
         }
+    }
+
+    /// Hold for the whole read-modify-write cycle of a staging mutation.
+    async fn staging_guard(&self) -> tokio::sync::MutexGuard<'_, ()> {
+        self.staging.lock().await
     }
 
     fn spec_repository(&self) -> FsSpecRepository {
@@ -497,6 +521,7 @@ impl WorkflowServer {
         &self,
         Parameters(params): Parameters<FeatureCreateParams>,
     ) -> Result<CallToolResult, McpError> {
+        let _staging = self.staging_guard().await;
         let _span = tool_call("feature_create");
         tracing::debug!(path = %params.path, name = %params.name, "tool arguments");
         Ok(
@@ -518,6 +543,7 @@ impl WorkflowServer {
         &self,
         Parameters(params): Parameters<ScenarioAddParams>,
     ) -> Result<CallToolResult, McpError> {
+        let _staging = self.staging_guard().await;
         let _span = tool_call("scenario_add");
         tracing::debug!(feature = %params.feature, name = %params.name, "tool arguments");
         Ok(
@@ -541,6 +567,7 @@ impl WorkflowServer {
         &self,
         Parameters(params): Parameters<ScenarioUpdateParams>,
     ) -> Result<CallToolResult, McpError> {
+        let _staging = self.staging_guard().await;
         let _span = tool_call("scenario_update");
         tracing::debug!(feature = %params.feature, name = %params.name, "tool arguments");
         Ok(
@@ -564,6 +591,7 @@ impl WorkflowServer {
         &self,
         Parameters(params): Parameters<ScenarioDeleteParams>,
     ) -> Result<CallToolResult, McpError> {
+        let _staging = self.staging_guard().await;
         let _span = tool_call("scenario_delete");
         tracing::debug!(feature = %params.feature, name = %params.name, "tool arguments");
         Ok(
@@ -579,6 +607,7 @@ impl WorkflowServer {
 
     #[tool(description = "Show every staged change waiting for review.")]
     async fn changes_show(&self) -> Result<CallToolResult, McpError> {
+        let _staging = self.staging_guard().await;
         let _span = tool_call("changes_show");
         Ok(match self.change_service().show() {
             Ok(report) => json_result(&report),
@@ -592,6 +621,7 @@ impl WorkflowServer {
         committed spec on disk; call this after staging and before changes_commit."
     )]
     async fn changes_validate(&self) -> Result<CallToolResult, McpError> {
+        let _staging = self.staging_guard().await;
         let _span = tool_call("changes_validate");
         Ok(match self.change_service().validate() {
             Ok(report) => json_result(&report),
@@ -601,6 +631,7 @@ impl WorkflowServer {
 
     #[tool(description = "Apply every staged change to the working tree and clear the area.")]
     async fn changes_commit(&self) -> Result<CallToolResult, McpError> {
+        let _staging = self.staging_guard().await;
         let _span = tool_call("changes_commit");
         Ok(match self.change_service().commit() {
             Ok(report) => json_result(&report),
@@ -610,6 +641,7 @@ impl WorkflowServer {
 
     #[tool(description = "Drop every staged change without applying it.")]
     async fn changes_discard(&self) -> Result<CallToolResult, McpError> {
+        let _staging = self.staging_guard().await;
         let _span = tool_call("changes_discard");
         Ok(match self.change_service().discard() {
             Ok(report) => json_result(&report),
@@ -653,6 +685,7 @@ impl WorkflowServer {
         &self,
         Parameters(params): Parameters<RequirementRewordParams>,
     ) -> Result<CallToolResult, McpError> {
+        let _staging = self.staging_guard().await;
         let _span = tool_call("requirement_reword");
         tracing::debug!(
             id = %params.id,
@@ -698,6 +731,7 @@ impl WorkflowServer {
         &self,
         Parameters(params): Parameters<IdParam>,
     ) -> Result<CallToolResult, McpError> {
+        let _staging = self.staging_guard().await;
         let _span = tool_call("requirement_mark_implemented");
         tracing::debug!(id = %params.id, "tool arguments");
         Ok(match self.mutation_service().mark_implemented(&params.id) {
@@ -723,6 +757,7 @@ impl WorkflowServer {
         (template only over MCP; apply with changes_commit)."
     )]
     async fn step_definition_create(&self) -> Result<CallToolResult, McpError> {
+        let _staging = self.staging_guard().await;
         let _span = tool_call("step_definition_create");
         Ok(match self.generation_service() {
             Err(message) => error_result(message),
@@ -741,6 +776,7 @@ impl WorkflowServer {
         &self,
         Parameters(params): Parameters<ReqIdParam>,
     ) -> Result<CallToolResult, McpError> {
+        let _staging = self.staging_guard().await;
         let _span = tool_call("unit_test_create");
         tracing::debug!(req_id = %params.req_id, "tool arguments");
         Ok(match self.generation_service() {
@@ -820,6 +856,101 @@ mod tests {
     use std::fs;
 
     use crate::ports::ToolBroker;
+
+    /// A project the server can stage a feature mutation into.
+    fn staging_project() -> (tempfile::TempDir, WorkflowServer) {
+        let dir = tempfile::tempdir().unwrap();
+        let features = dir.path().join("kata/src/test/resources/features");
+        fs::create_dir_all(&features).unwrap();
+        fs::write(
+            features.join("calc.feature"),
+            "Feature: Calc\n\n  @REQ-001\n  Scenario: Base\n    Given a calculator\n",
+        )
+        .unwrap();
+        let server = WorkflowServer::new(dir.path().to_path_buf());
+        (dir, server)
+    }
+
+    fn add_scenario_params(name: &str) -> Parameters<ScenarioAddParams> {
+        Parameters(ScenarioAddParams {
+            feature: "kata/src/test/resources/features/calc.feature".into(),
+            req: "REQ-002".into(),
+            name: name.into(),
+            steps: vec!["Given a calculator".into()],
+        })
+    }
+
+    fn staged_scenarios(dir: &tempfile::TempDir) -> Vec<String> {
+        let staged = dir
+            .path()
+            .join(crate::domain::STAGED_DIR)
+            .join("files/kata/src/test/resources/features/calc.feature");
+        fs::read_to_string(staged)
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|line| line.trim().strip_prefix("Scenario: ").map(String::from))
+            .collect()
+    }
+
+    /// A host is free to dispatch a batch of tool calls concurrently, and
+    /// each one lands on its own task. Two interleaved read-modify-write
+    /// cycles used to lose one edit while both replies still said
+    /// `staged: true`.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_parallel_staging_batch_keeps_every_edit() {
+        let (dir, server) = staging_project();
+        let names: Vec<String> = (0..8).map(|i| format!("Scenario{i}")).collect();
+        let batch: Vec<_> = names
+            .iter()
+            .map(|name| {
+                // A clone is what a host hands each concurrent call.
+                let server = server.clone();
+                let params = add_scenario_params(name);
+                tokio::spawn(async move { server.scenario_add(params).await })
+            })
+            .collect();
+        for task in batch {
+            let reply = task.await.unwrap().unwrap();
+            assert_ne!(
+                reply.is_error,
+                Some(true),
+                "got: {}",
+                reply.content[0].as_text().unwrap().text
+            );
+        }
+        let mut staged = staged_scenarios(&dir);
+        staged.sort();
+        let mut expected = names;
+        expected.push("Base".into());
+        expected.sort();
+        assert_eq!(staged, expected, "a parallel staging batch dropped an edit");
+    }
+
+    /// The guard is what serializes those cycles: while it is held, a
+    /// staging mutation has to wait rather than read a stale base.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_staging_mutation_waits_for_the_staging_lock() {
+        let (_dir, server) = staging_project();
+        let held = server.staging_guard().await;
+        let blocked = tokio::spawn({
+            let server = server.clone();
+            async move { server.scenario_add(add_scenario_params("Blocked")).await }
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        assert!(
+            !blocked.is_finished(),
+            "the mutation ran while the staging lock was held"
+        );
+        drop(held);
+        let reply = blocked.await.unwrap().unwrap();
+        assert_ne!(reply.is_error, Some(true));
+    }
+
+    #[test]
+    fn every_clone_guards_the_same_staging_area() {
+        let (_dir, server) = staging_project();
+        assert!(Arc::ptr_eq(&server.staging, &server.clone().staging));
+    }
 
     #[test]
     fn a_runner_is_detected_for_every_supported_marker() {

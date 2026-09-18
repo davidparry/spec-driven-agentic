@@ -79,10 +79,26 @@ def report(ok, label, detail=""):
     if not ok:
         fail = 1
 
-def req(doc, rid):
-    return next((r for r in doc["requirements"] if r["id"] == rid), None)
+def req(requirements, rid):
+    return next((r for r in requirements if r["id"] == rid), None)
 
-spec = json.loads(local(SPEC))
+def merged_spec(path=SPEC, seen=None):
+    """requirements.json is the entry point, not necessarily the whole spec:
+    it may carry an `includes` list of child files, N levels deep, and the
+    tools grade the merged tree. Demo C moves REQ-007 into a child, so
+    reading only the root file would report it missing."""
+    seen = set() if seen is None else seen
+    if path in seen:
+        return []
+    seen.add(path)
+    doc = json.loads(local(path))
+    requirements = list(doc.get("requirements", []))
+    parent = os.path.dirname(path)
+    for child in doc.get("includes", []):
+        requirements += merged_spec(os.path.join(parent, child), seen)
+    return requirements
+
+spec = merged_spec()
 
 # ---- Exercise 1: the requirement you drafted -----------------------------
 # The wording here is authored by you and your agent, so it is graded the

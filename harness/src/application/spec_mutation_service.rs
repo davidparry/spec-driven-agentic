@@ -938,14 +938,19 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
             )
         };
         if !self.confirm(prompter, &question)? {
+            // Name the command the developer actually ran - reword reaches
+            // here too, and telling them to draft sends them the wrong way.
+            let next_step = if replace {
+                format!("Nothing was staged. Run spec reword {id} again when the wording is ready.")
+            } else {
+                "Nothing was staged. Run spec draft again when the wording is ready.".to_string()
+            };
             return Ok(DraftReport {
                 id,
                 title,
                 staged: false,
                 findings: unresolved,
-                next_step: "Nothing was staged. Run spec draft again when the wording \
-                            is ready."
-                    .into(),
+                next_step,
             });
         }
         let doc = file_mut_or_err(&mut catalog, &file)?;

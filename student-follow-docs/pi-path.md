@@ -143,6 +143,30 @@ From there the loop is the one in
 [student-follow-along.md](../student-follow-along.md): review the staged
 Gherkin, commit, RED, implement, GREEN, refactor, mark implemented.
 
+### Two steps need an editor, so plan for them
+
+The 25 tools stage Gherkin, unit tests, and step definitions, but none of
+them writes a *new* requirement and none writes production code —
+`requirement_reword` only edits a requirement that already exists, and the
+follow-along says it outright for the implement step ("a file edit — there
+is no `implement` MCP tool"). So under a strict `-nbt` two steps cannot
+happen at all: **Exercise 1's draft** of REQ-007, and **the implement step**
+of every Red/Green cycle.
+
+Give those two steps an editor while still keeping the shell away:
+
+```bash
+pi -xt bash,powershell          # read/write/edit/grep/find/ls on, no shell
+```
+
+Run the tool-driven steps under `-nbt` and switch to `-xt bash,powershell`
+for the draft and the implementation. The point of the exercise survives —
+the model still cannot run commands, so the bar is whatever `run_tests`
+says — and you avoid watching a capable agent insist it has no way to write
+the file. The alternative is to hand-write REQ-007 yourself and let the
+agent critique it with `validate_spec` and `refine_requirement`, which is
+closer to what the [harness path](harness-path.md) does with `spec draft`.
+
 ### The catch, and why the runner exists
 
 `-nbt` is a flag on one run. Forget it and the shell is back. More to the
