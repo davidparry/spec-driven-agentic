@@ -46,7 +46,11 @@ pub fn parse_proposals_checked(reply: &str) -> Result<Vec<ProposedRequirement>, 
                 .into(),
         );
     };
-    let complete: Vec<ProposedRequirement> = proposals.into_iter().filter(is_complete).collect();
+    let complete: Vec<ProposedRequirement> = proposals
+        .into_iter()
+        .filter(is_complete)
+        .map(ProposedRequirement::normalized)
+        .collect();
     if complete.is_empty() {
         return Err(
             "the JSON held no complete requirement (each needs a title, a story, and at least one Given/When/Then criterion)"
@@ -54,6 +58,41 @@ pub fn parse_proposals_checked(reply: &str) -> Result<Vec<ProposedRequirement>, 
         );
     }
     Ok(complete)
+}
+
+impl ProposedRequirement {
+    /// A requirement's title, story, and criteria are single-line fields,
+    /// and the spec writes an input newline as the two characters `\n` (see
+    /// REQ-005's `"1\n2,3"`). A model handed that sometimes answers with a
+    /// real newline in its place - even in a criterion it was told to copy
+    /// verbatim - which leaves the criterion wrapping across two lines in
+    /// every prompt and report and no longer matching the rest of the spec.
+    /// Put the escape back.
+    fn normalized(mut self) -> Self {
+        self.title = escape_controls(&self.title);
+        self.story = escape_controls(&self.story);
+        self.acceptance_criteria = self
+            .acceptance_criteria
+            .iter()
+            .map(|criterion| escape_controls(criterion))
+            .collect();
+        self
+    }
+}
+
+/// One spec field folded back onto the single line it is authored on,
+/// with a real control character written the way the spec writes it.
+///
+/// Also what the `// criterion` comment above a generated test is built
+/// from: a real newline there would leave the rest of the criterion
+/// outside the comment, which is a compile error rather than a cosmetic
+/// one. Unlike [`crate::domain::generation::escape_literal`] this leaves
+/// backslashes and quotes alone - a comment needs no delimiter escaped,
+/// and doubling them would stop it reading as the spec wrote it.
+pub(crate) fn escape_controls(text: &str) -> String {
+    text.replace('\r', "")
+        .replace('\n', "\\n")
+        .replace('\t', "\\t")
 }
 
 fn is_complete(proposal: &ProposedRequirement) -> bool {
@@ -136,7 +175,7 @@ pub fn parse_rewording_checked(reply: &str) -> Result<ProposedRequirement, Strin
         );
     };
     if is_complete(&proposal) {
-        Ok(proposal)
+        Ok(proposal.normalized())
     } else {
         Err(
             "the JSON object was incomplete (needs a title, a story, and at least one Given/When/Then criterion)"
@@ -148,6 +187,50 @@ pub fn parse_rewording_checked(reply: &str) -> Result<ProposedRequirement, Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_real_newline_in_a_reworded_criterion_becomes_the_escape_again() {
+        // What the model actually answered on a reword of REQ-007: the spec
+        // writes the input newline as the two characters `\n`, and the reply
+        // came back with JSON's `\n` escape instead - valid JSON that
+        // decodes to a real newline, in the story and in a criterion it was
+        // told to keep verbatim.
+        let reply = r#"{"title": "Custom delimiter",
+            "story": "As a user, I want \"//+\n1+2\" to sum so that I can pick a delimiter.",
+            "acceptanceCriteria": ["Given \"//+\n1+2\", when add is called, then the result is 3"]}"#;
+        let proposal = parse_rewording_checked(reply).unwrap();
+        assert!(
+            !proposal.story.contains('\n'),
+            "story kept a real newline: {:?}",
+            proposal.story
+        );
+        assert_eq!(
+            proposal.acceptance_criteria,
+            vec![r#"Given "//+\n1+2", when add is called, then the result is 3"#]
+        );
+    }
+
+    #[test]
+    fn an_escape_the_model_wrote_correctly_is_left_alone() {
+        let reply = r#"{"title": "T", "story": "As a user, I want x so that y.",
+                        "acceptanceCriteria": ["Given \"1\\n2\", when add is called, then the result is 3"]}"#;
+        let proposal = parse_rewording_checked(reply).unwrap();
+        assert_eq!(
+            proposal.acceptance_criteria,
+            vec![r#"Given "1\n2", when add is called, then the result is 3"#]
+        );
+    }
+
+    #[test]
+    fn a_tab_in_a_proposed_criterion_is_escaped_too() {
+        let reply = r#"[{"title": "T", "story": "As a user, I want x so that y.",
+            "acceptanceCriteria": ["Given \"1\t2\", when add is called, then the result is 3"]}]"#;
+        let proposals = parse_proposals_checked(reply).unwrap();
+        assert_eq!(
+            proposals[0].acceptance_criteria,
+            vec![r#"Given "1\t2", when add is called, then the result is 3"#]
+        );
+    }
 
     fn candidate() -> Requirement {
         Requirement {

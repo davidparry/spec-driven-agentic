@@ -6,6 +6,7 @@
 use crate::domain::language::Language;
 use crate::domain::model::Requirement;
 use crate::domain::prompts::{RenderedPrompt, render};
+use crate::domain::proposal::escape_controls;
 use crate::domain::steps::{MissingStep, extract_patterns, step_to_expression};
 use crate::domain::tdd::{ImplementAttempt, StateEntry};
 
@@ -110,7 +111,7 @@ fn step_definition(language: Language, step: &MissingStep) -> String {
             format!(
                 "    @{keyword}(\"{expr}\")\n    public void {name}({params}) {{\n        throw new PendingException();\n    }}\n",
                 keyword = step.keyword,
-                expr = expression.replace('"', "\\\""),
+                expr = escape_literal(&expression, '"'),
                 name = camel_case(&name_source(&step.text)),
             )
         }
@@ -119,7 +120,7 @@ fn step_definition(language: Language, step: &MissingStep) -> String {
             format!(
                 "{keyword}('{expr}', function ({params}) {{\n  return 'pending';\n}});\n",
                 keyword = step.keyword,
-                expr = expression.replace('\'', "\\'"),
+                expr = escape_literal(&expression, '\''),
                 params = params.join(", "),
             )
         }
@@ -131,7 +132,7 @@ fn step_definition(language: Language, step: &MissingStep) -> String {
             format!(
                 "    [{keyword}(\"{expr}\")]\n    public void {name}({params})\n    {{\n        throw new PendingStepException();\n    }}\n",
                 keyword = step.keyword,
-                expr = expression.replace('"', "\\\""),
+                expr = escape_literal(&expression, '"'),
                 name = pascal_case(&name_source(&step.text)),
             )
         }
@@ -143,9 +144,9 @@ fn step_definition(language: Language, step: &MissingStep) -> String {
             format!(
                 "#[{keyword}(expr = \"{expr}\")]\nfn {name}(_world: &mut World{params}) {{\n    todo!(\"implement step: {text}\");\n}}\n",
                 keyword = step.keyword.to_lowercase(),
-                expr = expression.replace('"', "\\\""),
+                expr = escape_literal(&expression, '"'),
                 name = snake_case(&name_source(&step.text)),
-                text = step.text,
+                text = escape_literal(&step.text, '"'),
             )
         }
     }
@@ -190,26 +191,27 @@ pub fn unit_test_template(language: Language, requirement: &Requirement) -> Stri
 }
 
 fn unit_test_case(language: Language, criterion: &str) -> String {
+    let commented = escape_controls(criterion);
     match language {
         Language::Java => format!(
-            "    @Test\n    void {name}() {{\n        // {criterion}\n        fail(\"TODO: assert - {escaped}\");\n    }}\n",
+            "    @Test\n    void {name}() {{\n        // {commented}\n        fail(\"TODO: assert - {escaped}\");\n    }}\n",
             name = snake_case(criterion),
-            escaped = criterion.replace('"', "\\\""),
+            escaped = escape_literal(criterion, '"'),
         ),
         Language::JavaScript | Language::TypeScript => format!(
-            "test('{name}', () => {{\n  // {criterion}\n  assert.fail('TODO: assert - {escaped}');\n}});\n",
-            name = criterion.replace('\\', "\\\\").replace('\'', "\\'"),
-            escaped = criterion.replace('\\', "\\\\").replace('\'', "\\'"),
+            "test('{name}', () => {{\n  // {commented}\n  assert.fail('TODO: assert - {escaped}');\n}});\n",
+            name = escape_literal(criterion, '\''),
+            escaped = escape_literal(criterion, '\''),
         ),
         Language::DotNet => format!(
-            "    [Fact]\n    public void {name}()\n    {{\n        // {criterion}\n        Assert.Fail(\"TODO: assert - {escaped}\");\n    }}\n",
+            "    [Fact]\n    public void {name}()\n    {{\n        // {commented}\n        Assert.Fail(\"TODO: assert - {escaped}\");\n    }}\n",
             name = pascal_case(criterion),
-            escaped = criterion.replace('"', "\\\""),
+            escaped = escape_literal(criterion, '"'),
         ),
         Language::Rust => format!(
-            "#[test]\nfn {name}() {{\n    // {criterion}\n    unimplemented!(\"TODO: assert - {escaped}\");\n}}\n",
+            "#[test]\nfn {name}() {{\n    // {commented}\n    unimplemented!(\"TODO: assert - {escaped}\");\n}}\n",
             name = snake_case(criterion),
-            escaped = criterion.replace('"', "\\\""),
+            escaped = escape_literal(criterion, '"'),
         ),
     }
 }
@@ -522,6 +524,23 @@ pub fn polish_prompt(language: Language, scaffold: &str) -> RenderedPrompt {
     )
 }
 
+/// The fragment-scoped polish instructions used when the target file
+/// already exists: the model is shown only the newly generated members,
+/// never the file they will be spliced into. Rendered from the
+/// `[polish_fragment]` templates.
+pub fn polish_fragment_prompt(language: Language, members: &str, count: usize) -> RenderedPrompt {
+    render(
+        "polish_fragment",
+        minijinja::context! {
+            framework => language.bdd_framework(),
+            language => language.display(),
+            practices => best_practices(language),
+            count => count,
+            members => members,
+        },
+    )
+}
+
 /// Parse the model's implementation reply. Elements without a path or
 /// content are dropped; an unparseable reply is an empty list.
 pub fn parse_file_updates(reply: &str) -> Vec<FileUpdate> {
@@ -660,29 +679,142 @@ pub fn looks_like_unit_test_for(
     }
 }
 
+/// Does this fragment try to declare the scope it is meant to be spliced
+/// into? A polished fragment is inserted *inside* an existing class, so a
+/// package line, an import, or a type declaration in the reply would
+/// either nest illegally or duplicate what the file already has.
+fn declares_enclosing_scope(language: Language, fragment: &str) -> bool {
+    const MODIFIERS: [&str; 7] = [
+        "public",
+        "private",
+        "protected",
+        "final",
+        "abstract",
+        "static",
+        "sealed",
+    ];
+    const DECLARATIONS: [&str; 5] = ["class", "interface", "enum", "record", "namespace"];
+    fragment.lines().any(|line| {
+        let mut rest = line.trim();
+        if rest.starts_with("package ") || rest.starts_with("import ") || rest.starts_with("using ")
+        {
+            return true;
+        }
+        if matches!(language, Language::Rust) && rest.starts_with("mod ") {
+            return true;
+        }
+        // Peel modifiers so `public final class Foo` is caught as readily
+        // as a bare `class Foo`.
+        while let Some(tail) = MODIFIERS
+            .iter()
+            .find_map(|word| rest.strip_prefix(word)?.strip_prefix(' '))
+        {
+            rest = tail.trim_start();
+        }
+        DECLARATIONS
+            .iter()
+            .any(|word| rest.strip_prefix(word).is_some_and(|t| t.starts_with(' ')))
+    })
+}
+
+/// Polish gate for a step-definition *fragment*: the reply must declare
+/// exactly the cucumber expressions it was given - no additions, no
+/// losses, no edits - and must not wrap them in a class of its own.
+pub fn looks_like_step_fragment(language: Language, fragment: &str, expected: &[String]) -> bool {
+    if fragment.trim().is_empty() || declares_enclosing_scope(language, fragment) {
+        return false;
+    }
+    let kept = extract_patterns(language, fragment);
+    kept.len() == expected.len() && expected.iter().all(|pattern| kept.contains(pattern))
+}
+
+/// Every `fail("TODO: assert ...")` placeholder a generated unit test
+/// fragment carries. These are the assertions the developer is meant to
+/// sharpen by hand, so the polish pass may not quietly resolve them.
+pub fn todo_placeholders(code: &str) -> Vec<String> {
+    const OPEN: &str = "\"TODO: assert";
+    code.match_indices(OPEN)
+        .filter_map(|(start, _)| {
+            let tail = &code[start + 1..];
+            tail.find('"').map(|end| tail[..end].to_string())
+        })
+        .collect()
+}
+
+/// How many test cases a fragment declares.
+fn count_test_cases(language: Language, code: &str) -> usize {
+    let marker = match language {
+        Language::Java => "@Test",
+        Language::JavaScript | Language::TypeScript => "test(",
+        Language::DotNet => "[Fact]",
+        Language::Rust => "#[test]",
+    };
+    code.matches(marker).count()
+}
+
+/// Polish gate for a unit-test *fragment*: same number of test cases,
+/// every TODO placeholder intact, and no class of its own. The
+/// placeholders are the contract here - a reply that "helpfully" writes
+/// the assertion has taken the exercise away from the developer.
+pub fn looks_like_unit_test_fragment(
+    language: Language,
+    fragment: &str,
+    expected_placeholders: &[String],
+    expected_cases: usize,
+) -> bool {
+    if fragment.trim().is_empty() || declares_enclosing_scope(language, fragment) {
+        return false;
+    }
+    if count_test_cases(language, fragment) != expected_cases {
+        return false;
+    }
+    let kept = todo_placeholders(fragment);
+    kept.len() == expected_placeholders.len()
+        && expected_placeholders.iter().all(|todo| kept.contains(todo))
+}
+
 /// Append failing tests for `requirement` onto an existing test class
 /// (the workshop `StringCalculatorTest` shape). Greenfield still uses
 /// [`unit_test_template`].
 pub fn append_unit_tests(existing: &str, language: Language, requirement: &Requirement) -> String {
-    let methods: String = requirement
+    splice_unit_tests(
+        existing,
+        language,
+        &unit_test_fragment(language, requirement),
+    )
+}
+
+/// The new test methods on their own, with no surrounding file.
+///
+/// Split out of [`append_unit_tests`] so the polish pass can be handed
+/// the generated members alone: a model that never sees the rest of the
+/// file cannot rename or reflow the tests already in it.
+pub fn unit_test_fragment(language: Language, requirement: &Requirement) -> String {
+    requirement
         .acceptance_criteria
         .iter()
         .map(|criterion| unit_test_case_for(language, requirement, criterion))
-        .collect();
+        .collect()
+}
+
+/// Insert `fragment` - freshly generated or polished - into an existing
+/// test class. Bytes outside the splice point are carried over untouched.
+pub fn splice_unit_tests(existing: &str, language: Language, fragment: &str) -> String {
     match language {
-        Language::Java => append_java_methods(existing, &methods),
-        _ => format!("{}\n{methods}", existing.trim_end()),
+        Language::Java => append_java_methods(existing, fragment),
+        _ => format!("{}\n{fragment}", existing.trim_end()),
     }
 }
 
 fn unit_test_case_for(language: Language, requirement: &Requirement, criterion: &str) -> String {
     match language {
         Language::Java => format!(
-            "    @Test\n    @DisplayName(\"{id}: {title}\")\n    void {name}() {{\n        // {criterion}\n        fail(\"TODO: assert - {escaped}\");\n    }}\n",
+            "    @Test\n    @DisplayName(\"{id}: {title}\")\n    void {name}() {{\n        // {commented}\n        fail(\"TODO: assert - {escaped}\");\n    }}\n",
             id = requirement.id,
-            title = criterion.replace('"', "\\\""),
+            title = escape_literal(criterion, '"'),
             name = snake_case(criterion),
-            escaped = criterion.replace('"', "\\\""),
+            commented = escape_controls(criterion),
+            escaped = escape_literal(criterion, '"'),
         ),
         _ => unit_test_case(language, criterion),
     }
@@ -696,10 +828,11 @@ fn append_java_methods(existing: &str, methods: &str) -> String {
     insert_into_class(&with_imports, methods)
 }
 
-/// Add members to the last class in a brace-delimited source.
+/// Add members to the last class in a brace-delimited source, one blank
+/// line below whatever the class already declares.
 fn insert_into_class(source: &str, members: &str) -> String {
     match source.rfind('}') {
-        Some(i) => format!("{}{}\n{}", &source[..i], members, &source[i..]),
+        Some(i) => format!("{}\n\n{members}\n{}", source[..i].trim_end(), &source[i..]),
         None => format!("{source}\n{members}"),
     }
 }
@@ -715,6 +848,24 @@ pub fn append_step_definitions(
     language: Language,
     missing: &[MissingStep],
 ) -> String {
+    match step_definitions_fragment(existing, language, missing) {
+        Some(fragment) => splice_step_definitions(existing, language, &fragment),
+        None => existing.to_string(),
+    }
+}
+
+/// The new step definitions on their own, with no surrounding file, or
+/// `None` when `existing` already declares every missing expression.
+///
+/// Split out of [`append_step_definitions`] so the polish pass can be
+/// handed the generated definitions alone: a model that never sees the
+/// rest of the file cannot rename the definitions already binding
+/// scenarios that pass today.
+pub fn step_definitions_fragment(
+    existing: &str,
+    language: Language,
+    missing: &[MissingStep],
+) -> Option<String> {
     let mut seen = extract_patterns(language, existing);
     let definitions: Vec<String> = missing
         .iter()
@@ -730,14 +881,21 @@ pub fn append_step_definitions(
         .map(|step| step_definition(language, step))
         .collect();
     if definitions.is_empty() {
-        return existing.to_string();
+        return None;
     }
-    let body = definitions.join("\n");
+    Some(definitions.join("\n"))
+}
+
+/// Insert `fragment` - freshly generated or polished - into a file that
+/// already holds step definitions, adding whatever imports it needs.
+/// Bytes outside the splice point are carried over untouched.
+pub fn splice_step_definitions(existing: &str, language: Language, fragment: &str) -> String {
     match language {
-        Language::Java => insert_into_class(&ensure_cucumber_imports(existing, language), &body),
-        Language::DotNet => insert_into_class(&ensure_cucumber_imports(existing, language), &body),
+        Language::Java | Language::DotNet => {
+            insert_into_class(&ensure_cucumber_imports(existing, language), fragment)
+        }
         _ => format!(
-            "{}\n\n{body}",
+            "{}\n\n{fragment}",
             ensure_cucumber_imports(existing, language).trim_end()
         ),
     }
@@ -811,6 +969,40 @@ fn parameter_list(expression: &str, format_param: impl Fn(usize, &str) -> String
         rest = &tail[close + 1..];
     }
     params.join(", ")
+}
+
+/// Spec text as the body of a generated string literal delimited by
+/// `quote` - the one place criteria, step texts, and cucumber
+/// expressions cross into source code.
+///
+/// The spec writes an input newline as the two characters `\n` (REQ-005's
+/// `"1\n2,3"`), so a literal that escapes only the quote hands the
+/// compiler a real newline escape: the assertion message arrives broken
+/// across two lines at runtime. A criterion holding a real control
+/// character instead - which a model reword introduces, see
+/// [`crate::domain::proposal::escape_controls`] - ends the literal
+/// mid-string and stops the file compiling at all.
+///
+/// Escaping in one pass over the characters is what makes the order
+/// safe: a backslash written here is never re-read as the opening of the
+/// next escape, which is the double-escaping that chained `replace`
+/// calls invite.
+pub(crate) fn escape_literal(text: &str, quote: char) -> String {
+    let mut escaped = String::with_capacity(text.len());
+    for character in text.chars() {
+        match character {
+            '\\' => escaped.push_str("\\\\"),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            c if c == quote => {
+                escaped.push('\\');
+                escaped.push(c);
+            }
+            c => escaped.push(c),
+        }
+    }
+    escaped
 }
 
 /// The text an identifier is derived from: quoted arguments carry data,
@@ -1124,6 +1316,170 @@ mod tests {
     }
 
     #[test]
+    fn the_step_fragment_holds_the_new_definitions_and_nothing_around_them() {
+        let existing = "package com.example.kata;\n\n\
+             public class CalculatorSteps {\n\
+             \x20   @Given(\"a calculator\")\n\
+             \x20   public void aCalculator() {}\n\
+             }\n";
+        let fragment = step_definitions_fragment(
+            existing,
+            Language::Java,
+            &[
+                missing("Given", "a calculator"),
+                missing("Then", "the result is 3"),
+            ],
+        )
+        .expect("one definition is missing");
+        // Only the missing step, and none of the scaffolding that would
+        // let a polish pass reach the rest of the file.
+        assert!(fragment.contains("@Then(\"the result is {int}\")"));
+        assert!(!fragment.contains("a calculator"), "{fragment}");
+        assert!(!fragment.contains("package"), "{fragment}");
+        assert!(!fragment.contains("class"), "{fragment}");
+
+        // Splicing it back is exactly what appending does.
+        assert_eq!(
+            splice_step_definitions(existing, Language::Java, &fragment),
+            append_step_definitions(
+                existing,
+                Language::Java,
+                &[
+                    missing("Given", "a calculator"),
+                    missing("Then", "the result is 3"),
+                ],
+            )
+        );
+    }
+
+    #[test]
+    fn appended_members_are_separated_from_the_member_above_by_a_blank_line() {
+        let existing = "public class CalculatorSteps {\n\n\
+             \x20   @Given(\"a calculator\")\n\
+             \x20   public void aCalculator() {\n\
+             \x20   }\n\
+             }\n";
+        let once = append_step_definitions(
+            existing,
+            Language::Java,
+            &[missing("Then", "the result is 3")],
+        );
+        assert!(
+            once.contains("    }\n\n    @Then(\"the result is {int}\")"),
+            "{once}"
+        );
+
+        // Appending again separates by one blank line, not two.
+        let twice = append_step_definitions(
+            &once,
+            Language::Java,
+            &[missing("When", "the numbers are added")],
+        );
+        assert!(!twice.contains("\n\n\n"), "{twice}");
+        assert!(
+            twice.contains("    }\n\n    @When(\"the numbers are added\")"),
+            "{twice}"
+        );
+    }
+
+    #[test]
+    fn a_file_declaring_every_missing_step_yields_no_fragment() {
+        let existing = "public class Steps {\n\
+             \x20   @Given(\"a calculator\")\n    public void a() {}\n}\n";
+        assert!(
+            step_definitions_fragment(
+                existing,
+                Language::Java,
+                &[missing("Given", "a calculator")]
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn the_step_fragment_gate_holds_the_expression_set_exactly() {
+        let expected = vec!["the result is {int}".to_string()];
+        let good = "    @Then(\"the result is {int}\")\n    public void resultIs(int n) {}\n";
+        assert!(looks_like_step_fragment(Language::Java, good, &expected));
+
+        // Renaming the method is the point; editing the expression is not.
+        let altered =
+            "    @Then(\"the result is {word}\")\n    public void resultIs(String n) {}\n";
+        assert!(!looks_like_step_fragment(
+            Language::Java,
+            altered,
+            &expected
+        ));
+
+        // Nor is inventing a definition that was not asked for.
+        let extra = "    @Then(\"the result is {int}\")\n    public void a(int n) {}\n\
+             \x20   @Given(\"a calculator\")\n    public void b() {}\n";
+        assert!(!looks_like_step_fragment(Language::Java, extra, &expected));
+
+        // A fragment is spliced inside a class, so it may not bring one.
+        for wrapped in [
+            "package com.example;\n    @Then(\"the result is {int}\")\n    public void a(int n) {}\n",
+            "public class Steps {\n    @Then(\"the result is {int}\")\n    public void a(int n) {}\n}\n",
+            "import io.cucumber.java.en.Then;\n    @Then(\"the result is {int}\")\n    public void a(int n) {}\n",
+        ] {
+            assert!(
+                !looks_like_step_fragment(Language::Java, wrapped, &expected),
+                "should be refused: {wrapped}"
+            );
+        }
+        assert!(!looks_like_step_fragment(Language::Java, "  \n", &expected));
+    }
+
+    #[test]
+    fn the_unit_test_fragment_gate_keeps_the_todo_placeholders() {
+        let todos = vec!["TODO: assert - sums two numbers".to_string()];
+        let good = "    @Test\n    void sums() {\n        fail(\"TODO: assert - sums two numbers\");\n    }\n";
+        assert!(looks_like_unit_test_fragment(
+            Language::Java,
+            good,
+            &todos,
+            1
+        ));
+
+        // Writing the assertion takes the RED bar away from the developer.
+        let resolved =
+            "    @Test\n    void sums() {\n        assertEquals(3, c.add(\"1,2\"));\n    }\n";
+        assert!(!looks_like_unit_test_fragment(
+            Language::Java,
+            resolved,
+            &todos,
+            1
+        ));
+
+        // Dropping or inventing a case is refused on the count alone.
+        let two = format!("{good}{good}");
+        assert!(!looks_like_unit_test_fragment(
+            Language::Java,
+            &two,
+            &todos,
+            1
+        ));
+
+        let wrapped = format!("class Test {{\n{good}}}\n");
+        assert!(!looks_like_unit_test_fragment(
+            Language::Java,
+            &wrapped,
+            &todos,
+            1
+        ));
+    }
+
+    #[test]
+    fn todo_placeholders_are_read_back_out_of_generated_tests() {
+        let code = "fail(\"TODO: assert - one\");\n  fail(\"TODO: assert - two\");\n";
+        assert_eq!(
+            todo_placeholders(code),
+            vec!["TODO: assert - one", "TODO: assert - two"]
+        );
+        assert!(todo_placeholders("assertEquals(1, 1);").is_empty());
+    }
+
+    #[test]
     fn appending_nothing_new_leaves_the_file_untouched() {
         let existing = "import io.cucumber.java.en.Given;\n\
              public class Steps {\n\
@@ -1240,6 +1596,220 @@ mod tests {
             code.matches('}').count() >= 2,
             "class brace is preserved: {code}"
         );
+    }
+
+    /// What `javac` makes of the body of a string literal: the value the
+    /// generated test prints at runtime. Asserting on this is what pins
+    /// the property the workshop actually reads off the projector.
+    fn java_string_value(body: &str) -> String {
+        let mut value = String::new();
+        let mut characters = body.chars();
+        while let Some(character) = characters.next() {
+            if character != '\\' {
+                value.push(character);
+                continue;
+            }
+            match characters.next() {
+                Some('n') => value.push('\n'),
+                Some('r') => value.push('\r'),
+                Some('t') => value.push('\t'),
+                Some(other) => value.push(other),
+                None => panic!("literal ends on a dangling backslash: {body}"),
+            }
+        }
+        value
+    }
+
+    /// The body of the literal `open` introduces, ending where javac ends
+    /// it: at the first quote no backslash escapes.
+    fn literal_body<'a>(code: &'a str, open: &str) -> &'a str {
+        let start = code
+            .find(open)
+            .unwrap_or_else(|| panic!("no {open} in:\n{code}"))
+            + open.len();
+        let rest = &code[start..];
+        let mut escaped = false;
+        for (index, character) in rest.char_indices() {
+            match character {
+                _ if escaped => escaped = false,
+                '\\' => escaped = true,
+                '"' => return &rest[..index],
+                '\n' => panic!("literal ran off the end of its line:\n{code}"),
+                _ => {}
+            }
+        }
+        panic!("unterminated literal in:\n{code}")
+    }
+
+    fn requirement_with(criteria: &[&str]) -> Requirement {
+        Requirement {
+            acceptance_criteria: criteria.iter().map(|c| (*c).into()).collect(),
+            ..requirement()
+        }
+    }
+
+    #[test]
+    fn the_escape_in_a_criterion_reaches_java_as_the_two_characters_the_spec_wrote() {
+        // REQ-005 verbatim: the spec writes the input newline as the two
+        // characters `\n`. Escaping only the quote left javac reading a
+        // real newline, and the RED bar the room is watching broke across
+        // two lines mid-message.
+        let criterion = r#"Given "4\n5\n6", when add is called, then the result is 15"#;
+        let code = unit_test_fragment(Language::Java, &requirement_with(&[criterion]));
+        assert!(
+            code.contains(r#"fail("TODO: assert - Given \"4\\n5\\n6\", when add is called, then the result is 15");"#),
+            "{code}"
+        );
+        assert_eq!(
+            java_string_value(literal_body(&code, "fail(\"")),
+            format!("TODO: assert - {criterion}"),
+            "what Java prints must be the criterion as the JSON writes it"
+        );
+        // One line each, or the assertion message wraps on the projector.
+        for line in code.lines() {
+            assert!(line.len() < 200 || !line.contains("TODO"), "{code}");
+        }
+        assert_eq!(code.matches("TODO: assert").count(), 1, "{code}");
+    }
+
+    #[test]
+    fn a_quote_a_backslash_before_a_quote_and_both_together_round_trip() {
+        for criterion in [
+            r#"Given "1,2", when add is called, then the result is 3"#,
+            r#"Given a trailing escape "1,2\", when add is called, then an error is raised"#,
+            r#"Given "1\n2", when add is called, then the message is "ok""#,
+        ] {
+            let code = unit_test_fragment(Language::Java, &requirement_with(&[criterion]));
+            assert_eq!(
+                java_string_value(literal_body(&code, "fail(\"")),
+                format!("TODO: assert - {criterion}"),
+                "round trip failed for {criterion:?}:\n{code}"
+            );
+            assert_eq!(
+                java_string_value(literal_body(&code, "@DisplayName(\"")),
+                format!("REQ-001: {criterion}"),
+                "the display name must carry the criterion too:\n{code}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_real_control_character_in_a_criterion_never_escapes_its_literal_or_its_comment() {
+        // Not hypothetical: REQ-007 in the workshop spec holds real
+        // newlines, put there by a model reword that ProposedRequirement
+        // ::normalized did not get to. Interpolated raw, the comment
+        // above the placeholder ends mid-criterion and the rest of the
+        // line is stray Java - a compile error, not a cosmetic one.
+        let criterion = "Given the input \"//+\n1+2\", when add is called, then the result is 3";
+        let code = unit_test_fragment(Language::Java, &requirement_with(&[criterion]));
+        assert!(
+            code.contains(
+                r#"        // Given the input "//+\n1+2", when add is called, then the result is 3"#
+            ),
+            "{code}"
+        );
+        for line in code.lines() {
+            let trimmed = line.trim();
+            assert!(
+                trimmed.is_empty()
+                    || trimmed.starts_with("//")
+                    || trimmed.starts_with('@')
+                    || trimmed.starts_with("void ")
+                    || trimmed.starts_with("fail(")
+                    || trimmed == "}",
+                "a criterion's newline split the file open:\n{code}"
+            );
+        }
+        assert_eq!(
+            java_string_value(literal_body(&code, "fail(\"")),
+            format!("TODO: assert - {criterion}"),
+            "a real newline still round trips - it is simply written as an escape"
+        );
+    }
+
+    #[test]
+    fn every_language_escapes_the_backslash_a_criterion_carries() {
+        let requirement =
+            requirement_with(&[r#"Given "1\n2,3", when add is called, then the result is 6"#]);
+        for language in Language::ALL {
+            let code = unit_test_template(language, &requirement);
+            assert!(
+                code.contains(r"1\\n2,3"),
+                "{language:?} left the backslash unescaped:\n{code}"
+            );
+            assert!(
+                !code.lines().any(|line| line.ends_with(r"1\n2,3")),
+                "{language:?} still writes a bare escape into a literal:\n{code}"
+            );
+            assert!(
+                looks_like_unit_test(language, &code),
+                "{language:?} fails its own gate:\n{code}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_step_definition_escapes_the_expression_and_the_text_it_quotes() {
+        // The Rust template interpolates the whole step text into a
+        // todo!, quotes and all - unescaped it never compiled.
+        let code = step_definitions_template(
+            Language::Rust,
+            &[missing("When", r#"add is called with "1\n2""#)],
+        );
+        assert!(
+            code.contains(r#"todo!("implement step: add is called with \"1\\n2\"");"#),
+            "{code}"
+        );
+
+        // An expression only keeps a backslash when it falls outside the
+        // quoted span step_to_expression collapses to {string}.
+        for (language, expected) in [
+            (Language::Java, r#"@Then("the delimiter is \\n")"#),
+            (Language::DotNet, r#"[Then("the delimiter is \\n")]"#),
+            (Language::Rust, r#"#[then(expr = "the delimiter is \\n")]"#),
+            (Language::JavaScript, r"Then('the delimiter is \\n'"),
+            (Language::TypeScript, r"Then('the delimiter is \\n'"),
+        ] {
+            let code =
+                step_definitions_template(language, &[missing("Then", r"the delimiter is \n")]);
+            assert!(
+                code.contains(expected),
+                "{language:?} wants {expected}:\n{code}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_escaped_expression_is_read_back_as_the_expression_it_was_generated_from() {
+        // Emitting `\\n` is only half of it: the next steps generate
+        // reads the file back to see what it already declares. If the
+        // escape did not collapse again the pattern would look missing
+        // and a second, ambiguous definition would be appended.
+        let step = missing("Then", r"the delimiter is \n");
+        let generated = step_definitions_template(Language::Java, std::slice::from_ref(&step));
+        assert_eq!(
+            extract_patterns(Language::Java, &generated),
+            vec![r"the delimiter is \n".to_string()]
+        );
+        assert!(
+            step_definitions_fragment(&generated, Language::Java, &[step]).is_none(),
+            "a step the file already declares must not be generated twice:\n{generated}"
+        );
+    }
+
+    #[test]
+    fn escape_literal_escapes_the_delimiter_in_use_and_nothing_else() {
+        assert_eq!(escape_literal(r#"a "b" c"#, '"'), r#"a \"b\" c"#);
+        assert_eq!(escape_literal(r#"a "b" c"#, '\''), r#"a "b" c"#);
+        assert_eq!(escape_literal(r"a 'b' c", '\''), r"a \'b\' c");
+        // Backslash first: a doubled backslash must not swallow the
+        // quote that follows it.
+        assert_eq!(escape_literal(r#"trailing\"#, '"'), r"trailing\\");
+        assert_eq!(escape_literal(r#"\"#, '"'), r"\\");
+        assert_eq!(escape_literal("tab\there", '"'), r"tab\there");
+        assert_eq!(escape_literal("cr\r\nlf", '"'), r"cr\r\nlf");
+        assert_eq!(escape_literal("plain", '"'), "plain");
+        assert_eq!(escape_literal("", '"'), "");
     }
 
     #[test]

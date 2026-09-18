@@ -63,16 +63,47 @@ pub fn extract_patterns(language: Language, source: &str) -> Vec<String> {
     regex
         .captures_iter(source)
         .map(|c| {
-            c.iter()
-                .skip(1)
-                .flatten()
-                .next()
-                .expect("one capture group matches")
-                .as_str()
-                .replace("\\\"", "\"")
-                .replace("\\'", "'")
+            unescape_literal(
+                c.iter()
+                    .skip(1)
+                    .flatten()
+                    .next()
+                    .expect("one capture group matches")
+                    .as_str(),
+            )
         })
         .collect()
+}
+
+/// The pattern a declared step-definition literal stands for - the
+/// inverse of [`crate::domain::generation::escape_literal`], so an
+/// expression this crate generated reads back as the expression it was
+/// generated from. Without the backslash case a generated `{string}`
+/// pattern carrying a `\n` would never match the one already in the
+/// file, and the next `steps generate` would append a second definition
+/// of it - the duplicate Cucumber refuses every scenario over.
+///
+/// Only the three escapes this crate emits are collapsed. An unknown
+/// escape keeps its backslash: the `\d` of a hand-written `#[then(regex
+/// = r"^the result is (\d+)$")]` is a regex atom, not an escaped `d`.
+fn unescape_literal(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut characters = text.chars();
+    while let Some(character) = characters.next() {
+        if character != '\\' {
+            out.push(character);
+            continue;
+        }
+        match characters.next() {
+            Some(escaped @ ('\\' | '"' | '\'')) => out.push(escaped),
+            Some(other) => {
+                out.push('\\');
+                out.push(other);
+            }
+            None => out.push('\\'),
+        }
+    }
+    out
 }
 
 /// Does `text` match `pattern`? Patterns are either anchored regexes
@@ -244,6 +275,26 @@ mod tests {
         assert_eq!(
             extract_patterns(Language::Rust, source),
             vec!["a calculator", "^the result is (\\d+)$"]
+        );
+    }
+
+    #[test]
+    fn an_escaped_backslash_collapses_but_a_regex_atom_keeps_its_own() {
+        let source = r#"
+            @Given("the delimiter is \\n")
+            public void delimiter() {}
+            @Then("^the result is (\d+)$")
+            public void result(int n) {}
+            @When("the \"quoted\" case")
+            public void quoted() {}
+        "#;
+        assert_eq!(
+            extract_patterns(Language::Java, source),
+            vec![
+                r"the delimiter is \n",
+                r"^the result is (\d+)$",
+                "the \"quoted\" case",
+            ]
         );
     }
 

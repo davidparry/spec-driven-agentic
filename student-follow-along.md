@@ -33,7 +33,12 @@ You need:
   [the pi path](student-follow-docs/pi-path.md) — a free MIT agent you run with
   `pi -nbt` so these 25 tools are all it gets — and
   [the harness path](student-follow-docs/harness-path.md), the `spec` runner
-  with narrower tools per command.
+  with narrower tools per command. The harness path is the command
+  reference; if you would rather be walked through it the way this page
+  walks you through Cursor — every command in order, with the expected
+  output after each one — follow
+  [student-follow-docs/spec-binary-follow-along.md](student-follow-docs/spec-binary-follow-along.md)
+  instead.
 
 Build once at home so the room's Wi-Fi never matters:
 
@@ -627,10 +632,20 @@ spec changes commit && spec test
   tell you that, then reach for `Pattern.quote`.
 - If you phrase a `Then` step the kata has never seen — `Then an
   IllegalArgumentException is thrown`, with no `with a message containing`
-  — `spec steps generate` appends it to the kata's own
+  — `spec steps generate` adds it to the kata's own
   `StringCalculatorSteps.java`, keeping the package and class and leaving a
-  `PendingException` body for you to fill in. It stages like everything
-  else, so read it with `spec changes show` before committing.
+  `PendingException` body for you to fill in. The model only ever sees the
+  definitions being added, never the file they join, so the diff is the new
+  method and nothing else — it cannot rename a field or an existing step
+  method on the way past. A reply that hands back a whole file, alters a
+  generated step expression, or drops a definition is refused, and the
+  deterministic version of the same method is staged instead
+  (`"source": "template"`). On top of that, no step *pattern* the file
+  already declared may disappear — that would unbind a passing scenario.
+  It stages like everything else, so read it with `spec changes show`
+  before committing. (Older `spec` builds did hand the model the whole
+  file and got a much larger diff back; if yours renames things you did
+  not ask it to, you are on one of those.)
 - `git diff complete` shows one worked ending for REQ-004, REQ-005, and
   REQ-006. Do **not** compare REQ-007 against it: the `complete` branch
   predates this exercise and its REQ-007 is a newline-delimiter duplicate

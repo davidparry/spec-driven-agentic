@@ -1458,15 +1458,17 @@ fn resolve_llm_attempts(root: &Path, flag: Option<u32>) -> u32 {
         .unwrap_or(DEFAULT_LLM_ATTEMPTS)
 }
 
-/// Warned once when a wizard starts on piped stdin. A read past the end of
-/// the pipe returns an empty line, which the prompter cannot tell apart
-/// from pressing Enter, so every remaining prompt takes its default and the
-/// closing "Stage this?" declines. The command then does its model work,
-/// stages nothing, and still exits 0 - say so rather than look like it
-/// worked.
+/// Warned once when a command that prompts starts on piped stdin. A read
+/// past the end of the pipe returns an empty line, which the prompter
+/// cannot tell apart from pressing Enter, so every remaining prompt takes
+/// its default and every confirmation declines. For the draft/reword wizard
+/// that means it does its model work and stages nothing while still exiting
+/// 0; for `spec implement` it only means the optional `command_run` is
+/// declined. Name the cause without promising which of the two happened.
 const PIPED_STDIN_WARNING: &str = "stdin is not a terminal: prompts are read from the pipe, and \
-     once it runs out every remaining prompt takes its default and the final confirmation \
-     declines - so nothing is staged. Run this in a terminal to answer the wizard.";
+     once it runs out every remaining prompt takes its default and every confirmation declines. \
+     A wizard that ends in \"Stage this?\" therefore stages nothing. Run this in a terminal to \
+     answer the prompts.";
 
 /// The wizard prompter. On a real terminal, rustyline gives the answers
 /// full line editing - arrow keys move the cursor anywhere in the typed

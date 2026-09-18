@@ -13,6 +13,14 @@ pi you do, through prompting and skills; `spec` is a **spec-specific runner**
 where the sequence, the tool profile for each step, and the phase gates are
 already encoded. Narrower on purpose.
 
+This page is the reference: terse command recipes plus the design notes
+behind them. Its follow-along companion,
+[spec-binary-follow-along.md](spec-binary-follow-along.md), runs the same
+commands one at a time with the expected reply after each, the two human
+checkpoints marked, the interactive `spec reword` wizard written out
+prompt by prompt, and realistic timings for the model-backed commands.
+Start there if this is your first run; come back here for the why.
+
 Do **not** work on `trunk`. `scripts/check-workshop-start.sh` must keep
 passing there.
 
@@ -98,11 +106,22 @@ with a message containing {string}`. Prefer those four wordings and
 `spec steps generate` stays a no-op.
 
 Any other wording is a real gap, and `spec steps generate` closes it: it
-appends the missing definitions to the discovered
-`StringCalculatorSteps.java`, keeping its package and class and skipping any
-pattern the file already declares, so Cucumber never sees a duplicate
-expression. Review with `spec changes show`, commit, and fill in the
-`PendingException` bodies.
+adds the missing definitions to the discovered `StringCalculatorSteps.java`,
+keeping its package and class and skipping any pattern the file already
+declares, so Cucumber never sees a duplicate expression. The polish pass
+is scoped to the new definitions: the model is handed those members alone,
+never the file they are spliced into, so it cannot rename a field or an
+existing step method, and everything outside the insertion point is
+carried over byte for byte. A reply that returns a whole file, alters a
+generated step expression, or drops a definition is refused and the
+deterministic members are staged instead (`"source": "template"`). The
+assembled file is then re-checked: no pattern the file already declared
+goes missing, and the package and class survive, so a passing scenario
+cannot be unbound. Review with `spec changes show`, commit, and fill in
+the `PendingException` bodies.
+
+`spec unittest generate` is scoped the same way when the test class
+already exists — only the new `@Test` methods reach the model.
 
 Every authoring command **stages** — including the interactive `spec draft`
 wizard, with or without a model. Nothing reaches the working tree until
@@ -205,7 +224,7 @@ Repeat the recipe. Suggested scenarios (reuse existing steps):
 | REQ-006 | A negative number is rejected | `"1,-2"` | `Then an IllegalArgumentException is thrown with a message containing "negatives not allowed"` |
 | REQ-006 | Every negative number is listed in the error | `"-1,-2"` | two further `Then`/`And` steps containing `"-1"` and `"-2"` |
 | REQ-007 | A custom delimiter declared on the first line is used | `"//+\n1+2"` | result is 3 |
-| REQ-007 | An empty delimiter declaration is rejected | `"//\n1+2"` | `Then an IllegalArgumentException is thrown` — the one wording with no step definition; `spec steps generate` appends it to `StringCalculatorSteps.java` |
+| REQ-007 | An empty delimiter declaration is rejected | `"//\n1+2"` | `Then an IllegalArgumentException is thrown` — the one wording with no step definition; `spec steps generate` adds it to `StringCalculatorSteps.java` |
 
 No earlier requirement overlaps REQ-007 — it is the behavior you drafted in
 Step 2, so both of its scenarios are new.

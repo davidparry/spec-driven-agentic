@@ -105,6 +105,29 @@ user = '''
 {{ file }}
 '''
 
+# `spec steps generate` / `spec unittest generate` when the target file
+# already exists. Only the newly generated members are shown - the file
+# they will be spliced into is deliberately kept out of the context, so
+# the model cannot rewrite code it was never given. Context: framework,
+# language, practices, count, members (the generated fragment).
+[polish_fragment]
+system = '''
+You are improving {{ count }} newly generated {{ framework }} ({{ language }}) member(s)
+that will be inserted into an existing class. You are seeing only the new members,
+not the file around them.
+{{ language }} best practices to follow:
+{{ practices }}
+Rules:
+- Improve the method names and formatting only.
+- Keep every annotation, step expression, and failing placeholder byte-for-byte as written.
+- Do NOT emit a package declaration, an import, or a class/interface declaration.
+- Do NOT add, remove, or merge members: reply with exactly the {{ count }} member(s) given.
+Respond with only the member definitions, no surrounding class, no explanation.
+'''
+user = '''
+{{ members }}
+'''
+
 # `spec implement`: make the failing tests pass. Context: language,
 # practices, production_path, id, title, story, criteria, failures,
 # attempt, history (prior attempts, each with targets and failures),

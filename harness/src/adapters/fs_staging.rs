@@ -55,6 +55,26 @@ impl FsChangeStore {
     }
 }
 
+const SUMMARY_SEPARATOR: &str = "; ";
+
+/// Join the summaries of repeated edits to one file, oldest first, skipping
+/// a summary already recorded. Long runs are capped so one file's review
+/// line cannot grow without bound.
+fn merge_summaries(prior: &str, next: &str) -> String {
+    const KEPT: usize = 5;
+    let mut parts: Vec<&str> = prior.split(SUMMARY_SEPARATOR).collect();
+    if parts.contains(&next) {
+        return prior.to_string();
+    }
+    parts.push(next);
+    if parts.len() <= KEPT {
+        return parts.join(SUMMARY_SEPARATOR);
+    }
+    let dropped = parts.len() - KEPT;
+    let kept = parts[parts.len() - KEPT..].join(SUMMARY_SEPARATOR);
+    format!("({dropped} earlier edit(s)){SUMMARY_SEPARATOR}{kept}")
+}
+
 fn ensure_parent(path: &Path) -> Result<(), StageError> {
     let parent = path.parent().expect("staged paths always have a parent");
     fs::create_dir_all(parent).map_err(|e| {
@@ -78,10 +98,19 @@ impl ChangeStore for FsChangeStore {
         } else {
             "create"
         };
+        // One file is one staged entry, but it can be the product of several
+        // edits - two scenario_add calls on the same feature, say. The
+        // content already holds both; carry both summaries too, or the
+        // review surface names only the last and the reviewer undercounts
+        // what they are about to approve.
+        let summary = match changes.iter().find(|c| c.path == path) {
+            Some(prior) => merge_summaries(&prior.summary, summary),
+            None => summary.to_string(),
+        };
         let change = StagedChange {
             path: path.clone(),
             action: action.to_string(),
-            summary: summary.to_string(),
+            summary,
         };
         changes.retain(|c| c.path != path);
         changes.push(change.clone());
@@ -142,6 +171,58 @@ mod tests {
     }
 
     #[test]
+    fn two_edits_to_one_file_stay_one_change_that_names_both() {
+        let (_dir, store) = store();
+        store
+            .stage(
+                "features/calc.feature",
+                "one",
+                "add scenario \"A\" for REQ-003",
+            )
+            .unwrap();
+        let change = store
+            .stage(
+                "features/calc.feature",
+                "one and two",
+                "add scenario \"B\" for REQ-003",
+            )
+            .unwrap();
+        // One file is still one entry, and its content is the latest write...
+        let changes = store.changes().unwrap();
+        assert_eq!(changes.len(), 1);
+        assert_eq!(
+            store.content("features/calc.feature").unwrap().as_deref(),
+            Some("one and two")
+        );
+        // ...but the review line names both edits, so a reviewer reading
+        // changes_show does not undercount what they are approving.
+        assert_eq!(
+            change.summary,
+            "add scenario \"A\" for REQ-003; add scenario \"B\" for REQ-003"
+        );
+    }
+
+    #[test]
+    fn re_staging_the_same_summary_does_not_repeat_it() {
+        let (_dir, store) = store();
+        store.stage("a.txt", "one", "reword REQ-007").unwrap();
+        let change = store.stage("a.txt", "two", "reword REQ-007").unwrap();
+        assert_eq!(change.summary, "reword REQ-007");
+    }
+
+    #[test]
+    fn a_long_run_of_edits_keeps_the_newest_and_counts_the_rest() {
+        let (_dir, store) = store();
+        for i in 1..=7 {
+            store.stage("a.txt", "x", &format!("edit {i}")).unwrap();
+        }
+        assert_eq!(
+            store.changes().unwrap()[0].summary,
+            "(2 earlier edit(s)); edit 3; edit 4; edit 5; edit 6; edit 7"
+        );
+    }
+
+    #[test]
     fn an_empty_store_has_no_changes_and_no_content() {
         let (_dir, store) = store();
         assert_eq!(store.changes().unwrap(), vec![]);
@@ -178,14 +259,16 @@ mod tests {
     }
 
     #[test]
-    fn restaging_the_same_path_replaces_the_earlier_entry() {
+    fn restaging_the_same_path_replaces_the_content_and_keeps_both_summaries() {
         let (_dir, store) = store();
         store.stage("a.txt", "one", "first").unwrap();
         store.stage("a.txt", "two", "second").unwrap();
         let changes = store.changes().unwrap();
         assert_eq!(changes.len(), 1);
-        assert_eq!(changes[0].summary, "second");
+        // The latest write is the staged content; the summary is the record
+        // of how it got there.
         assert_eq!(store.content("a.txt").unwrap().as_deref(), Some("two"));
+        assert_eq!(changes[0].summary, "first; second");
     }
 
     #[test]

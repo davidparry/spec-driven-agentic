@@ -253,8 +253,10 @@ pub fn declined_reply(name: &str) -> String {
     format!("the developer declined {name}")
 }
 
+/// The question only; `Prompter::confirm` owns the `[y/N]` suffix, so
+/// spelling it here too renders it twice.
 pub fn confirm_question(name: &str, args: &serde_json::Value) -> String {
-    format!("Run {}? [y/N]", narrate_call(name, args))
+    format!("Run {}?", narrate_call(name, args))
 }
 
 pub fn truncate_for_model(text: &str, max_chars: usize) -> String {
@@ -469,9 +471,11 @@ mod tests {
             declined_reply("command_run"),
             "the developer declined command_run"
         );
-        assert!(
-            confirm_question("command_run", &serde_json::json!({"command": ["mvn"]}))
-                .contains("command_run")
+        // No `[y/N]` here - `Prompter::confirm` adds it, and spelling it in
+        // both places rendered "Run ...? [y/N] [y/N]".
+        assert_eq!(
+            confirm_question("command_run", &serde_json::json!({"command": ["mvn"]})),
+            "Run command_run(command=[\"mvn\"])?"
         );
         assert_eq!(
             first_sentence("Run the tests. Updates the bar."),
