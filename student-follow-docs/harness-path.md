@@ -33,9 +33,28 @@ cargo install --path harness
 spec --version
 ```
 
-Requires `spec` **0.5.2 or newer** — check with `spec --version`. The
+Requires `spec` **0.5.4 or newer** — check with `spec --version`. The
 generation behavior this page describes, where the polish pass sees only
-the newly generated members, arrived in that release.
+the newly generated members, arrived in 0.5.2; 0.5.4 is the floor because
+several things this page states as fact are only true from it. The ones
+that change what you do, rather than what you read:
+
+- `spec validate` **exits nonzero when `valid` is false.** It used to
+  report the failure and exit 0, so a CI gate scripted on it passed on an
+  invalid spec.
+- `spec scenario add` **preserves trailing content.** It used to delete
+  everything after the last scenario — this kata's own closing comment
+  block disappeared on the first add — and `changes show` never mentioned
+  it.
+- `spec refine` **reads staged-first**, so the reword/refine loop needs no
+  `spec changes commit` between passes. It used to read the committed file
+  and could report `clean: true` over a staged edit that was not.
+- `spec model use` **edits one key** instead of re-rendering `.spec.toml`,
+  which used to destroy every comment in it on the first command of
+  Step 1.
+- **Prompts are visible while a spinner runs.** `spec implement`'s
+  `command_run` confirmation used to be redrawn over indefinitely, so the
+  command looked hung when it was waiting on you.
 
 A local [Ollama](https://ollama.com) model is optional. It is only
 required for `spec implement`. Without one, implement
@@ -132,6 +151,24 @@ the `PendingException` bodies.
 `spec unittest generate` is scoped the same way when the test class
 already exists — only the new `@Test` methods reach the model.
 
+Scoping protects the file's **content**, not always its indentation: a
+generated method occasionally arrives at column 0, which absorbs the
+class's closing brace into it. Braces balance and it compiles, so every
+gate passes; it is cosmetic, and it is intermittent. Two of five
+requirements in the measured run came back that way.
+
+On the template path, member names derived from two criteria that differ
+only in punctuation collide, and the later ones take a `_2` / `_3`
+suffix. The LLM path invents semantic names and does not. A `_2` in
+generated members is a reliable tell for `"source": "template"`.
+
+`spec scenario add` appends and does not rewrite: new scenarios are
+inserted **after the last scenario and before any trailing block**, so
+the feature file's header, its `As a / I want / So that` narrative, and
+its closing comments all survive. Every spec document a command writes
+ends in a trailing newline, so `\ No newline at end of file` in a diff
+means an older build.
+
 Every authoring command **stages** — including the interactive `spec draft`
 wizard, with or without a model. Nothing reaches the working tree until
 `spec changes commit`; decline the wizard's last prompt and the batch it
@@ -143,10 +180,44 @@ only on GREEN. `spec implement` may offer `command_run`; confirm before it
 spawns. Optional: `spec ask "which pending requirement next?"` (read-only
 profile).
 
+Refusals are worded for the phase you are in, not for RED: `spec refactor`
+answers "No tests have been run yet — run them to find out where you are."
+at START and "A refactor is already in progress — run the tests to close
+it." during a refactor, rather than the red-bar sentence at every phase.
+`spec state` reports where you are without touching anything, and leads
+with `phase` rather than its `instructions` blob.
+
+Every `nextStep` the shell prints names commands, not MCP tools: the
+services word their advice for the agent path and the CLI rewrites
+`start_refactor` into `spec refactor` at the one place it prints a reply.
+Tool output you asked for explicitly with `spec mcp call` is passed
+through verbatim and still speaks in tool names.
+
+`spec changes show` names at most five edits per file and then states the
+running total — `(8 edits in all, 3 not shown); ...` — so the review
+surface can never understate what is about to be committed.
+
 `spec implement REQ-00N` also warns when the code it staged looks like it
 satisfies another requirement that is still `pending` — the drift this
 workflow exists to prevent. It is a literal check (same quoted inputs, same
 expected number), so it warns and never blocks: read the diff and decide.
+It can also legitimately report `"staged": false`, when the model hands
+back every file unchanged: the warning names the production file and the
+`nextStep` sends you round again or to your editor. That is better than
+the `"staged": true` it used to give, which sent you to review an empty
+diff.
+
+**On a pipe, only the wizards can lose work.** `spec draft` and
+`spec reword` end on a confirmation, so an exhausted pipe declines it and
+stages nothing; every other prompting command stages either way. Running
+out of input is now distinct from pressing Enter — a short pipe stops
+immediately, explains itself once on stderr
+(`input is not readable - end of input (the pipe ran out): ...`), and
+returns the same declined report and exit 0 that a typed `N` would. It
+used to read the end of a pipe as a blank line, which is how the wording
+review's `[r]eword again, [m]anual, [a]ccept` prompt looped forever.
+Ctrl+D at a terminal wizard lands in the same place, rather than exiting
+1 with an error.
 
 ## Step 1 — Branch and baseline
 
@@ -168,9 +239,10 @@ spec draft \
   --story "As a calculator user, I want to declare a custom delimiter on the first line so that I can separate numbers with a character of my choosing." \
   --criterion 'Given the input "//+\n1+2", when add is called, then the result is 3' \
   --criterion 'Given an empty delimiter declaration "//\n1+2", when add is called, then an IllegalArgumentException is thrown'
-spec changes commit
-spec refine REQ-007
-# if findings: spec reword REQ-007 && spec changes commit, then refine again
+spec changes show             # your checkpoint: read the staged requirement
+spec refine REQ-007           # reads the staged draft, not the committed file
+# if findings: spec reword REQ-007, then refine again — no commit between passes
+spec changes commit           # once, when refine comes back clean
 spec list                     # REQ-007 pending
 ```
 
@@ -178,7 +250,27 @@ Nothing in REQ-001..006 specifies a custom delimiter, so this draft earns
 no duplicate warning. (Reuse an existing title or criterion verbatim and
 `spec draft` warns you.) Do **not** mark REQ-007 implemented yet.
 
+`spec refine` reads staged-first and says which copy it graded in a
+`source` field of `"staged"` or `"working tree"`, so reword and refine
+loop against the staged text and only need one commit at the end.
+`spec validate` is the other half of the pair: it reads the **committed**
+spec by contract, says so in its `nextStep` when a spec edit is staged,
+and points at the staged-aware `spec changes validate`.
+
+Supply `--title` without `--story` and `--criterion` and the error names
+what you typed rather than what you left out:
+`spec draft with --title also needs --story and --criterion. Give all
+three, or none of them to be asked question by question.`
+
 ## Recipe used for every pending requirement
+
+Two lines in this block are not busywork. `spec steps missing` is the
+free pre-check that tells you whether `spec steps generate` has anything
+to do, and the two `spec changes show` calls are the human checkpoints
+the whole workflow exists for: the first reads the staged Gherkin and
+tests before they become the RED bar, the second reads the production
+diff before it becomes GREEN. Run them in that order and nothing reaches
+the working tree unreviewed.
 
 ```text
 spec show REQ-00N
@@ -216,12 +308,20 @@ spec scenario add --feature kata/src/test/resources/features/string_calculator.f
   --step 'Given a string calculator' \
   --step 'When I add "10,20"' \
   --step 'Then the result is 30'
+spec steps missing                 # [] — all four wordings are already bound
 spec unittest generate REQ-003
+spec changes show                  # checkpoint 1: the staged Gherkin and tests
 spec changes commit
-spec test                          # RED
-spec implement REQ-003 && spec changes commit && spec test    # GREEN, or edit by hand
+spec test                          # RED: 9 tests, 4 failures
+spec implement REQ-003             # or edit StringCalculator.java by hand
+spec changes show                  # checkpoint 2: the production diff
+spec changes commit && spec test   # GREEN: 9 tests, 0 failures
 spec mark-implemented REQ-003 && spec changes commit
 ```
+
+`spec implement` ends by offering to commit and run the tests for you.
+Decline it the first time through — that prompt skips exactly the
+checkpoint this exercise is for.
 
 ## Step 4 — Remaining pending: REQ-004, REQ-005, REQ-006, then REQ-007
 
@@ -253,9 +353,21 @@ delimiter.
 ```bash
 spec list
 # every id REQ-001 .. REQ-007 status: implemented
-spec validate
-spec test                          # GREEN
+spec validate                      # "valid": true, exit 0
+spec test                          # GREEN: 25 tests, 0 failures
 ```
+
+That is the harness success bar: **every requirement status is
+`implemented`**. `scripts/verify-workshop-run.sh check` grades the same
+end state and is safe to run from this path: it asks whether each of
+REQ-003's acceptance criteria reaches a scenario tagged `@REQ-003` and an
+assertion in a `@Test` that names the requirement, so the names
+`spec scenario add` and `spec unittest generate` produce are fine. Watch the
+scenario count — one `spec scenario add` per criterion, and REQ-003 has
+two.
+
+Check it before the stretch below, which deliberately adds a pending
+REQ-008 and so moves you off that bar.
 
 ### Stretch: split the spec into a catalog
 
@@ -269,21 +381,38 @@ requirement lives in, and mutations write back to that file:
 spec include add requirements/newlines.json   # stages the include + an empty file
 spec changes commit
 spec draft --file requirements/newlines.json  # drafts REQ-008 into the child file
+spec refine REQ-008                           # read the findings before committing
+# if findings: spec reword REQ-008, then refine again
+spec changes commit
 spec list                                     # one merged backlog, per-file provenance
 spec validate                                 # validates the whole tree as one catalog
 ```
 
-The format reference lives in the manual:
+Do not skip the refine. A one-criterion happy-path draft earns
+`criteria: only happy paths - add at least one edge case (empty, invalid,
+or error input)`, and REQ-008 is the easiest place in the workshop to
+leave that open: `verify-workshop-run.sh` does not grade REQ-008, so
+nothing downstream catches it. The wizard form above puts the finding to
+you before it stages. The flag form
+(`spec draft --file ... --title ... --story ... --criterion ...`) cannot
+ask, so it stages regardless and carries the finding back in a `findings`
+array with a `nextStep` of `Staged REQ-008 with refine findings. Run spec
+reword REQ-008 to address them, then spec changes commit.` Either way,
+reword it before you commit.
+
+REQ-008 is left `pending` on purpose — it is the next kata, not part of
+the success bar above. The format reference lives in the manual:
 [The requirements format](../manual/src/spec-format.md).
 
-That is the harness success bar: **every requirement status is
-`implemented`**. `scripts/verify-workshop-run.sh check` grades the same
-end state and is safe to run from this path: it asks whether each of
-REQ-003's acceptance criteria reaches a scenario tagged `@REQ-003` and an
-assertion in a `@Test` that names the requirement, so the names
-`spec scenario add` and `spec unittest generate` produce are fine. Watch the
-scenario count — one `spec scenario add` per criterion, and REQ-003 has
-two.
+Both catalog-structure failures have their own guidance, and it is the
+one place the tool tells you to edit a spec file by hand. A duplicate id
+answers `no tool can delete a requirement, so open the spec file the
+issue names and remove the duplicate requirement object, or give it an id
+nothing else uses`; a file reached twice answers `no tool can remove an
+include, so open the parent spec file the issue names and delete the
+repeated entry from its "includes" array`. Both close with `the rule
+against hand-editing covers wording, not catalog structure`. Neither is
+reachable with `spec reword`, which is what the advice used to name.
 
 ## Reset
 

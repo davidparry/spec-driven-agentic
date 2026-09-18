@@ -93,7 +93,7 @@
         <tr><td>3–9</td><td><strong>Act 1</strong> — <code>pi</code> on Ollama: a free offline agent, and where it drifts</td></tr>
         <tr><td>9–15</td><td><strong>Act 2</strong> — the same model with no shell: MCP and <code>-nbt</code></td></tr>
         <tr><td>15–23</td><td><strong>Act 3</strong> — general agent vs spec-specific runner, spec → RED → GREEN</td></tr>
-        <tr><td>23–27</td><td>Where this breaks</td></tr>
+        <tr><td>23–27</td><td>Why a local model needs the loop</td></tr>
         <tr><td>27–30</td><td>Takeaways and Q&amp;A</td></tr>
       </table>
       <p class="small muted">Slides, harness, and prompts: <code>github.com/davidparry/spec-driven-agentic</code></p>
@@ -343,15 +343,15 @@ pi --offline            # or PI_OFFLINE=1 — no startup network calls at all
 
     <section data-track="both">
       <h2>The tool that closes the loop: <code>run_tests</code></h2>
-      <pre><code class="language-bash" data-trim>
-spec mcp call run_tests          # the tool takes no arguments
+      <pre><code class="language-text" data-trim>
+agent  →  tools/call   run_tests   { }
       </code></pre>
       <pre><code class="language-json" data-trim>
 { "phase": "RED",
   "lastRun": { "tests": 8, "failures": 2, "errors": 1, "skipped": 0 },
   "nextStep": "make the failing tests pass — do not refactor on RED" }
       </code></pre>
-      <p class="small"><code>phase</code> is the bar color the agent sees; <code>nextStep</code> is the next legal move. The server enforces the rest: <code>start_refactor</code> refuses on any bar but GREEN, <code>requirement_mark_implemented</code> is GREEN-gated.</p>
+      <p class="small">The <em>agent</em> calls it, not you — the prompt forbids claiming a pass without it. <code>phase</code> is the bar color; <code>nextStep</code> the next legal move. <code>start_refactor</code> refuses on any bar but GREEN.</p>
     </section>
 
     <!-- ============ ACT 2 — SAME MODEL, NO SHELL ============ -->
@@ -500,7 +500,7 @@ scripts/verify-workshop-run.sh check
 spec tools profiles        # spec-draft 4 · spec-reword 3 · steps-generate 4
                           # unittest-generate 4 · implement-advice 5
                           # implement 7 · status 7 · ask 12 (read-only)
-spec mcp call get_tdd_state
+spec mcp call get_tdd_state  # inspect only — the agent is the normal caller
 spec draft …          # lookup of disk catalog; parse_proposals_checked is the gate
 spec implement REQ-003     # run_tests sees the working tree; command_run asks you first
 spec ask "what is pending?"
@@ -512,34 +512,31 @@ spec ask "what is pending?"
       </ul>
     </section>
 
-    <!-- ============ WHERE THIS BREAKS — BOTH TRACKS ============ -->
+    <!-- ============ A LOCAL MODEL NEEDS THE LOOP — BOTH TRACKS ============ -->
     <section data-track="both">
-      <h2>Where this breaks</h2>
-      <p class="small">Real failures on a local model — what catches them, or honestly doesn't.</p>
+      <h2>A local model needs the loop</h2>
+      <p class="small">Not breakage — iteration. The model veers, a deterministic tool refuses, and the next attempt is better briefed.</p>
       <table class="small">
-        <tr><th>Failure</th><th>What caught it</th></tr>
-        <tr><td>Wrapped required JSON in fences, emitted <code>&lt;think&gt;</code> blocks</td><td>Rejected by the parser, fed back with a correction prompt</td></tr>
-        <tr><td>Rewrote production code repeatedly — the real bug was a step expression missing a period</td><td>Failures are scanned for implicated files; the reply must include them</td></tr>
-        <tr><td>Dropped an acceptance criterion while rewording</td><td>Rewording takes <strong>one</strong> finding at a time and must return every criterion</td></tr>
-        <tr><td>Repeated an attempt that had already failed</td><td>Attempt history — what it wrote, what the run said — goes into the next prompt</td></tr>
-        <tr><td>Made a red bar green by <strong>editing the test</strong></td><td>Nothing in a loose host. In the runner it lands in staging, and skipping the production file is flagged incomplete</td></tr>
-        <tr><td>Implemented the <em>next</em> requirement too — bar green, nothing said a word</td><td>Matched against other pending requirements — warned, not blocked</td></tr>
-        <tr><td>Took the wrong requirement to green — every gate satisfied, an hour wasted</td><td><strong>Nothing, and that is the point:</strong> the gates police <em>how</em> an agent works, never <em>what</em> it works on</td></tr>
+        <tr><th>What the model did</th><th>What the harness did</th></tr>
+        <tr><td>Wrapped required JSON in fences, emitted <code>&lt;think&gt;</code> blocks</td><td>Refused it and re-asked, the bad reply attached</td></tr>
+        <tr><td>Rewrote production code repeatedly — the real bug was a step expression missing a period</td><td>Scanned the failures for implicated files; the reply must include them</td></tr>
+        <tr><td>Dropped an acceptance criterion while rewording</td><td><strong>One</strong> finding per call, and every criterion must come back</td></tr>
+        <tr><td>Repeated an attempt that had already failed</td><td>Briefed the next prompt with what it wrote and what the run said</td></tr>
+        <tr><td>Implemented the <em>next</em> requirement too — bar green</td><td>Matched it against the other pending requirements and warned</td></tr>
       </table>
+      <p class="small muted">What the loop cannot do: stop a loose host editing the test to force green, or tell you the requirement was worth the hour — the gates police <em>how</em> an agent works, never <em>what</em> it works on.</p>
     </section>
 
     <!-- ============ WRAP — 30-MINUTE TRACK ============ -->
     <section data-track="30">
       <h2>What to take away</h2>
       <ul>
-        <li><strong>Start tonight, for free:</strong> <code>pi</code> plus Ollama is an agent on your laptop with no account, no key, and no network</li>
+        <li><strong>Start tonight, for free:</strong> <code>pi</code> plus Ollama is an agent on your laptop — no account, no key, no network</li>
         <li><strong>Tool surface beats model size:</strong> the same local model, one <code>-nbt</code> flag apart, is a different colleague</li>
         <li><strong>Put the discipline in the tooling:</strong> a prompt is a suggestion; a tool that refuses is a guarantee</li>
         <li><strong>Pick your altitude:</strong> a general agent you specialize, or a runner that ships specialized</li>
-        <li><strong>Cucumber already won this argument:</strong> the executable contract did not need reinventing</li>
       </ul>
       <p class="small"><code>github.com/davidparry/spec-driven-agentic</code> — AGPL-3.0, and it runs on your hardware.</p>
-      <h1 style="margin-top:0.5em">Thank you!</h1>
     </section>
 
     <!-- ============ 55-60 min: WRAP ============ -->
@@ -548,14 +545,12 @@ spec ask "what is pending?"
       <ul>
         <li>Drafted a requirement <em>with</em> an agent and iterated it to valid and clean</li>
         <li>Drove a full spec-to-green cycle: requirement → Gherkin → RED → GREEN → refactor</li>
-        <li>Saw one server feed any agent, and the choice between a general one and a specialized one</li>
+        <li>Saw one server feed any agent — and chose between general and specialized</li>
         <li>Kept every engineering decision: the agent turned the crank, you steered</li>
       </ul>
-      <h3 style="margin-top:0.8em">Keep building</h3>
+      <h3 style="margin-top:0.4em">Keep building</h3>
       <ul class="small">
-        <li>Add a <code>write_test</code> tool that scaffolds test files · add resources exposing the requirements doc · add prompts for each TDD phase</li>
-        <li>Swap stdio for Streamable HTTP and share one server across the team</li>
-        <li>Point the server at <em>your</em> real project instead of the kata</li>
+        <li>Point it at <em>your</em> project, add your own tools, swap stdio for HTTP</li>
       </ul>
     </section>
 

@@ -16,13 +16,26 @@ Curious what order all these files would be created in if you started from
 zero? See the greenfield build order, first file to last:
 [student-follow-docs/greenfield-flow.md](student-follow-docs/greenfield-flow.md).
 
+**One convention to know before you write a criterion.** Where a
+requirement needs a newline in its *data* — the newline delimiter, the
+`//;\n1;2` form of a custom delimiter — the spec stores the
+**two-character** escape `\n`, a backslash followed by an `n`, not a real
+line break. That literal pair has to survive unchanged all the way into the
+Gherkin step and into the Java string the generated test asserts on. The
+generator escapes it for you on the way through, so you do not have to
+think about it when a tool writes the criterion. You do have to think about
+it when *you* write one: type `\n`, leave it alone, and do not let an
+editor or an agent "helpfully" turn it into a line break. A criterion
+holding a real newline is a different thing and it breaks the generated
+Java.
+
 ---
 
 ## Before the workshop
 
 You need:
 
-- **`spec` on PATH** (`spec --version`) — GitHub release, `cargo install --path harness`, or `harness/target/release/spec`. Cursor will not connect without it, and it must report **0.5.2 or newer** — the homework's account of how `spec steps generate` behaves is only true from that release on.
+- **`spec` on PATH** (`spec --version`) — GitHub release, `cargo install --path harness`, or `harness/target/release/spec`. Cursor will not connect without it, and it must report **0.5.4 or newer** — every tool reply quoted on this page is quoted from that release, and both the refinement loop in Step 4 and the homework's account of `spec steps generate` behave differently below it.
 - **Java 21+** (`java -version`)
 - **Maven 3.9+** (`mvn -version`)
 - **Cursor** (or any MCP-capable agent — Claude Desktop works with the same JSON)
@@ -60,10 +73,14 @@ Scenario: An empty string returns zero # features/string_calculator.feature:14
 …and continues through every scenario in the suite. Compare yours against
 the full captured run:
 [student-follow-docs/pre-step.log](student-follow-docs/pre-step.log).
-(A stray `[Fatal Error] TEST-com.example.FooTest.xml...` line mid-output is
-expected — it comes from a test fixture, not a real failure.) The build is
-good when the command exits without a `BUILD FAILURE` banner — check with
-`echo $?` right after; `0` means success.
+(That log carries a stray `[Fatal Error]
+TEST-com.example.FooTest.xml...` line mid-output. Nothing in the kata is
+called `FooTest`, so you will most likely not see it — it is a malformed
+XML report being re-read out of a `target/` directory on the machine that
+captured the log, not a test failure. `mvn -f kata/pom.xml clean test`
+clears it.) The build is good when the command exits without a
+`BUILD FAILURE` banner — check with `echo $?` right after; `0` means
+success.
 
 ---
 
@@ -177,23 +194,23 @@ A green light says the server *launched* — now prove the agent can actually
 Call the get_tdd_state tool from the spec-driven-server server and show me the raw JSON result.
 ```
 
-On a freshly started server the reply opens with a long `instructions`
-field — a guide to reading the phase log, not workflow state — and then the
-part you care about:
+The reply leads with the phase, which is the one word you came for. The long
+`instructions` field — a guide to reading the phase log, not workflow
+state — comes last, out of the way:
 
 ```json
 {
-  "instructions" : "This file is the TDD phase log. ...",
-  "phase" : "START",
-  "lastRun" : {
-    "tests" : 0,
-    "failures" : 0,
-    "errors" : 0,
-    "skipped" : 0
+  "phase": "START",
+  "lastRun": {
+    "tests": 0,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
   },
-  "refactorLog" : [ ],
-  "entries" : [ ],
-  "nextStep" : "No tests have been run yet. Call run_tests to establish a baseline."
+  "nextStep": "No tests have been run yet. Call run_tests to establish a baseline.",
+  "refactorLog": [],
+  "entries": [],
+  "instructions": "This file is the TDD phase log. `instructions` is this guide, not workflow state. ..."
 }
 ```
 
@@ -249,45 +266,95 @@ spec.
 
    ```json
    {
-     "valid" : true,
-     "issues" : [ ],
-     "nextStep" : "The spec is valid. Call get_requirement for a pending requirement and write its Gherkin scenario from the acceptance criteria."
+     "valid": true,
+     "issues": [],
+     "nextStep": "The spec is valid. Call get_requirement for a pending requirement and write its Gherkin scenario from the acceptance criteria."
    }
    ```
 
-3. `refine_requirement` → findings in the **tool reply**. A happy-path-only
-   draft gets something very close to this (the findings list echoes
-   whatever the refiner spots in *your* agent's wording, so yours may have
-   more or different entries):
+   `validate_spec` reads the **committed** spec on disk, so once the agent
+   has staged a reword it says so, appending this to the `nextStep`: *"This
+   read the committed spec on disk, and a spec edit is staged - call
+   changes_validate to check the staged spec before changes_commit."*
+   That sentence is the tool telling you it just judged a file you have
+   already moved past. `changes_validate` is its staged-aware twin.
+
+3. `refine_requirement` → findings in the **tool reply**. **Expect
+   findings.** A first draft coming back with something to fix is the
+   normal outcome, not a stumble — the refiner is deterministic and it is
+   looking for happy-path-only criteria, ambiguous words, and a story
+   missing its actor or its why. The findings list echoes whatever it spots
+   in *your* agent's wording, so yours may have more or different entries:
 
    ```json
    {
-     "id" : "REQ-007",
-     "clean" : false,
-     "findings" : [ "criteria: only happy paths - add at least one edge case (empty, invalid, or error input)" ],
-     "nextStep" : "Call requirement_reword to address each finding - never edit the requirements file by hand - then run validate_spec and call refine_requirement again. Iterate until there are no findings."
+     "id": "REQ-007",
+     "clean": false,
+     "findings": [
+       "criteria: only happy paths - add at least one edge case (empty, invalid, or error input)"
+     ],
+     "source": "working tree",
+     "nextStep": "Call requirement_reword to address each finding - never edit the requirements file by hand - then run validate_spec and call refine_requirement again. Iterate until there are no findings."
    }
    ```
 
-   The agent calls `requirement_reword`, re-validates, re-refines. Done
-   looks like this (only the `id` varies):
+   `source` is the field to read first. It says **which copy of the
+   wording** was just judged: `"working tree"` for the committed spec on
+   disk, `"staged"` for an uncommitted edit. The agent drafted REQ-007
+   straight into the file, so the first pass reads the working tree.
+
+4. **The refine loop — this is its own step, and it usually runs more than
+   once.** `requirement_reword` *stages* its edit rather than writing it,
+   and `refine_requirement` reads staged-first, so the next pass judges the
+   new wording immediately. **No `changes_commit` between passes.** Reword,
+   refine, reword, refine until the findings are gone, then commit once.
+   From the second pass on, `source` flips and the `nextStep` says the same
+   thing out loud:
 
    ```json
    {
-     "id" : "REQ-007",
-     "clean" : true,
-     "findings" : [ ],
-     "nextStep" : "The wording reads clean. Confirm it with the developer, then write the Gherkin scenario from the acceptance criteria."
+     "id": "REQ-007",
+     "clean": false,
+     "findings": [
+       "story: 'handle' is ambiguous - describe the observable behavior instead"
+     ],
+     "source": "staged",
+     "nextStep": "Call requirement_reword to address each finding - never edit the requirements file by hand - then call refine_requirement again. It reviews your staged edit, so there is no need to commit between passes. Iterate until there are no findings."
    }
    ```
 
-   (If your agent's first draft already includes an edge case, the
-   `"clean": false` round never happens — that's fine, demo B below shows
-   you the findings loop on demand.)
+   Done looks like this (only the `id` varies):
 
-4. **Your checkpoint:** read the story and criteria aloud. Is this what we
+   ```json
+   {
+     "id": "REQ-007",
+     "clean": true,
+     "findings": [],
+     "source": "staged",
+     "nextStep": "The staged wording reads clean. Confirm it with the developer, apply it with changes_commit, then write the Gherkin scenario from the acceptance criteria."
+   }
+   ```
+
+   If the loop never ran — the agent's first draft already had an edge case
+   and nothing was staged — the same reply comes back with
+   `"source": "working tree"` and a `nextStep` of *"The wording reads
+   clean. Confirm it with the developer, then write the Gherkin scenario
+   from the acceptance criteria."* No `changes_commit` to do in that case,
+   because nothing was staged. Demo B below shows you the findings loop on
+   demand.
+
+   On a `spec` older than 0.5.3 this loop does not converge: refinement
+   read the committed spec, so rewording changed nothing the next pass
+   could see and the identical findings came back forever unless something
+   committed in between. Worse, a deliberately vague story staged over a
+   clean one came back `clean: true` — the tool passing judgement on text
+   you had already replaced. Any account of this loop that tells you to
+   commit between passes is describing that older binary.
+
+5. **Your checkpoint:** read the story and criteria aloud. Is this what we
    meant? You own the intent — approve it or redirect the agent with one
    sentence. Approving does **not** change `status`; leave it `pending`.
+   `changes_commit` the staged wording if the refine loop staged one.
 
 For both demos below, **you** make the breaking edit by hand — don't ask
 the agent to do it. An agent asked to write bad wording tends to fix it on
@@ -316,14 +383,24 @@ tool catches it, agent repairs it.
 
    ```json
    {
-     "valid" : false,
-     "issues" : [ "REQ-007: criterion \"the result should be 3 for //+\\n1+2\" must be phrased Given/When/Then" ],
-     "nextStep" : "Call requirement_reword to fix the issues - never edit the requirements file by hand - then call validate_spec again. Iterate until valid is true before writing scenarios or code."
+     "valid": false,
+     "issues": [
+       "REQ-007: criterion \"the result should be 3 for //+\\n1+2\" must be phrased Given/When/Then"
+     ],
+     "nextStep": "Call requirement_reword to fix the issues - never edit the requirements file by hand - then call validate_spec again. Iterate until valid is true before writing scenarios or code."
    }
    ```
 
+   Note the `\\n` in the issue text: the criterion holds the two-character
+   `\n`, the JSON reply escapes the backslash, and the pair survives
+   round-trip. That is the convention working, not a mangling.
+
 4. Now let the agent off the leash: ask it to repair the criterion with
    `requirement_reword` and call `validate_spec` again until `"valid": true`.
+   Because reword stages, the `validate_spec` that follows it will append
+   the staged-edit sentence to its `nextStep` and point at
+   `changes_validate`; the `"valid": true` you are waiting for arrives
+   after `changes_commit`.
 
 **Optional demo B — wording loop (`refine_requirement`)**
 
@@ -347,16 +424,28 @@ tool catches it, agent repairs it.
 
    ```json
    {
-     "id" : "REQ-007",
-     "clean" : false,
-     "findings" : [ "story: missing the actor - start with 'As a ...' so we know who this is for", "story: missing the why - finish with 'so that ...' so the value is explicit", "story: 'should' is ambiguous - describe the observable behavior instead", "story: 'handle' is ambiguous - describe the observable behavior instead", "story: 'quickly' is ambiguous - describe the observable behavior instead" ],
-     "nextStep" : "Call requirement_reword to address each finding - never edit the requirements file by hand - then run validate_spec and call refine_requirement again. Iterate until there are no findings."
+     "id": "REQ-007",
+     "clean": false,
+     "findings": [
+       "story: missing the actor - start with 'As a ...' so we know who this is for",
+       "story: missing the why - finish with 'so that ...' so the value is explicit",
+       "story: 'should' is ambiguous - describe the observable behavior instead",
+       "story: 'handle' is ambiguous - describe the observable behavior instead",
+       "story: 'quickly' is ambiguous - describe the observable behavior instead"
+     ],
+     "source": "working tree",
+     "nextStep": "Call requirement_reword to address each finding - never edit the requirements file by hand - then run validate_spec and call refine_requirement again. Iterate until there are no findings."
    }
    ```
 
+   `"source": "working tree"` is the proof that the tool read *your* hand
+   edit rather than something stale. That is the whole point of this demo:
+   you broke it, the tool saw what you broke.
+
 4. Now let the agent reword from the findings with `requirement_reword`,
-   then re-run `validate_spec` and `refine_requirement` until
-   `"clean": true`. The failure is the lesson.
+   then re-run `refine_requirement` until `"clean": true`. Watch `source`
+   turn to `"staged"` on the second pass — the loop converges without a
+   commit in the middle. The failure is the lesson.
 
 **Optional demo C — the spec is a catalog (includes)**
 
@@ -391,13 +480,49 @@ levels deep. The tools merge the whole tree into one backlog. To see it:
    ```
 
 4. Expect REQ-007 still listed (merged from the included file, after
-   REQ-001..006) and `"valid": true`. One catalog, many files — ids stay
-   unique across the whole tree. Duplicate the id and `validate_spec`
+   REQ-001..006) and `"valid": true`. Each row of `list_requirements` also
+   carries a `file` telling you which document it came from — once the
+   catalog is split, "REQ-007 exists" and "REQ-007 lives here" are two
+   different questions, and the second one now has an answer:
+
+   ```json
+   {
+     "id": "REQ-007",
+     "title": "A custom delimiter may be declared on the first line",
+     "status": "pending",
+     "file": "requirements/delimiters.json"
+   }
+   ```
+
+   One catalog, many files — ids stay unique across the whole tree.
+   Duplicate the id and `validate_spec`
    answers `REQ-007: duplicate id - also declared in requirements.json`,
    naming the file that already has it; make two files include each other
    and it names the file too:
    `spec: requirements.json is included more than once - include every spec
    file exactly once`.
+
+   **Both of those are the one case where you edit the spec file by hand.**
+   No tool deletes a requirement and no tool removes an include, so the
+   remedy is the file. `validate_spec` says so itself now, and says it
+   without hedging:
+
+   ```text
+   A duplicate id is catalog structure, not wording: no tool can delete a
+   requirement, so open the spec file the issue names and remove the
+   duplicate requirement object, or give it an id nothing else uses.
+   Editing the spec file directly is the remedy for these - the rule
+   against hand-editing covers wording, not catalog structure. Validate
+   again once the file is fixed.
+   ```
+
+   The repeated-include half reads the same way and names the parent file's
+   `"includes"` array. Older builds answered both of these with "call
+   `requirement_reword`", which cannot fix either — if your agent tries it
+   and gets nowhere, check `spec --version`. "Never hand-edit the
+   requirements file" still holds for every wording issue; catalog
+   structure is the written-down exception.
+
    Undo the split (or leave it — every later step works the same, and
    Step 6's verifier reads the merged tree) before moving on if you want
    your file to match the walkthrough exactly.
@@ -440,16 +565,19 @@ their edits differently):
 
    ```json
    {
-     "id" : "REQ-003",
-     "title" : "Two numbers separated by a comma are summed",
-     "status" : "pending",
-     "story" : "As a user, I want comma-separated numbers to be summed so that I can add multiple values at once.",
-     "acceptanceCriteria" : [ "Given \"1,2\", when add is called, then the result is 3", "Given \"10,20\", when add is called, then the result is 30" ],
-     "featureLocation" : "kata/src/test/resources/features/string_calculator.feature",
-     "stepDefinitions" : "kata/src/test/java/com/davidparry/workshop/kata/StringCalculatorSteps.java",
-     "testLocation" : "kata/src/test/java/com/davidparry/workshop/kata/StringCalculatorTest.java",
-     "productionLocation" : "kata/src/main/java/com/davidparry/workshop/kata/StringCalculator.java",
-     "workflowHint" : "Write the Gherkin scenario for this requirement in the feature file first (tag it @REQ-003), reuse or add step definitions, then run_tests to see RED."
+     "id": "REQ-003",
+     "title": "Two numbers separated by a comma are summed",
+     "status": "pending",
+     "story": "As a user, I want comma-separated numbers to be summed so that I can add multiple values at once.",
+     "acceptanceCriteria": [
+       "Given \"1,2\", when add is called, then the result is 3",
+       "Given \"10,20\", when add is called, then the result is 30"
+     ],
+     "featureLocation": "kata/src/test/resources/features/string_calculator.feature",
+     "stepDefinitions": "kata/src/test/java/com/davidparry/workshop/kata/StringCalculatorSteps.java",
+     "testLocation": "kata/src/test/java/com/davidparry/workshop/kata/StringCalculatorTest.java",
+     "productionLocation": "kata/src/main/java/com/davidparry/workshop/kata/StringCalculator.java",
+     "workflowHint": "Write the Gherkin scenario for this requirement in the feature file first (tag it @REQ-003), reuse or add step definitions, then run_tests to see RED."
    }
    ```
 
@@ -458,8 +586,43 @@ their edits differently):
    `changes_show` (or have the agent show it) and read the staged Gherkin
    before you allow `changes_commit`. This is the spec review — is this the
    behavior you want?
+
+   Four things about that review, all of which used to bite:
+
+   - **`step_definitions_find` returning nothing is the common answer, not
+     a bug.** The kata's steps are written in terms of "a string
+     calculator", "I add", "the result is" — phrasings that generalize
+     across requirements. Several requirements in this backlog need *no*
+     new step definitions at all: the scenario is new, the steps it is
+     built from are not. A new scenario implying new steps is the
+     exception. If the agent skips `step_definition_create` because
+     `step_definitions_find` came back empty, it is right.
+   - **`changes_show` states its own totals.** When more than five edits
+     are waiting it names five and prefixes the line
+     `(9 edits in all, 4 not shown); ...`, so you always know the size of
+     what you are approving rather than having to add a prefix to a list.
+     Two `scenario_add` calls on the same feature file accumulate into one
+     entry naming both scenarios.
+   - **`scenario_add` leaves the rest of the file alone.** The header
+     comment block above `Feature:`, the `As a / I want / So that`
+     narrative under it, and any trailing comment after the last scenario
+     all survive the append. A diff that shows any of them disappearing is
+     an old binary, not your agent.
+   - **A batched turn stages everything it says it staged.** Hosts like
+     Cursor and `pi` fire tool calls in parallel, and two `scenario_add`
+     calls in one turn used to interleave: both replied `"staged": true`,
+     one scenario reached disk, and `changes_show` agreed with the lie. The
+     staging area serialises now, in-process and across processes both, so
+     the count in `changes_show` is the count you get. Still read it —
+     that is the checkpoint — but you are reading it to review the
+     behavior, not to audit the tool.
+
+   And one non-finding: spec JSON files end with a newline, so a diff that
+   reports `\ No newline at end of file` on `requirements.json` is stale
+   output. Nothing to fix.
+
 3. `run_tests` → **RED**. The count depends on how many unit tests your
-   agent wrote: 8 tests with 3 failing (2 Cucumber failures + 1 JUnit
+   agent wrote: 8 tests with 3 not passing (2 Cucumber failures + 1 JUnit
    error) if it wrote a single test asserting both criteria, 9 with 4 if it
    wrote one per criterion. Either is a legitimate RED — what matters is
    that the two `@REQ-003` scenarios fail. The agent sees the same bar you
@@ -468,24 +631,60 @@ their edits differently):
 
    ```json
    {
-     "phase" : "RED",
-     "tests" : 8,
-     "failures" : 2,
-     "errors" : 1,
-     "skipped" : 0,
-     "failureDetails" : [ "String Calculator addition.Two numbers separated by a comma are summed: ... java.lang.NumberFormatException: For input string: \"1,2\" ...", "String Calculator addition.Two larger numbers separated by a comma are summed: ... java.lang.NumberFormatException: For input string: \"10,20\" ...", "com.davidparry.workshop.kata.StringCalculatorTest.twoCommaSeparatedNumbersAreSummed: For input string: \"1,2\"" ],
-     "nextStep" : "Tests are failing. Write the simplest production code that makes them pass, then call run_tests again."
+     "phase": "RED",
+     "tests": 8,
+     "failures": 2,
+     "errors": 1,
+     "skipped": 0,
+     "failureDetails": [
+       "String Calculator addition.Two numbers separated by a comma are summed: ... java.lang.NumberFormatException: For input string: \"1,2\" ...",
+       "String Calculator addition.Two larger numbers separated by a comma are summed: ... java.lang.NumberFormatException: For input string: \"10,20\" ...",
+       "com.davidparry.workshop.kata.StringCalculatorTest.twoCommaSeparatedNumbersAreSummed: For input string: \"1,2\""
+     ],
+     "nextStep": "Tests are failing. Write the simplest production code that makes them pass, then call run_tests again."
    }
    ```
 
+   **Read `failures` and `errors` as two different things.** Maven reports
+   them in separate columns, and the split tells you which layer is
+   unfinished. On the bar above, the two Cucumber scenarios hitting
+   `NumberFormatException` are counted as **failures**: they ran, they
+   exercised the behavior, and the behavior was wrong. The JUnit test is
+   counted as an **error**, because an uncaught exception out of a plain
+   `@Test` is a test that did not complete rather than a test that
+   disagreed. The error column catches the other unfinished-artifact case
+   too: a generated step definition still throwing `PendingException` is an
+   error, which is Cucumber's way of saying the step is bound but has no
+   body yet. So `"failures": 2, "errors": 1` reads as *two behaviors want
+   production code, one artifact is still a placeholder*. The total is what
+   decides GREEN; the split is what tells you where to work.
+
    The Cucumber lines read like that whatever your agent did, because the
    scenarios call the unimplemented `add`. The **JUnit** line depends on who
-   wrote the test. An agent that wrote the assertion itself fails on the
-   `NumberFormatException` above; `unit_test_create` and
-   `spec unittest generate` both stage the criteria as
-   `fail("TODO: assert - Given \"1,2\", ...")` for you to sharpen, so that
-   line reads `TODO: assert - ...` instead. Both are a real RED on the same
-   count — fill the assertions in when you write the production code.
+   wrote the test.
+
+   **Generated unit tests arrive unfinished on purpose.**
+   `unit_test_create` and `spec unittest generate` stage each criterion as
+   `fail("TODO: assert - Given \"1,2\", ...")` — the method, the
+   `@DisplayName`, and the criterion verbatim are all there, and the
+   assertion is not. You or the agent write it. That is a real RED on the
+   same count as a hand-written assertion; the difference is only which
+   message you see, `TODO: assert - ...` instead of the
+   `NumberFormatException` above. Do not treat a generated test as done.
+   The failure mode to watch for is an agent *deleting* the `fail("TODO")`
+   line instead of replacing it with a real assertion — that turns the bar
+   green and proves nothing. Fill the assertions in while you write the
+   production code, and read the test diff before you accept GREEN.
+
+   Two more things you may see in the generated test. Method names can
+   carry a `_2` or `_3` suffix — that happens when two criteria differ only
+   in punctuation and would otherwise slug to the same Java identifier, and
+   the criterion itself is still carried verbatim beside the member, so the
+   suffix disambiguates the name and nothing else. And any `\n` in a
+   criterion stays the two-character escape all the way into the Java
+   string literal, which is what keeps the Maven failure message on one
+   readable line.
+
    Over MCP, `unit_test_create` and `step_definition_create` always stage
    the deterministic template; the model-polished version is only on the
    `spec unittest generate` / `spec steps generate` CLI path.
@@ -493,17 +692,18 @@ their edits differently):
 4. The agent implements the simplest `StringCalculator.add` that passes
    (**a file edit** — there is no `implement` MCP tool). **Your checkpoint:**
    review the production diff.
-5. `run_tests` → **GREEN** — the same total as your RED bar, 0 failures:
+5. `run_tests` → **GREEN** — the same total as your RED bar, 0 failures
+   *and* 0 errors:
 
    ```json
    {
-     "phase" : "GREEN",
-     "tests" : 8,
-     "failures" : 0,
-     "errors" : 0,
-     "skipped" : 0,
-     "failureDetails" : [ ],
-     "nextStep" : "All tests pass. Either call start_refactor to clean up, or call get_requirement for the next pending requirement and write a failing test for it."
+     "phase": "GREEN",
+     "tests": 8,
+     "failures": 0,
+     "errors": 0,
+     "skipped": 0,
+     "failureDetails": [],
+     "nextStep": "All tests pass. Either call start_refactor to clean up, or call get_requirement for the next pending requirement and write a failing test for it."
    }
    ```
 
@@ -512,13 +712,28 @@ their edits differently):
 
    ```json
    {
-     "phase" : "REFACTOR",
-     "nextStep" : "A refactor is in progress. Call run_tests to prove the refactor kept the bar green."
+     "phase": "REFACTOR",
+     "nextStep": "A refactor is in progress. Call run_tests to prove the refactor kept the bar green."
    }
    ```
 
    (Try asking for `start_refactor` while RED sometime — the server
-   refuses: "Never refactor on a red bar." Discipline lives in the tool.)
+   refuses: *"Refactoring is only allowed from GREEN (current phase: RED).
+   Never refactor on a red bar — make the tests pass first."* Discipline
+   lives in the tool. The refusal is worded for the phase you are actually
+   in, so from START it reads *"No tests have been run yet — run them to
+   find out where you are"* and from REFACTOR *"A refactor is already in
+   progress — run the tests to close it."*)
+
+   **If you restart the MCP server mid-exercise, the phase goes back to
+   START.** Reload the server in Cursor's settings, or restart `pi`, and
+   your RED/GREEN state is gone — which means the very next
+   `start_refactor` or `requirement_mark_implemented` is refused with
+   `current phase: START` and no obvious reason, because as far as the
+   phase log is concerned you have not run any tests. It is not a bug and
+   there is nothing to repair: call `run_tests` once to re-establish the
+   bar, then carry on. Worth knowing before it happens to you in front of
+   the room.
 7. On GREEN, `requirement_mark_implemented` flips REQ-003 to
    `"status": "implemented"`. The tool **refuses** off GREEN or without a
    tagged `@REQ-003` scenario — premature completion is a live refusal, not
@@ -638,7 +853,9 @@ spec changes commit && spec test
   IllegalArgumentException is thrown`, with no `with a message containing`
   — `spec steps generate` adds it to the kata's own
   `StringCalculatorSteps.java`, keeping the package and class and leaving a
-  `PendingException` body for you to fill in. The model only ever sees the
+  `PendingException` body for you to fill in. That body shows up on the
+  next bar as an **error**, not a failure — see Step 5 on reading the
+  split. The model only ever sees the
   definitions being added, never the file they join, so the diff is the new
   method and nothing else — it cannot rename a field or an existing step
   method on the way past. A reply that hands back a whole file, alters a
@@ -654,6 +871,15 @@ spec changes commit && spec test
   REQ-006. Do **not** compare REQ-007 against it: the `complete` branch
   predates this exercise and its REQ-007 is a newline-delimiter duplicate
   of REQ-005, not the custom delimiter you drafted.
+- **Want a stretch?** This page does not have one; the CLI walkthrough
+  does. Its *Stretch — split the spec into a catalog, with a command*
+  takes demo C further with `spec include add`, moving a requirement into
+  a child spec file and re-grading the merged tree. Every tool used there
+  has an MCP twin except `include_add`, so on this path you would do the
+  include line by hand — which is demo C. Read it in
+  [student-follow-docs/spec-binary-follow-along.md](student-follow-docs/spec-binary-follow-along.md),
+  or the command-reference version in
+  [student-follow-docs/harness-path.md](student-follow-docs/harness-path.md).
 
 ---
 
@@ -678,10 +904,14 @@ git checkout trunk && git branch -D workshop && git checkout -b workshop trunk
 
 - **Build red:** pair with a neighbor first; the presenter won't debug from
   stage.
-- **Cursor MCP connection red:** `spec --version` must work. Launch Cursor
-  from that terminal or put the absolute path to `spec` in `command`, then
-  toggle the server off/on in Cursor's MCP settings. Note: a server restart
-  resets the TDD phase — have the agent call `run_tests` once before any
-  `start_refactor`, or the server will refuse.
+- **Cursor MCP connection red:** `spec --version` must work and must report
+  0.5.4 or newer. Launch Cursor from that terminal or put the absolute path
+  to `spec` in `command`, then toggle the server off/on in Cursor's MCP
+  settings. Note: a server restart resets the TDD phase — have the agent
+  call `run_tests` once before any `start_refactor`, or the server will
+  refuse.
+- **A gate refuses and the reason makes no sense:** read the phase it
+  names. `current phase: START` after everything was green means the
+  server restarted; `run_tests` once and it is back. See Step 5.
 - **Agent goes sideways:** it happens. Undo its edits, clear the chat, and
   re-paste the prompt — or follow the presenter's fallback on screen.

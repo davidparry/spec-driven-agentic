@@ -148,7 +148,7 @@ pushed (`scripts/release.sh`), not locally.
 
 ## Prerequisites
 
-- **`spec` on PATH** (GitHub release, `cargo install --path harness`, or `harness/target/release/spec`)
+- **`spec` on PATH**, reporting **0.5.4 or newer** (GitHub release, `cargo install --path harness`, or `harness/target/release/spec`)
 - Java 21+
 - Maven 3.9+
 - An MCP host for the exercises (Cursor, Claude Desktop, [pi](https://pi.dev) with `pi install npm:pi-mcp-extension`, or the bundled `smoke-test.jar`)
@@ -176,7 +176,7 @@ debug binary without installing: `harness/target/debug/spec mcp serve --root .`.
 
 ```bash
 git clone <this repo> && cd tdd-bdd-agentic
-spec --version                     # must succeed before Cursor will connect
+spec --version                     # must succeed, and report 0.5.4 or newer
 mvn -q -pl smoke-test package     # MCP-server smoke-test jar
 mvn -q -f kata/pom.xml test       # standalone kata: JUnit + Cucumber
 ```
@@ -207,22 +207,29 @@ plus smoke-test `ToolPlan`):
 
 | Tool | Purpose |
 | --- | --- |
-| `list_requirements` | Every requirement with its id, title, and status — find pending work. Re-reads the spec fresh on every call, so requirements an agent just drafted show up immediately. |
+| `list_requirements` | Every requirement with its id, title, status, and the spec `file` it lives in — find pending work, and know which document holds it once the catalog is split across includes. Re-reads the spec fresh on every call, so requirements an agent just drafted show up immediately. |
 | `get_requirement` | One requirement's user story, acceptance criteria, and `featureLocation` — the raw material for Gherkin scenarios and failing tests, plus a `workflowHint` telling the agent what to do next. |
-| `validate_spec` | Validates the requirements file **on disk**: well-formed unique ids, stories, Given/When/Then acceptance criteria, and tagged scenarios for implemented requirements. During `spec draft` these lookups do not critique the in-flight proposal; `parse_proposals_checked` is that gate. |
-| `refine_requirement` | Deterministic quality feedback on one requirement's wording: ambiguous words ("should", "handle", "quickly"), stories missing their actor or their why, outcomes with no concrete expected value, criteria covering more than one action, and happy-path-only coverage. |
+| `validate_spec` | Validates the requirements file **on disk**: well-formed unique ids, stories, Given/When/Then acceptance criteria, and tagged scenarios for implemented requirements. It reads the committed spec, so when a spec edit is waiting in staging its `nextStep` says so and names `changes_validate`, the staged-aware twin. During `spec draft` these lookups do not critique the in-flight proposal; `parse_proposals_checked` is that gate. `spec validate` exits non-zero on an invalid spec, so a CI gate can be scripted on it. |
+| `refine_requirement` | Deterministic quality feedback on one requirement's wording: ambiguous words ("should", "handle", "quickly"), stories missing their actor or their why, outcomes with no concrete expected value, criteria covering more than one action, and happy-path-only coverage. Reads the staged edit when there is one and names which copy it judged in a `source` field, so the reword/refine loop converges without a `changes_commit` between passes. |
 | `run_tests` | Runs the project tests (Maven on this kata), aggregating Cucumber (BDD) and JUnit (TDD) into one bar color: failures → **RED**, all passing → **GREEN**. On `spec implement` this sees the **working tree**, not an unstaged patch. |
-| `get_tdd_state` | Current Red/Green/Refactor phase, last run summary, and a suggested next step. |
-| `start_refactor` | Begins a refactor. Refuses unless the bar is GREEN — never refactor on a red bar. |
+| `get_tdd_state` | Current Red/Green/Refactor phase, last run summary, and a suggested next step. The reply leads with `phase`; the `instructions` guide to reading the phase log comes last. |
+| `start_refactor` | Begins a refactor. Refuses unless the bar is GREEN, and words the refusal for the phase you are in — "never refactor on a red bar" on RED, "no tests have been run yet" at START, "a refactor is already in progress" in REFACTOR. |
 
 **Authoring / staging:** `feature_list`, `feature_read`, `feature_create`,
 `scenario_add`, `scenario_update`, `scenario_delete`, `changes_show`,
 `changes_validate`, `changes_commit`, `changes_discard`, `requirement_reword`
-(the repair path `validate_spec` and `refine_requirement` point at — agents
-must never hand-edit `requirements.json`, whose JSON escaping and indentation
-differ from what the read tools return), `requirement_mark_implemented`
+(the repair path `validate_spec` and `refine_requirement` point at for
+**wording** — agents must never hand-edit `requirements.json`, whose JSON
+escaping and indentation differ from what the read tools return),
+`requirement_mark_implemented`
 (GREEN-gated, tagged scenario required), `step_definitions_find`,
 `step_definition_create`, `unit_test_create` (arg `req_id`).
+
+Catalog **structure** is the written-down exception to that prohibition. A
+duplicate id needs a requirement object deleted and a repeated `includes`
+entry needs removing, and no tool performs either edit, so `validate_spec`
+and `changes_validate` answer those two classes by naming the file edit and
+saying that the hand-editing rule covers wording, not structure.
 
 **Inspect:** `project_root` (the absolute `--root` this process was started with), `project_inspect`, `command_run` (allowlisted, path-jailed,
 RED-gated; the harness `implement` profile also asks the human to confirm).
@@ -307,7 +314,7 @@ add an edge case") → the LLM rewords, re-validates, re-refines →
 wording**. The human owns intent, the agent owns wording and iteration speed,
 the server owns the critique.
 
-### Exercise 2 — The end-to-end agentic spec-to-green loop (32–52 min)
+### Exercise 2 — The end-to-end agentic spec-to-green loop (32–50 min)
 
 With a valid spec, prompt your agent to **use MCP tools** (not hand-edits of
 Gherkin, tests, or spec status):
@@ -331,6 +338,17 @@ waiting — plus the one you drafted in Exercise 1. When you're done,
 acceptance criterion of REQ-003 covered by a scenario and asserted by a
 test, and the REQ-007 you drafted against `spec validate` and
 `spec refine` rather than anyone else's wording.
+
+**Eighteen minutes buys one requirement, not two.** Measured across the
+validation runs on the workshop's local model, `spec implement` takes
+66–125 seconds per requirement, and 284.6 seconds in the worst case
+observed — which is what happens when the model asks to run shell commands
+and each one waits on your confirmation. Add the two Maven runs that
+bracket it and the review you owe the staged Gherkin, and one requirement
+is a comfortable fit in this window while two are not. Plan the room's time
+around the worst case, not the median: nearly five minutes of a spinner is
+within normal range and looks exactly like a hang. Per-command timings are
+in [`notes/workshop-validation-runs.md`](notes/workshop-validation-runs.md).
 
 ### Backup — Inspect the protocol (if time allows)
 

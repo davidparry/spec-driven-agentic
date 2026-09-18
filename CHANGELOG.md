@@ -1,5 +1,144 @@
 # Changelog
 
+## 0.5.4
+
+Two rounds of defects found by re-walking the documented paths rather than
+by running the kata again. Nothing here is a new feature. The first round
+is correctness and safety — things that were wrong or unsafe and quiet
+about it; the second is interaction — things that were correct and
+unbearable to sit in front of.
+
+- `spec validate` exits non-zero when the spec is invalid. It printed
+  `"valid": false` and exited 0, so any CI gate scripted on it passed on
+  a duplicate id, a circular include, or a criterion that is not phrased
+  Given/When/Then — which is the whole population of things the command
+  exists to catch. The binary also disagreed with itself, since `spec list`
+  has always exited 1 on a circular include. The report is unchanged; only
+  the status is new, so a caller that reads the JSON sees exactly what it
+  saw before.
+
+- `spec scenario add` no longer deletes the content following the last
+  scenario in a feature file. `0.5.2` taught the parser to round-trip the
+  header comments and the `As a / I want / So that` narrative, and the
+  same defect at the other end of the file went unnoticed: Gherkin allows
+  nothing but comments and blank lines after the last scenario, so the
+  trailing block had nowhere to be stored and was dropped on the first
+  append. The kata's feature file ends in a two-line note telling the
+  student that `REQ-003+` scenarios are written live during the workshop
+  from the acceptance criteria — which is to say Exercise 2 deleted its own
+  instructions on its first tool call. A `trailing` field on `FeatureDoc`
+  carries it now, and `render` writes every append *above* it, so a note
+  that points at the end of the file keeps pointing there.
+
+- Staging is safe across concurrent processes. The `0.5.2` lock covered
+  one process; an advisory lock belongs to the open file rather than to
+  the process, so nothing covered two. Six concurrent `spec scenario add`
+  invocations against one feature file produced five `"staged": true`
+  replies, one hard crash reading a half-written manifest, and three
+  surviving scenarios: two callers were told they had staged and had not.
+  The manifest is written atomically — scratch file in the same directory,
+  then renamed over the real one, so a reader sees the old bytes or the new
+  ones and never a mixture — and the staging directory is guarded by an
+  advisory lock on `.spec-staged/.lock` held for the whole
+  read-modify-write. Four details are deliberate. Each writer gets a
+  scratch file of its own, because writers sharing one rename each other's
+  half-written bytes into place, which is the crash this started as. The
+  in-process claim is taken *before* the file lock, because a second
+  handle on the same lock file blocks its own process exactly as hard as
+  it blocks a stranger. The lock is re-checked by inode after it is taken,
+  because `changes commit` deletes the whole staging directory including
+  the lock file, and a handle can otherwise end up holding an inode that
+  is no longer the lock. And the kernel releases the lock when the file
+  closes, so there is no stale lock to clear after a panic or a kill.
+  Threads cannot prove any of this — every thread in one process shares
+  the in-process half — so `harness/tests/staging_concurrency.rs` drives
+  real `spec` child processes.
+
+- `spec implement`'s confirmation prompt is no longer hidden behind the
+  spinner. The command asks before it runs a shell command the model
+  requested, and the animation redrawing its own line over the question
+  left the run looking hung at the exact moment it was waiting on a human.
+  Spinners now hush for the duration of any prompt, decided once at the
+  composition root rather than in each wizard, so a prompt written later
+  inherits it.
+
+- `spec implement` no longer stages files the model returned unchanged. A
+  byte-identical "modify" is not an edit, and staging it gave the reviewer
+  a diff with nothing in it to review. If every file comes back unchanged
+  there is nothing to review at all, and the reply says so.
+
+- `spec model use` preserves the comments and the key order in
+  `.spec.toml`. It parsed, mutated, and re-serialised, which threw away
+  every comment in the file — including the block that documents
+  `server:tool` and the commented-out defaults. That file is mostly prose,
+  and rewriting the key is now a line edit against it: a commented-out
+  `# model = ...` is a comment and not the key, so the real assignment is
+  the one that moves.
+
+- `spec draft`'s partial-flag error names the flags you supplied. It
+  picked whichever flag it happened to check first, so `--title X` on its
+  own was answered by demanding `--title` — naming a flag the developer
+  had already typed and not the two they had not.
+
+- CLI `nextStep` text no longer names MCP tools. The services word their
+  advice for the agent, which calls tools; none of those names is a
+  command, so a student who followed the advice literally typed something
+  that does not run. Every reply the shell prints is rewritten into the
+  shell's dialect at the one place it prints one — 23 tools translate to
+  their commands, and the tools with no command are deliberately left
+  alone, because a visible tool name reads better than an invented
+  command.
+
+- Refactor refusals are worded for the phase the developer is in.
+  "Never refactor on a red bar" is the right sentence on RED and nonsense
+  anywhere else: at START there is no bar yet, and in REFACTOR there is
+  already one open. Each phase gets its own second sentence, and the first
+  one still names the rule.
+
+- `spec state` leads with the phase. `instructions` is roughly 900
+  characters of unchanging guidance on how to read the phase log, and it
+  came first, so the command a stuck student is sent to answered "what
+  phase am I in?" with a page of prose before the one word they wanted.
+  Field order is reading order now and `instructions` is last. Every field
+  is still there, so an agent reading this over MCP loses nothing.
+
+- The non-TTY stdin warning is scoped to the commands that run a wizard.
+  The warning's point is that a wizard ending in "Stage this?" declines on
+  a spent pipe and therefore stages nothing. `spec implement`,
+  `spec unittest generate`, and `spec steps generate` have no wizard and
+  stage regardless — they printed it too, which told a scripted run its
+  staged work had been thrown away when it had not.
+
+The second round is about what the commands feel like to use.
+
+- The prompter distinguishes the end of the input from an empty line. A
+  read past the end of a pipe returns an empty string and pressing Enter
+  returns an empty string, and conflating the two is what made
+  `spec reword` never terminate: the wording review asks "[r]eword again,
+  [m]anual, [a]ccept [Enter for r]", read the end of the pipe as `r`,
+  reworded, found the same finding, and asked again — forever. A wizard
+  whose answers have run out now stops asking, declines, and says why
+  once on stderr; confirmations answer no, which is the safe terminal
+  action, so a wizard ending in "Stage this?" reaches its own declined
+  outcome and reports it rather than erroring out with a report nobody
+  sees. Ctrl+D during a terminal wizard takes the same path: the declined
+  report, and exit 0, where it used to exit 1 with an error. Decorated at
+  the composition root next to the spinner-hushing prompter and for the
+  same reason — a wizard several layers down should not have to know where
+  its answers come from.
+
+- `spec unittest generate` and `spec steps generate` narrate the wait.
+  Both call a model, both showed nothing for the duration, and a rejected
+  reply costs another full call — so three silent minutes were
+  indistinguishable from a hang. They now say who is being asked and what
+  for while the model works, and name each rejected reply with the reason
+  and the attempt number. The template path has no wait and says nothing,
+  which is the point.
+
+Anything describing `spec validate` as exiting 0 on a bad spec, a feature
+file losing its trailing comment, concurrent staging as single-process
+only, or `spec reword` as hanging on a pipe is stale against this release.
+
 ## 0.5.3
 
 Defects found by running the full workshop end to end through the `pi`

@@ -63,12 +63,16 @@ Run `pi` in the repo and ask it to do something. It works, and it is
 genuinely pleasant. Know what you have:
 
 - **Eight built-in tools**: `read`, `bash`, `powershell` (Windows), `edit`,
-  `write`, `grep`, `find`, `ls`.
+  `write`, `grep`, `find`, `ls` — the list `pi --help` prints under
+  **Built-in Tool Names**. The last three ship *off by default*, so a
+  session that has not asked for them has five.
 - **No permission popups.** That is pi's documented philosophy, not an
   oversight — it will run `bash` without asking. Run it in a container if
   that matters to you.
-- **No MCP in core**, no sub-agents, no plan mode, no built-in to-dos.
-  Everything beyond the eight tools is an extension, a skill, or a package.
+- **No MCP in core** and no plan mode in core. Everything beyond the eight
+  is an extension, a skill, or a package — so the tool list in front of you
+  is pi's built-ins plus whatever you have installed, and counting it is
+  the only way to know what the model can reach.
 
 This is a deliberate trade: pi stays small and does not dictate a workflow.
 The consequence is that the workflow is yours to supply. On a frontier model
@@ -107,7 +111,8 @@ This repo already ships the server registration at
 
 There is no `--root` in those args, so `spec` uses the current directory.
 **Launch pi from the repository root** or the server will serve the wrong
-project. `spec` must be on PATH (`cargo install --path harness`).
+project. `spec` must be on PATH (`cargo install --path harness`) and must
+report **0.5.4 or newer** — check with `spec --version`.
 
 Now start pi with its own tools switched off:
 
@@ -125,9 +130,19 @@ whether to trust this project folder — it has to, before it will load
 `mcp_spec_driven_server_run_tests`. Use the prefixed names in prompts, or
 just describe the tool and let the model match it.
 
-What the model now has: 25 tools that read the spec, stage Gherkin and unit
+What the model now has: the tools that read the spec, stage Gherkin and unit
 tests, run Cucumber and JUnit as one bar, and refuse to refactor on red. What
 it does not have: `bash`, `write`, `edit`. Nothing about the model changed.
+
+**Count the tools in the session, not from this page.** 25 is the *server's*
+contract: `spec mcp serve` registers exactly that many, and
+`harness/tests/mcp_conformance.rs` fails the build if the number moves. You
+can confirm all 25 really cross the wire with `spec mcp tools`, which opens
+one throwaway MCP session and prints what it is offered — none are dropped in
+the bridge. A session total is a larger number, because pi adds its own
+built-ins on top of the server's; a `-xt bash,powershell` run listed **27**.
+When the two disagree, the session is the one that decides what reaches the
+model.
 
 ### Try the workshop loop
 
@@ -145,8 +160,8 @@ Gherkin, commit, RED, implement, GREEN, refactor, mark implemented.
 
 ### Two steps need an editor, so plan for them
 
-The 25 tools stage Gherkin, unit tests, and step definitions, but none of
-them writes a *new* requirement and none writes production code —
+The server's tools stage Gherkin, unit tests, and step definitions, but none
+of them writes a *new* requirement and none writes production code —
 `requirement_reword` only edits a requirement that already exists, and the
 follow-along says it outright for the implement step ("a file edit — there
 is no `implement` MCP tool"). So under a strict `-nbt` two steps cannot
@@ -156,8 +171,15 @@ of every Red/Green cycle.
 Give those two steps an editor while still keeping the shell away:
 
 ```bash
-pi -xt bash,powershell          # read/write/edit/grep/find/ls on, no shell
+pi -xt bash,powershell          # read/write/edit on, no shell
 ```
+
+`-xt` is a denylist: it takes `bash` and `powershell` away and leaves on
+whatever was already on, which is `read`, `write`, and `edit`. It does
+**not** hand you `grep`, `find`, or `ls` — those three ship off by default,
+and only an allowlist switches them on (`-t read,write,edit,grep,find,ls`).
+Shell commands used to cover that ground and now nothing does. That is fine
+for these two steps, which each write one file rather than search the tree.
 
 Run the tool-driven steps under `-nbt` and switch to `-xt bash,powershell`
 for the draft and the implementation. The point of the exercise survives —
@@ -166,6 +188,22 @@ says — and you avoid watching a capable agent insist it has no way to write
 the file. The alternative is to hand-write REQ-007 yourself and let the
 agent critique it with `validate_spec` and `refine_requirement`, which is
 closer to what the [harness path](harness-path.md) does with `spec draft`.
+
+**Expect `edit` to miss, and `write` to rescue it.** pi's `edit` tool is a
+find/replace, and it fails often enough to notice when the match is
+whitespace-sensitive — an indented Java block, a step under a `Scenario:`.
+The agent recovers on its own by rewriting the whole file with `write`.
+Nothing is broken; let it.
+
+**Do not plan a scripted run.** `pi -p` is real — it takes one prompt,
+processes it, and exits — but it cannot carry this hour. Under a strict
+`-nbt` there is no MCP tool that adds a requirement, so Exercise 1 has no
+path to completion however you invoke it; and the rest of the loop is built
+on you reading `changes_show` before you allow `changes_commit`, which is
+the exercise rather than an obstacle to it. Drive it interactively and
+change flags between steps, which is what the rest of this page assumes.
+(The flag is `--print` / `-p`. There is no `--prompt`, and
+`--prompt-template` is a different thing.)
 
 ### The catch, and why the runner exists
 
@@ -188,7 +226,9 @@ Continue with [harness-path.md](harness-path.md).
 | Symptom | Cause |
 | --- | --- |
 | `/mcp` shows no servers | pi was started outside the repo root, or the project was not trusted — restart with `--approve` |
-| Tools listed but every call errors | `spec` is not on PATH; check `spec --version` |
+| Tools listed but every call errors | `spec` is not on PATH; check `spec --version` reports 0.5.4 or newer |
 | Model missing from `/model` | No auth configured for the provider — keep the placeholder `apiKey` in `models.json` |
 | Tool calls vanish mid-stream | Ollama's OpenAI-compat shim drops `tool_calls` when streaming; use a tool-capable model and a current Ollama |
 | Server serves the wrong project | No `--root` in `.pi/mcp.json`; `cd` to the repository root first |
+| `edit` reports it could not find the text | Whitespace-sensitive match; the agent will fall back to `write` on its own |
+| `grep` / `find` / `ls` not offered under `-xt bash,powershell` | They are off by default and `-xt` only denies; use `-t` to allowlist them |

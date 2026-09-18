@@ -55,6 +55,11 @@ root**. Trust the project when pi asks (or pass `--approve`), then check
 `/mcp`. The bridge prefixes tool names: `run_tests` arrives as
 `mcp_spec_driven_server_run_tests`.
 
+`-nbt` is right for the tool-driven steps, but no MCP tool writes a *new*
+requirement or production code, so two steps of the workshop need an editor.
+Swap to `pi -xt bash,powershell` for those and back afterwards — [the pi
+path](pi-path.md) says which two and why.
+
 Full walkthrough, including the local-model setup: [the pi path](pi-path.md).
 
 - Docs: [pi.dev](https://pi.dev) · [pi-mcp-extension](https://github.com/irahardianto/pi-mcp-extension)
