@@ -413,7 +413,7 @@ fn is_step_definition_path(path: &str) -> bool {
 }
 
 /// A prior failure, briefed for the prompt: its first line, capped.
-fn brief_failure(failure: &str) -> String {
+pub(crate) fn brief_failure(failure: &str) -> String {
     let first_line = failure.lines().next().unwrap_or("").trim();
     let brief: String = first_line
         .chars()

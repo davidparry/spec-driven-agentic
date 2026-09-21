@@ -17,6 +17,11 @@ pub const DEFAULT_TOOLS_CONFIRM: &[&str] = &["command_run"];
 pub const DEFAULT_TOOLS_DISCOVERY_TIMEOUT_SECONDS: u64 = 10;
 pub const DEFAULT_TOOLS_CALL_TIMEOUT_SECONDS: u64 = 300;
 pub const DEFAULT_TOOLS_CACHE_TTL_SECONDS: u64 = 86_400;
+/// How many write-then-test rounds `spec refactor` is given to land a
+/// green refactor before it restores the code it started from. High
+/// enough that a model which is converging gets to finish, low enough
+/// that one which is not stops wasting a laptop's evening.
+pub const DEFAULT_REFACTOR_ATTEMPTS: u32 = 10;
 
 /// The key whose value the provider resolves when the file is silent.
 pub const LLM_MODEL_KEY: &str = "llm.model";
@@ -148,6 +153,7 @@ pub(crate) struct PresentValues {
     pub discovery_timeout_seconds: Option<u64>,
     pub call_timeout_seconds: Option<u64>,
     pub tools_cache_ttl_seconds: Option<u64>,
+    pub refactor_attempts: Option<u32>,
     pub mcp_config: Option<String>,
     pub profiles: BTreeMap<String, Vec<String>>,
     pub enabled: BTreeMap<String, Vec<String>>,
@@ -204,6 +210,8 @@ pub(crate) fn build_report(file: ConfigFileStatus, present: PresentValues) -> Co
     push(&mut settings, &file, "tools.cache_ttl_seconds", value, set);
     let (value, set) = optional_or(present.mcp_config, UNSET);
     push(&mut settings, &file, "tools.mcp_config", value, set);
+    let (value, set) = number_or(present.refactor_attempts, DEFAULT_REFACTOR_ATTEMPTS);
+    push(&mut settings, &file, "refactor.attempts", value, set);
     for caller in Caller::ALL {
         let key = format!("tools.profiles.{}", caller.key());
         match present.profiles.get(caller.key()) {

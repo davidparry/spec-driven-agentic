@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-5959f77b.js";
+            window.path_to_searchindex_js = "../searchindex-eaaa3625.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-372d77fe.js"></script>
@@ -212,6 +212,12 @@ bindings for .NET, cucumber-rs attributes for Rust.</p>
 <h2 id="spec-steps-generate"><a class="header" href="#spec-steps-generate">spec steps generate</a></h2>
 <p>Generate step definitions for the undefined steps and stage them.
 Already-defined steps are never regenerated — only the gap is filled.</p>
+<p>The target is the step-definition file the project already has, inside
+the module the build compiles (see <a href="inspect.html"><code>spec inspect</code></a>): the new
+definitions are appended to it, keeping its package and class and
+skipping any expression it already declares, so Cucumber never reports a
+duplicate step. A project with no step file yet gets the conventional one
+for its language created in the module’s test root.</p>
 <pre><code class="language-bash">spec steps generate
 </code></pre>
 <pre><code class="language-json">{

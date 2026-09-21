@@ -45,8 +45,10 @@ project root and survives between invocations and across MCP sessions.
 
 - [`spec test`](commands/test.md) runs the suite and moves the phase to
   RED (failures) or GREEN (all passing).
-- [`spec refactor`](commands/refactor.md) is only allowed on GREEN — it
-  moves to REFACTOR and records your note in the refactor log.
+- [`spec refactor`](commands/refactor.md) is only allowed on GREEN. It
+  moves to REFACTOR, records your note in the refactor log, and — with a
+  model resolved — carries the cleanup out in a loop that never edits a
+  test and restores your code if it cannot keep the bar green.
 - [`spec state`](commands/state.md) shows the phase, the last run's
   counts, and the refactor log at any time.
 - [`spec status`](commands/status.md) zooms out from the phase to the

@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "searchindex-5959f77b.js";
+            window.path_to_searchindex_js = "searchindex-eaaa3625.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-372d77fe.js"></script>
@@ -221,8 +221,10 @@ project root and survives between invocations and across MCP sessions.</p>
 <ul>
 <li><a href="commands/test.html"><code>spec test</code></a> runs the suite and moves the phase to
 RED (failures) or GREEN (all passing).</li>
-<li><a href="commands/refactor.html"><code>spec refactor</code></a> is only allowed on GREEN — it
-moves to REFACTOR and records your note in the refactor log.</li>
+<li><a href="commands/refactor.html"><code>spec refactor</code></a> is only allowed on GREEN. It
+moves to REFACTOR, records your note in the refactor log, and — with a
+model resolved — carries the cleanup out in a loop that never edits a
+test and restores your code if it cannot keep the bar green.</li>
 <li><a href="commands/state.html"><code>spec state</code></a> shows the phase, the last run’s
 counts, and the refactor log at any time.</li>
 <li><a href="commands/status.html"><code>spec status</code></a> zooms out from the phase to the

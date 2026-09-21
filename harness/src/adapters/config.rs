@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use crate::domain::CONFIG_FILE;
 use crate::domain::config_report::{
-    ConfigFileStatus, ConfigReport, DEFAULT_TOOLS_CACHE_TTL_SECONDS,
+    ConfigFileStatus, ConfigReport, DEFAULT_REFACTOR_ATTEMPTS, DEFAULT_TOOLS_CACHE_TTL_SECONDS,
     DEFAULT_TOOLS_CALL_TIMEOUT_SECONDS, DEFAULT_TOOLS_CONFIRM,
     DEFAULT_TOOLS_DISCOVERY_TIMEOUT_SECONDS, DEFAULT_TOOLS_MAX_ROUNDS, PresentValues, build_report,
 };
@@ -103,6 +103,9 @@ fn present_from_table(table: &toml::Table) -> PresentValues {
         present.enabled = string_list_table(tools, "enabled");
         present.disabled = string_list_table(tools, "disabled");
     }
+    if let Some(refactor) = table.get("refactor").and_then(|v| v.as_table()) {
+        present.refactor_attempts = toml_u32(refactor, "attempts").filter(|n| *n > 0);
+    }
     present
 }
 
@@ -186,6 +189,16 @@ impl ToolsSettings {
 
 pub fn tools_settings(path: &Path) -> ToolsSettings {
     ToolsSettings::from_present(present_values(path))
+}
+
+/// `[refactor] attempts`, the write-then-test budget `spec refactor`
+/// spends before restoring the code it started from. A missing, zero, or
+/// junk value is the default - a budget of nothing would mean the loop
+/// reverts without ever having tried.
+pub fn refactor_attempts(path: &Path) -> u32 {
+    present_values(path)
+        .refactor_attempts
+        .unwrap_or(DEFAULT_REFACTOR_ATTEMPTS)
 }
 
 fn present_values(path: &Path) -> PresentValues {
@@ -708,6 +721,25 @@ mod tests {
         assert_eq!(settings.call_timeout, Duration::from_secs(9));
         assert_eq!(settings.cache_ttl, Duration::from_secs(0));
         assert_eq!(settings.mcp_config.as_deref(), Some("mine.json"));
+    }
+
+    #[test]
+    fn a_configured_refactor_budget_is_read_and_zero_or_junk_fall_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(CONFIG_FILE);
+        fs::write(&path, "[refactor]\nattempts = 3\n").unwrap();
+        assert_eq!(refactor_attempts(&path), 3);
+        // A budget of nothing would revert without ever having tried.
+        fs::write(&path, "[refactor]\nattempts = 0\n").unwrap();
+        assert_eq!(refactor_attempts(&path), DEFAULT_REFACTOR_ATTEMPTS);
+        fs::write(&path, "[refactor]\nattempts = \"ten\"\n").unwrap();
+        assert_eq!(refactor_attempts(&path), DEFAULT_REFACTOR_ATTEMPTS);
+        fs::write(&path, "[llm]\nmodel = \"m\"\n").unwrap();
+        assert_eq!(refactor_attempts(&path), DEFAULT_REFACTOR_ATTEMPTS);
+        assert_eq!(
+            refactor_attempts(&dir.path().join("no-such-file.toml")),
+            DEFAULT_REFACTOR_ATTEMPTS
+        );
     }
 
     #[test]

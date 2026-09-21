@@ -16,12 +16,13 @@ pub enum Caller {
     UnittestGenerate,
     ImplementAdvice,
     Implement,
+    Refactor,
     Status,
     Ask,
 }
 
 impl Caller {
-    pub const ALL: [Caller; 9] = [
+    pub const ALL: [Caller; 10] = [
         Caller::SpecDraft,
         Caller::SpecReword,
         Caller::ScenarioGenerate,
@@ -29,6 +30,7 @@ impl Caller {
         Caller::UnittestGenerate,
         Caller::ImplementAdvice,
         Caller::Implement,
+        Caller::Refactor,
         Caller::Status,
         Caller::Ask,
     ];
@@ -42,6 +44,7 @@ impl Caller {
             Caller::UnittestGenerate => "unittest-generate",
             Caller::ImplementAdvice => "implement-advice",
             Caller::Implement => "implement",
+            Caller::Refactor => "refactor",
             Caller::Status => "status",
             Caller::Ask => "ask",
         }
@@ -57,6 +60,7 @@ impl Caller {
             Caller::UnittestGenerate => "spec unittest generate",
             Caller::ImplementAdvice => "spec implement (preflight advice)",
             Caller::Implement => "spec implement",
+            Caller::Refactor => "spec refactor",
             Caller::Status => "spec status",
             Caller::Ask => "spec ask",
         }
@@ -70,6 +74,7 @@ impl Caller {
             Caller::StepsGenerate | Caller::UnittestGenerate => "polish",
             Caller::ImplementAdvice => "advice",
             Caller::Implement => "implementation",
+            Caller::Refactor => "refactor",
             Caller::Status => "next_step",
             Caller::Ask => "ask",
         }
@@ -118,6 +123,17 @@ pub fn default_profile(caller: Caller) -> &'static [&'static str] {
             "run_tests",
             "command_run",
             "changes_show",
+        ],
+        // No run_tests and no command_run: the refactor loop runs the
+        // suite itself, once per round, and judges the result. A model
+        // that could run the tests could also report on a run the loop
+        // never saw.
+        Caller::Refactor => &[
+            "get_requirement",
+            "feature_read",
+            "step_definitions_find",
+            "project_inspect",
+            "get_tdd_state",
         ],
         Caller::Status => &[
             "project_root",

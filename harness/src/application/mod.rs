@@ -12,6 +12,7 @@ pub mod init_service;
 pub mod inspect_service;
 pub mod memory_service;
 pub mod model_service;
+pub mod refactor_service;
 pub mod scenario_service;
 pub mod spec_mutation_service;
 pub mod spec_service;

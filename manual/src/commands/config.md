@@ -50,9 +50,17 @@ tools.discovery_timeout_seconds	10	(default)
 tools.call_timeout_seconds	300	(default)
 tools.cache_ttl_seconds	86400	(default)
 tools.mcp_config	(unset)	(default)
+refactor.attempts	10	(default)
 tools.profiles.spec-draft	list_requirements, get_requirement, validate_spec, refine_requirement	(default)
 tools.profiles.implement	get_requirement, feature_read, …	(default)
 ```
+
+`refactor.attempts` is how many write-then-test rounds
+[`spec refactor`](refactor.md) may spend before it restores the code it
+started from. Each round costs a model call and a full test run, so it is
+that command's whole cost ceiling. Zero or a non-number falls back to the
+default rather than to a budget of nothing, which would revert without
+ever having tried.
 
 In a project that has never run `spec model use`, the first row is the
 name Ollama supplied:

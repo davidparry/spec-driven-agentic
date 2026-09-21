@@ -2,6 +2,57 @@
 
 ## Unreleased
 
+- `spec refactor` now carries the refactor out. It was a phase marker: it
+  logged the `--note`, moved GREEN to REFACTOR, and told you to run the
+  tests when you were done cleaning up. Every other altitude of the loop
+  had grown a model behind it — `spec draft` splits a description,
+  `spec scenario generate` writes the scenarios, `spec implement` writes
+  the code — and REFACTOR was the one step where the tool announced a
+  phase and then watched. Running `spec refactor --note "extract comma
+  delimiter constant"` and finding nothing extracted is the clearest way
+  to learn that, and not a good one.
+
+  With a model resolved it now reads the code and rewrites it, in a loop
+  of one model call and one full test run per round, up to `[refactor]
+  attempts` (ten by default, and reported by `spec config`). It stops the
+  moment the suite is green at the same test count it started from. With
+  no model, or with `--manual`, it marks the phase exactly as it always
+  did.
+
+  The tests are never touched, and that is enforced rather than asked
+  for. The writable paths are computed from the project layout, so the
+  model is only ever offered production files; the tests, step
+  definitions and features go in as read-only context; a reply naming a
+  test path is rejected in full and the round asked for again, because a
+  refactor the model believed came with a test change is not one worth
+  keeping half of; and after every round the test files are byte-compared
+  with what the loop started from. Green means the same count as well as
+  zero failures — a run that passes at a different total is a failure,
+  since green stopped meaning what it meant at the baseline.
+
+  What the model is shown is assembled deterministically: the
+  requirement's story and criteria from `--req`, the production file plus
+  every production file that names its type (a whole-word walk, so
+  refactoring `Calc` does not drag in `Calculator`), the tests that
+  exercise it, and the dependency coordinates declared in `pom.xml`,
+  `build.gradle`, `package.json` or `Cargo.toml` — a refactor that
+  reaches for a library the build cannot resolve is not one that compiles.
+
+  If the budget runs out, every file it touched is restored to the byte
+  from a snapshot the harness takes itself, rather than from git, so the
+  guarantee does not depend on your working tree having been clean. A
+  round that repeats the previous one ends the run early instead of
+  spending the rest of the budget confirming it, and a model that cannot
+  reach the goal without breaking a test is asked to say so — an empty
+  reply is a valid answer that leaves the code alone.
+
+  This is the one command that writes to the working tree without staging
+  first, which is a real departure from "spec stages, you approve". It
+  has to: the only thing that can tell a refactor from a rewrite is the
+  suite, and the suite runs against files on disk. A run that starts with
+  anything already staged is refused, since the loop's own commits would
+  sweep it along.
+
 - `spec draft`'s splitter now rejects a reply whose criteria are all
   happy paths and asks again, so the draft the wizard walks you through
   already carries an edge case. The prompt had asked for one since the

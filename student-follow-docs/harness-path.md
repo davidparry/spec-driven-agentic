@@ -288,7 +288,8 @@ spec test                          # expect RED
 spec implement REQ-00N             # or edit StringCalculator.java by hand
 spec changes show                  # your checkpoint: read the production diff
 spec changes commit && spec test    # GREEN
-spec refactor --note "<what>" && spec test    # optional, GREEN only
+spec refactor --note "<what>" --req REQ-00N    # optional, GREEN only
+git diff && spec test                          # read it, then record the run
 spec mark-implemented REQ-00N
 spec changes commit
 spec list

@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-5959f77b.js";
+            window.path_to_searchindex_js = "../searchindex-eaaa3625.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-372d77fe.js"></script>
@@ -305,6 +305,19 @@ ecosystem convention:</li>
 <p>Anything else in the reply is dropped. A reply with no usable update
 fails with <code>The model's reply held no usable file update.</code> — nothing
 is staged, and you implement by hand instead.</p>
+<h2 id="when-an-attempt-reaches-past-its-requirement"><a class="header" href="#when-an-attempt-reaches-past-its-requirement">When an attempt reaches past its requirement</a></h2>
+<p>The report’s <code>warning</code> also calls out staged code that looks like it
+satisfies a <em>different</em> requirement still marked <code>pending</code>:</p>
+<pre><code class="language-text">The staged code also satisfies REQ-005, still pending - REQ-006 was the
+requirement asked for. Review the diff with spec changes show and drop what
+REQ-006 does not need, so each requirement keeps its own RED bar.
+</code></pre>
+<p>It is a literal match — the code feeds in the same quoted inputs the other
+requirement’s criteria name and lands on the same expected numbers — so it
+warns and never blocks. A criterion worded without literals is invisible to
+it, and a literal two requirements share can raise it when nothing is wrong.
+Read the staged diff and decide; that is the check this is a prompt for, not
+a replacement of.</p>
 <p>The implementation prompt is the largest call the harness makes, so a
 local model can need minutes to answer. The generation timeout
 defaults to 300 seconds; if you see <code>no reply within ...s</code>, raise

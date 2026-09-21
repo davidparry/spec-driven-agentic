@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-5959f77b.js";
+            window.path_to_searchindex_js = "../searchindex-eaaa3625.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-372d77fe.js"></script>
@@ -183,11 +183,89 @@
                         <h1 id="spec-scenario"><a class="header" href="#spec-scenario">spec scenario</a></h1>
 <p>Scenario mutations. Every scenario is tied to a requirement by a
 <code>@REQ-...</code> tag, keeping the feature files traceable back to the spec.
-All three subcommands write to the <a href="../staged-changes.html">staging area</a>.</p>
+All four subcommands write to the <a href="../staged-changes.html">staging area</a>.</p>
 <pre><code class="language-text">Usage: spec scenario [OPTIONS] &lt;COMMAND&gt;
 
-Commands: add, update, delete
+Commands: generate, add, update, delete
 </code></pre>
+<p><code>generate</code> writes a requirement’s scenarios for you, from its acceptance
+criteria. The other three are the typed mutations underneath it, for when
+you want to say exactly what goes in.</p>
+<hr>
+<h2 id="spec-scenario-generate"><a class="header" href="#spec-scenario-generate">spec scenario generate</a></h2>
+<p>Turn one requirement’s acceptance criteria into tagged scenarios — one
+scenario per criterion, in order.</p>
+<pre><code class="language-text">Usage: spec scenario generate [OPTIONS] &lt;REQ_ID&gt;
+</code></pre>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Flag</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>&lt;REQ_ID&gt;</code></td><td>The requirement whose criteria become scenarios.</td></tr>
+<tr><td><code>--feature &lt;FEATURE&gt;</code></td><td>Feature file to append to. Defaults to the requirement’s own <code>featureFile</code>.</td></tr>
+</tbody>
+</table>
+</div>
+<pre><code class="language-bash">spec scenario generate REQ-003
+</code></pre>
+<pre><code class="language-json">{
+  "feature": "kata/src/test/resources/features/string_calculator.feature",
+  "scenarios": [
+    "Two numbers separated by a comma are summed",
+    "Two larger numbers separated by a comma are summed"
+  ],
+  "criteria": 2,
+  "staged": true,
+  "source": "llm",
+  "nextStep": "Read the steps against the acceptance criteria, apply with spec changes commit, then run spec steps missing."
+}
+</code></pre>
+<h3 id="where-the-wording-comes-from"><a class="header" href="#where-the-wording-comes-from">Where the wording comes from</a></h3>
+<p>Acceptance criteria are already <code>Given …, when …, then …</code>, so a literal
+reading of them is always available and needs no model. That literal
+reading is the <strong>template</strong>, and <code>source</code> reports <code>template</code> when it is
+what got staged.</p>
+<p>It is correct but rarely idiomatic: it cannot know that the feature file
+it is joining opens every scenario on <code>Given a string calculator</code>. So
+when a model is resolved it is asked to say the same thing in the file’s
+own vocabulary, with the file and the existing step definitions as
+context — the <code>scenario-generate</code> tool profile is <code>get_requirement</code>,
+<code>feature_read</code>, <code>step_definitions_find</code>. <code>source</code> then reports <code>llm</code>.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th></th><th>The steps for <code>Given "1,2", when add is called, then the result is 3</code></th></tr>
+</thead>
+<tbody>
+<tr><td><code>template</code></td><td><code>Given "1,2"</code> / <code>When add is called</code> / <code>Then the result is 3</code></td></tr>
+<tr><td><code>llm</code></td><td><code>Given a string calculator</code> / <code>When I add "1,2"</code> / <code>Then the result is 3</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>The second reuses steps that already have definitions, so
+<a href="steps.html"><code>spec steps missing</code></a> comes back empty. The first is two new
+undefined steps.</p>
+<h3 id="what-it-refuses"><a class="header" href="#what-it-refuses">What it refuses</a></h3>
+<p>The model’s reply is only used when it holds <strong>exactly one scenario per
+criterion</strong>, every step opens with a Gherkin keyword, every scenario has
+a <code>When</code> and a <code>Then</code>, and no name collides with one already in the file
+or with another in the reply. A reply failing any of those is retried
+with the reason, and the template is staged if the retries run out —
+coverage is never quietly lost to a chatty model.</p>
+<p>The command itself refuses two situations outright:</p>
+<ul>
+<li>The requirement already has scenarios tagged <code>@REQ-...</code> in that file.
+Running twice would stack a second copy of each. Change them with
+<a href="#spec-scenario-update"><code>spec scenario update</code></a> or delete them first.</li>
+<li>None of the criteria are Given/When/Then shaped, so there is nothing to
+read. Reword the requirement with <a href="spec.html#spec-reword"><code>spec reword</code></a>.</li>
+</ul>
+<p>A requirement with no <code>featureFile</code> and no <code>--feature</code> is refused too,
+naming <a href="spec.html#spec-set-feature"><code>spec set-feature</code></a> as the remedy;
+passing <code>--feature</code> also points the requirement at that file, exactly as
+<code>spec scenario add</code> does.</p>
 <hr>
 <h2 id="spec-scenario-add"><a class="header" href="#spec-scenario-add">spec scenario add</a></h2>
 <p>Append a tagged scenario to an existing feature file.</p>
@@ -269,7 +347,7 @@ found by feature path + scenario name; omitted parts are kept.</p>
 <p>Deleting a scenario that does not exist fails with exit status 1 and
 names the feature searched.</p>
 <h2 id="the-full-rhythm"><a class="header" href="#the-full-rhythm">The full rhythm</a></h2>
-<pre><code class="language-bash">spec scenario add --feature features/calc.feature --req REQ-002 --name "..." --step '...'
+<pre><code class="language-bash">spec scenario generate REQ-002   # or scenario add, to write them yourself
 spec changes show      # review the staged modify
 spec changes commit    # apply
 spec steps missing     # any steps without definitions?

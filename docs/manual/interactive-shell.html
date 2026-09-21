@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "searchindex-5959f77b.js";
+            window.path_to_searchindex_js = "searchindex-eaaa3625.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-372d77fe.js"></script>
@@ -256,6 +256,25 @@ model, especially one trained for work other than development. See
 <p>— the shell offers to start the loop before the first prompt. The same
 start refreshes <code>.spec-memory.json</code> (language, libraries, layout) so
 later model calls in the session carry that brief.</p>
+<h2 id="the-layout-question"><a class="header" href="#the-layout-question">The layout question</a></h2>
+<p>That refresh resolves the project’s layout: the module whose build file
+the test runner is pointed at, its test and production roots, its
+features directory, the step-definition file generated steps join, and
+the package existing tests declare. Everything the harness writes follows
+from it.</p>
+<p>It is answered deterministically — build manifests, observed source
+files, and the feature files your requirements name. A model is asked
+only when a tree holds several buildable modules and none of that
+separates them, and then only to pick one of the discovered module
+roots; anything else it replies with is refused. You confirm, and the
+answer is recorded, so the question is asked once per project:</p>
+<pre><code class="language-text">Several modules could be the one to work in: kata, smoke-test.
+Asking qwen3.8-flash-next:125b-mlx which module - working ...
+Work in kata - the module Maven compiles and runs tests in? [y/N] y
+Recorded kata as this project's module - asked once; spec inspect re-scans if that changes.
+</code></pre>
+<p>With no model resolved, or on a decline, the scan’s own pick stands and
+the shell says which one it used.</p>
 <pre><code class="language-text">It appears you are in a greenfield - this project has no requirements/requirements.json yet.
 Start with the greenfield command now? [y/N]
 </code></pre>

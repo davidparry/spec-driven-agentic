@@ -58,10 +58,20 @@ unittest-generate = ["project_inspect", "get_requirement", "feature_read", "step
 implement-advice = ["get_tdd_state", "validate_spec", "feature_list", "changes_show", "changes_validate"]
 # spec implement
 implement = ["get_requirement", "feature_read", "step_definitions_find", "get_tdd_state", "run_tests", "command_run", "changes_show"]
+# spec refactor - read-and-inspect only. The loop runs the suite itself,
+# once per round, and judges the result; a model that could run the tests
+# could also report on a run the loop never saw.
+refactor = ["get_requirement", "feature_read", "step_definitions_find", "project_inspect", "get_tdd_state"]
 # spec status
 status = ["project_root", "list_requirements", "get_requirement", "get_tdd_state", "validate_spec", "changes_show", "changes_validate"]
 # spec ask
 ask = ["project_root", "list_requirements", "get_requirement", "validate_spec", "refine_requirement", "get_tdd_state", "project_inspect", "feature_list", "feature_read", "step_definitions_find", "changes_show", "changes_validate"]
+# How many write-then-test rounds `spec refactor` may spend before it
+# restores the code it started from. Every round is a model call plus a
+# full test run, so this is the command's whole cost ceiling.
+[refactor]
+# attempts = 10
+
 # Extra tools attached on top of the default or profiles list.
 # [tools.enabled]
 # implement = ["playwright:browser_navigate"]

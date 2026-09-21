@@ -79,7 +79,8 @@ spec changes commit      # apply the staged spec
 spec test                # expect RED
 # ...implement...
 spec test                # expect GREEN
-spec refactor --note "extract parser"
+spec refactor --note "extract parser" --req REQ-001   # does the cleanup
+git diff                 # read what it changed
 spec test                # still GREEN
 spec status              # confirm REQ-001 is ready to mark
 spec mark-implemented REQ-001 && spec changes commit

@@ -10,7 +10,7 @@ use clap::{Args, Parser, Subcommand};
 
 use spec_harness::adapters::chat_cache::{CachedConversation, DEFAULT_CACHE_TTL};
 use spec_harness::adapters::config::{
-    TomlModelStore, TomlToolStore, config_path, inspect_config, tools_settings,
+    TomlModelStore, TomlToolStore, config_path, inspect_config, refactor_attempts, tools_settings,
 };
 use spec_harness::adapters::console_prompt::ConsolePrompter;
 use spec_harness::adapters::fs_project::FsProjectFiles;
@@ -38,6 +38,7 @@ use spec_harness::application::memory_service::MemoryAwareConversation;
 use spec_harness::application::model_service::{
     ModelResolution, ModelService, ModelSource, SessionModel,
 };
+use spec_harness::application::refactor_service::{RefactorReport, RefactorService};
 use spec_harness::application::spec_mutation_service::SpecMutationService;
 use spec_harness::application::spec_service::STAGED;
 use spec_harness::application::status_service::StatusService;
@@ -320,9 +321,17 @@ struct TestArgs {
 
 #[derive(Args)]
 struct RefactorArgs {
-    /// What you intend to refactor and why
+    /// What you intend to refactor and why. With a model resolved this
+    /// is also the brief it is given
     #[arg(long)]
     note: Option<String>,
+    /// The requirement whose behaviour must not change, shown to the
+    /// model as the specification it is preserving
+    #[arg(long = "req")]
+    req_id: Option<String>,
+    /// Mark the phase and stop - the cleanup stays in your hands
+    #[arg(long)]
+    manual: bool,
 }
 
 #[derive(Subcommand)]
@@ -586,7 +595,41 @@ fn execute(
             }
             Ok(())
         }
-        Command::Refactor(args) => tdd_reply(tdd_service(root).refactor(args.note.as_deref())),
+        Command::Refactor(args) => {
+            const RED: &str = "\x1b[31m";
+            const RESET: &str = "\x1b[0m";
+            // The phase transition is the gate: it refuses off GREEN and
+            // logs the note, exactly as it did when marking the phase was
+            // all this command could do. The loop only runs once it has
+            // agreed a refactor is legitimate here.
+            let marked = tdd_service(root).refactor(args.note.as_deref());
+            if args.manual {
+                return tdd_reply(marked);
+            }
+            let phase = match marked {
+                Ok(phase) => phase,
+                Err(error) => return tdd_reply(Err::<RefactorReport, _>(error)),
+            };
+            let service = refactor_service(root, model, attempts, tools, max_rounds)?;
+            if !service.has_model() {
+                // No model, no loop: the phase is marked and the cleanup
+                // is the developer's, which is the whole behaviour this
+                // command used to have.
+                return print_json(&phase);
+            }
+            let runner = detect_runner(root).map_err(|message| anyhow::anyhow!(message))?;
+            let mut prompter = interactive_prompter(Prompts::Incidental);
+            let report = service.run(
+                prompter.as_mut(),
+                runner.as_ref(),
+                args.note.as_deref(),
+                args.req_id.as_deref(),
+            )?;
+            if let Some(warning) = &report.warning {
+                println!("{RED}{warning}{RESET}");
+            }
+            print_json(&report)
+        }
         Command::Steps(command) => {
             let service = generation_service(
                 root,
@@ -972,6 +1015,36 @@ fn implement_service(
         language,
         layout,
         connected_llm(root, model_flag, caller, attempts, tools, max_rounds),
+    ))
+}
+
+fn refactor_service(
+    root: &Path,
+    model_flag: Option<&str>,
+    attempts: u32,
+    tools: Option<&str>,
+    max_rounds: Option<u32>,
+) -> anyhow::Result<
+    RefactorService<OverlayTree, FsChangeStore, FsSpecRepository, ChatLlm, LiveBroker>,
+> {
+    let language = primary_language(root)?;
+    let layout = project_layout(root);
+    let rounds = refactor_attempts(&config_path(root));
+    Ok(RefactorService::new(
+        wiring::overlay_sources(root, layout.module_root.as_deref()),
+        wiring::change_store(root),
+        wiring::spec_repository(root),
+        language,
+        layout,
+        connected_llm(
+            root,
+            model_flag,
+            Caller::Refactor,
+            attempts,
+            tools,
+            max_rounds,
+        ),
+        rounds,
     ))
 }
 

@@ -121,7 +121,7 @@ Ctrl-C.
 | --- | --- | --- |
 | `spec validate`, `spec list`, `spec show`, `spec refine`, `spec test` | No | instant |
 | `spec draft` with all flags, `spec scenario add`, `spec include add` | No | instant |
-| `spec changes show` / `commit` / `discard`, `spec refactor`, `spec mark-implemented` | No | instant |
+| `spec changes show` / `commit` / `discard`, `spec refactor --manual`, `spec mark-implemented` | No | instant |
 | `spec steps missing` | No | instant |
 | `spec draft` with no flags — the Step 2 wizard | Yes — one call to split your description, plus a retry for each reply that comes back unusable or without an edge case, then one per finding | about 59 s in the observed run |
 | `spec scenario generate` | Yes — one call, falling back to a literal reading of the criteria | about 12 s in the observed run |
@@ -129,6 +129,7 @@ Ctrl-C.
 | `spec unittest generate` | Yes — one call | 30–45 s |
 | `spec steps generate` | Yes — one call | about 35 s |
 | `spec implement` | Yes — one call, large prompt | 70–195 s |
+| `spec refactor` | Yes — one call plus a full test run per round, up to `[refactor] attempts` (10) | about 50–90 s per round; one round in the observed run |
 
 `spec refine` deserves a second look on that list: the wording review is
 a **deterministic** rule set, not a model. Same input, same findings,
@@ -969,24 +970,53 @@ both altitudes.
 **Do this** — the refactor is optional, but the proof is not:
 
 ```bash
-spec refactor --note "extract comma delimiter constant"
+spec refactor --note "extract comma delimiter constant" --req REQ-003
 ```
+
+`spec refactor` carries the cleanup out. The note is both the log entry
+and the brief. Expect a round or two, about a minute each, then:
 
 ```json
 {
   "phase": "REFACTOR",
-  "nextStep": "A refactor is in progress. Call run_tests to prove the refactor kept the bar green."
+  "goal": "extract comma delimiter constant",
+  "rounds": 1,
+  "attempts": 10,
+  "targets": ["kata/src/main/java/com/davidparry/workshop/kata/StringCalculator.java"],
+  "tests": 9,
+  "applied": true,
+  "reverted": false,
+  "nextStep": "The refactor is in your working tree and the bar is where it was. Read it with git diff, then run spec test to record the run."
 }
 ```
 
-**Do this** — do the cleanup, then prove it:
+`"applied": true` means it is already in your working tree — this is the
+one command that writes there without staging first, because the only
+thing that can tell a refactor from a rewrite is the suite, and the suite
+runs against files on disk. It earns that by never writing a test and by
+restoring every file it touched if it cannot get green. If your run comes
+back `"reverted": true`, the model could not clean this up without
+breaking something and your code is exactly as you left it.
+
+**Do this** — read what it did, then prove it:
 
 ```bash
+git diff
 spec test
 ```
 
 GREEN, nine tests, zero failures. A refactor that changes the bar was not
-a refactor.
+a refactor — which is why the loop checks the count as well as the
+failures, and throws away a round that comes back green at eight.
+
+**Expect** the diff to be small and structural: a named constant, or a
+block lifted into a well-named private method. If yours reached for a
+regex engine or a stream pipeline, that is the conversation worth having
+with yourself before you commit it.
+
+Prefer to do it by hand? `spec refactor --note "..." --manual` marks the
+phase and leaves the code alone, which is what this command did before it
+could refactor. You then clean up and run `spec test` yourself.
 
 **Do this** — record it:
 
@@ -1035,7 +1065,8 @@ spec implement REQ-00N             # or edit StringCalculator.java by hand
 spec changes show                  # checkpoint 2
 spec changes commit && spec test   # expect GREEN
 
-spec refactor --note "<what>" && spec test    # optional, GREEN only
+spec refactor --note "<what>" --req REQ-00N    # optional, GREEN only
+git diff && spec test                          # read it, then record the run
 spec mark-implemented REQ-00N
 spec changes commit
 ```
