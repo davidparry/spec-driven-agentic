@@ -1,5 +1,53 @@
 # Changelog
 
+## Unreleased
+
+- `spec draft`'s splitter now rejects a reply whose criteria are all
+  happy paths and asks again, so the draft the wizard walks you through
+  already carries an edge case. The prompt had asked for one since the
+  beginning, as the fourth clause of a compound rule about criteria, and
+  models dropped it often enough that the pattern was reliable: the
+  wording review then raised `criteria: only happy paths`, the repair
+  loop ran, and the author reviewed the same requirement twice — once
+  before the edge case existed and once after. The rule that finding
+  comes from is deterministic, so it is now applied to the model's reply
+  the moment it arrives, where a retry costs seconds the author never
+  waits through instead of a second pass over wording they already read.
+  The edge-case clause is a rule of its own in the prompt as well, with
+  the vocabulary and two examples.
+
+  The check goes lenient on the last attempt rather than failing the
+  split: a happy-path draft is worth keeping, and losing one to a
+  stubborn model would drop the author into manual drafting — worse than
+  the second pass this removes. When the retries cannot win it, the
+  findings round still asks, exactly as before.
+
+- `spec scenario generate <REQ>` writes a requirement's scenarios from
+  its acceptance criteria, one per criterion, staged and tagged. The BDD
+  altitude was the only one without a generator: `spec unittest generate`
+  has always written the unit test from the criteria and `spec steps
+  generate` the step definitions, while the scenario — the most
+  mechanical of the three, since criteria are already stored as
+  Given/When/Then — could only be typed out a `--step` at a time. The
+  agent path never had this gap, because an agent reads the criteria and
+  calls `scenario_add` itself; the CLI exposed that tool's writing half
+  and not its authoring half, so the human did the model's job.
+
+  A literal reading of the criteria is always available and needs no
+  model, and `source` reports `template` when it is what got staged. It
+  is correct but foreign — it cannot know the feature file it is joining
+  opens every scenario on `Given a string calculator` — so a resolved
+  model is given the requirement, the feature file, and the existing step
+  definitions, and asked for the same behaviour in the file's own
+  vocabulary (`source: "llm"`, profile `scenario-generate`:
+  `get_requirement`, `feature_read`, `step_definitions_find`). On the
+  kata that difference is the difference between zero undefined steps and
+  two. The reply is only used when it holds exactly one scenario per
+  criterion with valid keywords and no colliding names, so coverage
+  cannot be lost to a chatty model. Re-running against a requirement that
+  already has tagged scenarios is refused rather than stacking a second
+  copy of each.
+
 ## 0.5.4
 
 Two rounds of defects found by re-walking the documented paths rather than

@@ -131,7 +131,7 @@ fn outcome_is_concrete(outcome: &str) -> bool {
 
 /// An edge case announces itself by keyword, or by a bare `""` literal -
 /// the canonical empty-input case, often written without the word "empty".
-fn covers_edge_case(criterion: &str) -> bool {
+pub(crate) fn covers_edge_case(criterion: &str) -> bool {
     EDGE_CASE.is_match(criterion) || criterion.contains("\"\"")
 }
 

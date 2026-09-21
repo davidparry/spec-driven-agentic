@@ -41,6 +41,7 @@ pub mod prompts;
 pub mod proposal;
 pub mod refiner;
 pub mod scaffold;
+pub mod scenario;
 pub mod spec_validator;
 pub mod steps;
 pub mod tdd;

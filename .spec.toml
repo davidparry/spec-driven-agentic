@@ -48,6 +48,8 @@ cache_ttl_seconds = 600
 spec-draft = ["list_requirements", "get_requirement", "validate_spec", "refine_requirement"]
 # spec reword
 spec-reword = ["get_requirement", "validate_spec", "refine_requirement"]
+# spec scenario generate
+scenario-generate = ["get_requirement", "feature_read", "step_definitions_find"]
 # spec steps generate
 steps-generate = ["project_inspect", "feature_list", "feature_read", "step_definitions_find"]
 # spec unittest generate

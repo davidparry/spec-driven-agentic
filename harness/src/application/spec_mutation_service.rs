@@ -12,8 +12,8 @@ use crate::application::{DEFAULT_LLM_ATTEMPTS, LlmReplyError};
 use crate::domain::model::{Requirement, Spec, SpecCatalog, SpecFile};
 use crate::domain::prompts::RenderedPrompt;
 use crate::domain::proposal::{
-    ProposedRequirement, parse_proposals_checked, parse_rewording_checked, proposal_prompt,
-    rewording_prompt,
+    ProposedRequirement, missing_edge_case, parse_proposals_checked, parse_rewording_checked,
+    proposal_prompt, rewording_prompt,
 };
 use crate::domain::refiner::{RequirementRefiner, finding_signature, suggestion_for};
 use crate::domain::spec_validator::SpecValidator;
@@ -298,6 +298,25 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
         ));
         let prompt = proposal_prompt(&description);
         let retries = std::cell::RefCell::new(Vec::<String>::new());
+        // Every rejection this check has made, so the last attempt it is
+        // allowed can stop insisting: one rejection too many and the whole
+        // split fails, which costs the author the draft. A happy-path draft
+        // is worth keeping - the findings round asks for the edge case that
+        // the retries could not win.
+        let rejections = std::cell::Cell::new(0u32);
+        let attempts = self.llm_attempts;
+        let check = |reply: &str| {
+            let outcome = parse_proposals_checked(reply).and_then(|proposals| {
+                match missing_edge_case(&proposals) {
+                    Some(reason) if rejections.get() + 1 < attempts => Err(reason),
+                    _ => Ok(proposals),
+                }
+            });
+            if outcome.is_err() {
+                rejections.set(rejections.get() + 1);
+            }
+            outcome
+        };
         let null = NullBroker;
         let broker: &dyn ToolBroker = self.broker.as_deref().unwrap_or(&null);
         let outcome = ask_llm(
@@ -315,7 +334,7 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
             },
             prompter,
             &prompt,
-            parse_proposals_checked,
+            check,
             |attempt, of, reason| {
                 retries.borrow_mut().push(format!(
                     "The model reply was invalid ({reason}) - asking again ({attempt} of {of})"
@@ -2294,6 +2313,105 @@ mod tests {
             prompts[2].contains("Your previous reply was invalid"),
             "retry 3: {}",
             prompts[2]
+        );
+    }
+
+    const HAPPY_ONLY: &str = r#"[{"title": "Comma separated numbers are summed",
+        "story": "As a user, I want comma sums so that totals come from one input.",
+        "acceptanceCriteria": ["Given the input \"1,2\", when add is called, then the result is 3"]}]"#;
+
+    /// [`LlmConversation`] answering one scripted reply per call, and the
+    /// last one forever after.
+    struct ScriptedLlm {
+        replies: Vec<String>,
+        calls: std::cell::Cell<usize>,
+    }
+
+    impl LlmConversation for ScriptedLlm {
+        fn chat(
+            &self,
+            _model: &str,
+            _messages: &[crate::domain::tools::ChatMessage],
+            _tools: &[crate::domain::tools::ToolDefinition],
+        ) -> Result<crate::domain::tools::ChatTurn, crate::ports::LlmError> {
+            let call = self.calls.get();
+            self.calls.set(call + 1);
+            let reply = self.replies.get(call).or(self.replies.last()).unwrap();
+            Ok(crate::domain::tools::text_turn(reply.clone()))
+        }
+    }
+
+    #[test]
+    fn a_happy_path_only_split_is_retried_so_the_first_review_pass_reads_clean() {
+        let with_edge = r#"[{"title": "Comma separated numbers are summed",
+            "story": "As a user, I want comma sums so that totals come from one input.",
+            "acceptanceCriteria": ["Given the input \"1,2\", when add is called, then the result is 3",
+                                   "Given an empty string \"\", when add is called, then the result is 0"]}]"#;
+        let service = service(Ok(spec()), green());
+        let llm = ScriptedLlm {
+            replies: vec![HAPPY_ONLY.into(), with_edge.into()],
+            calls: std::cell::Cell::new(0),
+        };
+        // Enter through the whole wizard: every criterion the author sees
+        // arrived from the model.
+        let mut prompter = ScriptedPrompter::answering(&["sum numbers", "", "", "", "", "", "y"]);
+        let report = service
+            .draft_assisted(&mut prompter, "test-model", &llm)
+            .unwrap();
+        assert!(report.staged, "report: {report:?}");
+        assert_eq!(llm.calls.get(), 2, "one retry, then the edge case arrives");
+        assert!(
+            prompter.transcript.iter().any(|l| l.contains(
+                "covers only happy paths - add at least one edge case to each"
+            )),
+            "transcript: {:#?}",
+            prompter.transcript
+        );
+        // The payoff: nothing for the wording review to find, so the
+        // author walks the draft once instead of twice.
+        assert!(
+            !prompter
+                .transcript
+                .iter()
+                .any(|l| l == "Findings to address:"),
+            "transcript: {:#?}",
+            prompter.transcript
+        );
+        let staged: Spec =
+            serde_json::from_str(&service.store.content(SPEC_PATH).unwrap().unwrap()).unwrap();
+        assert_eq!(
+            staged.requirements.last().unwrap().acceptance_criteria,
+            vec![CLEAN_CRITERION.to_string(), EDGE_CRITERION.to_string()]
+        );
+    }
+
+    #[test]
+    fn a_model_that_never_adds_an_edge_case_keeps_its_draft_rather_than_losing_it() {
+        let service = service(Ok(spec()), green());
+        let llm = ScriptedLlm {
+            replies: vec![HAPPY_ONLY.into()],
+            calls: std::cell::Cell::new(0),
+        };
+        // The author supplies the edge case the retries could not win.
+        let mut prompter =
+            ScriptedPrompter::answering(&["sum numbers", "", "", "", EDGE_CRITERION, "", "y"]);
+        let report = service
+            .draft_assisted(&mut prompter, "test-model", &llm)
+            .unwrap();
+        assert!(report.staged, "report: {report:?}");
+        assert_eq!(report.title, "Comma separated numbers are summed");
+        assert_eq!(
+            llm.calls.get(),
+            3,
+            "the last of three attempts stops insisting"
+        );
+        assert!(
+            !prompter
+                .transcript
+                .iter()
+                .any(|l| l.contains("The description gave no complete requirement")),
+            "the draft must survive an unwinnable retry: {:#?}",
+            prompter.transcript
         );
     }
 

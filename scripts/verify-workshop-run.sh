@@ -86,7 +86,7 @@ def req(requirements, rid):
 def merged_spec(path=SPEC, seen=None):
     """requirements.json is the entry point, not necessarily the whole spec:
     it may carry an `includes` list of child files, N levels deep, and the
-    tools grade the merged tree. Demo C moves REQ-007 into a child, so
+    tools grade the merged tree. Extra C moves REQ-007 into a child, so
     reading only the root file would report it missing."""
     seen = set() if seen is None else seen
     if path in seen:

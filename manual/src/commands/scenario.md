@@ -2,13 +2,96 @@
 
 Scenario mutations. Every scenario is tied to a requirement by a
 `@REQ-...` tag, keeping the feature files traceable back to the spec.
-All three subcommands write to the [staging area](../staged-changes.md).
+All four subcommands write to the [staging area](../staged-changes.md).
 
 ```text
 Usage: spec scenario [OPTIONS] <COMMAND>
 
-Commands: add, update, delete
+Commands: generate, add, update, delete
 ```
+
+`generate` writes a requirement's scenarios for you, from its acceptance
+criteria. The other three are the typed mutations underneath it, for when
+you want to say exactly what goes in.
+
+---
+
+## spec scenario generate
+
+Turn one requirement's acceptance criteria into tagged scenarios — one
+scenario per criterion, in order.
+
+```text
+Usage: spec scenario generate [OPTIONS] <REQ_ID>
+```
+
+| Flag | Description |
+| --- | --- |
+| `<REQ_ID>` | The requirement whose criteria become scenarios. |
+| `--feature <FEATURE>` | Feature file to append to. Defaults to the requirement's own `featureFile`. |
+
+```bash
+spec scenario generate REQ-003
+```
+
+```json
+{
+  "feature": "kata/src/test/resources/features/string_calculator.feature",
+  "scenarios": [
+    "Two numbers separated by a comma are summed",
+    "Two larger numbers separated by a comma are summed"
+  ],
+  "criteria": 2,
+  "staged": true,
+  "source": "llm",
+  "nextStep": "Read the steps against the acceptance criteria, apply with spec changes commit, then run spec steps missing."
+}
+```
+
+### Where the wording comes from
+
+Acceptance criteria are already `Given …, when …, then …`, so a literal
+reading of them is always available and needs no model. That literal
+reading is the **template**, and `source` reports `template` when it is
+what got staged.
+
+It is correct but rarely idiomatic: it cannot know that the feature file
+it is joining opens every scenario on `Given a string calculator`. So
+when a model is resolved it is asked to say the same thing in the file's
+own vocabulary, with the file and the existing step definitions as
+context — the `scenario-generate` tool profile is `get_requirement`,
+`feature_read`, `step_definitions_find`. `source` then reports `llm`.
+
+| | The steps for `Given "1,2", when add is called, then the result is 3` |
+| --- | --- |
+| `template` | `Given "1,2"` / `When add is called` / `Then the result is 3` |
+| `llm` | `Given a string calculator` / `When I add "1,2"` / `Then the result is 3` |
+
+The second reuses steps that already have definitions, so
+[`spec steps missing`](steps.md) comes back empty. The first is two new
+undefined steps.
+
+### What it refuses
+
+The model's reply is only used when it holds **exactly one scenario per
+criterion**, every step opens with a Gherkin keyword, every scenario has
+a `When` and a `Then`, and no name collides with one already in the file
+or with another in the reply. A reply failing any of those is retried
+with the reason, and the template is staged if the retries run out —
+coverage is never quietly lost to a chatty model.
+
+The command itself refuses two situations outright:
+
+- The requirement already has scenarios tagged `@REQ-...` in that file.
+  Running twice would stack a second copy of each. Change them with
+  [`spec scenario update`](#spec-scenario-update) or delete them first.
+- None of the criteria are Given/When/Then shaped, so there is nothing to
+  read. Reword the requirement with [`spec reword`](spec.md#spec-reword).
+
+A requirement with no `featureFile` and no `--feature` is refused too,
+naming [`spec set-feature`](spec.md#spec-set-feature) as the remedy;
+passing `--feature` also points the requirement at that file, exactly as
+`spec scenario add` does.
 
 ---
 
@@ -111,7 +194,7 @@ names the feature searched.
 ## The full rhythm
 
 ```bash
-spec scenario add --feature features/calc.feature --req REQ-002 --name "..." --step '...'
+spec scenario generate REQ-002   # or scenario add, to write them yourself
 spec changes show      # review the staged modify
 spec changes commit    # apply
 spec steps missing     # any steps without definitions?

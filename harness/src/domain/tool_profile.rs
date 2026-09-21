@@ -11,6 +11,7 @@ use crate::domain::tools::{ToolDefinition, find};
 pub enum Caller {
     SpecDraft,
     SpecReword,
+    ScenarioGenerate,
     StepsGenerate,
     UnittestGenerate,
     ImplementAdvice,
@@ -20,9 +21,10 @@ pub enum Caller {
 }
 
 impl Caller {
-    pub const ALL: [Caller; 8] = [
+    pub const ALL: [Caller; 9] = [
         Caller::SpecDraft,
         Caller::SpecReword,
+        Caller::ScenarioGenerate,
         Caller::StepsGenerate,
         Caller::UnittestGenerate,
         Caller::ImplementAdvice,
@@ -35,6 +37,7 @@ impl Caller {
         match self {
             Caller::SpecDraft => "spec-draft",
             Caller::SpecReword => "spec-reword",
+            Caller::ScenarioGenerate => "scenario-generate",
             Caller::StepsGenerate => "steps-generate",
             Caller::UnittestGenerate => "unittest-generate",
             Caller::ImplementAdvice => "implement-advice",
@@ -49,6 +52,7 @@ impl Caller {
         match self {
             Caller::SpecDraft => "spec draft",
             Caller::SpecReword => "spec reword",
+            Caller::ScenarioGenerate => "spec scenario generate",
             Caller::StepsGenerate => "spec steps generate",
             Caller::UnittestGenerate => "spec unittest generate",
             Caller::ImplementAdvice => "spec implement (preflight advice)",
@@ -62,6 +66,7 @@ impl Caller {
         match self {
             Caller::SpecDraft => "proposal",
             Caller::SpecReword => "rewording",
+            Caller::ScenarioGenerate => "scenario",
             Caller::StepsGenerate | Caller::UnittestGenerate => "polish",
             Caller::ImplementAdvice => "advice",
             Caller::Implement => "implementation",
@@ -85,6 +90,7 @@ pub fn default_profile(caller: Caller) -> &'static [&'static str] {
             "refine_requirement",
         ],
         Caller::SpecReword => &["get_requirement", "validate_spec", "refine_requirement"],
+        Caller::ScenarioGenerate => &["get_requirement", "feature_read", "step_definitions_find"],
         Caller::StepsGenerate => &[
             "project_inspect",
             "feature_list",

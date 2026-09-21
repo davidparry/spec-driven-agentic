@@ -11,8 +11,10 @@ use crate::application::assets::{
     find_missing_steps, find_requirement, load_effective_spec, production_path,
     production_type_name, steps_path, unit_test_path,
 };
+use crate::application::scenario_service::ScenarioService;
 use crate::application::spec_service::ServiceError;
 use crate::application::{DEFAULT_LLM_ATTEMPTS, LlmReplyError};
+use crate::domain::feature;
 use crate::domain::generation::{
     append_step_definitions, looks_like_step_definitions, looks_like_step_fragment,
     looks_like_unit_test, looks_like_unit_test_for, looks_like_unit_test_fragment,
@@ -22,6 +24,10 @@ use crate::domain::generation::{
 };
 use crate::domain::language::Language;
 use crate::domain::memory::ProjectStructure;
+use crate::domain::scenario::{
+    ProposedScenario, parse_scenarios_checked, scenario_prompt, scenario_template, tagged,
+    taken_names,
+};
 use crate::domain::steps::{MissingStep, extract_patterns, source_extension};
 use crate::ports::{
     ChangeStore, FeatureCatalog, LlmConversation, Prompter, SourceFiles, SpecRepository, ToolBroker,
@@ -46,6 +52,23 @@ pub struct GenerationReport {
     /// polished version passed validation.
     pub source: String,
     pub summary: String,
+    #[serde(rename = "nextStep")]
+    pub next_step: String,
+}
+
+/// Reply of `spec scenario generate`.
+#[derive(Debug, Serialize, PartialEq, Eq)]
+pub struct ScenarioGenerationReport {
+    pub feature: String,
+    /// The scenario names staged, in the order the criteria gave them.
+    pub scenarios: Vec<String>,
+    /// The requirement's criteria count, so a reader can see at a glance
+    /// that every one of them got a scenario.
+    pub criteria: usize,
+    pub staged: bool,
+    /// "template" for the literal reading of the criteria, "llm" when a
+    /// model's version passed validation.
+    pub source: String,
     #[serde(rename = "nextStep")]
     pub next_step: String,
 }
@@ -341,6 +364,145 @@ where
             next_step: "Review the assertions (they are yours to sharpen), apply with spec changes commit, then run spec test (expect RED)."
                 .into(),
         })
+    }
+
+    /// One requirement's acceptance criteria, as tagged scenarios in its
+    /// feature file (staged).
+    ///
+    /// The deterministic template reads each criterion literally and is
+    /// always available; a model, when one is resolved, is asked to say
+    /// the same thing in the vocabulary the feature file already uses.
+    /// Its reply is used only when it still covers every criterion, so
+    /// the coverage the workshop grades cannot be lost to a chatty model.
+    pub fn scenario_generate<SC, SF>(
+        &self,
+        prompter: &mut dyn Prompter,
+        scenarios: &ScenarioService<SC, SF>,
+        req_id: &str,
+        feature_override: Option<&str>,
+    ) -> Result<ScenarioGenerationReport, ServiceError>
+    where
+        SC: ChangeStore,
+        SF: FeatureCatalog,
+    {
+        let spec = load_effective_spec(&self.spec, &self.store)?;
+        let requirement = find_requirement(&spec, req_id)?;
+        let feature_path = feature_override
+            .map(str::to_string)
+            .or_else(|| requirement.feature_file.clone())
+            .ok_or_else(|| {
+                ServiceError(format!(
+                    "{req_id} has no feature file. Point it at one with spec set-feature {req_id} --file <path>, or pass --feature."
+                ))
+            })?;
+        let doc = self.features.read(&feature_path).ok();
+        if let Some(doc) = &doc {
+            let already = tagged(doc, req_id);
+            if !already.is_empty() {
+                return Err(ServiceError(format!(
+                    "{feature_path} already has {} scenario(s) tagged @{req_id}: {}. Change them with spec scenario update, or delete them first.",
+                    already.len(),
+                    already.join(", ")
+                )));
+            }
+        }
+        let template = scenario_template(requirement);
+        if template.is_empty() {
+            return Err(ServiceError(format!(
+                "None of {req_id}'s acceptance criteria are Given/When/Then shaped, so there is nothing to turn into scenarios. Reword it with spec reword {req_id}, or write the scenarios with spec scenario add."
+            )));
+        }
+        let taken = taken_names(doc.as_ref());
+        let (proposed, source) = self.author_scenarios(
+            prompter,
+            requirement,
+            &feature_path,
+            &doc,
+            &template,
+            &taken,
+        );
+        let mut added = Vec::new();
+        for scenario in &proposed {
+            scenarios.add_scenario(
+                &feature_path,
+                req_id,
+                &scenario.name,
+                scenario.steps.clone(),
+            )?;
+            added.push(scenario.name.clone());
+        }
+        Ok(ScenarioGenerationReport {
+            feature: feature_path,
+            scenarios: added,
+            criteria: requirement.acceptance_criteria.len(),
+            staged: true,
+            source,
+            next_step: "Read the steps against the acceptance criteria, apply with spec changes commit, then run spec steps missing."
+                .into(),
+        })
+    }
+
+    /// The model's scenarios when they cover every criterion, the literal
+    /// template otherwise. Never fails: the template is always usable.
+    fn author_scenarios(
+        &self,
+        prompter: &mut dyn Prompter,
+        requirement: &crate::domain::model::Requirement,
+        feature_path: &str,
+        doc: &Option<crate::domain::feature::FeatureDoc>,
+        template: &[ProposedScenario],
+        taken: &[String],
+    ) -> (Vec<ProposedScenario>, String) {
+        let Some(llm) = &self.llm else {
+            return (template.to_vec(), "template".into());
+        };
+        // Only whole, parsed criteria get a scenario, so a model asked for
+        // one per criterion must be asked for the number the template
+        // found - not the number the requirement declares.
+        let expected = template.len();
+        let known_steps = self.defined_step_patterns();
+        let rendered = doc.as_ref().map(feature::render).unwrap_or_default();
+        let prompt = scenario_prompt(requirement, feature_path, &rendered, &known_steps, template);
+        let work = prompter.working(&format!(
+            "Asking {} to write the scenarios - working",
+            llm.model()
+        ));
+        let retries = std::cell::RefCell::new(Vec::<String>::new());
+        let outcome = llm.ask(
+            prompter,
+            &prompt,
+            |response| parse_scenarios_checked(response, expected, taken),
+            |attempt, of, reason| {
+                retries
+                    .borrow_mut()
+                    .push(retry_note(attempt, of, reason, "the scenarios"));
+            },
+        );
+        drop(work);
+        for message in retries.into_inner() {
+            prompter.warn(&message);
+        }
+        match outcome {
+            Ok(scenarios) => (scenarios, "llm".into()),
+            Err(_) => (template.to_vec(), "template".into()),
+        }
+    }
+
+    /// Every step expression the project already has a definition for.
+    /// Advisory context for the prompt, so an empty result is not an error.
+    fn defined_step_patterns(&self) -> Vec<String> {
+        self.sources
+            .sources(source_extension(self.language))
+            .map(|sources| {
+                let mut patterns: Vec<String> = sources
+                    .iter()
+                    .flat_map(|file| extract_patterns(self.language, &file.content))
+                    .collect();
+                patterns.sort();
+                patterns.dedup();
+                patterns
+            })
+            .unwrap_or_default()
     }
 
     /// The hybrid pass: prefer validated LLM output, fall back to the
@@ -1084,5 +1246,253 @@ mod tests {
                 None,
             );
         assert_eq!(service.steps_missing().unwrap_err().0, "disk on fire");
+    }
+
+    // --- scenario generate -------------------------------------------------
+
+    /// A second handle onto one store, so a test can read what the
+    /// service staged while the service still owns the store.
+    #[derive(Clone, Default)]
+    struct SharedStore(std::rc::Rc<InMemoryChangeStore>);
+
+    impl ChangeStore for SharedStore {
+        fn stage(
+            &self,
+            path: &str,
+            content: &str,
+            summary: &str,
+        ) -> Result<StagedChange, crate::ports::StageError> {
+            self.0.stage(path, content, summary)
+        }
+        fn changes(&self) -> Result<Vec<StagedChange>, crate::ports::StageError> {
+            self.0.changes()
+        }
+        fn content(&self, path: &str) -> Result<Option<String>, crate::ports::StageError> {
+            self.0.content(path)
+        }
+        fn commit(&self) -> Result<Vec<StagedChange>, crate::ports::StageError> {
+            self.0.commit()
+        }
+        fn discard(&self) -> Result<Vec<StagedChange>, crate::ports::StageError> {
+            self.0.discard()
+        }
+    }
+
+    type Scenarios = ScenarioService<SharedStore, InMemoryFeatureCatalog>;
+
+    fn scenarios() -> (Scenarios, SharedStore) {
+        let store = SharedStore::default();
+        (
+            ScenarioService::new(store.clone(), calculator_catalog()),
+            store,
+        )
+    }
+
+    fn staged_feature(store: &SharedStore) -> String {
+        store
+            .content("features/calc.feature")
+            .unwrap()
+            .expect("the feature file was staged")
+    }
+
+    /// REQ-001's one criterion, read literally: the criterion's own words
+    /// become the steps, because without a model nothing knows the file
+    /// already says "Given a calculator".
+    #[test]
+    fn without_a_model_the_scenarios_are_the_literal_reading_of_the_criteria() {
+        let service = service(vec![], None);
+        let (scenarios, store) = scenarios();
+        let report = service
+            .scenario_generate(&mut Watching::default(), &scenarios, "REQ-001", None)
+            .unwrap();
+        assert_eq!(report.source, "template");
+        assert_eq!(report.criteria, 1);
+        assert_eq!(report.scenarios, vec!["Adds two numbers case 1"]);
+        assert!(report.staged);
+        let staged = staged_feature(&store);
+        assert!(staged.contains("@REQ-001"), "{staged}");
+        assert!(
+            staged.contains("Scenario: Adds two numbers case 1"),
+            "{staged}"
+        );
+        assert!(staged.contains("When add is called"), "{staged}");
+        // The scenario already in the file is carried over, not replaced.
+        assert!(staged.contains("Scenario: Adds\n"), "{staged}");
+    }
+
+    #[test]
+    fn a_model_reply_in_the_files_vocabulary_is_preferred_over_the_template() {
+        let reply = r#"[{"name": "Two numbers are summed",
+                         "steps": ["Given a calculator", "When add is called with \"1,2\"", "Then the result is 3"]}]"#;
+        let service = service(vec![], Some(FakeLlm::replying(reply)));
+        let (scenarios, store) = scenarios();
+        let report = service
+            .scenario_generate(&mut Watching::default(), &scenarios, "REQ-001", None)
+            .unwrap();
+        assert_eq!(report.source, "llm");
+        assert_eq!(report.scenarios, vec!["Two numbers are summed"]);
+        let staged = staged_feature(&store);
+        assert!(
+            staged.contains("When add is called with \"1,2\""),
+            "{staged}"
+        );
+        assert!(
+            !staged.contains("Adds two numbers case 1"),
+            "the template should not also be staged: {staged}"
+        );
+    }
+
+    /// The contract is one scenario per criterion. A reply covering
+    /// fewer is refused after its retries and the template stands in, so
+    /// coverage is never quietly lost to a chatty model.
+    #[test]
+    fn a_reply_that_does_not_cover_every_criterion_falls_back_to_the_template() {
+        let service = service(vec![], Some(FakeLlm::replying("[]")));
+        let (scenarios, _store) = scenarios();
+        let report = service
+            .scenario_generate(&mut Watching::default(), &scenarios, "REQ-001", None)
+            .unwrap();
+        assert_eq!(report.source, "template");
+        assert_eq!(report.scenarios, vec!["Adds two numbers case 1"]);
+    }
+
+    #[test]
+    fn a_reply_reusing_a_name_already_in_the_file_falls_back_to_the_template() {
+        let reply = r#"[{"name": "Adds", "steps": ["Given a calculator", "When x", "Then the result is 3"]}]"#;
+        let service = service(vec![], Some(FakeLlm::replying(reply)));
+        let (scenarios, _store) = scenarios();
+        let report = service
+            .scenario_generate(&mut Watching::default(), &scenarios, "REQ-001", None)
+            .unwrap();
+        assert_eq!(report.source, "template");
+    }
+
+    #[test]
+    fn the_model_is_shown_the_feature_file_the_defined_steps_and_the_template() {
+        let reply = r#"[{"name": "N", "steps": ["Given a calculator", "When x", "Then y"]}]"#;
+        let service = service(
+            vec![crate::test_support::covered_steps_source()],
+            Some(FakeLlm::replying(reply)),
+        );
+        let (scenarios, _store) = scenarios();
+        service
+            .scenario_generate(&mut Watching::default(), &scenarios, "REQ-001", None)
+            .unwrap();
+        let sent = service.llm.as_ref().unwrap().chat().prompts.borrow()[0].clone();
+        assert!(
+            sent.contains("Scenario: Adds"),
+            "the file is context: {sent}"
+        );
+        assert!(
+            sent.contains("add is called with {string}"),
+            "the defined steps are context: {sent}"
+        );
+        assert!(
+            sent.contains(r#"Given "1,2""#),
+            "the literal template is context: {sent}"
+        );
+    }
+
+    /// Re-running would stack a second copy of every scenario, so the
+    /// second run is refused and names the two ways out.
+    #[test]
+    fn a_requirement_that_already_has_tagged_scenarios_is_refused() {
+        let mut catalog = InMemoryFeatureCatalog::default();
+        catalog.files.insert(
+            "features/calc.feature".into(),
+            "Feature: Calc\n\n  @REQ-001\n  Scenario: Adds\n    Given a calculator\n    When add is called with \"1,2\"\n    Then the result is 3\n".into(),
+        );
+        let service = GenerationService::new(
+            catalog,
+            FakeSources(vec![]),
+            InMemoryChangeStore::default(),
+            InMemorySpecRepository(Ok(calculator_spec())),
+            Language::Java,
+            flat_layout(Language::Java),
+            None::<ResolvedLlm<FakeLlm>>,
+        );
+        let (scenarios, _store) = scenarios();
+        let error = service
+            .scenario_generate(&mut Watching::default(), &scenarios, "REQ-001", None)
+            .unwrap_err();
+        assert!(
+            error
+                .0
+                .contains("already has 1 scenario(s) tagged @REQ-001"),
+            "{}",
+            error.0
+        );
+        assert!(error.0.contains("spec scenario update"), "{}", error.0);
+    }
+
+    /// REQ-002 has no `featureFile`, and guessing one would scatter the
+    /// suite across files nobody asked for.
+    #[test]
+    fn a_requirement_with_no_feature_file_says_how_to_give_it_one() {
+        let service = service(vec![], None);
+        let (scenarios, _store) = scenarios();
+        let error = service
+            .scenario_generate(&mut Watching::default(), &scenarios, "REQ-002", None)
+            .unwrap_err();
+        assert!(error.0.contains("spec set-feature REQ-002"), "{}", error.0);
+        assert!(error.0.contains("--feature"), "{}", error.0);
+    }
+
+    #[test]
+    fn the_feature_flag_stands_in_for_a_requirement_without_one() {
+        let service = service(vec![], None);
+        let (scenarios, _store) = scenarios();
+        let report = service
+            .scenario_generate(
+                &mut Watching::default(),
+                &scenarios,
+                "REQ-002",
+                Some("features/calc.feature"),
+            )
+            .unwrap();
+        assert_eq!(report.feature, "features/calc.feature");
+        assert_eq!(report.scenarios, vec!["Subtracts two numbers case 1"]);
+    }
+
+    /// Nothing to read literally means nothing to hand a model either -
+    /// its reply would have no criteria to be checked against.
+    #[test]
+    fn criteria_that_are_not_given_when_then_shaped_are_refused_with_the_remedy() {
+        let mut spec = calculator_spec();
+        spec.requirements[0].acceptance_criteria = vec!["the calculator is fast".into()];
+        let service = GenerationService::new(
+            calculator_catalog(),
+            FakeSources(vec![]),
+            InMemoryChangeStore::default(),
+            InMemorySpecRepository(Ok(spec)),
+            Language::Java,
+            flat_layout(Language::Java),
+            None::<ResolvedLlm<FakeLlm>>,
+        );
+        let (scenarios, _store) = scenarios();
+        let error = service
+            .scenario_generate(&mut Watching::default(), &scenarios, "REQ-001", None)
+            .unwrap_err();
+        assert!(error.0.contains("Given/When/Then shaped"), "{}", error.0);
+        assert!(error.0.contains("spec reword REQ-001"), "{}", error.0);
+    }
+
+    #[test]
+    fn the_wait_for_the_scenarios_is_narrated() {
+        let reply = r#"[{"name": "N", "steps": ["Given a", "When b", "Then c"]}]"#;
+        let service = service(vec![], Some(FakeLlm::replying(reply)));
+        let (scenarios, _store) = scenarios();
+        let mut prompter = Watching::default();
+        service
+            .scenario_generate(&mut prompter, &scenarios, "REQ-001", None)
+            .unwrap();
+        assert!(
+            prompter
+                .0
+                .iter()
+                .any(|line| line.contains("Asking fake-model to write the scenarios")),
+            "{:?}",
+            prompter.0
+        );
     }
 }

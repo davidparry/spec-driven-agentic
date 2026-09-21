@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::domain::generation::{decode_json, strip_code_fences};
 use crate::domain::model::Requirement;
 use crate::domain::prompts::{RenderedPrompt, render};
-use crate::domain::refiner::suggestion_for;
+use crate::domain::refiner::{covers_edge_case, suggestion_for};
 
 /// One requirement the model proposes from the description.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -58,6 +58,37 @@ pub fn parse_proposals_checked(reply: &str) -> Result<Vec<ProposedRequirement>, 
         );
     }
     Ok(complete)
+}
+
+/// Why a batch of proposals is not worth staging yet, or `None` once
+/// every one of them covers an edge case.
+///
+/// The wording review applies this same rule to every draft, so a
+/// proposal that only passes clean input earns a finding the moment the
+/// author has finished reading it. Spending a retry here instead trades
+/// a round the author never sees for a second walk through wording they
+/// have already approved.
+pub fn missing_edge_case(proposals: &[ProposedRequirement]) -> Option<String> {
+    let happy: Vec<String> = proposals
+        .iter()
+        .filter(|proposal| {
+            !proposal
+                .acceptance_criteria
+                .iter()
+                .any(|criterion| covers_edge_case(criterion))
+        })
+        .map(|proposal| format!("{:?}", proposal.title))
+        .collect();
+    let (subject, verb) = match happy.len() {
+        0 => return None,
+        1 => ("requirement", "covers"),
+        _ => ("requirements", "cover"),
+    };
+    Some(format!(
+        "{subject} {} {verb} only happy paths - add at least one edge case \
+         to each (empty, invalid, or error input)",
+        happy.join(", ")
+    ))
 }
 
 impl ProposedRequirement {
@@ -327,6 +358,13 @@ mod tests {
         assert!(prompt.system.contains("ONLY a JSON array"));
         assert!(prompt.system.contains("acceptanceCriteria"));
         assert!(prompt.system.contains("Do not invent capabilities"));
+        // The edge case earns a rule of its own: buried as the fourth
+        // clause of the criteria rule, models dropped it.
+        assert!(
+            prompt
+                .system
+                .contains("at least one criterion covering an edge case")
+        );
         // A broad description is unpacked into its conventional parts,
         // never refused with an empty array.
         assert!(prompt.system.contains("unpack"));
@@ -360,6 +398,53 @@ mod tests {
         assert_eq!(proposals.len(), 2);
         assert_eq!(proposals[0].title, "Empty string returns zero");
         assert_eq!(proposals[1].acceptance_criteria.len(), 1);
+    }
+
+    #[test]
+    fn a_happy_path_only_proposal_is_named_in_the_retry_reason() {
+        let reply = r#"[
+            {"title": "Comma separated numbers are summed",
+             "story": "As a user, I want comma sums so that totals come from one input.",
+             "acceptanceCriteria": ["Given \"1,2\", when add is called, then the result is 3"]},
+            {"title": "Empty string returns zero",
+             "story": "As a user, I want empty input to be 0 so that no input is safe.",
+             "acceptanceCriteria": ["Given an empty string \"\", when add is called, then the result is 0"]}
+        ]"#;
+        assert_eq!(
+            missing_edge_case(&parse_proposals(reply)),
+            Some(
+                "requirement \"Comma separated numbers are summed\" covers only happy \
+                 paths - add at least one edge case to each (empty, invalid, or error input)"
+                    .to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn several_happy_path_proposals_are_all_named_and_read_as_plural() {
+        let reply = r#"[
+            {"title": "Comma sums", "story": "As a user, I want sums so that totals arrive.",
+             "acceptanceCriteria": ["Given \"1,2\", when add is called, then the result is 3"]},
+            {"title": "Newline sums", "story": "As a user, I want sums so that totals arrive.",
+             "acceptanceCriteria": ["Given \"1\\n2\", when add is called, then the result is 3"]}
+        ]"#;
+        let reason = missing_edge_case(&parse_proposals(reply)).unwrap();
+        assert!(
+            reason.starts_with(
+                "requirements \"Comma sums\", \"Newline sums\" cover only happy paths"
+            ),
+            "reason: {reason}"
+        );
+    }
+
+    /// The canonical edge case is written `""`, with no keyword to match -
+    /// the same courtesy the wording review extends.
+    #[test]
+    fn an_empty_input_criterion_satisfies_the_check_without_the_word_empty() {
+        let reply = r#"[{"title": "T", "story": "As a user, I want x so that y.",
+            "acceptanceCriteria": ["Given \"1,2\", when add is called, then the result is 3",
+                                   "Given \"\", when add is called, then the result is 0"]}]"#;
+        assert_eq!(missing_edge_case(&parse_proposals(reply)), None);
     }
 
     #[test]

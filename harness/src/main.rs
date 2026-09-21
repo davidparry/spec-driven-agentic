@@ -255,6 +255,13 @@ enum ScenarioCommand {
         #[arg(long = "step")]
         steps: Vec<String>,
     },
+    /// Write a requirement's scenarios from its acceptance criteria (staged)
+    Generate {
+        req_id: String,
+        /// Feature file to append to; defaults to the requirement's own
+        #[arg(long)]
+        feature: Option<String>,
+    },
     /// Replace a scenario's steps and/or requirement tag (staged)
     Update {
         #[arg(long)]
@@ -542,7 +549,9 @@ fn execute(
             print_json(&service.inspect())
         }
         Command::Feature(command) => run_feature(root, command),
-        Command::Scenario(command) => run_scenario(root, command),
+        Command::Scenario(command) => {
+            run_scenario(root, model, attempts, tools, max_rounds, command)
+        }
         Command::Changes(command) => run_changes(root, command),
         Command::Init(args) => run_init(root, args),
         Command::Greenfield => run_greenfield(root, model, attempts),
@@ -1152,9 +1161,37 @@ fn run_changes(root: &Path, command: &ChangesCommand) -> anyhow::Result<()> {
     print_json(&report)
 }
 
-fn run_scenario(root: &Path, command: &ScenarioCommand) -> anyhow::Result<()> {
+fn run_scenario(
+    root: &Path,
+    model: Option<&str>,
+    attempts: u32,
+    tools: Option<&str>,
+    max_rounds: Option<u32>,
+    command: &ScenarioCommand,
+) -> anyhow::Result<()> {
     let service = scenario_service(root);
+    if let ScenarioCommand::Generate { req_id, feature } = command {
+        let generation = generation_service(
+            root,
+            model,
+            attempts,
+            tools,
+            max_rounds,
+            Caller::ScenarioGenerate,
+        )?;
+        let mut prompter = interactive_prompter(Prompts::Incidental);
+        let report = generation.scenario_generate(
+            prompter.as_mut(),
+            &service,
+            req_id,
+            feature.as_deref(),
+        )?;
+        drop(prompter);
+        let _ = mutation_service(root, DEFAULT_LLM_ATTEMPTS).set_feature(req_id, &report.feature);
+        return print_json(&report);
+    }
     let report = match command {
+        ScenarioCommand::Generate { .. } => unreachable!("handled above"),
         ScenarioCommand::Add {
             feature,
             req,
