@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.5
 
 - `spec refactor` now carries the refactor out. It was a phase marker: it
   logged the `--note`, moved GREEN to REFACTOR, and told you to run the
