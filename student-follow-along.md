@@ -842,6 +842,9 @@ spec changes commit && spec test
 
 ## Step 7 — Homework
 
+The workshop is over and your score is already in. Nothing below is
+graded, and Step 6 reads the same 7/7 before and after it.
+
 - **REQ-004, REQ-005, REQ-006** are still `pending` in the spec — run
   Exercise 2's prompt again with that id in place of REQ-003, one at a time.
 - **REQ-007** — the requirement *you* drafted — is waiting to be taken to
