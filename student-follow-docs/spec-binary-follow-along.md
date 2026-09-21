@@ -45,16 +45,21 @@ output, file contents, or an aside.
 What you actually have to do:
 
 - **Steps 1, 2 and 3 are the workshop.** They are the hands-on hour.
-- **Check your work** scores the two exercises, and it passes as soon as
-  Step 3 is done. That is the bar.
-- **Steps 4 and 5 finish the kata** — the remaining four requirements and
-  the final green bar. Real work, but on your own time.
+- **[Step 4](#step-4--check-your-work) scores the two exercises**, and it
+  passes as soon as Step 3 is done. That is the bar, and it is where the
+  workshop ends.
+- **[Step 5](#step-5--homework) is homework** — the remaining four
+  requirements and the final green bar, on your own time. Nothing there is
+  graded.
 - **[Optional extras](#optional-extras)** at the end are after-class
   material. Nothing depends on them and nothing grades them.
 
 The last two sections, [Reset / start over](#reset--start-over) and
 [If you get stuck](#if-you-get-stuck), are recovery recipes rather than
 part of the run. Use what applies.
+
+[spec-binary-steps.md](spec-binary-steps.md) is the same run as a numbered
+list of bare commands, one per step.
 
 ---
 
@@ -222,7 +227,7 @@ Nothing downstream means anything on a broken baseline.
 ## Step 2 — Exercise 1: draft REQ-007
 
 Exercise 1 agrees on a requirement. It does **not** write scenarios or
-code, and REQ-007 stays `pending` until Step 4.
+code, and REQ-007 stays `pending` until the homework in Step 5.
 
 You do not write the requirement, and **you start from the same prompt the
 agent path uses** — word for word, the block Step 4 of
@@ -536,7 +541,7 @@ Extras A, B and C at the end of this page take Exercise 1 apart — the
 structure gate, the wording gate, and the catalog. They are the most
 instructive few minutes on the page, and they are also entirely optional:
 nothing later depends on them and nothing grades them. Do them after
-Step 5, or after the workshop.
+Step 4, or after the workshop.
 
 ---
 
@@ -1039,12 +1044,59 @@ notice what it recorded while it was there: `mark-implemented` writes the
 `featureFile` of the `@REQ-003`-tagged feature back into the requirement,
 which is what makes the staged spec validate.
 
-That is the loop. Everything left is repetition — and at this point
-[Check your work](#check-your-work) already scores 7/7.
+That is the loop. Everything left is repetition — so go score it in
+[Step 4](#step-4--check-your-work), which is where the workshop ends. It
+already reads 7/7.
 
 ---
 
-## Step 4 — Finish the kata: REQ-004, REQ-005, REQ-006, then REQ-007
+## Step 4 — Check your work
+
+**Do this**
+
+```bash
+scripts/verify-workshop-run.sh check
+```
+
+**Expect all seven PASS:**
+
+```text
+  PASS  REQ-007 was drafted into the spec
+  PASS  the spec is valid
+  PASS  REQ-007 wording is refine-clean
+  PASS  REQ-007 covers the first-line delimiter declaration
+  PASS  REQ-003 status is 'implemented' in the spec
+  PASS  @REQ-003 scenarios cover every acceptance criterion (2 tagged, 2 criteria)
+  PASS  REQ-003 unit test asserts every acceptance criterion (2 @Test naming REQ-003)
+```
+
+The first four grade Exercise 1, the last three grade Exercise 2 — so all
+seven pass as soon as Step 3 is done. That is why this is where the
+workshop ends. Run it again after the homework if you like; the score does
+not move, because Step 5 is the rest of the kata rather than more of the
+exercises.
+
+None of the optional extras changes the score either. The verifier reads
+the merged spec tree, so the split catalog in Extra C and the extra child
+file in Extra D both still score 7/7.
+
+Note what is not graded: your wording, anywhere. The REQ-007 paragraph you
+and the model settled on is yours, so the verifier asks the same two
+questions you asked in Exercise 1 — does `spec validate` pass, does
+`spec refine` come back clean — rather than diffing your prose against
+someone else's. Any FAIL line names the artifact to revisit and which
+criterion is unaccounted for.
+[../student-follow-along.md](../student-follow-along.md) walks through the
+two most common partial results in detail.
+
+---
+
+## Step 5 — Homework
+
+The workshop is over and your score is already in. What follows is the
+rest of the kata — REQ-004, REQ-005, REQ-006, and then REQ-007, the one
+you drafted yourself — on the plane home. Nothing here is graded, and
+[Step 4](#step-4--check-your-work) scores the same 7/7 before and after.
 
 Same recipe every time. Substitute the id and the scenarios.
 
@@ -1086,7 +1138,8 @@ scenario counts and their bars — are fixed. REQ-007 is the one you drafted
 in Step 2, and its criteria came from the model: the observed run came
 back with four, where the row above assumes two. One scenario per
 criterion is the rule, so more criteria means more scenarios, more unit
-tests, and a higher total than the 25 quoted here and in Step 5. Count
+tests, and a higher total than the 25 quoted here and in the final bar
+below. Count
 your own `spec show REQ-007` and expect your bar to differ. Nothing grades
 the number.
 
@@ -1207,9 +1260,9 @@ it on purpose if you want to.
 One more note on the commands: `spec steps` has exactly two subcommands,
 `missing` and `generate`. There is no `spec steps find`.
 
----
+### The final bar
 
-## Step 5 — Done
+When all four are done:
 
 **Do this**
 
@@ -1227,7 +1280,7 @@ mvn -f kata/pom.xml test
 - `spec validate` — `"valid": true`.
 - `spec test` — GREEN, 0 failures. The count below is the observed run's;
   yours tracks however many criteria REQ-007 came back with in Step 2, as
-  Step 4 explains. Zero failures is the bar, not the total.
+  the REQ-007 note above explains. Zero failures is the bar, not the total.
 - `mvn -f kata/pom.xml test` — the same bar from Maven directly, with no
   harness in the middle:
 
@@ -1242,50 +1295,10 @@ mvn -f kata/pom.xml test
 
 ---
 
-## Check your work
-
-**Do this**
-
-```bash
-scripts/verify-workshop-run.sh check
-```
-
-**Expect all seven PASS:**
-
-```text
-  PASS  REQ-007 was drafted into the spec
-  PASS  the spec is valid
-  PASS  REQ-007 wording is refine-clean
-  PASS  REQ-007 covers the first-line delimiter declaration
-  PASS  REQ-003 status is 'implemented' in the spec
-  PASS  @REQ-003 scenarios cover every acceptance criterion (2 tagged, 2 criteria)
-  PASS  REQ-003 unit test asserts every acceptance criterion (2 @Test naming REQ-003)
-```
-
-The first four grade Exercise 1, the last three grade Exercise 2 — so all
-seven pass as soon as Step 3 is done. You can run it there and run it
-again at the end; the score does not move, because Steps 4 and 5 are the
-rest of the kata rather than more of the exercises.
-
-None of the optional extras changes the score either. The verifier reads
-the merged spec tree, so the split catalog in Extra C and the extra child
-file in Extra D both still score 7/7.
-
-Note what is not graded: your wording, anywhere. The REQ-007 paragraph you
-and the model settled on is yours, so the verifier asks the same two
-questions you asked in Exercise 1 — does `spec validate` pass, does
-`spec refine` come back clean — rather than diffing your prose against
-someone else's. Any FAIL line names the artifact to revisit and which
-criterion is unaccounted for.
-[../student-follow-along.md](../student-follow-along.md) walks through the
-two most common partial results in detail.
-
----
-
 ## Optional extras
 
 **None of this is required and none of it is graded.** The workshop
-finishes at "Check your work". What follows takes the machinery apart so
+finishes at [Step 4](#step-4--check-your-work). What follows takes the machinery apart so
 you can see why it behaves the way it does, and it is the most
 instructive quarter-hour on the page — but it is after-class material.
 

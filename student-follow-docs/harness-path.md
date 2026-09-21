@@ -324,9 +324,27 @@ spec mark-implemented REQ-003 && spec changes commit
 Decline it the first time through — that prompt skips exactly the
 checkpoint this exercise is for.
 
-## Step 4 — Remaining pending: REQ-004, REQ-005, REQ-006, then REQ-007
+## Step 4 — Check your work
 
-Repeat the recipe. Suggested scenarios (reuse existing steps):
+```bash
+scripts/verify-workshop-run.sh check
+```
+
+All seven checks pass as soon as Step 3 is done — four grade Exercise 1
+and three grade Exercise 2 — so this is where the workshop ends. It is
+safe to run from this path: it asks whether each of REQ-003's acceptance
+criteria reaches a scenario tagged `@REQ-003` and an assertion in a
+`@Test` that names the requirement, so the names `spec scenario add` and
+`spec unittest generate` produce are fine. Watch the scenario count — one
+scenario per criterion, and REQ-003 has two.
+
+Run it before the stretch below, which deliberately adds a pending
+REQ-008 and so moves you off that bar.
+
+## Step 5 — Homework: REQ-004, REQ-005, REQ-006, then REQ-007
+
+Your score is already in; none of this is graded. Repeat the recipe on
+your own time. Suggested scenarios (reuse existing steps):
 
 | Id | Scenario name | When I add | Then |
 | --- | --- | --- | --- |
@@ -349,7 +367,7 @@ Gherkin cannot put a real newline inside `"…"`. Write `\n` in the
 `PatternSyntaxException`. Take the RED bar first, then `Pattern.quote` the
 delimiter.
 
-## Step 5 — Done
+### The final bar
 
 ```bash
 spec list
@@ -359,16 +377,7 @@ spec test                          # GREEN: 25 tests, 0 failures
 ```
 
 That is the harness success bar: **every requirement status is
-`implemented`**. `scripts/verify-workshop-run.sh check` grades the same
-end state and is safe to run from this path: it asks whether each of
-REQ-003's acceptance criteria reaches a scenario tagged `@REQ-003` and an
-assertion in a `@Test` that names the requirement, so the names
-`spec scenario add` and `spec unittest generate` produce are fine. Watch the
-scenario count — one `spec scenario add` per criterion, and REQ-003 has
-two.
-
-Check it before the stretch below, which deliberately adds a pending
-REQ-008 and so moves you off that bar.
+`implemented`**.
 
 ### Stretch: split the spec into a catalog
 
