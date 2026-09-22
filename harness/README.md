@@ -64,9 +64,10 @@ that one idea:
   [Ollama model](#ollama-model).
 
 The harness grew out of a talk and hands-on class that teaches spec-driven
-development with BDD and TDD — this repository is that workshop (see
-[../student-follow-docs/student-follow-along.md](../student-follow-docs/student-follow-along.md)). The class
-walks students through the loop in Cursor against **this binary**
+development with BDD and TDD. The class lives in
+[../talks/WORKSHOP.md](../talks/WORKSHOP.md); students follow
+[../student-follow-docs/student-follow-along.md](../student-follow-docs/student-follow-along.md).
+The class walks students through the loop in Cursor against **this binary**
 (`spec mcp serve`, 25 tools). To finish the same kata from the terminal
 with scoped profiles (Wi-Fi off), follow
 [../student-follow-docs/harness-path.md](../student-follow-docs/harness-path.md).

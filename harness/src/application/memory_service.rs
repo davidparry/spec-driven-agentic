@@ -121,6 +121,10 @@ where
         ask: Option<LayoutAsk<'_>>,
         prompter: &mut dyn Prompter,
     ) -> Result<ProjectMemory, MemoryError> {
+        // The tree walk is the slow part of shell startup, and it happens
+        // before the prompt. The ellipsis runs for the whole read and
+        // settles before anything is asked.
+        let work = prompter.working("Reading the project - working");
         // Read before the scan writes: a module root already recorded is
         // the answer to this same question from an earlier session.
         let remembered = self
@@ -129,14 +133,17 @@ where
             .and_then(|memory| memory.structure.module_root);
         let scan = self.scan(chosen)?;
         let Some(language) = Language::parse(&scan.memory.language) else {
+            drop(work);
             return Ok(scan.memory);
         };
         if scan.module_candidates.is_empty() {
+            drop(work);
             return Ok(scan.memory);
         }
         let tree = self.inventory.list_tree();
         let spec_features = self.spec_features(&tree);
         let build_tool = scan.memory.build_tool.clone();
+        drop(work);
         let input = LayoutInput {
             language,
             build_tool: build_tool.as_deref(),
@@ -544,6 +551,7 @@ mod tests {
     struct ScriptedPrompter {
         confirm: bool,
         said: RefCell<Vec<String>>,
+        started: RefCell<Vec<String>>,
     }
 
     impl ScriptedPrompter {
@@ -551,6 +559,7 @@ mod tests {
             Self {
                 confirm,
                 said: RefCell::new(Vec::new()),
+                started: RefCell::new(Vec::new()),
             }
         }
 
@@ -562,6 +571,10 @@ mod tests {
     impl Prompter for ScriptedPrompter {
         fn tell(&mut self, message: &str) {
             self.said.borrow_mut().push(message.to_string());
+        }
+        fn working(&mut self, message: &str) -> Box<dyn crate::ports::Working> {
+            self.started.borrow_mut().push(message.to_string());
+            Box::new(crate::ports::ToldOnce)
         }
         fn ask(&mut self, _question: &str) -> Result<String, crate::ports::PromptError> {
             Err(crate::ports::PromptError("nobody to ask".into()))
@@ -633,6 +646,10 @@ mod tests {
             .unwrap();
         assert_eq!(memory.structure.module_root, None);
         assert_eq!(prompter.transcript(), "");
+        assert_eq!(
+            prompter.started.borrow().as_slice(),
+            ["Reading the project - working"]
+        );
     }
 
     #[test]

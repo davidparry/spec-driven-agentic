@@ -210,6 +210,7 @@ impl Greenfield {
         }
 
         let language = self.ensure_project(prompter)?;
+        self.ensure_spec(prompter)?;
         refresh_project_memory(&self.root, Some(language));
         prompter.tell(&format!(
             "Project language: {} ({}).",
@@ -473,6 +474,32 @@ impl Greenfield {
         Ok(language)
     }
 
+    /// A detected project can still have no spec. Drafting reads
+    /// `requirements/requirements.json`, so a missing or unreadable file
+    /// is written as an empty catalog before the wizard starts. A file
+    /// that can be read is left as it is.
+    fn ensure_spec(&self, prompter: &mut dyn Prompter) -> Result<(), String> {
+        let path = self.root.join(SPEC_PATH);
+        if std::fs::read_to_string(&path).is_ok_and(|text| !text.trim().is_empty()) {
+            return Ok(());
+        }
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|error| format!("{SPEC_PATH} is not writable - {error}"))?;
+        }
+        let spec = Spec {
+            project: project_name(&self.root),
+            ..Spec::default()
+        };
+        let body = serde_json::to_string_pretty(&spec).expect("an empty spec always serializes");
+        std::fs::write(&path, format!("{body}\n"))
+            .map_err(|error| format!("{SPEC_PATH} is not writable - {error}"))?;
+        prompter.tell(&format!(
+            "Created {SPEC_PATH} — there was no readable spec yet."
+        ));
+        Ok(())
+    }
+
     /// Turn the requirement's criteria into a tagged feature file. The
     /// title comes from the committed spec, so a rewording that changed
     /// it still names the feature correctly.
@@ -726,6 +753,18 @@ fn attempt_budget(answer: &str) -> u32 {
     answer.parse::<u32>().ok().filter(|n| *n > 0).unwrap_or(1)
 }
 
+/// The directory name, for the empty spec's `project` field.
+fn project_name(root: &Path) -> String {
+    root.canonicalize()
+        .ok()
+        .and_then(|path| {
+            path.file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+        })
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| "project".into())
+}
+
 /// Flatten a TDD error into the message the human sees.
 fn tdd_message(error: TddError) -> String {
     match error {
@@ -738,6 +777,57 @@ fn tdd_message(error: TddError) -> String {
 mod tests {
     use super::*;
     use crate::ports::LlmError;
+
+    struct Told {
+        lines: Vec<String>,
+    }
+
+    impl Prompter for Told {
+        fn tell(&mut self, message: &str) {
+            self.lines.push(message.to_string());
+        }
+        fn ask(&mut self, _question: &str) -> Result<String, crate::ports::PromptError> {
+            Ok(String::new())
+        }
+        fn confirm(&mut self, _question: &str) -> Result<bool, crate::ports::PromptError> {
+            Ok(false)
+        }
+    }
+
+    #[test]
+    fn a_project_without_a_readable_spec_gets_an_empty_requirements_file() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("pom.xml"), "<project/>").unwrap();
+        let greenfield = Greenfield::new(dir.path().to_path_buf(), None);
+        let mut prompter = Told { lines: Vec::new() };
+        greenfield.ensure_spec(&mut prompter).unwrap();
+        let path = dir.path().join(SPEC_PATH);
+        let text = std::fs::read_to_string(&path).unwrap();
+        let spec: Spec = serde_json::from_str(&text).unwrap();
+        assert!(spec.requirements.is_empty());
+        assert_eq!(
+            spec.project,
+            dir.path().file_name().unwrap().to_string_lossy()
+        );
+        assert_eq!(
+            prompter.lines,
+            vec!["Created requirements/requirements.json — there was no readable spec yet."]
+        );
+
+        std::fs::write(&path, "   \n").unwrap();
+        let mut empty = Told { lines: Vec::new() };
+        greenfield.ensure_spec(&mut empty).unwrap();
+        assert_eq!(empty.lines.len(), 1, "an empty file is not a spec");
+        let replaced: Spec =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert!(replaced.requirements.is_empty());
+
+        std::fs::write(&path, "{ nope").unwrap();
+        let mut again = Told { lines: Vec::new() };
+        greenfield.ensure_spec(&mut again).unwrap();
+        assert!(again.lines.is_empty(), "a readable file is left alone");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{ nope");
+    }
 
     #[test]
     fn language_answers_parse_with_aliases() {
