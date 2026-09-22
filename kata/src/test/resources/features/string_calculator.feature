@@ -28,5 +28,17 @@ Feature: String Calculator addition
     When I add "42"
     Then the result is 42
 
+  @REQ-003
+  Scenario: Two numbers separated by a comma are summed
+    Given a string calculator
+    When I add "1,2"
+    Then the result is 3
+
+  @REQ-003
+  Scenario: Two larger numbers separated by a comma are summed
+    Given a string calculator
+    When I add "10,20"
+    Then the result is 30
+
   # REQ-003+: scenarios are written live during the workshop from the
   # acceptance criteria. Ask the agent to call get_requirement("REQ-003").

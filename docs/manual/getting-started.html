@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "searchindex-eaaa3625.js";
+            window.path_to_searchindex_js = "searchindex-1707d030.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-372d77fe.js"></script>
@@ -250,6 +250,27 @@ spec mark-implemented REQ-001 &amp;&amp; spec changes commit
 same commands. The kata-specific recipe (paths under <code>kata/</code>, draft
 REQ-007, then REQ-003…007 to implemented) is
 <a href="workshop.html">This workshop’s String Calculator</a>.</p>
+<h2 id="where-spec-keeps-its-files"><a class="header" href="#where-spec-keeps-its-files">Where spec keeps its files</a></h2>
+<p>Harness files for a project live in one directory, <code>.spec/</code>, under the
+project root (<code>--root</code>, or the current directory). They sit next to
+<code>requirements/</code>, not loose in the root. <code>spec init</code> creates the
+directory. The next <code>spec</code> run also creates it, and moves an older
+root-level file into the matching path below when that new path is
+still empty.</p>
+<pre><code class="language-text">.spec/
+  config.toml    tracked — LLM, timeouts, per-command tool profiles
+  state.json     TDD phase log
+  memory.json    discovered language, libraries, and layout
+  history        interactive-shell command history
+  cache/         cached LLM responses and tool catalogs
+  log/           daily diagnostic logs
+  staged/        mutations waiting for spec changes commit
+</code></pre>
+<p>Only <code>config.toml</code> is meant to be committed. <code>spec init</code> writes a
+gitignore that ignores <code>.spec/*</code> and keeps <code>.spec/config.toml</code>. The
+other children are generated. Deleting <code>cache/</code> or <code>log/</code> is always
+safe. Deleting <code>state.json</code> resets the phase to START. Deleting
+<code>staged/</code> throws away mutations that have not been committed.</p>
 <h2 id="working-against-an-existing-project"><a class="header" href="#working-against-an-existing-project">Working against an existing project</a></h2>
 <p>Every command takes <code>--root</code> (see <a href="global-flags.html">Global flags</a>), so
 you can point the harness at any project:</p>

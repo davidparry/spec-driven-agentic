@@ -70,11 +70,12 @@ An empty directory reports no languages and points you at
 
 Session start (`spec` shell, `spec mcp serve`), [`spec init`](init.md),
 [`spec greenfield`](greenfield.md), and every LLM command refresh
-`.spec-memory.json` in the project root: language, BDD framework, build
+`.spec/memory.json`: language, BDD framework, build
 tool, libraries parsed from the manifest, and a short layout outline.
 A language chosen at greenfield/init is kept even if other marker files
-appear later. That file is project identity (commit it); every model
-system prompt opens with a compact brief of its contents.
+appear later. The file is generated project identity under `.spec/`
+(gitignored, same as the rest of that directory except `config.toml`);
+every model system prompt opens with a compact brief of its contents.
 
 ## Notes
 

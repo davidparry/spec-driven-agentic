@@ -1,6 +1,6 @@
 //! Rustyline-backed [`InteractiveShell`]: line editing, arrow-key
-//! history recall, and a session history persisted to `.spec-history`
-//! in the project root so the next shell picks up where this one left
+//! history recall, and a session history persisted to `.spec/history`
+//! so the next shell picks up where this one left
 //! off. Ctrl+C and Ctrl+D surface as structured session endings.
 
 use std::path::PathBuf;
@@ -104,7 +104,9 @@ mod tests {
     #[test]
     fn the_session_history_persists_between_shells() {
         let dir = tempfile::tempdir().unwrap();
-        let history = dir.path().join(".spec-history");
+        let history =
+            crate::adapters::spec_home::spec_file(dir.path(), crate::domain::HISTORY_FILE);
+        std::fs::create_dir_all(history.parent().unwrap()).unwrap();
         let mut first = ReadlineShell::open(history.clone()).unwrap();
         first.remember("spec list");
         first.remember("state");
@@ -116,14 +118,18 @@ mod tests {
     #[test]
     fn a_missing_history_file_is_a_fresh_session() {
         let dir = tempfile::tempdir().unwrap();
-        let shell = ReadlineShell::open(dir.path().join(".spec-history")).unwrap();
+        let shell = ReadlineShell::open(crate::adapters::spec_home::spec_file(
+            dir.path(),
+            crate::domain::HISTORY_FILE,
+        ))
+        .unwrap();
         assert!(shell.recalled().is_empty());
     }
 
     #[test]
     fn an_unwritable_history_path_is_a_structured_error() {
         let dir = tempfile::tempdir().unwrap();
-        let mut shell = ReadlineShell::open(dir.path().join("no-such-dir/.spec-history")).unwrap();
+        let mut shell = ReadlineShell::open(dir.path().join("no-such-dir/.spec/history")).unwrap();
         shell.remember("spec list");
         let error = shell.save_session().unwrap_err();
         assert!(error.0.contains("is not writable -"), "error: {}", error.0);

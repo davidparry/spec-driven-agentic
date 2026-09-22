@@ -10,7 +10,7 @@ Three companion pages, and it is worth knowing which is which:
 - [harness-path.md](harness-path.md) is this path's **reference** — the
   same commands as terse recipes, plus the design notes on tool profiles
   and what the harness discovers. Read it when you want to know *why*.
-- [../student-follow-along.md](../student-follow-along.md) is the
+- [student-follow-along.md](student-follow-along.md) is the
   **agent-centric hour** — the same MCP server driven by Cursor through
   prompts. Read it when you want the workshop as it is presented.
 - [pi-path.md](pi-path.md) points a free local agent at that same server,
@@ -159,12 +159,12 @@ spec list
 spec test
 ```
 
-`spec model use` writes the model into `.spec.toml` and prints where it
+`spec model use` writes the model into `.spec/config.toml` and prints where it
 went:
 
 ```text
 Configured model: qwen3.8-flash-next:125b-mlx
-Written to: /path/to/tdd-bdd-agentic/.spec.toml
+Written to: /path/to/tdd-bdd-agentic/.spec/config.toml
 ```
 
 Do this even if you plan to implement by hand — `spec implement` and the
@@ -231,7 +231,7 @@ code, and REQ-007 stays `pending` until the homework in Step 5.
 
 You do not write the requirement, and **you start from the same prompt the
 agent path uses** — word for word, the block Step 4 of
-[../student-follow-along.md](../student-follow-along.md) tells you to
+[student-follow-along.md](student-follow-along.md) tells you to
 paste into your agent. Same intent, same words, both paths. What differs
 is everything that happens after you press Enter, and that is the
 comparison worth making.
@@ -303,7 +303,7 @@ requirement to copy the house style. REQ-005 is a well-chosen one to
 open, because it is the requirement that already writes a newline as
 `"1\n2,3"`.
 
-That is the `spec-draft` profile in `.spec.toml` at work, and it is also
+That is the `spec-draft` profile in `.spec/config.toml` at work, and it is also
 the answer to the last row of the table:
 
 ```toml
@@ -498,8 +498,8 @@ what tells the two replies apart: `Staged changes applied to the working
 tree.` means the edit is now in your files.
 
 The staged **bytes** live beside the manifest, under
-`.spec-staged/files/` mirroring the project layout — so the file above is
-at `.spec-staged/files/requirements/requirements.json`. Open it when you
+`.spec/staged/files/` mirroring the project layout — so the file above is
+at `.spec/staged/files/requirements/requirements.json`. Open it when you
 want to read the exact content before approving it. Your working tree is
 untouched until `spec changes commit`.
 
@@ -737,7 +737,7 @@ reads as two appends rather than one generation:
 
 That cumulative summary is the point of the checkpoint: it tells you you
 are approving two scenarios, not one. Open
-`.spec-staged/files/kata/src/test/resources/features/string_calculator.feature`
+`.spec/staged/files/kata/src/test/resources/features/string_calculator.feature`
 and read the Gherkin itself before you commit. Is that the behavior you
 want? This is the spec review, and it is the cheapest place in the whole
 loop to change your mind.
@@ -1086,7 +1086,7 @@ questions you asked in Exercise 1 — does `spec validate` pass, does
 `spec refine` come back clean — rather than diffing your prose against
 someone else's. Any FAIL line names the artifact to revisit and which
 criterion is unaccounted for.
-[../student-follow-along.md](../student-follow-along.md) walks through the
+[student-follow-along.md](student-follow-along.md) walks through the
 two most common partial results in detail.
 
 ---
@@ -1699,7 +1699,7 @@ cd /tmp/spec-gates
 
 The `-b spec-gates` matters: git will not check the same branch out in two
 worktrees, so this cuts a scratch branch from your run instead. The gates
-read the phase from `.spec-state.json`, which is per-directory, so the new
+read the phase from `.spec/state.json`, which is per-directory, so the new
 worktree starts at phase `START` — run `spec test` once to establish a bar
 before you try to trip anything.
 
@@ -1776,13 +1776,26 @@ Or throw the branch away and cut it again:
 git checkout trunk && git branch -D workshop-spec && git checkout -b workshop-spec trunk
 ```
 
-The runner's own scratch files are all gitignored and safe to delete at
-any time: `.spec-staged/` (the staging area), `.spec-state.json` (the TDD
-phase log), `.spec-cache/`, `.spec-log/`, and `.spec-memory.json` (the
-project-layout discovery memory). Deleting `.spec-state.json` resets the
-phase to `START`, which means `spec refactor` and `spec mark-implemented`
-will refuse until you run `spec test` once. That is not a bug; it is the
-same gate as everything else.
+The harness keeps its own files in one directory, `.spec/`, next to
+`requirements/`:
+
+```text
+.spec/config.toml    tracked configuration (model, timeouts, tool profiles)
+.spec/state.json     TDD phase log
+.spec/memory.json    discovered language and layout
+.spec/history        interactive-shell history
+.spec/cache/         cached model replies and tool catalogs
+.spec/log/           daily diagnostic logs
+.spec/staged/        mutations waiting for spec changes commit
+```
+
+Everything there except `config.toml` is gitignored. Deleting
+`.spec/cache/` or `.spec/log/` is always safe. Deleting `.spec/staged/`
+throws away mutations that have not been committed. Deleting
+`.spec/state.json` resets the phase to `START`, which means
+`spec refactor` and `spec mark-implemented` will refuse until you run
+`spec test` once. That is not a bug; it is the same gate as everything
+else.
 
 Do not merge kata completion to `trunk`. `scripts/check-workshop-start.sh`
 has to keep passing there.

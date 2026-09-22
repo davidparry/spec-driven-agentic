@@ -11,6 +11,9 @@ use std::fs;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 
+use spec_harness::adapters::spec_home::spec_file;
+use spec_harness::domain::CONFIG_FILE;
+
 const SPEC: &str = env!("CARGO_BIN_EXE_spec");
 
 const VALID: &str = r#"{
@@ -85,8 +88,10 @@ fn project(spec: &str) -> tempfile::TempDir {
     // pulled. The short discovery timeout keeps the commands that
     // survey MCP servers from spending the default one finding out
     // there are none.
+    let config = spec_file(dir.path(), CONFIG_FILE);
+    fs::create_dir_all(config.parent().unwrap()).unwrap();
     fs::write(
-        dir.path().join(".spec.toml"),
+        &config,
         "[llm]\nendpoint = \"http://127.0.0.1:1\"\n\n\
          [tools]\ndiscovery_timeout_seconds = 1\ncall_timeout_seconds = 1\n",
     )

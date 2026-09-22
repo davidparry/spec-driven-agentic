@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-eaaa3625.js";
+            window.path_to_searchindex_js = "../searchindex-1707d030.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-372d77fe.js"></script>
@@ -182,7 +182,7 @@
                     <main>
                         <h1 id="spec-changes"><a class="header" href="#spec-changes">spec changes</a></h1>
 <p>Staged-transaction management. Every file mutation the harness authors
-lands in <code>.spec-staged/</code> first (see <a href="../staged-changes.html">Staged changes</a>);
+lands in <code>.spec/staged/</code> first (see <a href="../staged-changes.html">Staged changes</a>);
 these subcommands are how you review, apply, or drop the transaction.</p>
 <pre><code class="language-text">Usage: spec changes [OPTIONS] &lt;COMMAND&gt;
 
@@ -219,7 +219,7 @@ create or modify the file, and a one-line summary of the change.</p>
 }
 </code></pre>
 <p>To see the full content of a staged file, read it directly under
-<code>.spec-staged/</code> — the layout mirrors the project tree.</p>
+<code>.spec/staged/</code> — the layout mirrors the project tree.</p>
 <hr>
 <h2 id="spec-changes-commit"><a class="header" href="#spec-changes-commit">spec changes commit</a></h2>
 <p>Apply every staged change to the working tree atomically and clear
@@ -264,7 +264,7 @@ on-disk frozen tool).</p>
 <h3 id="what-is-checked"><a class="header" href="#what-is-checked">What is checked</a></h3>
 <ul>
 <li>Every <code>.feature</code> file under the root parses as valid Gherkin.</li>
-<li>Every file in the staging area (<code>.spec-staged/</code>) that is a feature
+<li>Every file in the staging area (<code>.spec/staged/</code>) that is a feature
 file parses too — you cannot commit a transaction containing broken
 Gherkin without knowing.</li>
 <li>Scenario requirement tags (<code>@REQ-...</code>) refer to ids that exist in

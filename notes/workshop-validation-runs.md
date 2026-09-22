@@ -1,6 +1,6 @@
 # The pi and spec workshop validation runs
 
-Two full end-to-end runs of `student-follow-along.md`, one driven by the
+Two full end-to-end runs of `student-follow-docs/student-follow-along.md`, one driven by the
 `pi` agent through the MCP server and one driven by the `spec` CLI
 directly. Both covered the entire document: every demo and every homework
 requirement. The stretch exercise exists only on the CLI path — it turns
@@ -195,7 +195,7 @@ That closed the in-process half. The cross-process half stayed open until
 0.5.4, when six concurrent `spec scenario add` processes were found
 crashing the manifest and losing updates while five of them reported
 success. That fix writes the manifest atomically and guards the staging
-directory with an advisory lock on `.spec-staged/.lock`, in
+directory with an advisory lock on `.spec/staged/.lock`, in
 `harness/src/adapters/staging_lock.rs`. Note the ordering constraint it
 records: an advisory lock belongs to the open file rather than to the
 process, so a second handle in the same process blocks its own process as

@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "searchindex-eaaa3625.js";
+            window.path_to_searchindex_js = "searchindex-1707d030.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-372d77fe.js"></script>
@@ -209,8 +209,10 @@ it to real code.</li>
 fine-grained behavior beneath the scenario.</li>
 </ul>
 <h2 id="the-phase-machine"><a class="header" href="#the-phase-machine">The phase machine</a></h2>
-<p>The persistent TDD phase lives in <code>.spec-state.json</code> under the
-project root and survives between invocations and across MCP sessions.</p>
+<p>The persistent TDD phase lives in <code>.spec/state.json</code> and survives
+between invocations and across MCP sessions. That file, and the rest of
+the harness’s project files, live in the <code>.spec/</code> directory — see
+<a href="getting-started.html#where-spec-keeps-its-files">Where spec keeps its files</a>.</p>
 <pre><code class="language-text">          tests fail                    tests pass
   (start) ──────────► RED ────────────► GREEN ──┐
                        ▲                  │     │ spec refactor

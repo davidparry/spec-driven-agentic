@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-eaaa3625.js";
+            window.path_to_searchindex_js = "../searchindex-1707d030.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-372d77fe.js"></script>
@@ -182,7 +182,7 @@
                     <main>
                         <h1 id="spec-config"><a class="header" href="#spec-config">spec config</a></h1>
 <p>Print every configuration key the harness uses and whether the value is a
-code <strong>default</strong> or was read from the project file (<code>.spec.toml</code>).</p>
+code <strong>default</strong> or was read from the project file (<code>.spec/config.toml</code>).</p>
 <pre><code class="language-text">Usage: spec config [OPTIONS]
 </code></pre>
 <h2 id="flags"><a class="header" href="#flags">Flags</a></h2>
@@ -214,11 +214,11 @@ directories. Run <code>spec config</code> from the project root, or point
 <code>--root</code> at it, or <code>file</code> reads <code>(none)</code> and every key is a default.</p>
 <pre><code class="language-bash">spec config
 </code></pre>
-<pre><code class="language-text">file	/Users/you/code/calculator/.spec.toml
-llm.model	qwen3.8-flash-next:125b-mlx	/Users/you/code/calculator/.spec.toml
+<pre><code class="language-text">file	/Users/you/code/calculator/.spec/config.toml
+llm.model	qwen3.8-flash-next:125b-mlx	/Users/you/code/calculator/.spec/config.toml
 llm.endpoint	http://localhost:11434	(default)
-llm.timeout_seconds	900	/Users/you/code/calculator/.spec.toml
-llm.cache_ttl_seconds	600	/Users/you/code/calculator/.spec.toml
+llm.timeout_seconds	900	/Users/you/code/calculator/.spec/config.toml
+llm.cache_ttl_seconds	600	/Users/you/code/calculator/.spec/config.toml
 llm.retry	3	(default)
 tools.max_rounds	12	(default)
 tools.confirm	command_run	(default)

@@ -60,7 +60,7 @@ Before any test has ever run, the phase is the starting state and
 
 ## Where the state lives
 
-`.spec-state.json` under the project root. It is a chronological log of
+`.spec/state.json`, inside the project's `.spec/` directory. It is a chronological log of
 timestamped entries — one per test run, refactor, or implementation
 attempt — plus `instructions` that explain how to read the schema. The
 file keeps the full history so a human can audit the loop; `spec state`

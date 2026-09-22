@@ -136,7 +136,7 @@ pub fn server_of(name: &str) -> Option<&str> {
         .map(|(server, _)| server)
 }
 
-/// Split `origin:tool` as written in `.spec.toml`. The namespaced catalog
+/// Split `origin:tool` as written in `.spec/config.toml`. The namespaced catalog
 /// form `server__tool` is not a qualified reference.
 fn qualified_parts(name: &str) -> Option<(&str, &str)> {
     let (origin, tool) = name.split_once(ORIGIN_SEPARATOR)?;

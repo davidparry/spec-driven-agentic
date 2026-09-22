@@ -27,7 +27,7 @@
     {
       "id": "REQ-003",
       "title": "Two numbers separated by a comma are summed",
-      "status": "pending",
+      "status": "implemented",
       "story": "As a user, I want comma-separated numbers to be summed so that I can add multiple values at once.",
       "acceptanceCriteria": [
         "Given \"1,2\", when add is called, then the result is 3",
@@ -67,6 +67,19 @@
         "Given \"-1,-2\", when add is called, then the exception message lists every negative number: -1 and -2"
       ],
       "featureFile": "kata/src/test/resources/features/string_calculator.feature"
+    },
+    {
+      "id": "REQ-007",
+      "title": "Custom delimiter declared on the first line",
+      "status": "pending",
+      "story": "As a user, I want to declare a custom delimiter on the first line of the input so that I can sum numbers separated by a character of my choosing instead of a comma or a newline.",
+      "acceptanceCriteria": [
+        "Given \"//+\\n1+2\", when add is called, then the result is 3",
+        "Given \"//;\\n1;2;3\", when add is called, then the result is 6",
+        "Given \"//+\\n7\", when add is called, then the result is 7",
+        "Given \"//+\\n1,2\", when add is called, then an error is raised because the comma is not a delimiter once \"//+\" declares one",
+        "Given \"//+\\n1++2\", when add is called, then an error is raised because the empty token between the two \"+\" characters is not a number"
+      ]
     }
   ]
 }

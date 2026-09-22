@@ -9,7 +9,7 @@
 //! manifest halfway through somebody else's write and died on
 //! "staging manifest is not valid JSON".
 //!
-//! An advisory lock on `.spec-staged/.lock` closes the second hole and,
+//! An advisory lock on `.spec/staged/.lock` closes the second hole and,
 //! held for the whole read-modify-write cycle rather than just the
 //! write, the first as well. The kernel drops the lock when the file
 //! descriptor closes, which happens on a normal return, on an error
@@ -225,7 +225,7 @@ mod tests {
     #[test]
     fn a_claim_creates_the_lock_file_inside_the_area_it_guards() {
         let dir = tempfile::tempdir().unwrap();
-        let staged = dir.path().join(".spec-staged");
+        let staged = dir.path().join(".spec/staged");
         let held = claim(&staged).unwrap();
         assert!(staged.join(LOCK_FILE).is_file());
         drop(held);
@@ -234,7 +234,7 @@ mod tests {
     #[test]
     fn a_second_claim_on_the_same_thread_nests_instead_of_deadlocking() {
         let dir = tempfile::tempdir().unwrap();
-        let staged = dir.path().join(".spec-staged");
+        let staged = dir.path().join(".spec/staged");
         let outer = claim(&staged).unwrap();
         let inner = claim(&staged).unwrap();
         drop(inner);
@@ -252,7 +252,7 @@ mod tests {
     #[test]
     fn another_thread_waits_for_the_claim_and_then_gets_it() {
         let dir = tempfile::tempdir().unwrap();
-        let staged = dir.path().join(".spec-staged");
+        let staged = dir.path().join(".spec/staged");
         let held = claim(&staged).unwrap();
         let order = Arc::new(Mutex::new(Vec::new()));
         let waiting = std::thread::spawn({
@@ -318,7 +318,7 @@ mod tests {
     #[test]
     fn a_handle_on_a_deleted_lock_file_is_not_mistaken_for_the_live_one() {
         let dir = tempfile::tempdir().unwrap();
-        let staged = dir.path().join(".spec-staged");
+        let staged = dir.path().join(".spec/staged");
         std::fs::create_dir_all(&staged).unwrap();
         let path = staged.join(LOCK_FILE);
         std::fs::write(&path, "").unwrap();

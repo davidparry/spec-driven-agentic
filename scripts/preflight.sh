@@ -109,10 +109,10 @@ else
 fi
 
 # 8. Slides present (open them once manually to warm the CDN cache)
-if [ -f slides/index.html ]; then
-    ok "slides/index.html present — open it once now to cache the reveal.js CDN assets"
+if [ -f talks/slides/index.html ]; then
+    ok "talks/slides/index.html present — open it once now to cache the reveal.js CDN assets"
 else
-    bad "slides/index.html missing" "restore it from git"
+    bad "talks/slides/index.html missing" "restore it from git"
 fi
 
 echo

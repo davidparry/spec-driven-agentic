@@ -39,28 +39,18 @@ target/
 
 # GitHub Pages build output
 _site/
-.spec-history
 
-# Cached LLM responses; safe to delete at any time
-.spec-cache/
-
-# Diagnostic logs written by the spec harness; safe to delete at any time
-.spec-log/
-
-# TDD phase log and staged mutations written by the spec harness
-.spec-state.json
-.spec-staged/
+# Spec harness home: generated state stays untracked; configuration is shared.
+.spec/*
+!.spec/config.toml
 
 # macOS Finder metadata
 .DS_Store
 # Claude Code: keep shared project settings; ignore machine-local files
 .claude/*
 !.claude/settings.json
-/.spec-memory.json
-/.spec-state.json
 
 /harness/.bdd-log/
 /harness/.cargo
 /harness/.cargo/
-./.spec-memory.json
-/harness/.cargo/
+/harness/.spec-history

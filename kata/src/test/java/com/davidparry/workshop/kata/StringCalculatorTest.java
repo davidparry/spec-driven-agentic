@@ -31,7 +31,15 @@ class StringCalculatorTest {
         assertThat(calculator.add("7")).isEqualTo(7);
     }
 
-    // REQ-003 .. REQ-006: tests are generated live from acceptance criteria
-    // by the agent during the workshop. Ask the agent to call
-    // get_requirement("REQ-003") and write the failing tests here.
+    @Test
+    @DisplayName("REQ-003: Given \"1,2\", when add is called, then the result is 3")
+    void shouldSumTwoNumbersSeparatedByComma() {
+        assertThat(calculator.add("1,2")).isEqualTo(3);
+    }
+
+    @Test
+    @DisplayName("REQ-003: Given \"10,20\", when add is called, then the result is 30")
+    void shouldSumTwoMultiDigitNumbersSeparatedByComma() {
+        assertThat(calculator.add("10,20")).isEqualTo(30);
+    }
 }

@@ -51,7 +51,7 @@ pub fn project_memory_service(
     )
 }
 
-/// Scan the project and persist `.spec-memory.json`. Failures are logged
+/// Scan the project and persist `.spec/memory.json`. Failures are logged
 /// and yield empty memory so a read-only root still runs.
 pub fn refresh_project_memory(root: &Path, chosen: Option<Language>) -> ProjectMemory {
     project_memory_service(root.to_path_buf())

@@ -194,7 +194,7 @@ bar.
   with a `nextStep` that teaches the correct move.
   `requirement_mark_implemented` is GREEN-gated and needs a tagged
   scenario.
-- **State survives.** The phase machine lives on disk, so a
+- **State survives.** The phase machine lives in `.spec/state.json`, so a
   reconnecting agent (or a human taking over in the harness) continues
   from the same place.
 
@@ -202,13 +202,14 @@ bar.
 
 | Flag | Description |
 | --- | --- |
-| `--root <ROOT>` | Project root the served tools operate on. Defaults to the process's working directory. |
+| `--root <ROOT>` | Project root the served tools operate on. A concrete path wins. An empty value or an unexpanded `${...}` template is ignored; `SPEC_PROJECT_DIR` is used when it names a real path. Otherwise the directory the process was launched in. |
 | `--model <MODEL>` | Model override for the serving session. MCP generation tools do not call Ollama; they stage templates. |
 
 ## Notes
 
 - The server logs nothing to stdout except protocol traffic (stdout
-  is the wire). Diagnostics go to stderr.
+  is the wire). Diagnostics go to daily-rolling files under `.spec/log/`
+  and fall back to stderr only when that directory cannot be created.
 - One server serves one project root. Point different projects at
   different server entries.
 - Backup Inspector: `npx @modelcontextprotocol/inspector spec mcp serve --root $PWD`.

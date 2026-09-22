@@ -6,7 +6,7 @@ prompts, and what you should see at every step.
 
 **The big idea:** there is one MCP server — `spec mcp serve` (25 tools).
 Cursor talks to it, so does the bundled `smoke-test.jar`, and so does a free
-local agent if you take the [pi path](student-follow-docs/pi-path.md). Your
+local agent if you take the [pi path](pi-path.md). Your
 hour is the workflow it enables: draft a requirement *with* an agent, let the
 server critique it (structure first, wording second), then drive it
 spec → Gherkin → RED → GREEN → REFACTOR through **tools**, with you
@@ -14,7 +14,7 @@ reviewing staged changes before they land.
 
 Curious what order all these files would be created in if you started from
 zero? See the greenfield build order, first file to last:
-[student-follow-docs/greenfield-flow.md](student-follow-docs/greenfield-flow.md).
+[greenfield-flow.md](greenfield-flow.md).
 
 **One convention to know before you write a criterion.** Where a
 requirement needs a newline in its *data* — the newline delimiter, the
@@ -43,14 +43,14 @@ You need:
 - **Optional, and the fully offline route:** [Ollama](https://ollama.com) with
   `qwen3.8-flash-next:125b-mlx` pulled. Two Wi-Fi-off alternatives, both on the
   **same server**:
-  [the pi path](student-follow-docs/pi-path.md) — a free MIT agent you run with
+  [the pi path](pi-path.md) — a free MIT agent you run with
   `pi -nbt` so these 25 tools are all it gets — and
-  [the harness path](student-follow-docs/harness-path.md), the `spec` runner
+  [the harness path](harness-path.md), the `spec` runner
   with narrower tools per command. The harness path is the command
   reference; if you would rather be walked through it the way this page
   walks you through Cursor — every command in order, with the expected
   output after each one — follow
-  [student-follow-docs/spec-binary-follow-along.md](student-follow-docs/spec-binary-follow-along.md)
+  [spec-binary-follow-along.md](spec-binary-follow-along.md)
   instead.
 
 Build once at home so the room's Wi-Fi never matters:
@@ -72,7 +72,7 @@ Scenario: An empty string returns zero # features/string_calculator.feature:14
 
 …and continues through every scenario in the suite. Compare yours against
 the full captured run:
-[student-follow-docs/pre-step.log](student-follow-docs/pre-step.log).
+[pre-step.log](pre-step.log).
 (That log carries a stray `[Fatal Error]
 TEST-com.example.FooTest.xml...` line mid-output. Nothing in the kata is
 called `FooTest`, so you will most likely not see it — it is a malformed
@@ -99,7 +99,7 @@ mvn -q -pl smoke-test package && mvn -q -f kata/pom.xml test
 **Expect:** a green build with the exact same output as your at-home build —
 the `workshop` branch is a fresh copy of `trunk`, so nothing has changed yet.
 Compare against
-[student-follow-docs/pre-step.log](student-follow-docs/pre-step.log) if
+[pre-step.log](pre-step.log) if
 anything looks off. If it's red, raise a hand and pair with a neighbor —
 don't fall behind debugging alone.
 
@@ -127,7 +127,7 @@ require an `initialize` handshake. The Java MCP SDK still opens the stdio
 session with the classic `initialize` (protocol `2025-11-25`) on first use,
 which you will see in the log, and the server answers it normally. Compare
 yours against the full captured run:
-[student-follow-docs/step2.log](student-follow-docs/step2.log). (The
+[step2.log](step2.log). (The
 interleaved `INFO io.modelcontextprotocol...` lines are SDK logging — normal —
 and the absolute repo paths in the log will differ on your machine.)
 
@@ -156,7 +156,7 @@ Cursor does it, and so does `pi` once its MCP extension is installed.
 That's all the MCP you need today.
 
 To connect your own agent, the ready-to-run configuration lives at
-[config/mcp.json](config/mcp.json):
+[config/mcp.json](../config/mcp.json):
 
 ```json
 {
@@ -170,10 +170,10 @@ To connect your own agent, the ready-to-run configuration lives at
 ```
 
 Cursor users get this automatically — the repo ships `.cursor/mcp.json`
-(the same entry as [`config/mcp.json`](config/mcp.json), plus a
+(the same entry as [`config/mcp.json`](../config/mcp.json), plus a
 `"protocolEra": "auto"` hint for the host). For every other client
 (Claude Desktop, Claude Code, Codex, VS Code, Windsurf, Gemini CLI), see
-[student-follow-docs/setup-mcp.md](student-follow-docs/setup-mcp.md).
+[setup-mcp.md](setup-mcp.md).
 
 ---
 
@@ -181,7 +181,7 @@ Cursor users get this automatically — the repo ships `.cursor/mcp.json`
 
 The repo already registers the server for you in `.cursor/mcp.json`. Open
 Cursor's MCP settings (see
-[student-follow-docs/setup-mcp.md](student-follow-docs/setup-mcp.md) for
+[setup-mcp.md](setup-mcp.md) for
 where to find them) and confirm `spec-driven-server` shows **green**. If it's red:
 `spec` is not on PATH for GUI apps (launch Cursor from a terminal where
 `spec --version` works, or put the absolute binary path in `command`), then
@@ -880,15 +880,19 @@ graded, and Step 6 reads the same 7/7 before and after it.
   a child spec file and re-grading the merged tree. Every tool used there
   has an MCP twin except `include_add`, so on this path you would do the
   include line by hand — which is demo C. Read it in
-  [student-follow-docs/spec-binary-follow-along.md](student-follow-docs/spec-binary-follow-along.md),
+  [spec-binary-follow-along.md](spec-binary-follow-along.md),
   or the command-reference version in
-  [student-follow-docs/harness-path.md](student-follow-docs/harness-path.md).
+  [harness-path.md](harness-path.md).
 
 ---
 
 ## Reset / start over
 
-Everything the exercises touched lives in `kata/` and `requirements/`:
+Everything the exercises touched lives in `kata/` and `requirements/`.
+The harness's own files are separate, under `.spec/` (`config.toml` is
+the tracked configuration; `state.json`, `memory.json`, `history`,
+`cache/`, `log/`, and `staged/` are gitignored). Deleting `.spec/state.json`
+resets the TDD phase to START.
 
 ```bash
 git checkout -- kata requirements     # rewind this branch to the start state

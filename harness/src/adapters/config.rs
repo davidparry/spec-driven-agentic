@@ -1,5 +1,5 @@
 //! TOML configuration adapter: the `[llm]` and `[tools]` blocks of
-//! `.spec.toml` hold the persisted model choice, provider endpoint, and
+//! `.spec/config.toml` hold the persisted model choice, provider endpoint, and
 //! per-command tool profiles.
 
 use std::collections::BTreeMap;
@@ -8,6 +8,7 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use crate::adapters::spec_home::{ensure_parent, spec_file};
 use crate::domain::CONFIG_FILE;
 use crate::domain::config_report::{
     ConfigFileStatus, ConfigReport, DEFAULT_REFACTOR_ATTEMPTS, DEFAULT_TOOLS_CACHE_TTL_SECONDS,
@@ -17,10 +18,10 @@ use crate::domain::config_report::{
 use crate::domain::tool_profile::ProfileOverrides;
 use crate::ports::{LlmError, ModelStore, ToolError, ToolStore};
 
-/// `.spec.toml` under this project root. Missing files stay this path so
-/// first writes create the current name.
+/// `.spec/config.toml` under this project root. Missing files stay this
+/// path so first writes create the current name.
 pub fn config_path(root: &Path) -> PathBuf {
-    root.join(CONFIG_FILE)
+    spec_file(root, CONFIG_FILE)
 }
 
 enum ConfigLoad {
@@ -300,7 +301,7 @@ impl TomlToolStore {
             toml::Value::Array(names.into_iter().map(toml::Value::String).collect()),
         );
         let rendered = toml::to_string_pretty(&table).expect("a plain TOML table always renders");
-        fs::write(&self.config_file, rendered).map_err(|e| {
+        write_config(&self.config_file, &rendered).map_err(|e| {
             ToolError(format!(
                 "config: cannot write {} - {e}",
                 self.config_file.display()
@@ -370,7 +371,7 @@ impl ModelStore for TomlModelStore {
     /// Edit the `model` key and nothing else.
     ///
     /// Re-rendering the parsed table used to rewrite the whole file:
-    /// `spec model use` turned a 3322-byte `.spec.toml` into 1319 bytes
+    /// `spec model use` turned a 3322-byte `.spec/config.toml` into 1319 bytes
     /// and threw away every comment in it, including the block that
     /// documents the `server:tool` naming scheme and all the
     /// commented-out defaults. That is the first command of the
@@ -387,13 +388,18 @@ impl ModelStore for TomlModelStore {
             return Err(LlmError("config: [llm] is not a table".into()));
         }
         let current = fs::read_to_string(&self.config_file).unwrap_or_default();
-        fs::write(&self.config_file, set_model(&current, model)).map_err(|e| {
+        write_config(&self.config_file, &set_model(&current, model)).map_err(|e| {
             LlmError(format!(
                 "config: cannot write {} - {e}",
                 self.config_file.display()
             ))
         })
     }
+}
+
+fn write_config(path: &Path, contents: &str) -> std::io::Result<()> {
+    ensure_parent(path)?;
+    fs::write(path, contents)
 }
 
 /// The file with its `model` line replaced, and every other byte of it
@@ -552,8 +558,7 @@ mod tests {
 
     #[test]
     fn persist_reports_an_unwritable_location() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("no-such-dir").join(CONFIG_FILE);
+        let path = PathBuf::from("/dev/null/nowhere").join(CONFIG_FILE);
         let error = TomlModelStore::new(path).persist("qwen3:8b").unwrap_err();
         assert!(
             error.0.starts_with("config: cannot write"),
@@ -580,7 +585,7 @@ mod tests {
         assert_eq!(store.endpoint(), Some("http://box:11434".to_string()));
     }
 
-    /// The shipped `.spec.toml` is mostly prose: a comment block
+    /// The shipped `.spec/config.toml` is mostly prose: a comment block
     /// explaining `server:tool`, and defaults left commented out so a
     /// student can see what is available. Choosing a model must not
     /// cost them that.
@@ -743,14 +748,15 @@ mod tests {
     }
 
     #[test]
-    fn config_path_is_always_spec_toml() {
+    fn config_path_is_always_inside_spec_home() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        assert_eq!(config_path(root), root.join(CONFIG_FILE));
-        fs::write(root.join(".spec-mcp.toml"), "[llm]\nmodel = \"legacy\"\n").unwrap();
-        assert_eq!(config_path(root), root.join(CONFIG_FILE));
-        fs::write(root.join(CONFIG_FILE), "[llm]\nmodel = \"new\"\n").unwrap();
-        assert_eq!(config_path(root), root.join(CONFIG_FILE));
+        assert_eq!(config_path(root), spec_file(root, CONFIG_FILE));
+        fs::write(root.join(".spec.toml"), "[llm]\nmodel = \"legacy\"\n").unwrap();
+        assert_eq!(config_path(root), spec_file(root, CONFIG_FILE));
+        fs::create_dir_all(spec_file(root, CONFIG_FILE).parent().unwrap()).unwrap();
+        fs::write(spec_file(root, CONFIG_FILE), "[llm]\nmodel = \"new\"\n").unwrap();
+        assert_eq!(config_path(root), spec_file(root, CONFIG_FILE));
     }
 
     #[test]

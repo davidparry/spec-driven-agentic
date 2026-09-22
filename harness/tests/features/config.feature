@@ -1,7 +1,7 @@
 Feature: Project configuration dump
   As a developer checking how the harness is set up
   I want `spec config` to list every key and whether it is a default or came from the file
-  So that I can see what `.spec.toml` actually overrides
+  So that I can see what `.spec/config.toml` actually overrides
 
   Scenario: No config file reports every key as default
     When the configuration is listed
@@ -25,7 +25,7 @@ Feature: Project configuration dump
       implement = ["feature_list"]
       """
     When the configuration is listed
-    Then the config file status contains ".spec.toml"
+    Then the config file status contains ".spec/config.toml"
     And the config value "llm.model" is "mine" from the config file
     And the config value "llm.endpoint" is "http://localhost:11434" from default
     And the config value "llm.timeout_seconds" is "900" from the config file

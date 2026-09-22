@@ -31,8 +31,10 @@ The iteration loop for the spec itself:
 
 ## The phase machine
 
-The persistent TDD phase lives in `.spec-state.json` under the
-project root and survives between invocations and across MCP sessions.
+The persistent TDD phase lives in `.spec/state.json` and survives
+between invocations and across MCP sessions. That file, and the rest of
+the harness's project files, live in the `.spec/` directory — see
+[Where spec keeps its files](getting-started.md#where-spec-keeps-its-files).
 
 ```text
           tests fail                    tests pass

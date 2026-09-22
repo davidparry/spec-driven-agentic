@@ -141,7 +141,7 @@ mod tests {
         fn save_session(&mut self) -> Result<(), ShellError> {
             self.saves += 1;
             if self.save_fails {
-                Err(ShellError(".spec-history is not writable - boom".into()))
+                Err(ShellError(".spec/history is not writable - boom".into()))
             } else {
                 Ok(())
             }

@@ -15,7 +15,9 @@ use rmcp::service::{RoleClient, RunningService};
 use rmcp::{ClientLifecycleMode, ClientServiceExt, ServiceExt as _};
 use serde_json::{Value, json};
 
+use spec_harness::adapters::spec_home::spec_file;
 use spec_harness::domain::model::TestRunSummary;
+use spec_harness::domain::{STAGED_DIR, STATE_FILE};
 use spec_harness::mcp::WorkflowServer;
 use spec_harness::ports::{RunnerError, TestFilter, TestRunner};
 
@@ -756,10 +758,13 @@ async fn broken_project_state_surfaces_as_tool_errors_not_crashes() {
     fs::create_dir_all(dir.path().join("features")).unwrap();
     fs::write(dir.path().join("features/broken.feature"), "not gherkin").unwrap();
     // Corrupt TDD state: get_tdd_state reports the state error.
-    fs::write(dir.path().join(".spec-state.json"), "{{{").unwrap();
+    let state = spec_file(dir.path(), STATE_FILE);
+    fs::create_dir_all(state.parent().unwrap()).unwrap();
+    fs::write(&state, "{{{").unwrap();
     // Corrupt staging manifest: the changes tools report the staging error.
-    fs::create_dir_all(dir.path().join(".spec-staged")).unwrap();
-    fs::write(dir.path().join(".spec-staged/manifest.json"), "{{{").unwrap();
+    let staged = spec_file(dir.path(), STAGED_DIR);
+    fs::create_dir_all(&staged).unwrap();
+    fs::write(staged.join("manifest.json"), "{{{").unwrap();
 
     let client = connect_default(dir.path()).await;
 

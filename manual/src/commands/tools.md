@@ -14,7 +14,7 @@ Commands:
   show      One tool's description and schema
   enable    Attach a tool to a caller (`--for` required)
   disable   Remove a tool from a caller (`--for` required)
-  refresh   Rediscover external servers and rewrite `.spec-cache/tools/`
+  refresh   Rediscover external servers and rewrite `.spec/cache/tools/`
   servers   Registered mcp.json servers and parse problems
 ```
 
@@ -51,7 +51,7 @@ profile, and that call still asks the human to confirm.
 External tools are namespaced `server__tool`. A name in config that is
 not in the catalog is a warning, not a hard failure.
 
-## `.spec.toml` per-command mapping
+## `.spec/config.toml` per-command mapping
 
 Built-in defaults live in code and are also written into
 `[tools.profiles]` by `spec init` so you can see what each command
@@ -79,7 +79,7 @@ Built-in tools keep their catalog names (`validate_spec`). Tools from
 built-in. When both exist, the **bare** name is the built-in. Pin the
 origin when you need to be explicit:
 
-| Written in `.spec.toml` | Resolves to |
+| Written in `.spec/config.toml` | Resolves to |
 | --- | --- |
 | `validate_spec` | built-in |
 | `builtin:validate_spec` | built-in, even if an MCP tool shares the short name |
@@ -87,6 +87,6 @@ origin when you need to be explicit:
 | `self__validate_spec` | same MCP tool (catalog name) |
 
 `builtin` is reserved for the harness's own tools. `spec init` writes
-`.spec.toml` with every key and a live `[tools.profiles]` list for each
+`.spec/config.toml` with every key and a live `[tools.profiles]` list for each
 caller. [`spec config`](config.md) prints the resolved set and whether
 each value is a default or came from the file.

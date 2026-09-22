@@ -92,7 +92,7 @@ on one scenario.
 - A failing run during REFACTOR drops you back to RED — the refactor
   broke behavior.
 
-The phase is stored in `.spec-state.json` and read back by
+The phase is stored in `.spec/state.json` and read back by
 [`spec state`](state.md) and enforced by [`spec refactor`](refactor.md).
 
 ## See also

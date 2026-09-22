@@ -155,7 +155,7 @@ for my approval before changes_commit. Then run_tests — I expect RED.
 ```
 
 From there the loop is the one in
-[student-follow-along.md](../student-follow-along.md): review the staged
+[student-follow-along.md](student-follow-along.md): review the staged
 Gherkin, commit, RED, implement, GREEN, refactor, mark implemented.
 
 ### Two steps need an editor, so plan for them

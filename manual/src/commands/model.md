@@ -28,7 +28,7 @@ Commands: list, current, use
 Highest priority first:
 
 1. **`--model` flag** — this invocation only, never persisted.
-2. **Configuration** — the `model` key in `.spec.toml` under the
+2. **Configuration** — the `model` key in `.spec/config.toml` under the
    project root, written by `spec model use`.
 3. **Discovery** — the first model installed in Ollama, as a
    session-only default. Nothing is written to disk.
@@ -98,7 +98,7 @@ spec model use qwen3.8-flash-next:125b-mlx
 
 ```text
 Configured model: qwen3.8-flash-next:125b-mlx
-Written to /Users/you/code/calculator/.spec.toml
+Written to /Users/you/code/calculator/.spec/config.toml
 ```
 
 The choice is validated against Ollama's installed models — a name
@@ -106,7 +106,7 @@ Ollama does not have is rejected rather than silently saved.
 
 ## The [llm] configuration block
 
-Everything model-related lives under `[llm]` in `.spec.toml`:
+Everything model-related lives under `[llm]` in `.spec/config.toml`:
 
 ```toml
 [llm]

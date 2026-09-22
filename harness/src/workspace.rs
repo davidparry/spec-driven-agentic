@@ -6,7 +6,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::application::spec_service::ProjectLayout;
-use crate::domain::STAGED_DIR;
+use crate::domain::SPEC_DIR;
 use crate::domain::language::{Language, detect_languages};
 use crate::domain::memory::ProjectStructure;
 
@@ -21,7 +21,7 @@ const SKIPPED_DIRS: [&str; 7] = [
     "obj",
     "dist",
     ".git",
-    STAGED_DIR,
+    SPEC_DIR,
 ];
 
 /// The workshop kata layout the frozen `get_requirement` tool reports,
@@ -38,7 +38,7 @@ pub fn workshop_layout() -> ProjectLayout {
 }
 
 /// The project's resolved layout: the recorded one when
-/// `.spec-memory.json` holds it, else a fresh scan that is then cached.
+/// `.spec/memory.json` holds it, else a fresh scan that is then cached.
 /// Mirrors [`primary_language`]'s precedence, so the language and the
 /// layout are answered the same way and `spec inspect` refreshes both.
 pub fn project_layout(root: &Path) -> ProjectStructure {
@@ -270,8 +270,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         fs::write(dir.path().join("pom.xml"), "<project/>").unwrap();
         assert_eq!(primary_language(dir.path()).unwrap(), Language::Java);
+        let memory = crate::adapters::spec_home::spec_file(dir.path(), crate::domain::MEMORY_FILE);
+        fs::create_dir_all(memory.parent().unwrap()).unwrap();
         fs::write(
-            dir.path().join(".spec-memory.json"),
+            &memory,
             r#"{"version":1,"language":"Rust","refreshedAt":"2026-01-01T00:00:00Z"}"#,
         )
         .unwrap();

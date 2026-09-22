@@ -26,6 +26,7 @@ use spec_harness::adapters::prompt_end::AbortOnEndOfInput;
 use spec_harness::adapters::readline_prompt::ReadlinePrompter;
 use spec_harness::adapters::readline_shell::ReadlineShell;
 use spec_harness::adapters::runners::detect_runner;
+use spec_harness::adapters::spec_home::{ensure_spec_home, spec_file};
 use spec_harness::adapters::spinner::{HushingPrompter, Spinner};
 use spec_harness::adapters::tool_cache::CachedDiscovery;
 use spec_harness::application::DEFAULT_LLM_ATTEMPTS;
@@ -52,7 +53,7 @@ use spec_harness::domain::prompts::ask_prompt;
 use spec_harness::domain::spec_validator::{is_structural_issue, structural_repair};
 use spec_harness::domain::tdd::ImplementAttempt;
 use spec_harness::domain::tool_profile::{Caller, resolve};
-use spec_harness::domain::{CACHE_DIR, HISTORY_FILE, LOG_DIR, RECOMMENDED_MODEL};
+use spec_harness::domain::{CACHE_DIR, HISTORY_FILE, LOG_DIR, RECOMMENDED_MODEL, spec_rel};
 use spec_harness::greenfield::{
     DynLlm, Greenfield, parse_language, prompt_language, refresh_project_memory,
     settle_project_memory,
@@ -76,7 +77,7 @@ struct Cli {
     #[arg(long, global = true)]
     model: Option<String>,
 
-    /// Project root (where requirements/ and .spec.toml live)
+    /// Project root (where requirements/ and .spec/config.toml live)
     #[arg(long, global = true, default_value = ".")]
     root: PathBuf,
 
@@ -447,8 +448,46 @@ impl std::fmt::Display for NonzeroExit {
 
 impl std::error::Error for NonzeroExit {}
 
+/// The directory `spec` operates on.
+///
+/// A concrete `--root` wins. An empty value, or an unexpanded template
+/// such as `${CLAUDE_PROJECT_DIR:-.}` (Claude Code stores that string
+/// as-is; it does not apply bash defaults), is not a directory. In that
+/// case `SPEC_PROJECT_DIR` is used when it names a real path. Otherwise
+/// the process keeps the directory it was launched in.
+fn resolve_project_root(flag: PathBuf, spec_project_dir: Option<&str>) -> PathBuf {
+    if usable_root(&flag) {
+        return flag;
+    }
+    if let Some(from_env) = spec_project_dir
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        let path = PathBuf::from(from_env);
+        if usable_root(&path) {
+            return path;
+        }
+    }
+    PathBuf::from(".")
+}
+
+fn usable_root(path: &Path) -> bool {
+    let text = path.to_string_lossy();
+    let trimmed = text.trim();
+    !trimmed.is_empty() && !is_unexpanded_template(trimmed)
+}
+
+fn is_unexpanded_template(value: &str) -> bool {
+    value.contains("${")
+        || value.contains("$CLAUDE_PROJECT_DIR")
+        || value.contains("$SPEC_PROJECT_DIR")
+}
+
 fn main() -> anyhow::Result<()> {
-    let cli = Cli::parse();
+    let mut cli = Cli::parse();
+    let from_env = std::env::var("SPEC_PROJECT_DIR").ok();
+    cli.root = resolve_project_root(cli.root, from_env.as_deref());
+    ensure_spec_home(&cli.root)?;
     // Held until exit so the logging worker thread drains its queue.
     let log_guard = init_logging(cli.debug, &cli.root);
     match cli.command {
@@ -488,7 +527,7 @@ fn main() -> anyhow::Result<()> {
     }
 }
 
-/// Diagnostics go to daily-rolling files under `<root>/.spec-log/`, so
+/// Diagnostics go to daily-rolling files under `<root>/.spec/log/`, so
 /// stdout stays clean for JSON output and the MCP stdio protocol, and
 /// stderr stays clean for user-facing messages. Writes go through an
 /// in-memory queue drained by a dedicated worker thread; the returned
@@ -505,7 +544,7 @@ fn init_logging(debug: bool, root: &Path) -> Option<tracing_appender::non_blocki
     };
     let filter =
         EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_directives));
-    let log_dir = root.join(LOG_DIR);
+    let log_dir = spec_file(root, LOG_DIR);
     if std::fs::create_dir_all(&log_dir).is_err() {
         tracing_subscriber::fmt()
             .with_env_filter(filter)
@@ -850,7 +889,8 @@ fn run_shell_mode(root: &Path, model: Option<&str>, retry: Option<u32>) -> anyho
     println!(
         "Interactive shell - type commands without the spec prefix \
          (e.g. list). exit, quit, or Ctrl+C leaves. The session \
-         history lives in .spec-history."
+         history lives in {}.",
+        spec_rel(HISTORY_FILE)
     );
     interactive_shell_loop(root, model, retry, true, model_ready)
 }
@@ -882,7 +922,7 @@ fn interactive_shell_loop(
     model_ready: bool,
 ) -> anyhow::Result<()> {
     use clap::CommandFactory as _;
-    let history = root.join(HISTORY_FILE);
+    let history = spec_file(root, HISTORY_FILE);
     let first_session = !history.exists();
     let mut shell = ReadlineShell::open(history).map_err(|error| anyhow::anyhow!(error.0))?;
     let mut dispatch = |tokens: Vec<String>| {
@@ -1495,7 +1535,7 @@ fn cached_chat(root: &Path, model_flag: Option<&str>) -> Option<(String, CachedC
             let context = endpoint.clone();
             let chat = CachedConversation::new(
                 OllamaChat::with_timeout(endpoint, timeout),
-                root.join(CACHE_DIR),
+                spec_file(root, CACHE_DIR),
                 ttl,
                 context,
             );
@@ -1883,7 +1923,7 @@ fn tool_service(root: &Path) -> LiveTools {
         TomlToolStore::new(config_file(root)),
         CachedDiscovery::new(
             live_broker(root),
-            root.join(CACHE_DIR).join("tools"),
+            spec_file(root, CACHE_DIR).join("tools"),
             settings.cache_ttl,
         ),
         mcp_registry(root),
@@ -2300,6 +2340,28 @@ mod tests {
         assert!(warning.starts_with("stdin is not a terminal:"), "{warning}");
         assert!(warning.ends_with("Run this in a terminal to answer the prompts."));
         assert!(!warning.contains("stages nothing"), "{warning}");
+    }
+
+    #[test]
+    fn an_unexpanded_root_uses_spec_project_dir_or_the_launch_directory() {
+        let placeholder = PathBuf::from("${CLAUDE_PROJECT_DIR:-.}");
+        assert_eq!(
+            resolve_project_root(placeholder.clone(), Some("/work/kata")),
+            PathBuf::from("/work/kata")
+        );
+        assert_eq!(resolve_project_root(placeholder, None), PathBuf::from("."));
+        assert_eq!(
+            resolve_project_root(PathBuf::from("${SPEC_PROJECT_DIR}"), Some("  ")),
+            PathBuf::from(".")
+        );
+        assert_eq!(
+            resolve_project_root(PathBuf::from("."), Some("/work/kata")),
+            PathBuf::from(".")
+        );
+        assert_eq!(
+            resolve_project_root(PathBuf::from("/explicit"), Some("/work/kata")),
+            PathBuf::from("/explicit")
+        );
     }
 
     #[test]

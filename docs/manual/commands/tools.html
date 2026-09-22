@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-eaaa3625.js";
+            window.path_to_searchindex_js = "../searchindex-1707d030.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-372d77fe.js"></script>
@@ -193,7 +193,7 @@ Commands:
   show      One tool's description and schema
   enable    Attach a tool to a caller (`--for` required)
   disable   Remove a tool from a caller (`--for` required)
-  refresh   Rediscover external servers and rewrite `.spec-cache/tools/`
+  refresh   Rediscover external servers and rewrite `.spec/cache/tools/`
   servers   Registered mcp.json servers and parse problems
 </code></pre>
 <pre><code class="language-bash">spec tools profiles
@@ -223,7 +223,7 @@ a harness-side model may request is <code>command_run</code> on the <code>implem
 profile, and that call still asks the human to confirm.</p>
 <p>External tools are namespaced <code>server__tool</code>. A name in config that is
 not in the catalog is a warning, not a hard failure.</p>
-<h2 id="spectoml-per-command-mapping"><a class="header" href="#spectoml-per-command-mapping"><code>.spec.toml</code> per-command mapping</a></h2>
+<h2 id="specconfigtoml-per-command-mapping"><a class="header" href="#specconfigtoml-per-command-mapping"><code>.spec/config.toml</code> per-command mapping</a></h2>
 <p>Built-in defaults live in code and are also written into
 <code>[tools.profiles]</code> by <code>spec init</code> so you can see what each command
 offers the model. If that table names a caller with a list, that list
@@ -247,7 +247,7 @@ origin when you need to be explicit:</p>
 <div class="table-wrapper">
 <table>
 <thead>
-<tr><th>Written in <code>.spec.toml</code></th><th>Resolves to</th></tr>
+<tr><th>Written in <code>.spec/config.toml</code></th><th>Resolves to</th></tr>
 </thead>
 <tbody>
 <tr><td><code>validate_spec</code></td><td>built-in</td></tr>
@@ -258,7 +258,7 @@ origin when you need to be explicit:</p>
 </table>
 </div>
 <p><code>builtin</code> is reserved for the harness’s own tools. <code>spec init</code> writes
-<code>.spec.toml</code> with every key and a live <code>[tools.profiles]</code> list for each
+<code>.spec/config.toml</code> with every key and a live <code>[tools.profiles]</code> list for each
 caller. <a href="config.html"><code>spec config</code></a> prints the resolved set and whether
 each value is a default or came from the file.</p>
 

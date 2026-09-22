@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Assemble the GitHub Pages site into _site/ from docs/, slides/, and markdown write-ups."""
+"""Assemble the GitHub Pages site into _site/ from docs/, talks/, and markdown write-ups."""
 
 from __future__ import annotations
 
@@ -21,19 +21,19 @@ TEMPLATE = (DOCS / "assets" / "page.template.html").read_text(encoding="utf-8")
 GITHUB = "https://github.com/davidparry/spec-driven-agentic/blob/trunk/"
 
 SITE_PATHS = {
-    "student-follow-along.md": "../workshop/",
+    "student-follow-docs/student-follow-along.md": "../workshop/",
     "harness/README.md": "../harness/",
-    "speaking.md": "../speaking/",
+    "talks/speaking.md": "../speaking/",
     "student-follow-docs/setup-mcp.md": "../setup/",
     "student-follow-docs/greenfield-flow.md": "../greenfield/",
     "student-follow-docs/pi-path.md": "../pi/",
-    "slides/index.html": "../talk/",
-    "slides/index.html?30": "../talk30/",
+    "talks/slides/index.html": "../talk/",
+    "talks/slides/index.html?30": "../talk30/",
 }
 
 PAGES = [
     {
-        "src": "student-follow-along.md",
+        "src": "student-follow-docs/student-follow-along.md",
         "dest": "workshop/index.html",
         "title": "Workshop follow-along",
         "description": "Step-by-step companion for the 60-minute spec workshop.",
@@ -45,7 +45,7 @@ PAGES = [
         "description": "Spec-driven BDD/TDD harness with an embedded MCP server.",
     },
     {
-        "src": "speaking.md",
+        "src": "talks/speaking.md",
         "dest": "speaking/index.html",
         "title": "Speaking",
         "description": "Turn Off the Wi-Fi: a conference session on spec-driven development that delivers on a local model.",
@@ -148,8 +148,8 @@ def copy_static() -> None:
         shutil.copy2(item, SITE / "assets" / item.name)
     # One deck, two cuts: the same file picks its track from the URL, so /talk/
     # serves the 60-minute workshop and /talk30/ the 30-minute session.
-    shutil.copy2(ROOT / "slides" / "index.html", SITE / "talk" / "index.html")
-    shutil.copy2(ROOT / "slides" / "index.html", SITE / "talk30" / "index.html")
+    shutil.copy2(ROOT / "talks" / "slides" / "index.html", SITE / "talk" / "index.html")
+    shutil.copy2(ROOT / "talks" / "slides" / "index.html", SITE / "talk30" / "index.html")
     # The harness manual is an mdBook committed pre-built (mdbook build manual).
     shutil.copytree(DOCS / "manual", SITE / "manual")
     (SITE / ".nojekyll").write_text("", encoding="utf-8")

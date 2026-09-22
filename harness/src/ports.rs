@@ -86,7 +86,7 @@ pub trait ProjectInventory {
     fn list_tree(&self) -> Vec<String>;
 }
 
-/// Persists [`.spec-memory.json`](crate::domain::memory::ProjectMemory)
+/// Persists [`.spec/memory.json`](crate::domain::memory::ProjectMemory)
 /// between harness invocations.
 pub trait MemoryStore {
     fn load(&self) -> Result<Option<crate::domain::memory::ProjectMemory>, MemoryError>;
@@ -399,7 +399,7 @@ pub trait InteractiveShell {
 }
 
 /// Persists the TDD state log between harness invocations
-/// (`.spec-state.json`): timestamped entries plus interpretation
+/// (`.spec/state.json`): timestamped entries plus interpretation
 /// instructions, so `test`, `state`, and `refactor` share one machine
 /// across harness invocations.
 pub trait StateStore {

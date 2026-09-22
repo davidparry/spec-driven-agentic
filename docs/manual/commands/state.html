@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-eaaa3625.js";
+            window.path_to_searchindex_js = "../searchindex-1707d030.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-372d77fe.js"></script>
@@ -228,7 +228,7 @@ it never changes anything.</p>
 <p>Before any test has ever run, the phase is the starting state and
 <code>lastRun</code> is all zeros; <code>nextStep</code> points you at <code>spec test</code>.</p>
 <h2 id="where-the-state-lives"><a class="header" href="#where-the-state-lives">Where the state lives</a></h2>
-<p><code>.spec-state.json</code> under the project root. It is a chronological log of
+<p><code>.spec/state.json</code>, inside the project’s <code>.spec/</code> directory. It is a chronological log of
 timestamped entries — one per test run, refactor, or implementation
 attempt — plus <code>instructions</code> that explain how to read the schema. The
 file keeps the full history so a human can audit the loop; <code>spec state</code>

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.6.0
+
+- Configuration and generated state now live in one `.spec/` directory:
+  `config.toml`, `state.json`, `memory.json`, `history`, `cache/`,
+  `log/`, and `staged/`. The next `spec` run moves an existing
+  `.spec.toml`, `.spec-state.json`, `.spec-memory.json`, `.spec-history`,
+  `.spec-cache/`, `.spec-log/`, or `.spec-staged/` into that directory
+  when the new path is still empty. An empty `--root`, or an unexpanded
+  `${...}` template, is ignored. `SPEC_PROJECT_DIR` is used when it names
+  a real path; otherwise `spec` stays in the directory it was launched in.
+
 ## 0.5.5
 
 - `spec refactor` now carries the refactor out. It was a phase marker: it

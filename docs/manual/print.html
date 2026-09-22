@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "searchindex-eaaa3625.js";
+            window.path_to_searchindex_js = "searchindex-1707d030.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-372d77fe.js"></script>
@@ -309,6 +309,27 @@ spec mark-implemented REQ-001 &amp;&amp; spec changes commit
 same commands. The kata-specific recipe (paths under <code>kata/</code>, draft
 REQ-007, then REQ-003…007 to implemented) is
 <a href="#this-workshops-string-calculator-harness">This workshop’s String Calculator</a>.</p>
+<h2 id="where-spec-keeps-its-files"><a class="header" href="#where-spec-keeps-its-files">Where spec keeps its files</a></h2>
+<p>Harness files for a project live in one directory, <code>.spec/</code>, under the
+project root (<code>--root</code>, or the current directory). They sit next to
+<code>requirements/</code>, not loose in the root. <code>spec init</code> creates the
+directory. The next <code>spec</code> run also creates it, and moves an older
+root-level file into the matching path below when that new path is
+still empty.</p>
+<pre><code class="language-text">.spec/
+  config.toml    tracked — LLM, timeouts, per-command tool profiles
+  state.json     TDD phase log
+  memory.json    discovered language, libraries, and layout
+  history        interactive-shell command history
+  cache/         cached LLM responses and tool catalogs
+  log/           daily diagnostic logs
+  staged/        mutations waiting for spec changes commit
+</code></pre>
+<p>Only <code>config.toml</code> is meant to be committed. <code>spec init</code> writes a
+gitignore that ignores <code>.spec/*</code> and keeps <code>.spec/config.toml</code>. The
+other children are generated. Deleting <code>cache/</code> or <code>log/</code> is always
+safe. Deleting <code>state.json</code> resets the phase to START. Deleting
+<code>staged/</code> throws away mutations that have not been committed.</p>
 <h2 id="working-against-an-existing-project"><a class="header" href="#working-against-an-existing-project">Working against an existing project</a></h2>
 <p>Every command takes <code>--root</code> (see <a href="#global-flags">Global flags</a>), so
 you can point the harness at any project:</p>
@@ -321,9 +342,15 @@ spec --root ~/code/my-kata validate
 them anywhere on the command line.</p>
 <h2 id="--root-root"><a class="header" href="#--root-root"><code>--root &lt;ROOT&gt;</code></a></h2>
 <p>The project root — the directory where <code>requirements/requirements.json</code>
-(the root of the <a href="#the-requirements-format">spec catalog</a>) and <code>.spec.toml</code>
-live, and the base for every relative path the harness reads or writes.
-Defaults to the current directory. MCP clients that cannot see argv can
+(the root of the <a href="#the-requirements-format">spec catalog</a>) lives, and where the
+harness keeps its own files under <code>.spec/</code> (see
+<a href="#where-spec-keeps-its-files">Where spec keeps its files</a>).
+<code>.spec/config.toml</code> is the tracked configuration. The root is the base
+for every relative path the harness reads or writes.
+A concrete path wins. An empty <code>--root</code>, or an unexpanded <code>${...}</code>
+template, is ignored. <code>SPEC_PROJECT_DIR</code> is used when it names a real
+path. Otherwise the process stays in the directory it was launched in.
+MCP clients that cannot see argv can
 call <code>project_root</code> to read the same directory as an absolute path.</p>
 <pre><code class="language-bash">spec --root ~/code/calculator list
 spec list --root ~/code/calculator   # same thing
@@ -341,7 +368,7 @@ spec --model llama3:8b greenfield   # another model; mileage will vary
 full story):</p>
 <ol>
 <li><code>--model</code> flag — this invocation only.</li>
-<li><code>model</code> in <code>.spec.toml</code> — the persisted project choice.</li>
+<li><code>model</code> in <code>.spec/config.toml</code> — the persisted project choice.</li>
 <li>Discovery — the first installed Ollama model, session-only.</li>
 </ol>
 <h2 id="--debug"><a class="header" href="#--debug"><code>--debug</code></a></h2>
@@ -349,15 +376,15 @@ full story):</p>
 responses, cache hits and misses, resolved configuration, MCP tool
 calls, and test-runner activity. Without the flag only high-level
 lifecycle events (info and above) are logged.</p>
-<p>Diagnostics are written to daily-rolling files under <code>.spec-log/</code> in
-the project root (gitignored; safe to delete at any time) — stdout and
+<p>Diagnostics are written to daily-rolling files under <code>.spec/log/</code>
+(gitignored; safe to delete at any time) — stdout and
 stderr are never touched, so JSON output, the MCP stdio protocol, and
 user-facing messages stay clean either way. Log writes go through an
 in-memory queue drained by a worker thread, so logging never blocks
 the command. If the log directory cannot be created, diagnostics fall
 back to stderr.</p>
 <pre><code class="language-bash">spec --debug implement REQ-003             # full prompts and replies in the log
-tail -f .spec-log/spec.log.$(date +%F)      # watch the diagnostics live
+tail -f .spec/log/spec.log.$(date +%F)      # watch the diagnostics live
 </code></pre>
 <p>The <code>RUST_LOG</code> environment variable overrides both the default and
 <code>--debug</code> with per-module directives, e.g.
@@ -372,14 +399,14 @@ plus the reason, so the model can correct itself. Transport failures
 <pre><code class="language-bash">spec --retry 5 greenfield
 spec draft --retry 1   # one attempt, then the usual fallback
 </code></pre>
-<p><code>--retry</code> wins over <code>retry</code> under <code>[llm]</code> in <code>.spec.toml</code>. A missing
+<p><code>--retry</code> wins over <code>retry</code> under <code>[llm]</code> in <code>.spec/config.toml</code>. A missing
 or zero config value uses the default of 3. In the interactive shell,
 commands inherit the shell’s <code>--retry</code> unless a line supplies its own.</p>
 <h2 id="--tools-names"><a class="header" href="#--tools-names"><code>--tools &lt;NAMES&gt;</code></a></h2>
 <p>Replace this command’s tool profile for one run with a comma-separated
 list of catalog names (<code>validate_spec</code>, <code>playwright:browser_navigate</code>,
 <code>builtin:run_tests</code>). Default profiles live in code and in
-<code>.spec.toml</code>; see <a href="#spec-tools"><code>spec tools</code></a>. <a href="#spec-config"><code>spec config</code></a>
+<code>.spec/config.toml</code>; see <a href="#spec-tools"><code>spec tools</code></a>. <a href="#spec-config"><code>spec config</code></a>
 prints the resolved keys and their source.</p>
 <pre><code class="language-bash">spec --tools list_requirements,get_requirement status
 </code></pre>
@@ -443,8 +470,8 @@ run <code>list</code>, <code>greenfield</code>, or anything else without relaunc
 </ul>
 <p>On exit the shell prints a summary of how many commands ran.</p>
 <h2 id="session-history"><a class="header" href="#session-history">Session history</a></h2>
-<p>Line history is kept across sessions in <code>.spec-history</code> under the
-project root. Use <kbd>↑</kbd>/<kbd>↓</kbd> to recall previous
+<p>Line history is kept across sessions in <code>.spec/history</code>. Use
+<kbd>↑</kbd>/<kbd>↓</kbd> to recall previous
 commands and <kbd>Ctrl</kbd>+<kbd>R</kbd> for reverse search. If the
 history cannot be saved, the shell says so and exits normally.</p>
 <h2 id="model-announcement-at-startup"><a class="header" href="#model-announcement-at-startup">Model announcement at startup</a></h2>
@@ -460,7 +487,7 @@ model, especially one trained for work other than development. See
 <tr><th>Situation</th><th>Announcement</th></tr>
 </thead>
 <tbody>
-<tr><td>Configured in <code>.spec.toml</code></td><td><code>Model set: qwen3.8-flash-next:125b-mlx (from configuration).</code></td></tr>
+<tr><td>Configured in <code>.spec/config.toml</code></td><td><code>Model set: qwen3.8-flash-next:125b-mlx (from configuration).</code></td></tr>
 <tr><td>No config, models installed</td><td><code>Model set for this session: qwen3.8-flash-next:125b-mlx (not saved - keep it with: spec model use qwen3.8-flash-next:125b-mlx).</code></td></tr>
 <tr><td>Ollama up, no models</td><td><code>Ollama is running but has no models - generation will use deterministic templates. For optimal results pull a coding model, e.g.: ollama pull qwen3.8-flash-next:125b-mlx (mileage varies with models not trained for development)</code></td></tr>
 <tr><td>Ollama unreachable</td><td><code>Ollama is not reachable - generation will use deterministic templates. Install it from https://ollama.com, start it, and pull a coding model, e.g.: ollama pull qwen3.8-flash-next:125b-mlx (mileage varies with models not trained for development)</code></td></tr>
@@ -470,12 +497,12 @@ model, especially one trained for work other than development. See
 <h2 id="the-greenfield-nudge"><a class="header" href="#the-greenfield-nudge">The greenfield nudge</a></h2>
 <p>When all three signs of a brand-new project line up —</p>
 <ol>
-<li>this is the first shell session in the root (no <code>.spec-history</code> yet),</li>
+<li>this is the first shell session in the root (no <code>.spec/history</code> yet),</li>
 <li>a model is ready, and</li>
 <li>there is no <code>requirements/requirements.json</code></li>
 </ol>
 <p>— the shell offers to start the loop before the first prompt. The same
-start refreshes <code>.spec-memory.json</code> (language, libraries, layout) so
+start refreshes <code>.spec/memory.json</code> (language, libraries, layout) so
 later model calls in the session carry that brief.</p>
 <h2 id="the-layout-question"><a class="header" href="#the-layout-question">The layout question</a></h2>
 <p>That refresh resolves the project’s layout: the module whose build file
@@ -536,8 +563,10 @@ it to real code.</li>
 fine-grained behavior beneath the scenario.</li>
 </ul>
 <h2 id="the-phase-machine"><a class="header" href="#the-phase-machine">The phase machine</a></h2>
-<p>The persistent TDD phase lives in <code>.spec-state.json</code> under the
-project root and survives between invocations and across MCP sessions.</p>
+<p>The persistent TDD phase lives in <code>.spec/state.json</code> and survives
+between invocations and across MCP sessions. That file, and the rest of
+the harness’s project files, live in the <code>.spec/</code> directory — see
+<a href="#where-spec-keeps-its-files">Where spec keeps its files</a>.</p>
 <pre><code class="language-text">          tests fail                    tests pass
   (start) ──────────► RED ────────────► GREEN ──┐
                        ▲                  │     │ spec refactor
@@ -715,7 +744,7 @@ through the <a href="../../../student-follow-docs/pi-path.html">pi path</a>. The
 recipe — install, branch, draft REQ-007, then drive REQ-003…007 to
 <code>implemented</code> — lives in
 <a href="../../../student-follow-docs/harness-path.html">student-follow-docs/harness-path.md</a>.</p>
-<p>Do not edit <a href="../../../student-follow-along.html">student-follow-along.md</a>
+<p>Do not edit <a href="../../../student-follow-docs/student-follow-along.html">student-follow-along.md</a>
 for this path. Do not implement the kata on <code>trunk</code>.</p>
 <p>Kata files <code>spec</code> must reuse (not parallel <code>Req00NTest</code> / <code>Kata.java</code>
 classes):</p>
@@ -733,7 +762,7 @@ stays GREEN-gated.</p>
 <p>Every command that would write into your project — feature creation,
 scenario mutations, step-definition and unit-test generation, spec
 drafting, marking a requirement implemented — writes to a staging area
-instead: <code>.spec-staged/</code> under the project root. Nothing touches your
+instead: <code>.spec/staged/</code>. Nothing touches your
 working tree until you commit the transaction.</p>
 <h2 id="why"><a class="header" href="#why">Why</a></h2>
 <ul>
@@ -767,7 +796,7 @@ spec changes discard   # drop everything staged, tree untouched
 </thead>
 <tbody>
 <tr><td><code>feature create</code></td><td><code>init</code> (scaffolding a fresh project)</td></tr>
-<tr><td><code>scenario add</code> / <code>update</code> / <code>delete</code></td><td><code>model use</code> (writes <code>.spec.toml</code>)</td></tr>
+<tr><td><code>scenario add</code> / <code>update</code> / <code>delete</code></td><td><code>model use</code> (writes <code>.spec/config.toml</code>)</td></tr>
 <tr><td><code>steps generate</code></td><td><code>test</code> / <code>refactor</code> (phase state file)</td></tr>
 <tr><td><code>unittest generate</code></td><td></td></tr>
 <tr><td><code>spec draft</code></td><td></td></tr>
@@ -780,7 +809,7 @@ a transaction before committing it.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="spec-init"><a class="header" href="#spec-init">spec init</a></h1>
 <p>Scaffold build files, a Cucumber runner, an empty requirements spec,
-and the harness’s configuration in the project root. Existing files are
+and the harness configuration at <code>.spec/config.toml</code>. Existing files are
 never overwritten — they are reported as skipped.</p>
 <pre><code class="language-text">Usage: spec init [OPTIONS]
 </code></pre>
@@ -805,14 +834,16 @@ never overwritten — they are reported as skipped.</p>
 the root of the <a href="#the-requirements-format">spec catalog</a>: split the backlog
 into included files later with
 <a href="#spec-include"><code>spec include add</code></a>.</li>
-<li><code>.spec.toml</code> — the harness configuration (LLM, timeouts, per-command
+<li><code>.spec/config.toml</code> — the harness configuration (LLM, timeouts, per-command
 tool profiles). <code>spec init</code> writes <code>[tools.profiles]</code> with the tools
 each LLM-backed command offers the model (the code defaults, listed
 for reference). Other keys are commented with their defaults.</li>
 </ul>
-<p>After scaffolding, <code>init</code> scans the new files into <code>.spec-memory.json</code>
-(language, BDD framework, libraries, layout). That file is committed
-with the project; it is refreshed again when a shell, MCP server, or
+<p>After scaffolding, <code>init</code> scans the new files into <code>.spec/memory.json</code>
+(language, BDD framework, libraries, layout). That file is generated
+state inside <code>.spec/</code> and is gitignored, like <code>state.json</code>, <code>history</code>,
+<code>cache/</code>, <code>log/</code>, and <code>staged/</code>. Only <code>.spec/config.toml</code> is written to
+be committed. Memory is refreshed again when a shell, MCP server, or
 LLM command starts. Every model system prompt then opens with that
 brief.</p>
 <p>Plus the language’s build and BDD harness:</p>
@@ -840,7 +871,7 @@ spec init --language rust --name "String Calculator"
   "framework": "cucumber-rs",
   "created": [
     "requirements/requirements.json",
-    ".spec.toml",
+    ".spec/config.toml",
     "Cargo.toml",
     "src/lib.rs",
     "tests/cucumber.rs",
@@ -859,7 +890,7 @@ spec init --language rust --name "String Calculator"
   "created": [],
   "skipped": [
     "requirements/requirements.json",
-    ".spec.toml",
+    ".spec/config.toml",
     "Cargo.toml",
     "src/lib.rs",
     "tests/cucumber.rs",
@@ -908,7 +939,7 @@ generation, test execution, phase tracking — is automated.</p>
 </div>
 <h2 id="the-orchestrated-flow"><a class="header" href="#the-orchestrated-flow">The orchestrated flow</a></h2>
 <pre><code class="language-text"> 1. inspect / init      scaffold if the root is empty (asks for language)
-                        and records the choice in .spec-memory.json
+                        and records the choice in .spec/memory.json
  2. describe            you describe what to build in plain words; the
                         model splits it into requirement proposals
  3. accept + wizard     you accept all listed proposals, or a
@@ -1477,11 +1508,12 @@ tells you up front what will run and what will refuse.</p>
 <h2 id="project-memory"><a class="header" href="#project-memory">Project memory</a></h2>
 <p>Session start (<code>spec</code> shell, <code>spec mcp serve</code>), <a href="#spec-init"><code>spec init</code></a>,
 <a href="#spec-greenfield"><code>spec greenfield</code></a>, and every LLM command refresh
-<code>.spec-memory.json</code> in the project root: language, BDD framework, build
+<code>.spec/memory.json</code>: language, BDD framework, build
 tool, libraries parsed from the manifest, and a short layout outline.
 A language chosen at greenfield/init is kept even if other marker files
-appear later. That file is project identity (commit it); every model
-system prompt opens with a compact brief of its contents.</p>
+appear later. The file is generated project identity under <code>.spec/</code>
+(gitignored, same as the rest of that directory except <code>config.toml</code>);
+every model system prompt opens with a compact brief of its contents.</p>
 <h2 id="notes-1"><a class="header" href="#notes-1">Notes</a></h2>
 <ul>
 <li>Authoring commands (spec, feature, scenario, steps, unittest) work
@@ -2030,7 +2062,7 @@ a replacement of.</p>
 <p>The implementation prompt is the largest call the harness makes, so a
 local model can need minutes to answer. The generation timeout
 defaults to 300 seconds; if you see <code>no reply within ...s</code>, raise
-<code>timeout_seconds</code> under <code>[llm]</code> in <code>.spec.toml</code> (see
+<code>timeout_seconds</code> under <code>[llm]</code> in <code>.spec/config.toml</code> (see
 <a href="#the-llm-configuration-block"><code>spec model</code></a>).</p>
 <h2 id="where-it-fits-1"><a class="header" href="#where-it-fits-1">Where it fits</a></h2>
 <p>This is the standalone form of the <a href="#spec-greenfield">greenfield</a>
@@ -2046,7 +2078,7 @@ spec test                 # GREEN? then spec refactor / spec mark-implemented
 details from the latest run go back to the model — or take over by
 hand.</p>
 <h2 id="attempts-are-remembered"><a class="header" href="#attempts-are-remembered">Attempts are remembered</a></h2>
-<p>Every attempt is logged in <code>.spec-state.json</code> (under <code>attemptLog</code> on a
+<p>Every attempt is logged in <code>.spec/state.json</code> (under <code>attemptLog</code> on a
 timestamped state entry): the files it wrote, the failures it was
 addressing, and — attached by the first test run after it — the
 <code>outcome</code>: what that run actually reported, build output included. The
@@ -2065,7 +2097,7 @@ stays on disk for humans; it is not sent to the model.</p>
 test run goes GREEN — a closed loop leaves no history for the next
 requirement to inherit.</p>
 <p><code>run_tests</code> during this command sees the <strong>working tree</strong>, not the
-unstaged patch sitting in <code>.spec-staged/</code>. Commit (or apply) before you
+unstaged patch sitting in <code>.spec/staged/</code>. Commit (or apply) before you
 trust the bar. If the model requests <code>command_run</code>, the harness asks you to
 confirm first; piped or CI stdin declines and never hangs.</p>
 <h2 id="see-also-8"><a class="header" href="#see-also-8">See also</a></h2>
@@ -2158,7 +2190,7 @@ on one scenario.</p>
 <li>A failing run during REFACTOR drops you back to RED — the refactor
 broke behavior.</li>
 </ul>
-<p>The phase is stored in <code>.spec-state.json</code> and read back by
+<p>The phase is stored in <code>.spec/state.json</code> and read back by
 <a href="#spec-state"><code>spec state</code></a> and enforced by <a href="#spec-refactor"><code>spec refactor</code></a>.</p>
 <h2 id="see-also-9"><a class="header" href="#see-also-9">See also</a></h2>
 <ul>
@@ -2214,7 +2246,7 @@ it never changes anything.</p>
 <p>Before any test has ever run, the phase is the starting state and
 <code>lastRun</code> is all zeros; <code>nextStep</code> points you at <code>spec test</code>.</p>
 <h2 id="where-the-state-lives"><a class="header" href="#where-the-state-lives">Where the state lives</a></h2>
-<p><code>.spec-state.json</code> under the project root. It is a chronological log of
+<p><code>.spec/state.json</code>, inside the project’s <code>.spec/</code> directory. It is a chronological log of
 timestamped entries — one per test run, refactor, or implementation
 attempt — plus <code>instructions</code> that explain how to read the schema. The
 file keeps the full history so a human can audit the loop; <code>spec state</code>
@@ -2385,7 +2417,7 @@ every earlier round of this run broke.</li>
 <p>If the budget runs out, <strong>every file it touched is restored to the byte</strong>
 from a snapshot taken before the first round. The restore is the harness’s
 own, so it does not depend on your git state being clean.</p>
-<p>The budget is <code>[refactor] attempts</code> in <code>.spec.toml</code>, ten by default:</p>
+<p>The budget is <code>[refactor] attempts</code> in <code>.spec/config.toml</code>, ten by default:</p>
 <pre><code class="language-toml">[refactor]
 attempts = 10
     70|```
@@ -2490,7 +2522,7 @@ also a note worth acting on.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="spec-changes"><a class="header" href="#spec-changes">spec changes</a></h1>
 <p>Staged-transaction management. Every file mutation the harness authors
-lands in <code>.spec-staged/</code> first (see <a href="#staged-changes">Staged changes</a>);
+lands in <code>.spec/staged/</code> first (see <a href="#staged-changes">Staged changes</a>);
 these subcommands are how you review, apply, or drop the transaction.</p>
 <pre><code class="language-text">Usage: spec changes [OPTIONS] &lt;COMMAND&gt;
 
@@ -2527,7 +2559,7 @@ create or modify the file, and a one-line summary of the change.</p>
 }
 </code></pre>
 <p>To see the full content of a staged file, read it directly under
-<code>.spec-staged/</code> — the layout mirrors the project tree.</p>
+<code>.spec/staged/</code> — the layout mirrors the project tree.</p>
 <hr>
 <h2 id="spec-changes-commit"><a class="header" href="#spec-changes-commit">spec changes commit</a></h2>
 <p>Apply every staged change to the working tree atomically and clear
@@ -2572,7 +2604,7 @@ on-disk frozen tool).</p>
 <h3 id="what-is-checked"><a class="header" href="#what-is-checked">What is checked</a></h3>
 <ul>
 <li>Every <code>.feature</code> file under the root parses as valid Gherkin.</li>
-<li>Every file in the staging area (<code>.spec-staged/</code>) that is a feature
+<li>Every file in the staging area (<code>.spec/staged/</code>) that is a feature
 file parses too — you cannot commit a transaction containing broken
 Gherkin without knowing.</li>
 <li>Scenario requirement tags (<code>@REQ-...</code>) refer to ids that exist in
@@ -2653,7 +2685,7 @@ Commands: list, current, use
 <p>Highest priority first:</p>
 <ol>
 <li><strong><code>--model</code> flag</strong> — this invocation only, never persisted.</li>
-<li><strong>Configuration</strong> — the <code>model</code> key in <code>.spec.toml</code> under the
+<li><strong>Configuration</strong> — the <code>model</code> key in <code>.spec/config.toml</code> under the
 project root, written by <code>spec model use</code>.</li>
 <li><strong>Discovery</strong> — the first model installed in Ollama, as a
 session-only default. Nothing is written to disk.</li>
@@ -2695,12 +2727,12 @@ session default and the output tells you it is not saved:</p>
 <pre><code class="language-bash">spec model use qwen3.8-flash-next:125b-mlx
 </code></pre>
 <pre><code class="language-text">Configured model: qwen3.8-flash-next:125b-mlx
-Written to /Users/you/code/calculator/.spec.toml
+Written to /Users/you/code/calculator/.spec/config.toml
 </code></pre>
 <p>The choice is validated against Ollama’s installed models — a name
 Ollama does not have is rejected rather than silently saved.</p>
 <h2 id="the-llm-configuration-block"><a class="header" href="#the-llm-configuration-block">The [llm] configuration block</a></h2>
-<p>Everything model-related lives under <code>[llm]</code> in <code>.spec.toml</code>:</p>
+<p>Everything model-related lives under <code>[llm]</code> in <code>.spec/config.toml</code>:</p>
 <pre><code class="language-toml">[llm]
 model = "qwen3.8-flash-next:125b-mlx"     # persisted by spec model use
 endpoint = "http://localhost:11434"   # the Ollama endpoint
@@ -2738,7 +2770,7 @@ output is validated before it can stage.</li>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="spec-config"><a class="header" href="#spec-config">spec config</a></h1>
 <p>Print every configuration key the harness uses and whether the value is a
-code <strong>default</strong> or was read from the project file (<code>.spec.toml</code>).</p>
+code <strong>default</strong> or was read from the project file (<code>.spec/config.toml</code>).</p>
 <pre><code class="language-text">Usage: spec config [OPTIONS]
 </code></pre>
 <h2 id="flags-6"><a class="header" href="#flags-6">Flags</a></h2>
@@ -2770,11 +2802,11 @@ directories. Run <code>spec config</code> from the project root, or point
 <code>--root</code> at it, or <code>file</code> reads <code>(none)</code> and every key is a default.</p>
 <pre><code class="language-bash">spec config
 </code></pre>
-<pre><code class="language-text">file	/Users/you/code/calculator/.spec.toml
-llm.model	qwen3.8-flash-next:125b-mlx	/Users/you/code/calculator/.spec.toml
+<pre><code class="language-text">file	/Users/you/code/calculator/.spec/config.toml
+llm.model	qwen3.8-flash-next:125b-mlx	/Users/you/code/calculator/.spec/config.toml
 llm.endpoint	http://localhost:11434	(default)
-llm.timeout_seconds	900	/Users/you/code/calculator/.spec.toml
-llm.cache_ttl_seconds	600	/Users/you/code/calculator/.spec.toml
+llm.timeout_seconds	900	/Users/you/code/calculator/.spec/config.toml
+llm.cache_ttl_seconds	600	/Users/you/code/calculator/.spec/config.toml
 llm.retry	3	(default)
 tools.max_rounds	12	(default)
 tools.confirm	command_run	(default)
@@ -2991,7 +3023,7 @@ refactor while failing, or invent requirements: the tools refuse,
 with a <code>nextStep</code> that teaches the correct move.
 <code>requirement_mark_implemented</code> is GREEN-gated and needs a tagged
 scenario.</li>
-<li><strong>State survives.</strong> The phase machine lives on disk, so a
+<li><strong>State survives.</strong> The phase machine lives in <code>.spec/state.json</code>, so a
 reconnecting agent (or a human taking over in the harness) continues
 from the same place.</li>
 </ul>
@@ -3002,7 +3034,7 @@ from the same place.</li>
 <tr><th>Flag</th><th>Description</th></tr>
 </thead>
 <tbody>
-<tr><td><code>--root &lt;ROOT&gt;</code></td><td>Project root the served tools operate on. Defaults to the process’s working directory.</td></tr>
+<tr><td><code>--root &lt;ROOT&gt;</code></td><td>Project root the served tools operate on. A concrete path wins. An empty value or an unexpanded <code>${...}</code> template is ignored; <code>SPEC_PROJECT_DIR</code> is used when it names a real path. Otherwise the directory the process was launched in.</td></tr>
 <tr><td><code>--model &lt;MODEL&gt;</code></td><td>Model override for the serving session. MCP generation tools do not call Ollama; they stage templates.</td></tr>
 </tbody>
 </table>
@@ -3010,7 +3042,8 @@ from the same place.</li>
 <h2 id="notes-2"><a class="header" href="#notes-2">Notes</a></h2>
 <ul>
 <li>The server logs nothing to stdout except protocol traffic (stdout
-is the wire). Diagnostics go to stderr.</li>
+is the wire). Diagnostics go to daily-rolling files under <code>.spec/log/</code>
+and fall back to stderr only when that directory cannot be created.</li>
 <li>One server serves one project root. Point different projects at
 different server entries.</li>
 <li>Backup Inspector: <code>npx @modelcontextprotocol/inspector spec mcp serve --root $PWD</code>.</li>
@@ -3030,7 +3063,7 @@ Commands:
   show      One tool's description and schema
   enable    Attach a tool to a caller (`--for` required)
   disable   Remove a tool from a caller (`--for` required)
-  refresh   Rediscover external servers and rewrite `.spec-cache/tools/`
+  refresh   Rediscover external servers and rewrite `.spec/cache/tools/`
   servers   Registered mcp.json servers and parse problems
 </code></pre>
 <pre><code class="language-bash">spec tools profiles
@@ -3060,7 +3093,7 @@ a harness-side model may request is <code>command_run</code> on the <code>implem
 profile, and that call still asks the human to confirm.</p>
 <p>External tools are namespaced <code>server__tool</code>. A name in config that is
 not in the catalog is a warning, not a hard failure.</p>
-<h2 id="spectoml-per-command-mapping"><a class="header" href="#spectoml-per-command-mapping"><code>.spec.toml</code> per-command mapping</a></h2>
+<h2 id="specconfigtoml-per-command-mapping"><a class="header" href="#specconfigtoml-per-command-mapping"><code>.spec/config.toml</code> per-command mapping</a></h2>
 <p>Built-in defaults live in code and are also written into
 <code>[tools.profiles]</code> by <code>spec init</code> so you can see what each command
 offers the model. If that table names a caller with a list, that list
@@ -3084,7 +3117,7 @@ origin when you need to be explicit:</p>
 <div class="table-wrapper">
 <table>
 <thead>
-<tr><th>Written in <code>.spec.toml</code></th><th>Resolves to</th></tr>
+<tr><th>Written in <code>.spec/config.toml</code></th><th>Resolves to</th></tr>
 </thead>
 <tbody>
 <tr><td><code>validate_spec</code></td><td>built-in</td></tr>
@@ -3095,7 +3128,7 @@ origin when you need to be explicit:</p>
 </table>
 </div>
 <p><code>builtin</code> is reserved for the harness’s own tools. <code>spec init</code> writes
-<code>.spec.toml</code> with every key and a live <code>[tools.profiles]</code> list for each
+<code>.spec/config.toml</code> with every key and a live <code>[tools.profiles]</code> list for each
 caller. <a href="#spec-config"><code>spec config</code></a> prints the resolved set and whether
 each value is a default or came from the file.</p>
 <div style="break-before: page; page-break-before: always;"></div>

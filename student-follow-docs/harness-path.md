@@ -1,6 +1,6 @@
 # Finish the String Calculator workshop with `spec`
 
-The 60-minute hour in [student-follow-along.md](../student-follow-along.md)
+The 60-minute hour in [student-follow-along.md](student-follow-along.md)
 uses Cursor against **the same** `spec mcp serve` (all 25 tools, including
 staging). The [pi path](pi-path.md) points a free, local, general-purpose
 agent at that same server. This page is the same end state — every
@@ -49,7 +49,7 @@ that change what you do, rather than what you read:
 - `spec refine` **reads staged-first**, so the reword/refine loop needs no
   `spec changes commit` between passes. It used to read the committed file
   and could report `clean: true` over a staged edit that was not.
-- `spec model use` **edits one key** instead of re-rendering `.spec.toml`,
+- `spec model use` **edits one key** instead of re-rendering `.spec/config.toml`,
   which used to destroy every comment in it on the first command of
   Step 1.
 - **Prompts are visible while a spinner runs.** `spec implement`'s
@@ -114,18 +114,23 @@ kata files this repository already has:
 | Unit tests | `kata/src/test/java/com/davidparry/workshop/kata/StringCalculatorTest.java` |
 | Production | `kata/src/main/java/com/davidparry/workshop/kata/StringCalculator.java` |
 
+The harness's own files are not in that table. They live under `.spec/`
+in the project root: `config.toml` (tracked; `spec model use` writes the
+model here), `state.json` (the TDD phase), `memory.json` (the discovered
+layout), `history`, `cache/`, `log/`, and `staged/`.
+
 Nothing in that table is configured. The harness discovers it: this
 repository is a Maven aggregator with two buildable modules (`kata/` and
 `smoke-test/`), and the feature file your requirements name is the tiebreak
 that picks `kata`. Everything else — test root, production root, features
 directory, the package generated code declares, and the `pom.xml` `spec test`
-runs — follows from that one answer. `spec show` and `.spec-memory.json`
+runs — follows from that one answer. `spec show` and `.spec/memory.json`
 report it, and `spec inspect` re-scans.
 
 When a tree is genuinely ambiguous (several modules, and the spec names
 features in none of them) the interactive shell asks **once**: the model
 proposes one of the discovered module roots, you confirm, and the answer is
-recorded in `.spec-memory.json`. No model, or a declined prompt, leaves the
+recorded in `.spec/memory.json`. No model, or a declined prompt, leaves the
 scan's own pick in place and says which one it used.
 
 Existing steps already bind `Given a string calculator`, `When I add {string}`,

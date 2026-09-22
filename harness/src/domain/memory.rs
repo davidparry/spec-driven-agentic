@@ -8,7 +8,7 @@ use crate::domain::language::Language;
 use crate::domain::layout::{LayoutInput, ResolvedLayout, resolve_layout};
 use crate::domain::prompts::render_snippet;
 
-/// Schema version written into `.spec-memory.json`.
+/// Schema version written into `.spec/memory.json`.
 pub const MEMORY_VERSION: u32 = 1;
 
 /// How many outline entries survive into stored memory.
@@ -35,7 +35,7 @@ pub struct Library {
 /// it briefs the model with. Resolved by
 /// [`crate::domain::layout::resolve_layout`].
 ///
-/// Every field is optional with a serde default so a `.spec-memory.json`
+/// Every field is optional with a serde default so a `.spec/memory.json`
 /// written before the layout was recorded still loads.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct ProjectStructure {
@@ -74,7 +74,7 @@ pub struct ProjectStructure {
 
 impl ProjectStructure {
     /// Whether a resolver has answered this, as opposed to a
-    /// `.spec-memory.json` written before layouts were recorded. The
+    /// `.spec/memory.json` written before layouts were recorded. The
     /// resolver always names a step-definition path, so that is the
     /// field that distinguishes the two.
     pub fn is_resolved(&self) -> bool {
@@ -82,7 +82,7 @@ impl ProjectStructure {
     }
 }
 
-/// Durable project identity stored in `.spec-memory.json`.
+/// Durable project identity stored in `.spec/memory.json`.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct ProjectMemory {
     pub version: u32,

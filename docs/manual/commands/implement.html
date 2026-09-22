@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-eaaa3625.js";
+            window.path_to_searchindex_js = "../searchindex-1707d030.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-372d77fe.js"></script>
@@ -321,7 +321,7 @@ a replacement of.</p>
 <p>The implementation prompt is the largest call the harness makes, so a
 local model can need minutes to answer. The generation timeout
 defaults to 300 seconds; if you see <code>no reply within ...s</code>, raise
-<code>timeout_seconds</code> under <code>[llm]</code> in <code>.spec.toml</code> (see
+<code>timeout_seconds</code> under <code>[llm]</code> in <code>.spec/config.toml</code> (see
 <a href="model.html#the-llm-configuration-block"><code>spec model</code></a>).</p>
 <h2 id="where-it-fits"><a class="header" href="#where-it-fits">Where it fits</a></h2>
 <p>This is the standalone form of the <a href="greenfield.html">greenfield</a>
@@ -337,7 +337,7 @@ spec test                 # GREEN? then spec refactor / spec mark-implemented
 details from the latest run go back to the model — or take over by
 hand.</p>
 <h2 id="attempts-are-remembered"><a class="header" href="#attempts-are-remembered">Attempts are remembered</a></h2>
-<p>Every attempt is logged in <code>.spec-state.json</code> (under <code>attemptLog</code> on a
+<p>Every attempt is logged in <code>.spec/state.json</code> (under <code>attemptLog</code> on a
 timestamped state entry): the files it wrote, the failures it was
 addressing, and — attached by the first test run after it — the
 <code>outcome</code>: what that run actually reported, build output included. The
@@ -356,7 +356,7 @@ stays on disk for humans; it is not sent to the model.</p>
 test run goes GREEN — a closed loop leaves no history for the next
 requirement to inherit.</p>
 <p><code>run_tests</code> during this command sees the <strong>working tree</strong>, not the
-unstaged patch sitting in <code>.spec-staged/</code>. Commit (or apply) before you
+unstaged patch sitting in <code>.spec/staged/</code>. Commit (or apply) before you
 trust the bar. If the model requests <code>command_run</code>, the harness asks you to
 confirm first; piped or CI stdin declines and never hangs.</p>
 <h2 id="see-also"><a class="header" href="#see-also">See also</a></h2>

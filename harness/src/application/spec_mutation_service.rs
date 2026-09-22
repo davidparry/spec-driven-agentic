@@ -1464,7 +1464,7 @@ fn parse_accept_selection(answer: &str, count: usize) -> Result<Vec<usize>, Stri
 /// A catalog inconsistency: a path or id the caller already resolved
 /// through the same catalog no longer looks up. That means the in-memory
 /// catalog and what it was built from disagree — a half-written
-/// `.spec-staged`, a hand-edited manifest, an include tree that changed
+/// `.spec/staged`, a hand-edited manifest, an include tree that changed
 /// underfoot. It is a state the developer can clear, so it is reported
 /// rather than panicked on.
 fn inconsistent_file(target: &str) -> ServiceError {
@@ -2967,11 +2967,11 @@ mod tests {
     fn mark_implemented_propagates_a_failing_state_store() {
         let service = service(
             Ok(spec()),
-            FixedStateStore::failing(".spec-state.json is not readable - boom"),
+            FixedStateStore::failing(".spec/state.json is not readable - boom"),
         );
         assert_eq!(
             service.mark_implemented("REQ-001").unwrap_err(),
-            ServiceError(".spec-state.json is not readable - boom".into())
+            ServiceError(".spec/state.json is not readable - boom".into())
         );
     }
 

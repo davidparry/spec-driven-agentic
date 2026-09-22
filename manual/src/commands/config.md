@@ -1,7 +1,7 @@
 # spec config
 
 Print every configuration key the harness uses and whether the value is a
-code **default** or was read from the project file (`.spec.toml`).
+code **default** or was read from the project file (`.spec/config.toml`).
 
 ```text
 Usage: spec config [OPTIONS]
@@ -38,11 +38,11 @@ spec config
 ```
 
 ```text
-file	/Users/you/code/calculator/.spec.toml
-llm.model	qwen3.8-flash-next:125b-mlx	/Users/you/code/calculator/.spec.toml
+file	/Users/you/code/calculator/.spec/config.toml
+llm.model	qwen3.8-flash-next:125b-mlx	/Users/you/code/calculator/.spec/config.toml
 llm.endpoint	http://localhost:11434	(default)
-llm.timeout_seconds	900	/Users/you/code/calculator/.spec.toml
-llm.cache_ttl_seconds	600	/Users/you/code/calculator/.spec.toml
+llm.timeout_seconds	900	/Users/you/code/calculator/.spec/config.toml
+llm.cache_ttl_seconds	600	/Users/you/code/calculator/.spec/config.toml
 llm.retry	3	(default)
 tools.max_rounds	12	(default)
 tools.confirm	command_run	(default)

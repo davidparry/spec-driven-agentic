@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "searchindex-eaaa3625.js";
+            window.path_to_searchindex_js = "searchindex-1707d030.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-372d77fe.js"></script>
@@ -185,9 +185,15 @@
 them anywhere on the command line.</p>
 <h2 id="--root-root"><a class="header" href="#--root-root"><code>--root &lt;ROOT&gt;</code></a></h2>
 <p>The project root — the directory where <code>requirements/requirements.json</code>
-(the root of the <a href="spec-format.html">spec catalog</a>) and <code>.spec.toml</code>
-live, and the base for every relative path the harness reads or writes.
-Defaults to the current directory. MCP clients that cannot see argv can
+(the root of the <a href="spec-format.html">spec catalog</a>) lives, and where the
+harness keeps its own files under <code>.spec/</code> (see
+<a href="getting-started.html#where-spec-keeps-its-files">Where spec keeps its files</a>).
+<code>.spec/config.toml</code> is the tracked configuration. The root is the base
+for every relative path the harness reads or writes.
+A concrete path wins. An empty <code>--root</code>, or an unexpanded <code>${...}</code>
+template, is ignored. <code>SPEC_PROJECT_DIR</code> is used when it names a real
+path. Otherwise the process stays in the directory it was launched in.
+MCP clients that cannot see argv can
 call <code>project_root</code> to read the same directory as an absolute path.</p>
 <pre><code class="language-bash">spec --root ~/code/calculator list
 spec list --root ~/code/calculator   # same thing
@@ -205,7 +211,7 @@ spec --model llama3:8b greenfield   # another model; mileage will vary
 full story):</p>
 <ol>
 <li><code>--model</code> flag — this invocation only.</li>
-<li><code>model</code> in <code>.spec.toml</code> — the persisted project choice.</li>
+<li><code>model</code> in <code>.spec/config.toml</code> — the persisted project choice.</li>
 <li>Discovery — the first installed Ollama model, session-only.</li>
 </ol>
 <h2 id="--debug"><a class="header" href="#--debug"><code>--debug</code></a></h2>
@@ -213,15 +219,15 @@ full story):</p>
 responses, cache hits and misses, resolved configuration, MCP tool
 calls, and test-runner activity. Without the flag only high-level
 lifecycle events (info and above) are logged.</p>
-<p>Diagnostics are written to daily-rolling files under <code>.spec-log/</code> in
-the project root (gitignored; safe to delete at any time) — stdout and
+<p>Diagnostics are written to daily-rolling files under <code>.spec/log/</code>
+(gitignored; safe to delete at any time) — stdout and
 stderr are never touched, so JSON output, the MCP stdio protocol, and
 user-facing messages stay clean either way. Log writes go through an
 in-memory queue drained by a worker thread, so logging never blocks
 the command. If the log directory cannot be created, diagnostics fall
 back to stderr.</p>
 <pre><code class="language-bash">spec --debug implement REQ-003             # full prompts and replies in the log
-tail -f .spec-log/spec.log.$(date +%F)      # watch the diagnostics live
+tail -f .spec/log/spec.log.$(date +%F)      # watch the diagnostics live
 </code></pre>
 <p>The <code>RUST_LOG</code> environment variable overrides both the default and
 <code>--debug</code> with per-module directives, e.g.
@@ -236,14 +242,14 @@ plus the reason, so the model can correct itself. Transport failures
 <pre><code class="language-bash">spec --retry 5 greenfield
 spec draft --retry 1   # one attempt, then the usual fallback
 </code></pre>
-<p><code>--retry</code> wins over <code>retry</code> under <code>[llm]</code> in <code>.spec.toml</code>. A missing
+<p><code>--retry</code> wins over <code>retry</code> under <code>[llm]</code> in <code>.spec/config.toml</code>. A missing
 or zero config value uses the default of 3. In the interactive shell,
 commands inherit the shell’s <code>--retry</code> unless a line supplies its own.</p>
 <h2 id="--tools-names"><a class="header" href="#--tools-names"><code>--tools &lt;NAMES&gt;</code></a></h2>
 <p>Replace this command’s tool profile for one run with a comma-separated
 list of catalog names (<code>validate_spec</code>, <code>playwright:browser_navigate</code>,
 <code>builtin:run_tests</code>). Default profiles live in code and in
-<code>.spec.toml</code>; see <a href="commands/tools.html"><code>spec tools</code></a>. <a href="commands/config.html"><code>spec config</code></a>
+<code>.spec/config.toml</code>; see <a href="commands/tools.html"><code>spec tools</code></a>. <a href="commands/config.html"><code>spec config</code></a>
 prints the resolved keys and their source.</p>
 <pre><code class="language-bash">spec --tools list_requirements,get_requirement status
 </code></pre>

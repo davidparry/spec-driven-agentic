@@ -1,11 +1,12 @@
 //! Filesystem implementation of the [`ChangeStore`] port. Staged files
-//! live under `.spec-staged/files/` mirroring the project layout, with a
+//! live under `.spec/staged/files/` mirroring the project layout, with a
 //! `manifest.json` describing each change; `commit` copies them into the
 //! working tree and clears the area.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::adapters::spec_home::spec_file;
 use crate::adapters::staging_lock;
 use crate::domain::STAGED_DIR;
 use crate::ports::{ChangeStore, StageError, StagedChange, Staging};
@@ -20,7 +21,7 @@ impl FsChangeStore {
     }
 
     fn staged_dir(&self) -> PathBuf {
-        self.root.join(STAGED_DIR)
+        spec_file(&self.root, STAGED_DIR)
     }
 
     fn manifest_file(&self) -> PathBuf {
@@ -436,7 +437,7 @@ mod tests {
             "{}"
         );
         assert_eq!(store.changes().unwrap(), vec![]);
-        assert!(!dir.path().join(STAGED_DIR).exists());
+        assert!(!spec_file(dir.path(), STAGED_DIR).exists());
     }
 
     #[test]
@@ -458,7 +459,7 @@ mod tests {
     fn the_manifest_is_renamed_into_place_from_a_scratch_file_of_its_own() {
         let (dir, store) = store();
         store.stage("a.txt", "x", "s").unwrap();
-        let staged = dir.path().join(STAGED_DIR);
+        let staged = spec_file(dir.path(), STAGED_DIR);
         let leftovers: Vec<_> = fs::read_dir(&staged)
             .unwrap()
             .filter_map(Result::ok)
@@ -482,9 +483,9 @@ mod tests {
     #[test]
     fn a_corrupt_manifest_is_a_structured_error() {
         let (dir, store) = store();
-        fs::create_dir_all(dir.path().join(STAGED_DIR)).unwrap();
+        fs::create_dir_all(spec_file(dir.path(), STAGED_DIR)).unwrap();
         fs::write(
-            dir.path().join(STAGED_DIR).join("manifest.json"),
+            spec_file(dir.path(), STAGED_DIR).join("manifest.json"),
             "not json",
         )
         .unwrap();
@@ -507,7 +508,7 @@ mod tests {
     fn a_staged_file_missing_from_disk_is_a_structured_error() {
         let (dir, store) = store();
         store.stage("a.txt", "x", "s").unwrap();
-        fs::remove_file(dir.path().join(STAGED_DIR).join("files/a.txt")).unwrap();
+        fs::remove_file(spec_file(dir.path(), STAGED_DIR).join("files/a.txt")).unwrap();
         let read = store.content("a.txt").unwrap_err();
         assert!(
             read.0.contains("staged file not readable"),

@@ -6,9 +6,15 @@ them anywhere on the command line.
 ## `--root <ROOT>`
 
 The project root — the directory where `requirements/requirements.json`
-(the root of the [spec catalog](spec-format.md)) and `.spec.toml`
-live, and the base for every relative path the harness reads or writes.
-Defaults to the current directory. MCP clients that cannot see argv can
+(the root of the [spec catalog](spec-format.md)) lives, and where the
+harness keeps its own files under `.spec/` (see
+[Where spec keeps its files](getting-started.md#where-spec-keeps-its-files)).
+`.spec/config.toml` is the tracked configuration. The root is the base
+for every relative path the harness reads or writes.
+A concrete path wins. An empty `--root`, or an unexpanded `${...}`
+template, is ignored. `SPEC_PROJECT_DIR` is used when it names a real
+path. Otherwise the process stays in the directory it was launched in.
+MCP clients that cannot see argv can
 call `project_root` to read the same directory as an absolute path.
 
 ```bash
@@ -34,7 +40,7 @@ Model resolution order (see [spec model](commands/model.md) for the
 full story):
 
 1. `--model` flag — this invocation only.
-2. `model` in `.spec.toml` — the persisted project choice.
+2. `model` in `.spec/config.toml` — the persisted project choice.
 3. Discovery — the first installed Ollama model, session-only.
 
 ## `--debug`
@@ -44,8 +50,8 @@ responses, cache hits and misses, resolved configuration, MCP tool
 calls, and test-runner activity. Without the flag only high-level
 lifecycle events (info and above) are logged.
 
-Diagnostics are written to daily-rolling files under `.spec-log/` in
-the project root (gitignored; safe to delete at any time) — stdout and
+Diagnostics are written to daily-rolling files under `.spec/log/`
+(gitignored; safe to delete at any time) — stdout and
 stderr are never touched, so JSON output, the MCP stdio protocol, and
 user-facing messages stay clean either way. Log writes go through an
 in-memory queue drained by a worker thread, so logging never blocks
@@ -54,7 +60,7 @@ back to stderr.
 
 ```bash
 spec --debug implement REQ-003             # full prompts and replies in the log
-tail -f .spec-log/spec.log.$(date +%F)      # watch the diagnostics live
+tail -f .spec/log/spec.log.$(date +%F)      # watch the diagnostics live
 ```
 
 The `RUST_LOG` environment variable overrides both the default and
@@ -75,7 +81,7 @@ spec --retry 5 greenfield
 spec draft --retry 1   # one attempt, then the usual fallback
 ```
 
-`--retry` wins over `retry` under `[llm]` in `.spec.toml`. A missing
+`--retry` wins over `retry` under `[llm]` in `.spec/config.toml`. A missing
 or zero config value uses the default of 3. In the interactive shell,
 commands inherit the shell's `--retry` unless a line supplies its own.
 
@@ -84,7 +90,7 @@ commands inherit the shell's `--retry` unless a line supplies its own.
 Replace this command's tool profile for one run with a comma-separated
 list of catalog names (`validate_spec`, `playwright:browser_navigate`,
 `builtin:run_tests`). Default profiles live in code and in
-`.spec.toml`; see [`spec tools`](commands/tools.md). [`spec config`](commands/config.md)
+`.spec/config.toml`; see [`spec tools`](commands/tools.md). [`spec config`](commands/config.md)
 prints the resolved keys and their source.
 
 ```bash

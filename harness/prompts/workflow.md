@@ -10,7 +10,7 @@ below. The goal: every requirement implemented, validated, and committed.
 
 STATES
 
-TDD phases, recorded in .spec-state.json by spec test and spec refactor:
+TDD phases, recorded in .spec/state.json by spec test and spec refactor:
 - START: no test run is recorded yet.
 - RED: the last test run failed.
 - GREEN: the last test run passed.

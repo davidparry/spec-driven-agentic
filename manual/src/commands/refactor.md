@@ -63,7 +63,7 @@ If the budget runs out, **every file it touched is restored to the byte**
 from a snapshot taken before the first round. The restore is the harness's
 own, so it does not depend on your git state being clean.
 
-The budget is `[refactor] attempts` in `.spec.toml`, ten by default:
+The budget is `[refactor] attempts` in `.spec/config.toml`, ten by default:
 
 ```toml
 [refactor]

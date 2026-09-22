@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use cucumber::gherkin::Step;
 use cucumber::{World, given, then, when};
 
-use spec_harness::adapters::config::{TomlToolStore, inspect_config};
+use spec_harness::adapters::config::{TomlToolStore, config_path, inspect_config};
 use spec_harness::adapters::fs_project::FsProjectFiles;
 use spec_harness::adapters::fs_scaffold::FsScaffoldWriter;
 use spec_harness::adapters::fs_sources::FsSourceFiles;
@@ -22,6 +22,7 @@ use spec_harness::adapters::runners::cargo::parse_cargo_output;
 use spec_harness::adapters::runners::cucumber_js::parse_json_report;
 use spec_harness::adapters::runners::dotnet::parse_trx;
 use spec_harness::adapters::runners::maven::{MavenRunner, parse_surefire_xml};
+use spec_harness::adapters::spec_home::spec_file;
 use spec_harness::adapters::tool_cache::CachedDiscovery;
 use spec_harness::application::DEFAULT_LLM_ATTEMPTS;
 use spec_harness::application::agent_service::{
@@ -54,7 +55,7 @@ use spec_harness::application::tdd_service::{
 };
 use spec_harness::application::tool_call_service::ToolCallService;
 use spec_harness::application::tool_service::{self, ToolService};
-use spec_harness::domain::CONFIG_FILE;
+use spec_harness::domain::CACHE_DIR;
 use spec_harness::domain::feature::{FeatureDoc, FeatureSummary};
 use spec_harness::domain::language::detect_languages;
 use spec_harness::domain::mcp_registry::{RegistryLoad, ServerSpec, parse_registry};
@@ -3040,7 +3041,7 @@ impl SpecWorld {
         let root = self.project_root();
         let connects = Arc::new(Mutex::new(0usize));
         let service = ToolService::new(
-            TomlToolStore::new(root.join(CONFIG_FILE)),
+            TomlToolStore::new(config_path(&root)),
             CountingDiscovery {
                 connects: Arc::clone(&connects),
                 fail: fail_discovery.then(|| "failed to start".into()),
@@ -3055,7 +3056,7 @@ impl SpecWorld {
         // Reconstruct so later calls share counting... the connects already happened.
         // Return a fresh service with the same counter for subsequent use.
         ToolService::new(
-            TomlToolStore::new(self.project_root().join(CONFIG_FILE)),
+            TomlToolStore::new(config_path(&self.project_root())),
             CountingDiscovery {
                 connects,
                 fail: fail_discovery.then(|| "failed to start".into()),
@@ -3118,7 +3119,7 @@ fn the_tool_profiles_are_listed(world: &mut SpecWorld) {
 fn the_tools_are_listed_offline(world: &mut SpecWorld) {
     let connects = Arc::new(Mutex::new(0usize));
     let service = ToolService::new(
-        TomlToolStore::new(world.project_root().join(CONFIG_FILE)),
+        TomlToolStore::new(config_path(&world.project_root())),
         CountingDiscovery {
             connects: Arc::clone(&connects),
             fail: None,
@@ -3149,7 +3150,7 @@ fn the_tool_catalog_is_refreshed(world: &mut SpecWorld) {
     };
     let cache = CachedDiscovery::new(
         inner,
-        world.project_root().join(".spec-cache").join("tools"),
+        spec_file(&world.project_root(), CACHE_DIR).join("tools"),
         std::time::Duration::from_secs(86_400),
     );
     let load = FsMcpRegistry::new(world.project_root(), None).load();
@@ -3171,11 +3172,9 @@ fn the_tool_catalog_is_refreshed(world: &mut SpecWorld) {
 #[given("the config file contains:")]
 fn the_config_file_contains(world: &mut SpecWorld, step: &Step) {
     let content = step.docstring.clone().expect("a docstring");
-    std::fs::write(
-        world.project_root().join(CONFIG_FILE),
-        content.trim_start_matches('\n'),
-    )
-    .unwrap();
+    let path = config_path(&world.project_root());
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, content.trim_start_matches('\n')).unwrap();
 }
 
 #[when("the configuration is listed")]
@@ -3334,7 +3333,7 @@ fn a_tool_warning_contains(world: &mut SpecWorld, fragment: String) {
 
 #[then(regex = r#"^the config file contains "([^"]+)"$"#)]
 fn config_file_contains(world: &mut SpecWorld, fragment: String) {
-    let text = std::fs::read_to_string(world.project_root().join(CONFIG_FILE)).unwrap();
+    let text = std::fs::read_to_string(config_path(&world.project_root())).unwrap();
     assert!(text.contains(&fragment), "{text}");
 }
 

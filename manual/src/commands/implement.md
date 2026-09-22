@@ -168,7 +168,7 @@ a replacement of.
 The implementation prompt is the largest call the harness makes, so a
 local model can need minutes to answer. The generation timeout
 defaults to 300 seconds; if you see `no reply within ...s`, raise
-`timeout_seconds` under `[llm]` in `.spec.toml` (see
+`timeout_seconds` under `[llm]` in `.spec/config.toml` (see
 [`spec model`](model.md#the-llm-configuration-block)).
 
 ## Where it fits
@@ -191,7 +191,7 @@ hand.
 
 ## Attempts are remembered
 
-Every attempt is logged in `.spec-state.json` (under `attemptLog` on a
+Every attempt is logged in `.spec/state.json` (under `attemptLog` on a
 timestamped state entry): the files it wrote, the failures it was
 addressing, and — attached by the first test run after it — the
 `outcome`: what that run actually reported, build output included. The
@@ -213,7 +213,7 @@ test run goes GREEN — a closed loop leaves no history for the next
 requirement to inherit.
 
 `run_tests` during this command sees the **working tree**, not the
-unstaged patch sitting in `.spec-staged/`. Commit (or apply) before you
+unstaged patch sitting in `.spec/staged/`. Commit (or apply) before you
 trust the bar. If the model requests `command_run`, the harness asks you to
 confirm first; piped or CI stdin declines and never hangs.
 

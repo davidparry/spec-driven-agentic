@@ -138,7 +138,7 @@ query string, and <kbd>t</kbd> switches between them live.
 | --- | --- | --- |
 | **Conference session** (50 minutes) | [`?60`](slides/index.html?60) | The full narrative above — pi on Ollama, pi with its built-ins taken away, then the harness — with the live frontier-versus-local comparison and the *Where This Breaks* segment. The two exercise slides are delivered as demos from the stage rather than as hands-on time, which is what makes the 60-minute cut fit in 50. |
 | **Short session** (30 minutes) | [`?30`](slides/index.html?30) | The same three acts, demo-driven, with no hands-on segment: pi free and offline, the one-flag change to `pi --no-builtin-tools`, then the spec-specific runner taken from requirement to green — plus *Where This Breaks*. Published at [/talk30/](https://davidparry.github.io/spec-driven-agentic/talk30/). |
-| **Hands-on workshop** (60 minutes) | [`?60`](slides/index.html?60) | Attendees run the loop on their own machines against a local model: draft a requirement, refine it until the wording review is clean, take it through RED, GREEN, and REFACTOR, then grade the run with `scripts/verify-workshop-run.sh check`. Companion material is the [workshop follow-along](student-follow-along.md); the [pi path](student-follow-docs/pi-path.md) is the free, no-IDE on-ramp, and the [harness path](student-follow-docs/harness-path.md) covers attendees who prefer the terminal to an IDE. |
+| **Hands-on workshop** (60 minutes) | [`?60`](slides/index.html?60) | Attendees run the loop on their own machines against a local model: draft a requirement, refine it until the wording review is clean, take it through RED, GREEN, and REFACTOR, then grade the run with `scripts/verify-workshop-run.sh check`. Companion material is the [workshop follow-along](../student-follow-docs/student-follow-along.md); the [pi path](../student-follow-docs/pi-path.md) is the free, no-IDE on-ramp, and the [harness path](../student-follow-docs/harness-path.md) covers attendees who prefer the terminal to an IDE. |
 
 ## Technical requirements
 
@@ -151,23 +151,23 @@ query string, and <kbd>t</kbd> switches between them live.
   MCP-server **smoke test**.
 - For the workshop format: attendees need **`spec` on PATH**, Java 21, Maven, git, and an MCP
   host — Cursor, Claude, or pi with `pi-mcp-extension` — and, to run fully offline, Ollama with
-  `qwen3.8-flash-next:125b-mlx` pulled ahead of time. The [pi path](student-follow-docs/pi-path.md)
-  and the [harness path](student-follow-docs/harness-path.md) are the Wi-Fi-off alternatives.
+  `qwen3.8-flash-next:125b-mlx` pulled ahead of time. The [pi path](../student-follow-docs/pi-path.md)
+  and the [harness path](../student-follow-docs/harness-path.md) are the Wi-Fi-off alternatives.
 
 ## What is on stage, in this repo
 
 | Shown live | Where it lives |
 | --- | --- |
-| The free on-ramp: pi on Ollama, then pi with `--no-builtin-tools` against this server | [`.pi/mcp.json`](.pi/mcp.json), [`student-follow-docs/pi-path.md`](student-follow-docs/pi-path.md) |
+| The free on-ramp: pi on Ollama, then pi with `--no-builtin-tools` against this server | [`.pi/mcp.json`](../.pi/mcp.json), [`student-follow-docs/pi-path.md`](../student-follow-docs/pi-path.md) |
 | The 25-tool MCP server enforcing the loop | `harness/src/mcp.rs` (`spec mcp serve`) |
 | The deterministic structure and wording reviews | `harness/src/domain/` (spec validator, requirement refiner) |
 | The state machine that refuses a red-bar refactor | `harness/src/domain/tdd.rs` (`TddStateMachine`) |
 | The requirements catalog that drives everything | `requirements/requirements.json` |
 | Gherkin and JUnit generated from the spec | `kata/` |
-| The offline harness: same server, scoped profiles on `qwen3.8-flash-next:125b-mlx` | [`harness/README.md`](harness/README.md), [`student-follow-docs/harness-path.md`](student-follow-docs/harness-path.md) |
+| The offline harness: same server, scoped profiles on `qwen3.8-flash-next:125b-mlx` | [`harness/README.md`](../harness/README.md), [`student-follow-docs/harness-path.md`](../student-follow-docs/harness-path.md) |
 | Every prompt sent to the model, in one auditable file | `harness/prompts/prompts.toml` |
-| The end-of-run grader that names the requirement id — where "right process, wrong requirement" is caught | [`scripts/verify-workshop-run.sh`](scripts/verify-workshop-run.sh) |
-| The bundled MCP-server smoke test: launch, discover 25 tools, invoke | `smoke-test/`, captured run in [`student-follow-docs/step2.log`](student-follow-docs/step2.log) |
+| The end-of-run grader that names the requirement id — where "right process, wrong requirement" is caught | [`scripts/verify-workshop-run.sh`](../scripts/verify-workshop-run.sh) |
+| The bundled MCP-server smoke test: launch, discover 25 tools, invoke | `smoke-test/`, captured run in [`student-follow-docs/step2.log`](../student-follow-docs/step2.log) |
 | The slide deck — one file, two cuts ([`?30`](slides/index.html?30) selects the short one, or press <kbd>t</kbd> in the deck) | [`slides/index.html`](slides/index.html) |
 
 ## Booking

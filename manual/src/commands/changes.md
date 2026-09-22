@@ -1,7 +1,7 @@
 # spec changes
 
 Staged-transaction management. Every file mutation the harness authors
-lands in `.spec-staged/` first (see [Staged changes](../staged-changes.md));
+lands in `.spec/staged/` first (see [Staged changes](../staged-changes.md));
 these subcommands are how you review, apply, or drop the transaction.
 
 ```text
@@ -52,7 +52,7 @@ An empty stage:
 ```
 
 To see the full content of a staged file, read it directly under
-`.spec-staged/` — the layout mirrors the project tree.
+`.spec/staged/` — the layout mirrors the project tree.
 
 ---
 
@@ -118,7 +118,7 @@ Usage: spec changes validate [OPTIONS]
 ### What is checked
 
 - Every `.feature` file under the root parses as valid Gherkin.
-- Every file in the staging area (`.spec-staged/`) that is a feature
+- Every file in the staging area (`.spec/staged/`) that is a feature
   file parses too — you cannot commit a transaction containing broken
   Gherkin without knowing.
 - Scenario requirement tags (`@REQ-...`) refer to ids that exist in

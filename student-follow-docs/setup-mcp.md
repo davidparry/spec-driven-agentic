@@ -3,9 +3,11 @@
 The ready-to-run server entry lives in [config/mcp.json](../config/mcp.json).
 Put **`spec` on PATH** first (`cargo install --path harness`, a GitHub release
 binary, or `harness/target/release/spec`), then register the server with your
-client of choice below. One thing to know before you copy:
-`${workspaceFolder}` is a Cursor variable — every other client needs it
-replaced with the **absolute path** to your repo clone.
+client of choice below. `${workspaceFolder}` is a Cursor variable.
+Claude Code passes `${SPEC_PROJECT_DIR}`. When that variable is unset,
+the server uses the directory it was launched in. pi ships with no
+`--root`, so start it from the repo root. Other clients need the
+**absolute path** to your repo clone.
 
 The server itself is always the same command, whatever the client:
 
@@ -82,10 +84,15 @@ server list Claude Code reads) and [`.claude/settings.json`](../.claude/settings
 on PATH. In a Claude Code session, trust the workspace if prompted, then
 confirm with `/mcp`.
 
+[`.mcp.json`](../.mcp.json) passes `--root ${SPEC_PROJECT_DIR}`. Set that
+variable to the project directory when Claude Code starts the server. If
+it is unset, `spec` uses the directory the process was launched in. An
+unexpanded `${...}` value is not turned into a directory.
+
 To register the same server in another clone without those files:
 
 ```bash
-claude mcp add spec-driven-server --scope project -- spec mcp serve --root "${CLAUDE_PROJECT_DIR:-$PWD}"
+claude mcp add spec-driven-server --scope project -- spec mcp serve --root "${SPEC_PROJECT_DIR:-.}"
 ```
 
 - Docs: [Claude Code — MCP](https://code.claude.com/docs/en/mcp)

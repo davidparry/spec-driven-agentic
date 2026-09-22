@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "searchindex-eaaa3625.js";
+            window.path_to_searchindex_js = "searchindex-1707d030.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-372d77fe.js"></script>
@@ -222,8 +222,8 @@ run <code>list</code>, <code>greenfield</code>, or anything else without relaunc
 </ul>
 <p>On exit the shell prints a summary of how many commands ran.</p>
 <h2 id="session-history"><a class="header" href="#session-history">Session history</a></h2>
-<p>Line history is kept across sessions in <code>.spec-history</code> under the
-project root. Use <kbd>↑</kbd>/<kbd>↓</kbd> to recall previous
+<p>Line history is kept across sessions in <code>.spec/history</code>. Use
+<kbd>↑</kbd>/<kbd>↓</kbd> to recall previous
 commands and <kbd>Ctrl</kbd>+<kbd>R</kbd> for reverse search. If the
 history cannot be saved, the shell says so and exits normally.</p>
 <h2 id="model-announcement-at-startup"><a class="header" href="#model-announcement-at-startup">Model announcement at startup</a></h2>
@@ -239,7 +239,7 @@ model, especially one trained for work other than development. See
 <tr><th>Situation</th><th>Announcement</th></tr>
 </thead>
 <tbody>
-<tr><td>Configured in <code>.spec.toml</code></td><td><code>Model set: qwen3.8-flash-next:125b-mlx (from configuration).</code></td></tr>
+<tr><td>Configured in <code>.spec/config.toml</code></td><td><code>Model set: qwen3.8-flash-next:125b-mlx (from configuration).</code></td></tr>
 <tr><td>No config, models installed</td><td><code>Model set for this session: qwen3.8-flash-next:125b-mlx (not saved - keep it with: spec model use qwen3.8-flash-next:125b-mlx).</code></td></tr>
 <tr><td>Ollama up, no models</td><td><code>Ollama is running but has no models - generation will use deterministic templates. For optimal results pull a coding model, e.g.: ollama pull qwen3.8-flash-next:125b-mlx (mileage varies with models not trained for development)</code></td></tr>
 <tr><td>Ollama unreachable</td><td><code>Ollama is not reachable - generation will use deterministic templates. Install it from https://ollama.com, start it, and pull a coding model, e.g.: ollama pull qwen3.8-flash-next:125b-mlx (mileage varies with models not trained for development)</code></td></tr>
@@ -249,12 +249,12 @@ model, especially one trained for work other than development. See
 <h2 id="the-greenfield-nudge"><a class="header" href="#the-greenfield-nudge">The greenfield nudge</a></h2>
 <p>When all three signs of a brand-new project line up —</p>
 <ol>
-<li>this is the first shell session in the root (no <code>.spec-history</code> yet),</li>
+<li>this is the first shell session in the root (no <code>.spec/history</code> yet),</li>
 <li>a model is ready, and</li>
 <li>there is no <code>requirements/requirements.json</code></li>
 </ol>
 <p>— the shell offers to start the loop before the first prompt. The same
-start refreshes <code>.spec-memory.json</code> (language, libraries, layout) so
+start refreshes <code>.spec/memory.json</code> (language, libraries, layout) so
 later model calls in the session carry that brief.</p>
 <h2 id="the-layout-question"><a class="header" href="#the-layout-question">The layout question</a></h2>
 <p>That refresh resolves the project’s layout: the module whose build file

@@ -91,6 +91,32 @@ same commands. The kata-specific recipe (paths under `kata/`, draft
 REQ-007, then REQ-003…007 to implemented) is
 [This workshop’s String Calculator](workshop.md).
 
+## Where spec keeps its files
+
+Harness files for a project live in one directory, `.spec/`, under the
+project root (`--root`, or the current directory). They sit next to
+`requirements/`, not loose in the root. `spec init` creates the
+directory. The next `spec` run also creates it, and moves an older
+root-level file into the matching path below when that new path is
+still empty.
+
+```text
+.spec/
+  config.toml    tracked — LLM, timeouts, per-command tool profiles
+  state.json     TDD phase log
+  memory.json    discovered language, libraries, and layout
+  history        interactive-shell command history
+  cache/         cached LLM responses and tool catalogs
+  log/           daily diagnostic logs
+  staged/        mutations waiting for spec changes commit
+```
+
+Only `config.toml` is meant to be committed. `spec init` writes a
+gitignore that ignores `.spec/*` and keeps `.spec/config.toml`. The
+other children are generated. Deleting `cache/` or `log/` is always
+safe. Deleting `state.json` resets the phase to START. Deleting
+`staged/` throws away mutations that have not been committed.
+
 ## Working against an existing project
 
 Every command takes `--root` (see [Global flags](global-flags.md)), so

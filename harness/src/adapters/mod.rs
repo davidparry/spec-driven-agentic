@@ -26,6 +26,7 @@ pub mod prompt_end;
 pub mod readline_prompt;
 pub mod readline_shell;
 pub mod runners;
+pub mod spec_home;
 pub mod spinner;
 pub mod staging_lock;
 pub mod tool_cache;

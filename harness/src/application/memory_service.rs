@@ -101,7 +101,7 @@ where
     }
 
     /// Scan the project, preserve a chosen (or previously stored) language,
-    /// and write `.spec-memory.json` when there is something to record.
+    /// and write `.spec/memory.json` when there is something to record.
     pub fn refresh(&self, chosen: Option<Language>) -> Result<ProjectMemory, MemoryError> {
         Ok(self.scan(chosen)?.memory)
     }

@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-eaaa3625.js";
+            window.path_to_searchindex_js = "../searchindex-1707d030.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-372d77fe.js"></script>
@@ -182,7 +182,7 @@
                     <main>
                         <h1 id="spec-init"><a class="header" href="#spec-init">spec init</a></h1>
 <p>Scaffold build files, a Cucumber runner, an empty requirements spec,
-and the harness’s configuration in the project root. Existing files are
+and the harness configuration at <code>.spec/config.toml</code>. Existing files are
 never overwritten — they are reported as skipped.</p>
 <pre><code class="language-text">Usage: spec init [OPTIONS]
 </code></pre>
@@ -207,14 +207,16 @@ never overwritten — they are reported as skipped.</p>
 the root of the <a href="../spec-format.html">spec catalog</a>: split the backlog
 into included files later with
 <a href="spec.html#spec-include"><code>spec include add</code></a>.</li>
-<li><code>.spec.toml</code> — the harness configuration (LLM, timeouts, per-command
+<li><code>.spec/config.toml</code> — the harness configuration (LLM, timeouts, per-command
 tool profiles). <code>spec init</code> writes <code>[tools.profiles]</code> with the tools
 each LLM-backed command offers the model (the code defaults, listed
 for reference). Other keys are commented with their defaults.</li>
 </ul>
-<p>After scaffolding, <code>init</code> scans the new files into <code>.spec-memory.json</code>
-(language, BDD framework, libraries, layout). That file is committed
-with the project; it is refreshed again when a shell, MCP server, or
+<p>After scaffolding, <code>init</code> scans the new files into <code>.spec/memory.json</code>
+(language, BDD framework, libraries, layout). That file is generated
+state inside <code>.spec/</code> and is gitignored, like <code>state.json</code>, <code>history</code>,
+<code>cache/</code>, <code>log/</code>, and <code>staged/</code>. Only <code>.spec/config.toml</code> is written to
+be committed. Memory is refreshed again when a shell, MCP server, or
 LLM command starts. Every model system prompt then opens with that
 brief.</p>
 <p>Plus the language’s build and BDD harness:</p>
@@ -242,7 +244,7 @@ spec init --language rust --name "String Calculator"
   "framework": "cucumber-rs",
   "created": [
     "requirements/requirements.json",
-    ".spec.toml",
+    ".spec/config.toml",
     "Cargo.toml",
     "src/lib.rs",
     "tests/cucumber.rs",
@@ -261,7 +263,7 @@ spec init --language rust --name "String Calculator"
   "created": [],
   "skipped": [
     "requirements/requirements.json",
-    ".spec.toml",
+    ".spec/config.toml",
     "Cargo.toml",
     "src/lib.rs",
     "tests/cucumber.rs",

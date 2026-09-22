@@ -1,5 +1,5 @@
 //! A disk-backed response cache decorating any [`LlmConversation`]:
-//! identical histories within the TTL are answered from `.spec-cache/`
+//! identical histories within the TTL are answered from `.spec/cache/`
 //! without calling the model. Only terminal turns are cached: the agent
 //! loop executes the tool calls a turn carries, so serving one from disk
 //! would repeat their side effects without the model ever deciding to.

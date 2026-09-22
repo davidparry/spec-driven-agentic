@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-eaaa3625.js";
+            window.path_to_searchindex_js = "../searchindex-1707d030.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-372d77fe.js"></script>
@@ -359,7 +359,7 @@ refactor while failing, or invent requirements: the tools refuse,
 with a <code>nextStep</code> that teaches the correct move.
 <code>requirement_mark_implemented</code> is GREEN-gated and needs a tagged
 scenario.</li>
-<li><strong>State survives.</strong> The phase machine lives on disk, so a
+<li><strong>State survives.</strong> The phase machine lives in <code>.spec/state.json</code>, so a
 reconnecting agent (or a human taking over in the harness) continues
 from the same place.</li>
 </ul>
@@ -370,7 +370,7 @@ from the same place.</li>
 <tr><th>Flag</th><th>Description</th></tr>
 </thead>
 <tbody>
-<tr><td><code>--root &lt;ROOT&gt;</code></td><td>Project root the served tools operate on. Defaults to the process’s working directory.</td></tr>
+<tr><td><code>--root &lt;ROOT&gt;</code></td><td>Project root the served tools operate on. A concrete path wins. An empty value or an unexpanded <code>${...}</code> template is ignored; <code>SPEC_PROJECT_DIR</code> is used when it names a real path. Otherwise the directory the process was launched in.</td></tr>
 <tr><td><code>--model &lt;MODEL&gt;</code></td><td>Model override for the serving session. MCP generation tools do not call Ollama; they stage templates.</td></tr>
 </tbody>
 </table>
@@ -378,7 +378,8 @@ from the same place.</li>
 <h2 id="notes"><a class="header" href="#notes">Notes</a></h2>
 <ul>
 <li>The server logs nothing to stdout except protocol traffic (stdout
-is the wire). Diagnostics go to stderr.</li>
+is the wire). Diagnostics go to daily-rolling files under <code>.spec/log/</code>
+and fall back to stderr only when that directory cannot be created.</li>
 <li>One server serves one project root. Point different projects at
 different server entries.</li>
 <li>Backup Inspector: <code>npx @modelcontextprotocol/inspector spec mcp serve --root $PWD</code>.</li>

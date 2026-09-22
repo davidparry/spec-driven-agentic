@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use crate::domain::tools::{ToolDefinition, find};
 
 /// Every model call the harness makes, as a profile key. The kebab-case
-/// name is what `.spec.toml` and `--for` use.
+/// name is what `.spec/config.toml` and `--for` use.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Caller {
     SpecDraft,

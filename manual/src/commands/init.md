@@ -1,7 +1,7 @@
 # spec init
 
 Scaffold build files, a Cucumber runner, an empty requirements spec,
-and the harness's configuration in the project root. Existing files are
+and the harness configuration at `.spec/config.toml`. Existing files are
 never overwritten — they are reported as skipped.
 
 ```text
@@ -25,14 +25,16 @@ Every language gets the two spec-driven anchors:
   the root of the [spec catalog](../spec-format.md): split the backlog
   into included files later with
   [`spec include add`](spec.md#spec-include).
-- `.spec.toml` — the harness configuration (LLM, timeouts, per-command
+- `.spec/config.toml` — the harness configuration (LLM, timeouts, per-command
   tool profiles). `spec init` writes `[tools.profiles]` with the tools
   each LLM-backed command offers the model (the code defaults, listed
   for reference). Other keys are commented with their defaults.
 
-After scaffolding, `init` scans the new files into `.spec-memory.json`
-(language, BDD framework, libraries, layout). That file is committed
-with the project; it is refreshed again when a shell, MCP server, or
+After scaffolding, `init` scans the new files into `.spec/memory.json`
+(language, BDD framework, libraries, layout). That file is generated
+state inside `.spec/` and is gitignored, like `state.json`, `history`,
+`cache/`, `log/`, and `staged/`. Only `.spec/config.toml` is written to
+be committed. Memory is refreshed again when a shell, MCP server, or
 LLM command starts. Every model system prompt then opens with that
 brief.
 
@@ -61,7 +63,7 @@ spec init --language rust --name "String Calculator"
   "framework": "cucumber-rs",
   "created": [
     "requirements/requirements.json",
-    ".spec.toml",
+    ".spec/config.toml",
     "Cargo.toml",
     "src/lib.rs",
     "tests/cucumber.rs",
@@ -85,7 +87,7 @@ spec init --language rust
   "created": [],
   "skipped": [
     "requirements/requirements.json",
-    ".spec.toml",
+    ".spec/config.toml",
     "Cargo.toml",
     "src/lib.rs",
     "tests/cucumber.rs",

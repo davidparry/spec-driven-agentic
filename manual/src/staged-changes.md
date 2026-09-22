@@ -3,7 +3,7 @@
 Every command that would write into your project — feature creation,
 scenario mutations, step-definition and unit-test generation, spec
 drafting, marking a requirement implemented — writes to a staging area
-instead: `.spec-staged/` under the project root. Nothing touches your
+instead: `.spec/staged/`. Nothing touches your
 working tree until you commit the transaction.
 
 ## Why
@@ -41,7 +41,7 @@ spec changes discard   # drop everything staged, tree untouched
 | Writes to the stage | Writes directly |
 | --- | --- |
 | `feature create` | `init` (scaffolding a fresh project) |
-| `scenario add` / `update` / `delete` | `model use` (writes `.spec.toml`) |
+| `scenario add` / `update` / `delete` | `model use` (writes `.spec/config.toml`) |
 | `steps generate` | `test` / `refactor` (phase state file) |
 | `unittest generate` | |
 | `spec draft` | |

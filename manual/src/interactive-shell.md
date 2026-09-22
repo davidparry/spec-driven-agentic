@@ -47,8 +47,8 @@ On exit the shell prints a summary of how many commands ran.
 
 ## Session history
 
-Line history is kept across sessions in `.spec-history` under the
-project root. Use <kbd>↑</kbd>/<kbd>↓</kbd> to recall previous
+Line history is kept across sessions in `.spec/history`. Use
+<kbd>↑</kbd>/<kbd>↓</kbd> to recall previous
 commands and <kbd>Ctrl</kbd>+<kbd>R</kbd> for reverse search. If the
 history cannot be saved, the shell says so and exits normally.
 
@@ -63,7 +63,7 @@ model, especially one trained for work other than development. See
 
 | Situation | Announcement |
 | --- | --- |
-| Configured in `.spec.toml` | `Model set: qwen3.8-flash-next:125b-mlx (from configuration).` |
+| Configured in `.spec/config.toml` | `Model set: qwen3.8-flash-next:125b-mlx (from configuration).` |
 | No config, models installed | `Model set for this session: qwen3.8-flash-next:125b-mlx (not saved - keep it with: spec model use qwen3.8-flash-next:125b-mlx).` |
 | Ollama up, no models | `Ollama is running but has no models - generation will use deterministic templates. For optimal results pull a coding model, e.g.: ollama pull qwen3.8-flash-next:125b-mlx (mileage varies with models not trained for development)` |
 | Ollama unreachable | `Ollama is not reachable - generation will use deterministic templates. Install it from https://ollama.com, start it, and pull a coding model, e.g.: ollama pull qwen3.8-flash-next:125b-mlx (mileage varies with models not trained for development)` |
@@ -72,12 +72,12 @@ model, especially one trained for work other than development. See
 
 When all three signs of a brand-new project line up —
 
-1. this is the first shell session in the root (no `.spec-history` yet),
+1. this is the first shell session in the root (no `.spec/history` yet),
 2. a model is ready, and
 3. there is no `requirements/requirements.json`
 
 — the shell offers to start the loop before the first prompt. The same
-start refreshes `.spec-memory.json` (language, libraries, layout) so
+start refreshes `.spec/memory.json` (language, libraries, layout) so
 later model calls in the session carry that brief.
 
 ## The layout question

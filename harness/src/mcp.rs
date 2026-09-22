@@ -876,9 +876,7 @@ mod tests {
     }
 
     fn staged_scenarios(dir: &tempfile::TempDir) -> Vec<String> {
-        let staged = dir
-            .path()
-            .join(crate::domain::STAGED_DIR)
+        let staged = crate::adapters::spec_home::spec_file(dir.path(), crate::domain::STAGED_DIR)
             .join("files/kata/src/test/resources/features/calc.feature");
         fs::read_to_string(staged)
             .unwrap_or_default()

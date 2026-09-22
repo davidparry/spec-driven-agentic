@@ -13,10 +13,10 @@
 > [write-up](https://davidparry.com/blog/2026/08/07/spec-first-was-always-right-agents-just-made-it-fast/).
 
 > **Conference organizers:** the session abstract, formats, and stage
-> requirements are in [`speaking.md`](speaking.md) —
+> requirements are in [`talks/speaking.md`](talks/speaking.md) —
 > *Turn Off the Wi-Fi: Spec-Driven Development That Delivers on a Local Model.*
 
-> **Students: start here → [`student-follow-along.md`](student-follow-along.md)**
+> **Students: start here → [`student-follow-along.md`](student-follow-docs/student-follow-along.md)**
 > Your step-by-step companion for the hour — the exact commands, the exact
 > agent prompts, what you should see at every step, and a self-check that
 > grades your run against the spec's own acceptance criteria.
@@ -61,15 +61,15 @@ where useful (TDD), and the `run_tests` tool runs Cucumber and JUnit
 together — one bar, one color. Tests are generated *from* the spec, not the
 other way around, which is exactly the spec-driven claim.
 
-**Slides:** open [`slides/index.html`](slides/index.html) in a browser for the
-60-minute workshop, or [`slides/index.html?30`](slides/index.html?30) for the
+**Slides:** open [`talks/slides/index.html`](talks/slides/index.html) in a browser for the
+60-minute workshop, or [`talks/slides/index.html?30`](talks/slides/index.html?30) for the
 30-minute demo-driven cut. One file, two tracks — see
-[`slides/index.html`](slides/index.html) `data-track`. The deck carries a
+[`talks/slides/index.html`](talks/slides/index.html) `data-track`. The deck carries a
 switch in the bottom-left corner and toggles on <kbd>t</kbd>, so you can
 change cuts without retyping the URL.
 
 **Attending this workshop?** Follow
-[`student-follow-along.md`](student-follow-along.md) step by step.
+[`student-follow-along.md`](student-follow-docs/student-follow-along.md) step by step.
 
 **Presenting this workshop?** Run `scripts/preflight.sh` before going on
 stage, and rehearse through `scripts/verify-workshop-run.sh` — it cuts a
@@ -85,12 +85,29 @@ kept with the presenter, not in the repo.)
 | [`harness/`](harness/README.md) | The `spec` harness **and** the workshop MCP server. `spec mcp serve` exposes 25 tools over stdio (wire identity `spec-driven-server` / `1.0.0`, title `Spec Driven`, website [spec-driven-agentic](https://davidparry.github.io/spec-driven-agentic/)). Frozen seven-tool reply shapes are gated by `harness/tests/mcp_conformance.rs`. The same binary automates the spec-driven loop with per-command tool profiles (3–7 tools for a generating command, 12 for the read-only `ask`) and a local Ollama model (`qwen3.8-flash-next:125b-mlx`). See [`harness/README.md`](harness/README.md) and the searchable [command manual](https://davidparry.github.io/spec-driven-agentic/manual/). |
 | `smoke-test/` | A narrated **smoke test** of `spec mcp serve` (`smoke-test.jar`) plus an automated 25-tool sweep. It launches **only** that server as a child process — discovery, baseline `run_tests`, then remaining read-only tools (`validate_spec`, `project_root`, `project_inspect`, `feature_list` / `feature_read`, `changes_show` / `changes_validate`, `step_definitions_find`; the narration starts at `tools/list`, since the server does not require an `initialize` handshake). Mutating tools stay behind `--sweep --include-mutating`. Own spec (`smoke-test/requirements/requirements.json`), tagged Cucumber scenarios, `SpecCompletenessTest`, 100% instruction/branch coverage (JaCoCo-enforced; excludes `TddAgent` and `SdkToolClient` only), SpotBugs + PMD gating `mvn -pl smoke-test verify`. |
 | `requirements/requirements.json` | The SDD spec: the requirements backlog, and the root of the **spec catalog** — it holds requirements of its own and may `include` child spec files (which may include further files, N levels deep); the tooling merges the tree into one backlog. Each requirement carries acceptance criteria (already phrased Given/When/Then) that agents turn into executable Gherkin scenarios and failing tests, plus a `featureFile` pointer to where its scenarios live. Full field-by-field reference: [The requirements format](https://davidparry.github.io/spec-driven-agentic/manual/spec-format.html). |
-| `slides/index.html` | The reveal.js slide deck (self-contained, CDN-based). **One file, two cuts:** every top-level `<section>` carries `data-track="60"`, `"30"`, or `"both"`, and a script strips the other track before reveal initializes. Plain URL gives the 60-minute workshop (28 slides); `?30` — or the published `/talk30/` path — gives the 30-minute demo-driven session (21 slides). Facts live in one place, so the two cuts cannot drift apart. |
-| `student-follow-along.md` | The attendee's step-by-step companion: commands, prompts, expected output, self-check, homework. |
+| `talks/slides/index.html` | The reveal.js slide deck (self-contained, CDN-based). **One file, two cuts:** every top-level `<section>` carries `data-track="60"`, `"30"`, or `"both"`, and a script strips the other track before reveal initializes. Plain URL gives the 60-minute workshop (28 slides); `?30` — or the published `/talk30/` path — gives the 30-minute demo-driven session (21 slides). Facts live in one place, so the two cuts cannot drift apart. |
+| [`student-follow-docs/student-follow-along.md`](student-follow-docs/student-follow-along.md) | The attendee's step-by-step companion: commands, prompts, expected output, self-check, homework. |
 | [`student-follow-docs/pi-path.md`](student-follow-docs/pi-path.md) | The free, offline on-ramp: pi (MIT) on a local Ollama model, first as it ships and then with `-nbt` so the same 25 MCP tools are all the model gets. |
-| [`speaking.md`](speaking.md) | The conference session built on this repo — abstract, what attendees leave with, the *Where This Breaks* catalog of local-model failure modes, formats, and stage requirements. Published at [/speaking/](https://davidparry.github.io/spec-driven-agentic/speaking/). |
+| [`talks/speaking.md`](talks/speaking.md) | The conference session built on this repo — abstract, what attendees leave with, the *Where This Breaks* catalog of local-model failure modes, formats, and stage requirements. Published at [/speaking/](https://davidparry.github.io/spec-driven-agentic/speaking/). |
 | `scripts/` | `preflight.sh` (presenter readiness), `verify-workshop-run.sh` (fresh run branch + end-state check against the spec's acceptance criteria), `check-workshop-start.sh` / `check-class-complete.sh` (the two CI branch guards). |
-| `.cursor/mcp.json` / [`.mcp.json`](.mcp.json) / [`.pi/mcp.json`](.pi/mcp.json) / [`config/mcp.json`](config/mcp.json) | Registers `spec mcp serve` with Cursor (`.cursor/mcp.json`), Claude Code (`.mcp.json` + `.claude/settings.json`), [pi](https://pi.dev) (`.pi/mcp.json`, read by `pi-mcp-extension`; no `--root`, so launch pi from the repo root), and other MCP hosts. |
+| `.cursor/mcp.json` / [`.mcp.json`](.mcp.json) / [`.pi/mcp.json`](.pi/mcp.json) / [`config/mcp.json`](config/mcp.json) | Registers `spec mcp serve`. Cursor (`.cursor/mcp.json`, and [`config/mcp.json`](config/mcp.json)) passes `--root ${workspaceFolder}`. Claude Code ([`.mcp.json`](.mcp.json)) passes `--root ${SPEC_PROJECT_DIR}` and, when that variable is unset, `spec` uses the directory the process was launched in. [pi](https://pi.dev) (`.pi/mcp.json`, read by `pi-mcp-extension`) has no `--root`, so launch pi from the repo root. |
+
+## Where `spec` keeps its files
+
+Everything the harness writes for a project lives in one hidden directory, `.spec/`, next to `requirements/`. `spec init` creates it. The next `spec` run also creates it and moves an older root-level name (`.spec.toml`, `.spec-state.json`, `.spec-memory.json`, `.spec-history`, `.spec-cache/`, `.spec-log/`, `.spec-staged/`) into the matching path below when that new path is still empty.
+
+```text
+.spec/
+  config.toml    tracked — LLM, timeouts, per-command tool profiles
+  state.json     TDD phase log
+  memory.json    discovered language, libraries, and layout
+  history        interactive-shell command history
+  cache/         cached LLM responses and discovered tool catalogs
+  log/           daily diagnostic logs (spec.log.YYYY-MM-DD)
+  staged/        mutations waiting for `spec changes commit`
+```
+
+Only `config.toml` is meant to be committed. The other children are gitignored. Deleting `cache/` or `log/` is always safe. Deleting `state.json` resets the phase to START. Deleting `staged/` throws away mutations that have not been committed.
 
 ## Branches and CI
 
@@ -187,7 +204,7 @@ module of the workshop reactor — it is its own project, so a copy of
 branch cut from `trunk` (`git checkout -b workshop trunk`) — the exercises
 rewrite the spec and the kata, and `trunk` stays pristine so you can always
 reset by re-branching. Details in
-[`student-follow-along.md`](student-follow-along.md).
+[`student-follow-along.md`](student-follow-docs/student-follow-along.md).
 
 ## The server's tools
 

@@ -22,7 +22,7 @@ Usage: spec greenfield [OPTIONS]
 
 ```text
  1. inspect / init      scaffold if the root is empty (asks for language)
-                        and records the choice in .spec-memory.json
+                        and records the choice in .spec/memory.json
  2. describe            you describe what to build in plain words; the
                         model splits it into requirement proposals
  3. accept + wizard     you accept all listed proposals, or a

@@ -9,7 +9,7 @@ recipe — install, branch, draft REQ-007, then drive REQ-003…007 to
 `implemented` — lives in
 [student-follow-docs/harness-path.md](../../../student-follow-docs/harness-path.md).
 
-Do not edit [student-follow-along.md](../../../student-follow-along.md)
+Do not edit [student-follow-along.md](../../../student-follow-docs/student-follow-along.md)
 for this path. Do not implement the kata on `trunk`.
 
 Kata files `spec` must reuse (not parallel `Req00NTest` / `Kata.java`

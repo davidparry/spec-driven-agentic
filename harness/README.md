@@ -21,6 +21,23 @@ Source lives in [`manual/src`](../manual/src); rebuild with
 mdbook` once). The built book is committed under `docs/manual/` so
 GitHub Pages serves it.
 
+## Where the files live
+
+Every project file the harness owns sits in `.spec/` under the project root (the directory `--root` names, next to `requirements/requirements.json`). A concrete `--root` wins. An empty value or an unexpanded `${...}` template is ignored; `SPEC_PROJECT_DIR` is used when it names a real path, and otherwise the process stays in the directory it was launched in. `spec init` creates the directory. On startup, `spec` also creates it and moves a leftover root-level artifact into the new path when that new path does not already exist: `.spec.toml`, `.spec-state.json`, `.spec-memory.json`, `.spec-history`, `.spec-cache/`, `.spec-log/`, and `.spec-staged/`.
+
+```text
+.spec/
+  config.toml    tracked — [llm] and [tools] (spec model use, spec config)
+  state.json     TDD phase log, including implement attemptLog
+  memory.json    discovered language, libraries, and layout
+  history        interactive-shell history, reloaded on the next session
+  cache/         LLM response cache and .spec/cache/tools/ catalogs
+  log/           daily diagnostics: spec.log.YYYY-MM-DD
+  staged/        staged mutations until spec changes commit
+```
+
+`spec init` gitignores `.spec/*` and re-includes `.spec/config.toml`, so configuration is shared and the generated children are not. Deleting `cache/` or `log/` is always safe. Deleting `state.json` resets the phase machine to START.
+
 ## The core theme
 
 **The requirements spec is the source of truth, and the discipline is
@@ -48,7 +65,7 @@ that one idea:
 
 The harness grew out of a talk and hands-on class that teaches spec-driven
 development with BDD and TDD — this repository is that workshop (see
-[../student-follow-along.md](../student-follow-along.md)). The class
+[../student-follow-docs/student-follow-along.md](../student-follow-docs/student-follow-along.md)). The class
 walks students through the loop in Cursor against **this binary**
 (`spec mcp serve`, 25 tools). To finish the same kata from the terminal
 with scoped profiles (Wi-Fi off), follow
@@ -123,13 +140,13 @@ architecture and full test coverage throughout:
   mutations, parsed back before they are staged so broken syntax can
   never land.
 - `spec changes show | commit | discard` and `spec changes validate` — every
-  mutation goes to a staging area (`.spec-staged/`) first; the human
+  mutation goes to a staging area (`.spec/staged/`) first; the human
   reviews and applies, and `validate` checks spec plus staged Gherkin
   together before commit. After applying, `commit` re-validates the
   working tree and carries any open issues in its reply as a warning,
   so an invalid spec never lands silently.
 - `spec test | state | refactor` — the Red/Green/Refactor state machine,
-  persisted as a timestamped log in `.spec-state.json` across invocations
+  persisted as a timestamped log in `.spec/state.json` across invocations
   (interpretation instructions in the file; model briefs get only the
   three latest entries), executing through Maven, cucumber-js,
   `dotnet test`, or `cargo test` depending on the detected project, with
@@ -178,13 +195,13 @@ architecture and full test coverage throughout:
   orchestrated loop from an empty directory with exactly two human
   gates (see [Greenfield mode flow](#greenfield-mode-flow)).
 - `spec model list | current | use` — Ollama model discovery and
-  selection: `--model` flag > `.spec.toml` configuration > discovery.
+  selection: `--model` flag > `.spec/config.toml` configuration > discovery.
   With no configured model, discovery uses the first installed model as
   a session-only default (nothing is written until you run
   `spec model use <name>`), and reports `llm_unavailable` when Ollama is
   down or empty — never installs anything.
 - `spec config` — every LLM and tools key, marked `(default)` or with the
-  path of the `.spec.toml` it was read from (`--json` for the same as an
+  path of the `.spec/config.toml` it was read from (`--json` for the same as an
   object). With no configured `llm.model`, it shows the model discovery
   would use, marked `(discovered)`. The file is read from `--root`
   (default `.`) only.
@@ -192,7 +209,7 @@ architecture and full test coverage throughout:
   probes each runtime. A missing runtime disables test execution with a
   structured `runtime_missing` note — authoring and validation keep
   working, and nothing is ever installed for you. Session start, init,
-  greenfield, and every LLM command also refresh `.spec-memory.json`
+  greenfield, and every LLM command also refresh `.spec/memory.json`
   (language, libraries, layout) and prepend that brief to every model
   system prompt.
 
@@ -222,7 +239,7 @@ Model calls are cached in two complementary layers:
   Ollama keeps the model loaded between calls and the next request
   skips the multi-second startup cost.
 - **Response cache**: completed answers are stored on disk under
-  `.spec-cache/` in the project root (gitignored; safe to delete at any
+  `.spec/cache/` (gitignored; safe to delete at any
   time). An identical request — same endpoint, model, system prompt,
   and user prompt, hashed with SHA-256 — within the TTL is answered
   from disk without calling the model at all, even across separate
@@ -233,7 +250,7 @@ Model calls are cached in two complementary layers:
   corrupt entries are swept on the next write.
 
 The TTL defaults to 10 minutes and is configured under `[llm]` in
-`.spec.toml`:
+`.spec/config.toml`:
 
 ```toml
 [llm]
@@ -246,9 +263,9 @@ retry = 3
 ```
 
 After pulling new model data behind an unchanged tag such as
-`:latest`, delete `.spec-cache/` so stale answers from the old weights
+`:latest`, delete `.spec/cache/` so stale answers from the old weights
 cannot be served. Run with `--debug` to trace cache hits and misses in
-the `.spec-log/` diagnostics.
+the `.spec/log/` diagnostics.
 
 Invalid model replies (not JSON, incomplete requirements, empty
 advice, a polish pass that is not a valid file) are retried up to
@@ -258,8 +275,8 @@ retried.
 
 ## Debug logging
 
-Diagnostics are written to daily-rolling files under `.spec-log/` in
-the project root (gitignored; safe to delete at any time), so stdout
+Diagnostics are written to daily-rolling files under `.spec/log/`
+(gitignored; safe to delete at any time), so stdout
 stays clean for JSON output and the MCP stdio protocol, and stderr
 stays clean for user-facing messages. Log writes go through an
 in-memory queue drained by a dedicated worker thread, so logging
@@ -273,7 +290,7 @@ events are logged.
 
 ```bash
 spec --debug implement REQ-003             # full prompts and replies in the log
-tail -f .spec-log/spec.log.$(date +%F)      # watch the diagnostics live
+tail -f .spec/log/spec.log.$(date +%F)      # watch the diagnostics live
 ```
 
 The standard `RUST_LOG` environment variable overrides both the
@@ -320,11 +337,11 @@ generation falls back to deterministic templates either way. See
 will change the quality of generated work.
 
 On a brand-new project the shell notices and offers the loop directly:
-when this is the first session in the root (no `.spec-history` yet), a
+when this is the first session in the root (no `.spec/history` yet), a
 model is ready, and there is no `requirements/requirements.json`, it
 asks *"It appears you are in a greenfield - start with the greenfield
 command now? [y/N]"* — `y` runs `spec greenfield` on the spot, anything
-else drops to the prompt. Shell start also refreshes `.spec-memory.json`
+else drops to the prompt. Shell start also refreshes `.spec/memory.json`
 so later model calls in the session carry this project's language,
 libraries, and layout.
 
@@ -346,7 +363,7 @@ pick stands and the shell says which one it used.
 - Each line inherits the shell's `--root` and `--model` unless the line
   sets its own.
 - `exit`, `quit`, Ctrl+C, or Ctrl+D ends the session.
-- The session history is saved to `.spec-history` in the project root on
+- The session history is saved to `.spec/history` on
   the way out and loaded next time, so arrow-key recall picks up where
   the last session stopped.
 - A bad line (unknown command, unbalanced quote) prints its error and
@@ -374,7 +391,7 @@ greenfield orchestrator in `src/greenfield.rs`) name concrete adapters:
 | Domain | `src/domain/` | Requirement model, spec validator, wording refiner, TDD state machine, language detection, project memory scan, Gherkin feature model, step discovery, generation templates, scaffolds. Pure logic, no IO. |
 | Ports | `src/ports.rs` | Traits the inner layers depend on: `SpecRepository`, `FeatureFiles`, `FeatureCatalog`, `ChangeStore`, `Prompter`, `StateStore`, `TestRunner`, `LlmConversation`, `ToolBroker`, `ModelCatalog`, `ModelStore`, `ProjectFiles`, `ProjectInventory`, `MemoryStore`, `SourceFiles`, `ScaffoldWriter`, `RuntimeProbe`, `InteractiveShell`. |
 | Application | `src/application/` | Use-case services (`SpecService`, `SpecMutationService`, `ScenarioService`, `ChangeService`, `TddService`, `GenerationService`, `InitService`, `ModelService`, `InspectService`, `MemoryService`) composed via constructor injection. The interactive shell loop lives in `src/repl.rs`. |
-| Adapters | `src/adapters/` | Filesystem spec/feature/staging/state/source/memory access, the four test runners (Maven, cucumber-js, dotnet, cargo), Ollama HTTP catalog and `/api/chat`, MCP loopback/stdio broker, TOML config store, console prompter, rustyline shell with the persistent `.spec-history`, runtime probe. |
+| Adapters | `src/adapters/` | Filesystem spec/feature/staging/state/source/memory access, the four test runners (Maven, cucumber-js, dotnet, cargo), Ollama HTTP catalog and `/api/chat`, MCP loopback/stdio broker, TOML config store, console prompter, rustyline shell with the persistent `.spec/history`, runtime probe. |
 
 ## Building
 
@@ -689,7 +706,7 @@ committed.
 ```mermaid
 flowchart TD
     subgraph auto0 [Harness automated - phase 0]
-        scaffold["Scaffold: build files, Cucumber runner,<br/>empty spec, .spec.toml config"]
+        scaffold["Scaffold: build files, Cucumber runner,<br/>empty spec, .spec/config.toml config"]
     end
     subgraph human1 [Human input - phase 1: the driving spec]
         describe["Human describes what to build in plain words"]

@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-eaaa3625.js";
+            window.path_to_searchindex_js = "../searchindex-1707d030.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-372d77fe.js"></script>
@@ -204,7 +204,7 @@ Commands: list, current, use
 <p>Highest priority first:</p>
 <ol>
 <li><strong><code>--model</code> flag</strong> — this invocation only, never persisted.</li>
-<li><strong>Configuration</strong> — the <code>model</code> key in <code>.spec.toml</code> under the
+<li><strong>Configuration</strong> — the <code>model</code> key in <code>.spec/config.toml</code> under the
 project root, written by <code>spec model use</code>.</li>
 <li><strong>Discovery</strong> — the first model installed in Ollama, as a
 session-only default. Nothing is written to disk.</li>
@@ -246,12 +246,12 @@ session default and the output tells you it is not saved:</p>
 <pre><code class="language-bash">spec model use qwen3.8-flash-next:125b-mlx
 </code></pre>
 <pre><code class="language-text">Configured model: qwen3.8-flash-next:125b-mlx
-Written to /Users/you/code/calculator/.spec.toml
+Written to /Users/you/code/calculator/.spec/config.toml
 </code></pre>
 <p>The choice is validated against Ollama’s installed models — a name
 Ollama does not have is rejected rather than silently saved.</p>
 <h2 id="the-llm-configuration-block"><a class="header" href="#the-llm-configuration-block">The [llm] configuration block</a></h2>
-<p>Everything model-related lives under <code>[llm]</code> in <code>.spec.toml</code>:</p>
+<p>Everything model-related lives under <code>[llm]</code> in <code>.spec/config.toml</code>:</p>
 <pre><code class="language-toml">[llm]
 model = "qwen3.8-flash-next:125b-mlx"     # persisted by spec model use
 endpoint = "http://localhost:11434"   # the Ollama endpoint

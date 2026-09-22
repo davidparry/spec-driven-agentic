@@ -11,7 +11,7 @@ use crate::domain::config_report::{
 use crate::domain::language::Language;
 use crate::domain::tool_profile::{Caller, default_profile};
 use crate::domain::tools::BUILTIN_ORIGIN;
-use crate::domain::{CONFIG_FILE, RECOMMENDED_MODEL};
+use crate::domain::{CONFIG_FILE, RECOMMENDED_MODEL, spec_rel};
 
 /// One file the scaffold wants on disk.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,13 +31,14 @@ pub fn scaffold(language: Language, project_name: &str) -> Vec<ScaffoldFile> {
             ),
         },
         ScaffoldFile {
-            path: CONFIG_FILE.into(),
+            path: spec_rel(CONFIG_FILE),
             content: default_config_toml(),
         },
         ScaffoldFile {
             path: ".gitignore".into(),
-            content: "# Cached LLM responses; safe to delete at any time.\n.spec-cache/\n\
-                      # Diagnostic logs written by the spec harness; safe to delete.\n.spec-log/\n"
+            content: "# Spec harness: share config.toml; keep generated state out of git.\n\
+                      .spec/*\n\
+                      !.spec/config.toml\n"
                 .into(),
         },
     ];
@@ -51,7 +52,7 @@ pub fn scaffold(language: Language, project_name: &str) -> Vec<ScaffoldFile> {
     files
 }
 
-/// `.spec.toml` with every key the harness reads. Scalar knobs stay
+/// `.spec/config.toml` with every key the harness reads. Scalar knobs stay
 /// commented at their defaults. `[tools.profiles]` is written live:
 /// each LLM-backed command and the tools that call offers the model.
 pub fn default_config_toml() -> String {
@@ -68,7 +69,7 @@ pub fn default_config_toml() -> String {
 endpoint = \"{endpoint}\"
 # Generation timeout; large prompts on local models can need more.
 # timeout_seconds = {timeout}
-# Identical requests reuse the cached response in .spec-cache/
+# Identical requests reuse the cached response in .spec/cache/
 # for this many seconds; 0 disables the cache.
 # cache_ttl_seconds = {llm_cache}
 # How many times to try a model call when the reply fails
@@ -85,7 +86,7 @@ endpoint = \"{endpoint}\"
 # discovery_timeout_seconds = {discovery}
 # How long one tool invocation may take.
 # call_timeout_seconds = {call}
-# How long discovered mcp.json tool lists stay cached under .spec-cache/tools/.
+# How long discovered mcp.json tool lists stay cached under .spec/cache/tools/.
 # cache_ttl_seconds = {tools_cache}
 # Optional path to an mcp.json (otherwise the usual candidates are tried).
 # mcp_config = \"mcp.json\"
@@ -421,11 +422,15 @@ mod tests {
                 paths.contains(&"requirements/requirements.json"),
                 "{language:?}: {paths:?}"
             );
-            assert!(paths.contains(&CONFIG_FILE), "{language:?}: {paths:?}");
+            let config = spec_rel(CONFIG_FILE);
+            assert!(paths.contains(&config.as_str()), "{language:?}: {paths:?}");
             let spec = &files[0].content;
             assert!(spec.contains("\"project\": \"String Calculator\""));
             assert!(spec.contains("\"requirements\": []"));
-            let toml = files.iter().find(|f| f.path == CONFIG_FILE).unwrap();
+            let toml = files
+                .iter()
+                .find(|f| f.path == spec_rel(CONFIG_FILE))
+                .unwrap();
             assert!(
                 toml.content.contains(crate::domain::RECOMMENDED_MODEL),
                 "{language:?}: recommended Ollama model missing from scaffold"
@@ -467,7 +472,7 @@ mod tests {
             let table = toml
                 .content
                 .parse::<toml::Table>()
-                .expect("the scaffold .spec.toml must be valid TOML");
+                .expect("the scaffold .spec/config.toml must be valid TOML");
             let profiles = table
                 .get("tools")
                 .and_then(|v| v.get("profiles"))
@@ -490,12 +495,12 @@ mod tests {
             }
             let gitignore = files.iter().find(|f| f.path == ".gitignore").unwrap();
             assert!(
-                gitignore.content.contains(".spec-cache/"),
-                "{language:?}: the response cache must stay out of version control"
+                gitignore.content.contains(".spec/*"),
+                "{language:?}: generated spec state must stay out of version control"
             );
             assert!(
-                gitignore.content.contains(".spec-log/"),
-                "{language:?}: the diagnostic logs must stay out of version control"
+                gitignore.content.contains("!.spec/config.toml"),
+                "{language:?}: the harness configuration must stay shareable"
             );
         }
     }
