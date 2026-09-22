@@ -48,6 +48,10 @@ Step 8
 spec draft
 ```
 
+```text
+Add a new requirement to requirements/requirements.json: a custom delimiter may be declared on the first line, so "//+\n1+2" adds up to 3. Follow the existing format — unique id, title, user story, acceptance criteria phrased Given/When/Then, status pending. Then call validate_spec and fix every issue until the spec is valid. Then call refine_requirement on the new requirement and reword it from the findings until there are none. Do not write scenarios or code yet — we are only agreeing on the spec.
+```
+
 Step 9
 
 ```text
