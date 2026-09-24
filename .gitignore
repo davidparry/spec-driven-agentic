@@ -1,0 +1,56 @@
+# Compiled class file
+*.class
+
+# Log file
+*.log
+
+# BlueJ files
+*.ctxt
+
+# Mobile Tools for Java (J2ME)
+.mtj.tmp/
+
+# Package Files #
+*.jar
+*.war
+*.nar
+*.ear
+*.zip
+*.tar.gz
+*.rar
+
+# virtual machine crash logs, see http://www.java.com/en/download/help/error_hotspot.xml
+hs_err_pid*
+replay_pid*
+
+# Maven
+target/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.cursor/*
+!.cursor/mcp.json
+.qodo/
+
+# Copy produced at the repo root by `dist build` (extra-artifacts)
+/spec-harness-uninstaller.sh
+
+# GitHub Pages build output
+_site/
+
+# Spec harness home: generated state stays untracked; configuration is shared.
+.spec/*
+!.spec/config.toml
+
+# macOS Finder metadata
+.DS_Store
+# Claude Code: keep shared project settings; ignore machine-local files
+.claude/*
+!.claude/settings.json
+
+/harness/.bdd-log/
+/harness/.cargo
+/harness/.cargo/
+/harness/.spec-history

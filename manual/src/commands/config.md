@@ -1,0 +1,87 @@
+# spec config
+
+Print every configuration key the harness uses and whether the value is a
+code **default** or was read from the project file (`.spec/config.toml`).
+
+```text
+Usage: spec config [OPTIONS]
+```
+
+## Flags
+
+| Flag | Description |
+| --- | --- |
+| `--json` | Machine-readable object: `file` plus `settings` (`key`, `value`, `source`). |
+| `--root <ROOT>` | Project root that owns the config file. Defaults to `.`. |
+
+## Output
+
+Tab-separated columns: `key`, effective `value`, then the source:
+`(default)`, `(discovered)`, or the absolute path of the file that
+supplied it. The first line is `file` and the path that was opened,
+`(none)` when no file exists, or the path plus `(invalid TOML)` /
+`(unreadable)` when the file could not be used.
+
+When the file names no `llm.model`, Ollama is asked which model a run
+would actually use — the same order [`spec model current`](model.md)
+follows — and that name is shown as `(discovered)`. Nothing is
+written; persist it with `spec model use <name>`. A configured model
+skips the provider call, and an unreachable or empty Ollama leaves the
+key `(unset)`.
+
+The file is read from `--root` only; there is no search of parent
+directories. Run `spec config` from the project root, or point
+`--root` at it, or `file` reads `(none)` and every key is a default.
+
+```bash
+spec config
+```
+
+```text
+file	/Users/you/code/calculator/.spec/config.toml
+llm.model	qwen3.8-flash-next:125b-mlx	/Users/you/code/calculator/.spec/config.toml
+llm.endpoint	http://localhost:11434	(default)
+llm.timeout_seconds	900	/Users/you/code/calculator/.spec/config.toml
+llm.cache_ttl_seconds	600	/Users/you/code/calculator/.spec/config.toml
+llm.retry	3	(default)
+tools.max_rounds	12	(default)
+tools.confirm	command_run	(default)
+tools.discovery_timeout_seconds	10	(default)
+tools.call_timeout_seconds	300	(default)
+tools.cache_ttl_seconds	86400	(default)
+tools.mcp_config	(unset)	(default)
+refactor.attempts	10	(default)
+tools.profiles.spec-draft	list_requirements, get_requirement, validate_spec, refine_requirement	(default)
+tools.profiles.implement	get_requirement, feature_read, …	(default)
+```
+
+`refactor.attempts` is how many write-then-test rounds
+[`spec refactor`](refactor.md) may spend before it restores the code it
+started from. Each round costs a model call and a full test run, so it is
+that command's whole cost ceiling. Zero or a non-number falls back to the
+default rather than to a budget of nothing, which would revert without
+ever having tried.
+
+In a project that has never run `spec model use`, the first row is the
+name Ollama supplied:
+
+```text
+llm.model	qwen3:8b	(discovered)
+```
+
+A `[tools.profiles]` list for a caller **replaces** that command's
+built-in tools and is attributed to the file. `spec init` writes every
+caller's default list so those rows show as from the file. Callers not
+listed keep the code default. `[tools.enabled]` / `[tools.disabled]`
+rows appear only when those tables are set.
+
+Optional keys with nothing to show print `(unset)` with source
+`(default)`: `tools.mcp_config`, and `llm.model` when Ollama is down
+or has no models pulled.
+
+## See also
+
+- [`spec model`](model.md) — persist `llm.model`.
+- [`spec tools`](tools.md) — per-command profiles and `mcp.json` tools.
+- [Global flags](../global-flags.md) — `--model`, `--retry`, `--tools`
+  override a value for one run and are not written to the file.

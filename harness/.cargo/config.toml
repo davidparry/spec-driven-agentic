@@ -1,0 +1,9 @@
+# The runner adapter tests spawn `sh` stub processes; under heavy
+# parallel test load macOS intermittently refuses the spawn with
+# "Permission denied" (EACCES). Serial execution avoids that flake
+# deterministically, and the whole unit suite still finishes in well
+# under a second. This only affects libtest harnesses (unit tests and
+# the MCP conformance suite); the Cucumber harness schedules its own
+# scenarios and is unaffected.
+[env]
+RUST_TEST_THREADS = "1"

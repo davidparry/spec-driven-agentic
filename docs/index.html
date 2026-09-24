@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>spec — The new Specification-Driven Development in the AI era</title>
+  <meta name="description" content="spec is a native harness for Specification-Driven Development in the AI era: spec → Gherkin → RED → GREEN → REFACTOR, with an embedded MCP server. Also a 60-minute hands-on workshop.">
+  <meta property="og:title" content="spec — The new Specification-Driven Development in the AI era">
+  <meta property="og:description" content="A native harness for spec → Gherkin → RED → GREEN → REFACTOR, with an embedded MCP server.">
+  <meta property="og:image" content="https://davidparry.github.io/spec-driven-agentic/assets/spec-harness-mark.png">
+  <link rel="icon" href="assets/spec-harness-mark.png" type="image/png">
+  <link rel="apple-touch-icon" href="assets/spec-harness-mark.png">
+  <link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="wrap">
+      <a class="brand" href="./">
+        <img src="assets/spec-harness-mark.png" alt="">
+        spec
+      </a>
+      <nav class="nav">
+        <a href="talk/">Talk</a>
+        <a href="talk30/">Talk 30</a>
+        <a href="workshop/">Workshop</a>
+        <a href="pi/">pi path</a>
+        <a href="speaking/">Speaking</a>
+        <a href="https://davidparry.com/blog/2026/08/07/spec-first-was-always-right-agents-just-made-it-fast/">Write-up</a>
+        <a href="harness/">Harness</a>
+        <a href="manual/">Manual</a>
+        <a href="setup/">Setup</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <div class="wrap">
+      <section class="hero">
+        <div>
+          <h1>spec</h1>
+          <p class="tagline">The new Specification-Driven Development in the AI era</p>
+          <p class="lede">A native harness — and a 60-minute workshop — for spec → Gherkin → RED → GREEN → REFACTOR. The requirements spec is the source of truth. The human owns intent. The agent iterates. The tools refuse a red-bar refactor.</p>
+          <div class="badges">
+            <span class="badge red">RED</span>
+            <span class="badge green">GREEN</span>
+            <span class="badge refactor">REFACTOR</span>
+          </div>
+        </div>
+        <img src="assets/spec-harness-mark.png" alt="The spec harness mark: a terminal prompt wrapping a spec in a red-to-green cycle.">
+      </section>
+
+      <section id="install">
+        <h2>Install spec</h2>
+        <div class="panel">
+          <div class="install-block">
+            <p>macOS and Linux</p>
+            <div class="cmd">
+              <pre id="cmd-sh">curl --proto '=https' --tlsv1.2 -LsSf https://github.com/davidparry/spec-driven-agentic/releases/latest/download/spec-harness-installer.sh | sh</pre>
+              <button type="button" data-copy="#cmd-sh">Copy</button>
+            </div>
+          </div>
+          <div class="install-block">
+            <p>Windows (PowerShell)</p>
+            <div class="cmd">
+              <pre id="cmd-ps">powershell -ExecutionPolicy Bypass -c "irm https://github.com/davidparry/spec-driven-agentic/releases/latest/download/spec-harness-installer.ps1 | iex"</pre>
+              <button type="button" data-copy="#cmd-ps">Copy</button>
+            </div>
+          </div>
+          <div class="install-block" style="margin-bottom:0">
+            <p>Uninstall</p>
+            <div class="cmd">
+              <pre id="cmd-un">curl -LsSf https://github.com/davidparry/spec-driven-agentic/releases/latest/download/spec-harness-uninstaller.sh | sh -s -- -y</pre>
+              <button type="button" data-copy="#cmd-un">Copy</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="download">
+        <h2>Download a binary</h2>
+        <p class="lede">Prebuilt archives from the latest GitHub Release. Each row has the archive and its checksum.</p>
+        <div class="panel" style="padding:0.4rem 0.6rem 0.2rem">
+          <table class="downloads">
+            <thead>
+              <tr>
+                <th>Platform</th>
+                <th>Archive</th>
+                <th>Checksum</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Apple Silicon macOS</td>
+                <td><a href="https://github.com/davidparry/spec-driven-agentic/releases/latest/download/spec-harness-aarch64-apple-darwin.tar.xz"><code>spec-harness-aarch64-apple-darwin.tar.xz</code></a></td>
+                <td><a href="https://github.com/davidparry/spec-driven-agentic/releases/latest/download/spec-harness-aarch64-apple-darwin.tar.xz.sha256">sha256</a></td>
+              </tr>
+              <tr>
+                <td>Intel macOS</td>
+                <td><a href="https://github.com/davidparry/spec-driven-agentic/releases/latest/download/spec-harness-x86_64-apple-darwin.tar.xz"><code>spec-harness-x86_64-apple-darwin.tar.xz</code></a></td>
+                <td><a href="https://github.com/davidparry/spec-driven-agentic/releases/latest/download/spec-harness-x86_64-apple-darwin.tar.xz.sha256">sha256</a></td>
+              </tr>
+              <tr>
+                <td>x64 Windows</td>
+                <td><a href="https://github.com/davidparry/spec-driven-agentic/releases/latest/download/spec-harness-x86_64-pc-windows-msvc.zip"><code>spec-harness-x86_64-pc-windows-msvc.zip</code></a></td>
+                <td><a href="https://github.com/davidparry/spec-driven-agentic/releases/latest/download/spec-harness-x86_64-pc-windows-msvc.zip.sha256">sha256</a></td>
+              </tr>
+              <tr>
+                <td>ARM64 Linux</td>
+                <td><a href="https://github.com/davidparry/spec-driven-agentic/releases/latest/download/spec-harness-aarch64-unknown-linux-gnu.tar.xz"><code>spec-harness-aarch64-unknown-linux-gnu.tar.xz</code></a></td>
+                <td><a href="https://github.com/davidparry/spec-driven-agentic/releases/latest/download/spec-harness-aarch64-unknown-linux-gnu.tar.xz.sha256">sha256</a></td>
+              </tr>
+              <tr>
+                <td>x64 Linux</td>
+                <td><a href="https://github.com/davidparry/spec-driven-agentic/releases/latest/download/spec-harness-x86_64-unknown-linux-gnu.tar.xz"><code>spec-harness-x86_64-unknown-linux-gnu.tar.xz</code></a></td>
+                <td><a href="https://github.com/davidparry/spec-driven-agentic/releases/latest/download/spec-harness-x86_64-unknown-linux-gnu.tar.xz.sha256">sha256</a></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section>
+        <h2>Three altitudes, one discipline</h2>
+        <p class="lede">Not “just TDD.” Spec-first at three altitudes, then tests generated from the spec — not the other way around.</p>
+        <div class="panel" style="padding:0.4rem 0.6rem 0.2rem">
+          <table class="altitudes">
+            <thead>
+              <tr>
+                <th>Methodology</th>
+                <th>Pins</th>
+                <th>Canonical artifact</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>SDD</strong> (spec-driven)</td>
+                <td>the feature</td>
+                <td>versioned spec + acceptance criteria</td>
+              </tr>
+              <tr>
+                <td><strong>BDD</strong> (behavior-driven)</td>
+                <td>one behavior</td>
+                <td>Gherkin scenario (Given / When / Then)</td>
+              </tr>
+              <tr>
+                <td><strong>TDD</strong> (test-driven)</td>
+                <td>one unit</td>
+                <td>failing unit test</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section>
+        <h2>Learn the loop</h2>
+        <div class="cards">
+          <a class="card" href="talk/">
+            <strong>Talk — 60 min</strong>
+            <span>The full workshop deck, with both hands-on exercises. Open it and present.</span>
+          </a>
+          <a class="card" href="talk30/">
+            <strong>Talk — 30 min</strong>
+            <span>The same deck, demo-driven cut, plus Where This Breaks.</span>
+          </a>
+          <a class="card" href="workshop/">
+            <strong>Workshop</strong>
+            <span>Student follow-along: commands, prompts, expected output.</span>
+          </a>
+          <a class="card" href="speaking/">
+            <strong>Speaking</strong>
+            <span>Turn Off the Wi-Fi — the conference session, and how to book it.</span>
+          </a>
+          <a class="card" href="https://davidparry.com/blog/2026/08/07/spec-first-was-always-right-agents-just-made-it-fast/">
+            <strong>Write-up</strong>
+            <span>Spec-first was always right. Agents just made it fast.</span>
+          </a>
+          <a class="card" href="harness/">
+            <strong>Harness</strong>
+            <span>How spec automates the same loop the class teaches.</span>
+          </a>
+          <a class="card" href="pi/">
+            <strong>The pi path</strong>
+            <span>Free and offline: an MIT agent on a local model, driving the same server.</span>
+          </a>
+          <a class="card" href="setup/">
+            <strong>MCP setup</strong>
+            <span>Wire the workflow server into Cursor, Claude, and others.</span>
+          </a>
+          <a class="card" href="greenfield/">
+            <strong>Greenfield</strong>
+            <span>The file-creation order if you started from zero.</span>
+          </a>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap">
+      AGPL-3.0 · <a href="https://github.com/davidparry/spec-driven-agentic">github.com/davidparry/spec-driven-agentic</a>
+      · <a href="https://github.com/davidparry/spec-driven-agentic/releases/latest">Releases</a>
+    </div>
+  </footer>
+  <script src="assets/site.js"></script>
+</body>
+</html>

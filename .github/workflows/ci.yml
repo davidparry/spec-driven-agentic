@@ -1,0 +1,168 @@
+# CI for the workshop repo.
+#
+# Jobs:
+#   - build-and-test: smoke-test verify (JaCoCo 100%, SpotBugs, PMD) and
+#     `mvn -f kata/pom.xml test`. Does not require the spec binary, so a
+#     missing Rust build cannot look like a JaCoCo failure.
+#   - harness: spec tests, clippy, fmt, coverage, and the release binary.
+#   - smoke-test-live: needs harness; drives smoke-test.jar against that binary.
+#   - class-completeness / workshop-start: branch guards as before.
+name: CI
+
+on:
+  push:
+    branches: [trunk, complete]
+  pull_request:
+    branches: [trunk, complete]
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    name: Build, tests (JUnit + Cucumber), quality gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Verify smoke test (tests, JaCoCo 100%, SpotBugs, PMD)
+        run: mvn -B -pl smoke-test verify
+
+      - name: Test standalone kata (JUnit + Cucumber)
+        run: mvn -B -f kata/pom.xml test
+
+      - name: Upload test and quality reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports-${{ github.run_id }}-${{ github.run_number }}
+          if-no-files-found: warn
+          path: |
+            **/target/surefire-reports/**
+            **/target/cucumber-report.html
+            **/target/cucumber-report.json
+            **/target/site/jacoco/**
+            **/target/spotbugs.html
+            **/target/spotbugsXml.xml
+            **/target/pmd.xml
+            **/target/site/pmd.html
+
+  harness:
+    name: spec harness (tests, clippy, fmt, coverage)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: harness
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+
+      - uses: taiki-e/install-action@cargo-llvm-cov
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: harness
+
+      - name: Tests (unit + cucumber)
+        run: cargo test
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Format
+        run: cargo fmt --check
+
+      - name: Release binary
+        run: cargo build --release
+
+      - name: Upload spec binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: spec-linux
+          path: harness/target/release/spec
+
+      - name: Coverage
+        id: coverage
+        run: |
+          GATE=97
+          cargo llvm-cov --ignore-filename-regex 'main\.rs' --summary-only
+          PCT=$(cargo llvm-cov report --ignore-filename-regex 'main\.rs' --json \
+            | jq -r '.data[0].totals.lines.percent * 10 | round / 10')
+          echo "percent=$PCT" >> "$GITHUB_OUTPUT"
+          if awk "BEGIN { exit !($PCT < $GATE) }"; then
+            echo "::error::Harness line coverage is ${PCT}% (required ${GATE}%). Tests, clippy, and fmt already passed; this job fails on the coverage gate only."
+            exit 1
+          fi
+
+      - name: Publish the coverage badge (trunk pushes only)
+        if: always() && github.event_name == 'push' && github.ref_name == 'trunk' && steps.coverage.outputs.percent != ''
+        working-directory: ${{ github.workspace }}
+        run: |
+          PCT='${{ steps.coverage.outputs.percent }}'
+          if awk "BEGIN { exit !($PCT >= 95) }"; then COLOR=brightgreen
+          elif awk "BEGIN { exit !($PCT >= 85) }"; then COLOR=green
+          else COLOR=orange; fi
+          printf '{"schemaVersion":1,"label":"harness coverage","message":"%s%% lines","color":"%s"}\n' \
+            "$PCT" "$COLOR" > /tmp/coverage.json
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan badges
+          git rm -rf --quiet .
+          cp /tmp/coverage.json coverage.json
+          git add coverage.json
+          git commit -m "harness coverage badge: ${PCT}% lines"
+          git push --force origin badges
+
+  smoke-test-live:
+    name: smoke-test live against spec
+    needs: harness
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: spec-linux
+          path: /tmp/spec-bin
+
+      - name: Live sweep (25 tools against the real binary)
+        run: |
+          chmod +x /tmp/spec-bin/spec
+          mvn -B -pl smoke-test test -Dspec.binary=/tmp/spec-bin/spec
+
+  class-completeness:
+    name: Class completeness (complete branch only)
+    if: github.ref_name == 'complete' || github.base_ref == 'complete'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the 60-minute class deliverables
+        run: ./scripts/check-class-complete.sh
+
+  workshop-start:
+    name: Workshop start state (trunk only)
+    if: github.ref_name == 'trunk' || github.base_ref == 'trunk'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the workshop starting point is intact
+        run: ./scripts/check-workshop-start.sh

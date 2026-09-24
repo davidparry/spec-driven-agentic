@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "spec-driven-server": {
+      "command": "spec",
+      "args": [
+        "mcp",
+        "serve",
+        "--root",
+        "${SPEC_PROJECT_DIR}"
+      ]
+    }
+  }
+}

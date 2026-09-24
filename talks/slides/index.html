@@ -1,0 +1,775 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Spec-Driven with Harness — TDD and BDD in the Agentic Era</title>
+  <link rel="icon" href="../assets/spec-harness-mark.png" type="image/png">
+  <link rel="apple-touch-icon" href="../assets/spec-harness-mark.png">
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/theme/black.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/plugin/highlight/monokai.css">
+
+  <style>
+    :root {
+      --r-background-color: #101418;
+      --r-main-color: #e8eaed;
+      --r-heading-color: #ffffff;
+      --r-link-color: #4fc3f7;
+      --r-heading-text-transform: none;
+    }
+    .reveal h1 { font-size: 2.1em; }
+    .reveal h2 { font-size: 1.5em; line-height: 1.15; margin-bottom: 0.4em; }
+    .reveal h3 { font-size: 1.1em; color: #4fc3f7; line-height: 1.2; }
+    .reveal pre { width: 100%; box-shadow: none; margin: 0.5em 0; }
+    /* 520px is canvas units — Reveal scales a fixed 1280x720 canvas to the
+       window, so viewport-relative caps here would drift from the layout. */
+    .reveal pre code { max-height: 520px; font-size: 0.62em; line-height: 1.35; border-radius: 8px; }
+    /* Long lines wrap instead of disappearing off the right edge — real
+       terminal output wraps too. Reveal scopes its own wrapping rule as
+       `html:not(.print-pdf) .reveal .hljs`, so match that weight to win. */
+    html:not(.print-pdf) .reveal pre code {
+      white-space: pre-wrap; overflow-wrap: anywhere;
+    }
+    .reveal ul, .reveal ol { display: block; margin-left: 1em; }
+    .reveal li { margin: 0.25em 0; }
+    .reveal p { line-height: 1.35; }
+    .reveal .small { font-size: 0.65em; }
+    .reveal table { font-size: 0.7em; }
+    .badge {
+      display: inline-block; padding: 0.15em 0.6em; border-radius: 999px;
+      font-size: 0.55em; font-weight: 700; vertical-align: middle; letter-spacing: 0.05em;
+    }
+    .badge.red { background: #b71c1c; color: #fff; }
+    .badge.green { background: #1b5e20; color: #fff; }
+    .badge.refactor { background: #0d47a1; color: #fff; }
+    .badge.time { background: #333c44; color: #9fb3c8; }
+    .badge.exercise { background: #e65100; color: #fff; }
+    .two-col { display: flex; gap: 1.2em; align-items: flex-start; text-align: left; }
+    .two-col > div { flex: 1; min-width: 0; }
+    .two-col h3 { margin-bottom: 0.3em; }
+    .cycle { display: flex; justify-content: center; gap: 1em; margin-top: 0.8em; }
+    .cycle .step {
+      padding: 0.5em 1em; border-radius: 12px; font-weight: 700; font-size: 0.8em;
+    }
+    .cycle .arrow { align-self: center; color: #9fb3c8; }
+    /* A stack is read downwards, so the layers are a column with the arrows
+       between them. Each layer keeps the full slide width: the lines are
+       annotations, and wrapping them into two columns loses the order. */
+    .stack {
+      display: flex; flex-direction: column; align-items: stretch; gap: 0.1em;
+      width: 94%; margin: 0 auto;
+    }
+    .stack .layer {
+      /* border-box, or the padding is added to the 100% a stretched flex
+         child already has and every layer hangs over the slide's gutter. */
+      box-sizing: border-box;
+      padding: 0.3em 0.8em; border-radius: 10px; text-align: left;
+      border: 1px solid #2a323a; background: #171d23; font-size: 0.6em;
+    }
+    .stack .layer b { color: #4fc3f7; }
+    .stack .down { text-align: center; color: #9fb3c8; font-size: 0.55em; line-height: 1.2; }
+    /* The two test altitudes sit side by side because they are one layer:
+       the same criteria, two heights, and a single bar out the bottom. */
+    .stack .pair { display: flex; gap: 0.5em; }
+    .stack .pair .layer { flex: 1; min-width: 0; }
+    .muted { color: #9fb3c8; }
+    /* Title-slide QR: black modules need a white plate to stay scannable on
+       the dark theme. Sized in px, since fitTallSlides only scales type. */
+    .title-qr { margin-top: 0.6em; }
+    .title-qr img {
+      display: block; margin: 0 auto; width: 150px; height: 150px;
+      background: #fff; padding: 8px; border-radius: 10px;
+    }
+    .title-qr figcaption { font-size: 0.5em; color: #9fb3c8; margin-top: 0.4em; }
+    .reveal blockquote { width: 90%; font-size: 0.85em; margin: 0.6em auto; }
+    /* Which cut you are in, and the way out of it. Dimmed so it cannot
+       compete with the slide, legible the moment a presenter looks for it. */
+    .track-switch {
+      position: fixed; bottom: 14px; left: 14px; z-index: 40;
+      display: flex; gap: 2px; padding: 3px; border-radius: 999px;
+      background: rgba(16, 20, 24, 0.85); border: 1px solid #2a323a;
+      font-size: 13px; font-family: inherit; opacity: 0.4; transition: opacity 0.2s;
+    }
+    .track-switch:hover { opacity: 1; }
+    .track-switch a { padding: 0.25em 0.8em; border-radius: 999px; color: #9fb3c8; text-decoration: none; }
+    .track-switch a.on { background: #2a323a; color: #fff; }
+    @media print { .track-switch { display: none; } }
+    /* Screen only: PDF export places the slide number itself, per page. */
+    @media screen {
+      .reveal .slide-number { top: 8px; bottom: auto; right: 8px; }
+    }
+  </style>
+</head>
+<body>
+<div class="reveal">
+  <div class="slides">
+
+    <!-- ============ OPENING — 30-MINUTE TRACK ============ -->
+    <section data-track="30">
+      <h1>Spec-Driven with Harness</h1>
+      <h3>TDD and BDD in the agentic era — a purpose-built harness, not a bigger model</h3>
+      <p class="muted">30-minute session &nbsp;·&nbsp; every layer free and open source &nbsp;·&nbsp; every layer on this laptop, Wi-Fi off</p>
+      <p><span class="badge red">RED</span> <span class="badge green">GREEN</span> <span class="badge refactor">REFACTOR</span> — now with agents</p>
+      <figure class="title-qr">
+        <img src="davidparry-qr-duke.png" alt="QR code">
+        <figcaption>Where to find me — davidparry.com</figcaption>
+      </figure>
+    </section>
+
+    <!-- ============ 0-5 min: OPENING — 60-MINUTE TRACK ============ -->
+    <section data-track="60">
+      <h1>Spec-Driven with Harness</h1>
+      <h3>TDD and BDD in the agentic era — a purpose-built harness, hands on</h3>
+      <p class="muted">60-minute workshop &nbsp;·&nbsp; bring your laptop &nbsp;·&nbsp; you drive an agent from exercise one</p>
+      <p class="muted">Local model: <code>qwen3.8-flash-next:125b-mlx</code> on Ollama &nbsp;·&nbsp; the free <code>pi</code> on-ramp comes after</p>
+      <p><span class="badge red">RED</span> <span class="badge green">GREEN</span> <span class="badge refactor">REFACTOR</span> — now with agents</p>
+      <figure class="title-qr">
+        <img src="davidparry-qr-duke.png" alt="QR code">
+        <figcaption>Where to find me — davidparry.com</figcaption>
+      </figure>
+    </section>
+
+    <section data-track="60">
+      <h2>What you will leave with</h2>
+      <ul>
+        <li>A <strong>purpose-built harness</strong>: <code>spec</code> does one job — spec → Gherkin → RED → GREEN → REFACTOR — with the sequence and the gates in software, not in a prompt</li>
+        <li>A <strong>spec-authoring loop</strong>: you and an AI agent draft a requirement, <code>validate_spec</code> checks its structure, <code>refine_requirement</code> critiques its wording — and the agent iterates until both are clean</li>
+        <li>A complete <strong>spec-to-green workflow</strong> you drove yourself: requirement → Gherkin → RED → GREEN → refactor</li>
+        <li>A working grasp of how <strong>MCP feeds your tools into any agent</strong> — and a tested server to point at your own project</li>
+        <li>A <strong>free offline agent</strong> you can install this afternoon: <code>pi</code> on Ollama, and a clear read on what a general host does and does not give you</li>
+      </ul>
+    </section>
+
+    <section data-track="both">
+      <h2>The stack, on this kata</h2>
+      <div class="stack">
+        <div class="layer">
+          <b>Harness</b> — the purpose-built <code>spec</code> runner
+          <span class="muted">· or any MCP host: Cursor, <code>pi -nbt</code> — swap it and nothing below changes</span>
+        </div>
+        <div class="down">▼ &nbsp;stdio, JSON-RPC 2.0</div>
+        <div class="layer">
+          <b>MCP</b> — <code>spec mcp serve</code>, 25 tools
+          <span class="muted">· <strong>deterministic</strong>: no tool calls a model — same input, same answer</span>
+        </div>
+        <div class="down">▼ &nbsp;every tool reads and writes one spec</div>
+        <div class="layer">
+          <b>Validated requirements</b> — <code>requirements/requirements.json</code>
+          <span class="muted">· <code>validate_spec</code> owns structure · <code>refine_requirement</code> owns wording</span>
+        </div>
+        <div class="down">▼ &nbsp;one requirement, two altitudes, generated <em>from</em> the criteria</div>
+        <div class="pair">
+          <div class="layer">
+            <b>Cucumber</b> <span class="muted small">BDD</span><br>
+            <code>string_calculator.feature</code><br>
+            <span class="muted">scenarios tagged <code>@REQ-003</code></span>
+          </div>
+          <div class="layer">
+            <b>JUnit 5</b> <span class="muted small">TDD</span><br>
+            <code>StringCalculatorTest.java</code><br>
+            <span class="muted">AssertJ assertions</span>
+          </div>
+        </div>
+        <div class="down">▼ &nbsp;<code>run_tests</code> runs both suites and reports <strong>one bar</strong></div>
+      </div>
+      <p class="small muted">The gates live in the server: no refactor off GREEN, no <code>implemented</code> without a tagged scenario on a green bar</p>
+    </section>
+
+    <!-- ============ 5-12 min: TDD REFRESHER ============ -->
+    <section data-track="both">
+      <h2>Refresher: the discipline that scales</h2>
+      <div class="cycle">
+        <div class="step" style="background:#b71c1c">RED<br><span class="small">write a failing test</span></div>
+        <div class="arrow">→</div>
+        <div class="step" style="background:#1b5e20">GREEN<br><span class="small">simplest code that passes</span></div>
+        <div class="arrow">→</div>
+        <div class="step" style="background:#0d47a1">REFACTOR<br><span class="small">clean up on a green bar</span></div>
+      </div>
+      <ul style="margin-top:1em">
+        <li>The test is written <em>first</em> — it is the executable specification</li>
+        <li>Never refactor on a red bar</li>
+        <li>Small steps, fast feedback, permanent safety net</li>
+      </ul>
+    </section>
+
+    <section data-track="both">
+      <h2>What changes in the agentic era?</h2>
+      <div class="two-col">
+        <div>
+          <h3>Stays the same</h3>
+          <ul class="small">
+            <li>Red/Green/Refactor cycle</li>
+            <li>Tests define "done"</li>
+            <li>Human owns every engineering decision</li>
+          </ul>
+        </div>
+        <div>
+          <h3>Gets amplified</h3>
+          <ul class="small">
+            <li><strong>Spec authoring</strong>: you describe intent, the agent drafts, tools critique</li>
+            <li><strong>Requirements → tests</strong>: agents draft failing tests from acceptance criteria</li>
+            <li><strong>Green phase</strong>: a developer agent proposes the implementation</li>
+          </ul>
+        </div>
+      </div>
+      <blockquote>The agent turns the crank. You steer.</blockquote>
+    </section>
+
+    <section data-track="both">
+      <h2>Three altitudes, one discipline</h2>
+      <table class="small">
+        <tr><th></th><th>Pins</th><th>Canonical artifact</th><th>In this repo</th></tr>
+        <tr><td><strong>SDD</strong> <span class="muted">spec-driven</span></td>
+            <td>the feature</td><td>versioned spec + acceptance criteria</td>
+            <td><code>requirements/requirements.json</code></td></tr>
+        <tr><td><strong>BDD</strong> <span class="muted">behavior-driven</span></td>
+            <td>one behavior</td><td>Gherkin scenario (Given/When/Then)</td>
+            <td><code>string_calculator.feature</code> via Cucumber</td></tr>
+        <tr><td><strong>TDD</strong> <span class="muted">test-driven</span></td>
+            <td>one unit</td><td>failing JUnit test</td>
+            <td><code>StringCalculatorTest.java</code></td></tr>
+      </table>
+      <ul class="small" style="margin-top:0.6em">
+        <li>Agentic SDD: the spec is the source of truth; agents generate scenarios, tests, and code <em>from</em> it</li>
+      </ul>
+    </section>
+
+    <section data-track="60">
+      <h2>The spec is a catalog</h2>
+      <p class="small"><code>requirements/requirements.json</code> is <strong>always the entry point</strong>, but need not hold every requirement: it carries its own <code>requirements</code> <em>plus</em> an <code>includes</code> list of child spec files, N levels deep.</p>
+      <pre><code class="language-text" data-trim>
+requirements/
+├── requirements.json      ← the catalog: own requirements + includes
+├── core/
+│   ├── arithmetic.json    ← included by the root
+│   └── edge-cases.json    ← included by arithmetic.json (nesting!)
+└── validation/
+    └── negatives.json     ← included by the root
+      </code></pre>
+      <ul class="small">
+        <li>Tooling merges the tree <strong>depth-first</strong> into one backlog — <code>list_requirements</code>, <code>validate_spec</code>, and the agents all drive from the merged view</li>
+        <li>Ids stay unique <em>across the whole tree</em>; cycles and missing files are validation issues, not crashes</li>
+        <li>Mutations write back to the file a requirement lives in</li>
+      </ul>
+    </section>
+
+    <!-- ============ THE PROBLEM, AND THE THESIS ============ -->
+    <section data-track="both">
+      <h2>A general agent gives you a general result</h2>
+      <p class="small">Point a general agent at a red bar and you get a general answer. The industry's fix is a bigger model.</p>
+      <div class="two-col">
+        <div>
+          <h3>Frontier model</h3>
+          <ul class="small">
+            <li>Mostly stays on task</li>
+            <li>You are the review</li>
+            <li>Your code leaves the building</li>
+            <li>Not reproducible in six months</li>
+          </ul>
+        </div>
+        <div>
+          <h3><code>qwen3.8-flash-next:125b-mlx</code></h3>
+          <ul class="small">
+            <li>Veers — invents tools, drifts format</li>
+            <li>Given a shell, a writable test file, and a red bar, it <strong>made the bar green by deleting the assertion</strong></li>
+            <li>You are the cleanup crew</li>
+          </ul>
+        </div>
+      </div>
+      <p class="small muted">Both columns are System 1: fast, fluent, confident, holding no ground truth of its own. A bigger model is a better System 1.</p>
+      <blockquote>The answer is not a bigger model. It is a narrower job.</blockquote>
+    </section>
+
+    <section data-track="both">
+      <h2>Build the harness, not the prompt</h2>
+      <p class="small">A <strong>purpose-built harness</strong> is software that already knows the job. The model is one component in it — and it can be the smallest one that still works.</p>
+      <div class="two-col">
+        <div>
+          <h3>The harness owns</h3>
+          <ul class="small">
+            <li>The <strong>sequence</strong> — spec → Gherkin → RED → GREEN → REFACTOR, in that order, every run</li>
+            <li>The <strong>tool surface</strong> — a handful of typed tools per step, never a shell</li>
+            <li>The <strong>gates</strong> — no refactor off green, nothing <code>implemented</code> without a tagged scenario</li>
+            <li>The <strong>prompts</strong> — one auditable file, versioned with the code</li>
+          </ul>
+        </div>
+        <div>
+          <h3>The model is left with</h3>
+          <ul class="small">
+            <li>Word one requirement</li>
+            <li>Turn accepted criteria into a scenario and a test</li>
+            <li>Write the simplest code that turns the bar green</li>
+          </ul>
+          <p class="small muted">Jobs a model on your laptop can do — because nothing is asking it to <em>remember</em> the discipline.</p>
+        </div>
+      </div>
+      <blockquote class="small">Frontier capability buys slack. A harness means you do not need the slack.</blockquote>
+    </section>
+
+    <section data-track="both">
+      <h2>The missing piece: a protocol</h2>
+      <p>For an agent to run <em>your</em> tests and respect <em>your</em> workflow, it needs a standard way to discover and call your tools.</p>
+      <p style="margin-top:0.8em">That standard is the <strong>Model Context Protocol</strong>.</p>
+      <p class="muted small">Think "USB-C for AI tooling": one connector, any host, any tool.</p>
+    </section>
+
+    <!-- ============ 17-21 min: MCP FUNDAMENTALS ============ -->
+    <section data-track="60">
+      <h2>MCP architecture</h2>
+      <pre><code class="language-text" data-trim>
++-----------------------------+          +---------------------------+
+|  HOST (Cursor, Claude, ...) |          |  MCP SERVER (yours!)      |
+|                             |  stdio / |                           |
+|   +---------------------+   |   HTTP   |  25 tools                 |
+|   | MCP CLIENT          |&lt;--+----------+&gt;  resources               |
+|   | (one per server)    |   | JSON-RPC |  prompts                  |
+|   +---------------------+   |   2.0    |                           |
+|            ^                |          +---------------------------+
+|            |                |
+|         LLM agent           |
++-----------------------------+
+      </code></pre>
+      <ul class="small">
+        <li><strong>Host</strong> embeds an LLM and one MCP <strong>client</strong> per connection</li>
+      </ul>
+    </section>
+
+    <section data-track="60">
+      <h2>The wire: JSON-RPC 2.0</h2>
+      <p class="small">Three message types: requests (have an <code>id</code>), responses, notifications (no <code>id</code>).</p>
+      <pre><code class="language-json" data-trim>
+{ "jsonrpc": "2.0", "id": 1, "method": "initialize",
+  "params": { "protocolVersion": "2025-11-25",
+              "capabilities": { },
+              "clientInfo": { "name": "tdd-workshop-agent", "version": "1.0.0" } } }
+      </code></pre>
+      <pre><code class="language-json" data-trim>
+{ "jsonrpc": "2.0", "id": 1,
+  "result": { "protocolVersion": "2025-11-25",
+              "capabilities": { "tools": { "listChanged": true }, "logging": { } },
+              "serverInfo": { "name": "spec-driven-server", "title": "Spec Driven", "version": "1.0.0" },
+              "instructions": "Drives a spec-driven TDD/BDD workflow..." } }
+      </code></pre>
+    </section>
+
+    <!-- ============ 21-25 min: THE PLUMBING (pre-built) ============ -->
+    <section data-track="both">
+      <h2>The server — already built</h2>
+      <p class="small">One binary: <code>spec mcp serve --root ${workspaceFolder}</code>. Twenty-five tools in three groups:</p>
+      <ul class="small">
+        <li><strong>Frozen seven</strong> — <code>list_requirements</code>, <code>get_requirement</code>, <code>validate_spec</code>, <code>refine_requirement</code>, <code>run_tests</code>, <code>get_tdd_state</code>, <code>start_refactor</code></li>
+        <li><strong>Authoring / staging</strong> — features, scenarios, <code>changes_*</code>, <code>requirement_mark_implemented</code>, template-only <code>step_definition_create</code> / <code>unit_test_create</code></li>
+        <li><strong>Inspect</strong> — <code>project_root</code>, <code>project_inspect</code>, <code>command_run</code> (allowlisted, RED-gated)</li>
+      </ul>
+      <p class="small">A stdio server must <strong>never print to stdout</strong> — that corrupts the JSON-RPC stream. Diagnostics go to stderr.</p>
+    </section>
+
+    <section data-track="60">
+      <h2>Anatomy of a tool — what the agent sees</h2>
+      <p class="small">One entry from <code>tools/list</code> — see them all with <code>spec mcp tools</code>:</p>
+      <pre><code class="language-json" data-trim>
+{ "name": "get_requirement",
+  "description": "Get the user story and acceptance criteria for one requirement. Turn each acceptance criterion into a failing test before writing production code.",
+  "inputSchema": { "type": "object", "required": ["id"],
+    "properties": { "id": { "type": "string", "description": "The requirement id, e.g. REQ-003" } } } }
+      </code></pre>
+      <ul class="small">
+        <li><strong>Name, schema, description</strong> → the API docs the LLM reads at discovery. Writing them well <em>is</em> prompt engineering</li>
+        <li>Failures come back as results with <code>isError: true</code>, so the agent reads them and recovers</li>
+      </ul>
+    </section>
+
+    <section data-track="both">
+      <h2>The tool that closes the loop: <code>run_tests</code></h2>
+      <pre><code class="language-text" data-trim>
+agent  →  tools/call   run_tests   { }
+      </code></pre>
+      <pre><code class="language-json" data-trim>
+{ "phase": "RED",
+  "lastRun": { "tests": 8, "failures": 2, "errors": 1, "skipped": 0 },
+  "nextStep": "make the failing tests pass — do not refactor on RED" }
+      </code></pre>
+      <p class="small">The <em>agent</em> calls it, not you — the prompt forbids claiming a pass without it. <code>phase</code> is the bar color; <code>nextStep</code> the next legal move. <code>start_refactor</code> refuses on any bar but GREEN.</p>
+    </section>
+
+    <!-- ============ 25-27 min: THE HARNESS ON TOP OF THOSE TOOLS ============ -->
+    <section data-track="both">
+      <h2>The runner, concretely</h2>
+      <p class="small">One binary over those tools, doing one job. Each command is handed only the tools that job needs:</p>
+      <pre><code class="language-bash" data-trim>
+spec tools profiles        # spec-draft 4 · spec-reword 3 · scenario-generate 3
+                          # steps-generate 4 · unittest-generate 4
+                          # implement-advice 5 · implement 7 · refactor 5
+                          # status 7 · ask 12 (read-only)
+spec mcp call get_tdd_state  # inspect only — the agent is the normal caller
+spec draft …          # lookup of disk catalog; parse_proposals_checked is the gate
+spec implement REQ-003     # run_tests sees the working tree; command_run asks you first
+spec ask "what is pending?"
+      </code></pre>
+      <ul class="small">
+        <li>Ten profiles, one per job — narrowed to the work in front of the model</li>
+        <li>Drifting local model? <code>[tool_rules]</code> in the prompts file</li>
+        <li>Cucumber does the spec half: an executable contract that predates all of this by twenty years</li>
+      </ul>
+    </section>
+
+    <!-- ============ DEMO — 30-MINUTE TRACK ============ -->
+    <section data-track="30">
+      <h2>The spec is the entry ticket</h2>
+      <p class="small">Nothing gets written until the spec survives two deterministic reviews.</p>
+      <blockquote class="small">"Add a requirement to <code>requirements/requirements.json</code>: a custom delimiter may be declared on the first line, so <code>//+\n1+2</code> adds up to 3. Then call <code>validate_spec</code> and fix every issue. Then call <code>refine_requirement</code> and reword from the findings until there are none. No scenarios, no code yet."</blockquote>
+      <ul class="small">
+        <li><code>validate_spec</code> owns <strong>structure</strong> — unique id, a real user story, criteria phrased Given/When/Then</li>
+        <li><code>refine_requirement</code> owns <strong>wording</strong> — rejects "should", "handle", "quickly", stories with no why, happy-path-only coverage</li>
+        <li>Neither is a model call — both are deterministic</li>
+      </ul>
+    </section>
+
+    <!-- ============ 27-36 min: EXERCISE 1 — DRAFT AND REFINE THE SPEC ============ -->
+    <section data-track="60">
+      <h2>Draft the spec with your agent</h2>
+      <p class="small">The spec comes first — and the agent helps write it, then <em>refine</em> it. Prompt your IDE agent:</p>
+      <blockquote class="small">"Add a new requirement to <code>requirements/requirements.json</code>: a custom delimiter may be declared on the first line, so <code>//+\n1+2</code> adds up to 3. Follow the existing format — unique id, title, user story, acceptance criteria phrased Given/When/Then, status pending. Then call <code>validate_spec</code> and fix every issue until the spec is valid. Then call <code>refine_requirement</code> on the new requirement and reword it from the findings until there are none. Do not write scenarios or code yet — we are only agreeing on the spec."</blockquote>
+      <ul class="small">
+        <li>The agent drafts, the server critiques, the agent rewords — <strong>you approve the final wording</strong></li>
+      </ul>
+    </section>
+
+    <section data-track="both">
+      <h2>The spec iteration loop — two stages</h2>
+      <table class="small">
+        <tr><td><span class="badge time">you</span></td><td>describe the feature in a sentence of intent</td></tr>
+        <tr><td><span class="badge time">agent</span></td><td>drafts the requirement into <code>requirements.json</code></td></tr>
+        <tr><td><span class="badge red">structure</span></td><td><code>validate_spec</code> → "criterion must be phrased Given/When/Then" → agent fixes → <code>"valid": true</code></td></tr>
+        <tr><td><span class="badge refactor">wording</span></td><td><code>refine_requirement</code> → "'quickly' is ambiguous", "only happy paths — add an edge case" → agent rewords → validates → refines → <code>"clean": true</code></td></tr>
+        <tr><td><span class="badge time">you</span></td><td>read the story and criteria aloud — <em>is this what we meant?</em> Approve.</td></tr>
+      </table>
+      <p class="small">A valid, clean, approved spec is the <strong>entry ticket</strong> — no scenario or code before it.</p>
+    </section>
+
+    <!-- ============ DEMO — 30-MINUTE TRACK ============ -->
+    <section data-track="30">
+      <h2>Spec to green, Wi-Fi off</h2>
+      <p class="small">REQ-003, approved requirement to green bar — every mutation staged and reviewed.</p>
+      <blockquote class="small">"Using the spec-driven-server tools: <code>validate_spec</code> first, then <code>get_requirement</code> for REQ-003 &mdash; not the REQ-007 we just drafted. Add its Gherkin with <code>scenario_add</code> (tag the requirement id), add missing steps with <code>step_definition_create</code> if <code>step_definitions_find</code> reports any, add a unit test with <code>unit_test_create</code>. Show <code>changes_show</code> and wait before <code>changes_commit</code>. Then <code>run_tests</code> (expect RED). Implement the simplest production code in <code>StringCalculator</code>. <code>run_tests</code> (GREEN). <code>start_refactor</code> if I agree. On GREEN, <code>requirement_mark_implemented</code>."</blockquote>
+      <ul class="small">
+        <li><span class="badge red">RED</span> Cucumber and JUnit come back as <strong>one bar</strong> — the agent does not get to guess</li>
+        <li><span class="badge green">GREEN</span> the simplest passing implementation, then <code>start_refactor</code></li>
+        <li><code>requirement_mark_implemented</code> needs GREEN <em>and</em> a scenario tagged with the id</li>
+      </ul>
+    </section>
+
+    <!-- ============ 36-48 min: EXERCISE 2 — SPEC TO GREEN ============ -->
+    <section data-track="60">
+      <h2>Spec to green, agentically</h2>
+      <p class="small">Wire the server into your IDE agent:</p>
+      <pre><code class="language-json" data-trim>
+// .cursor/mcp.json  (already in the repo)
+{
+  "mcpServers": {
+    "spec-driven-server": {
+      "command": "spec",
+      "args": ["mcp", "serve", "--root", "${workspaceFolder}"]
+    }
+  }
+}
+      </code></pre>
+      <p class="small">Then prompt the agent:</p>
+      <blockquote class="small">"Using the spec-driven-server tools: validate the spec first, then <code>get_requirement</code> for REQ-003 &mdash; not the REQ-007 you just drafted, which stays pending until homework. Add its Gherkin with <code>scenario_add</code> (tag the requirement id), add missing steps with <code>step_definition_create</code> if <code>step_definitions_find</code> reports any, add a unit test with <code>unit_test_create</code>. Show <code>changes_show</code> and ask me before <code>changes_commit</code>. Then <code>run_tests</code> (expect RED). Implement the simplest production code in <code>StringCalculator</code>. <code>run_tests</code> (GREEN). <code>start_refactor</code> if I agree. On GREEN, <code>requirement_mark_implemented</code>. Ask me before each phase change."</blockquote>
+    </section>
+
+    <!-- ============ THE SAME LOOP IN THE HARNESS — BOTH TRACKS ============ -->
+    <section data-track="both">
+      <h2>The same requirement, a step at a time</h2>
+      <p class="small">That contract, driven by hand. No one-command orchestrator on stage — <strong>we are the orchestrator</strong>, so every check is one you watch fire.</p>
+      <pre><code class="language-bash" data-trim>
+spec status                       # asset survey: what REQ-003 lacks, and the next step
+spec scenario add --req REQ-003 … # staged, tagged @REQ-003
+spec steps missing                # [] — every wording is already bound
+spec unittest generate REQ-003    # staged
+spec changes show                 # checkpoint 1 — the staged Gherkin and test
+spec changes commit
+spec test                         # RED: 9 tests, 4 failures
+spec implement REQ-003            # the model attempts; the diff is staged
+spec changes show                 # checkpoint 2 — the production diff
+spec changes commit && spec test  # GREEN: 9 tests, 0 failures
+spec mark-implemented REQ-003     # refuses off GREEN, or with no tagged scenario
+      </code></pre>
+      <ul class="small">
+        <li><strong>Checked, not trusted</strong>: <code>spec status</code> re-reads the assets on disk between steps — the step says it wrote a scenario, the survey says whether one is there</li>
+        <li>Two human checkpoints, both a diff: nothing reaches the working tree unreviewed</li>
+        <li>An IDE agent calling the tools lands in the same place — same gates, same bar, same checks next</li>
+      </ul>
+    </section>
+
+    <!-- ============ 48-52 min: GRADE THE RUN ============ -->
+    <section data-track="both">
+      <h2>Grade the run — seven checks, by name</h2>
+      <pre><code class="language-bash" data-trim>
+scripts/verify-workshop-run.sh check
+      </code></pre>
+      <pre><code class="language-text" data-trim>
+  PASS  REQ-007 was drafted into the spec
+  PASS  the spec is valid
+  PASS  REQ-007 wording is refine-clean
+  PASS  REQ-007 covers the first-line delimiter declaration
+  FAIL  REQ-003 status is 'implemented' in the spec - status is pending - Exercise 2 takes REQ-003, not the REQ-007 you drafted
+  FAIL  @REQ-003 scenarios cover every acceptance criterion (0 tagged, 2 criteria) - no scenario is tagged @REQ-003
+  FAIL  REQ-003 unit test asserts every acceptance criterion (0 @Test naming REQ-003) - no @Test names REQ-003
+      </code></pre>
+      <p class="small">Three FAILs and <strong>nothing is broken</strong>: the whole Red/Green/Refactor arc ran on REQ-007 — pending, and the freshest thing in the agent's context. Every gate fired in the right order, because nothing was out of order.</p>
+      <p class="small muted">The same script grades either surface — the agent over the 25 tools, or the harness a step at a time. Four checks on the requirement you drafted, three on REQ-003, each named rather than diffed against a recorded solution.</p>
+    </section>
+
+    <section data-track="both">
+      <h2>Why this works reliably</h2>
+      <ul>
+        <li><strong>Valid spec first</strong>: <code>validate_spec</code> gates the pipeline — no scenario or code from a broken spec</li>
+        <li><strong>Ground truth</strong>: the agent doesn't guess whether code works — <code>run_tests</code> tells it</li>
+        <li><strong>Guardrails in tools</strong>: refactor-on-red is impossible; the server refuses</li>
+        <li><strong>Small steps</strong>: one requirement, one cycle — failures stay cheap</li>
+        <li><strong>Portable</strong>: one server, any host</li>
+      </ul>
+      <blockquote class="small">The model supplies System 1. The tools and the human supply System 2.</blockquote>
+    </section>
+
+    <!-- ============ A LOCAL MODEL NEEDS THE LOOP — BOTH TRACKS ============ -->
+    <section data-track="both">
+      <h2>A local model needs the loop</h2>
+      <p class="small">Not breakage — iteration. The model veers, a deterministic tool refuses, and the next attempt is better briefed.</p>
+      <table class="small">
+        <tr><th>What the model did</th><th>What the harness did</th></tr>
+        <tr><td>Wrapped required JSON in fences, emitted <code>&lt;think&gt;</code> blocks</td><td>Refused it and re-asked, the bad reply attached</td></tr>
+        <tr><td>Rewrote production code repeatedly — the real bug was a step expression missing a period</td><td>Scanned the failures for implicated files; the reply must include them</td></tr>
+        <tr><td>Dropped an acceptance criterion while rewording</td><td><strong>One</strong> finding per call, and every criterion must come back</td></tr>
+        <tr><td>Repeated an attempt that had already failed</td><td>Briefed the next prompt with what it wrote and what the run said</td></tr>
+        <tr><td>Implemented the <em>next</em> requirement too — bar green</td><td>Matched it against the other pending requirements and warned</td></tr>
+      </table>
+      <p class="small muted">What the loop cannot do: stop a loose host editing the test to force green, or tell you the requirement was worth the hour — the gates police <em>how</em> an agent works, never <em>what</em> it works on.</p>
+    </section>
+
+    <!-- ============ 52-57 min: THE FREE ON-RAMP: pi — 60-MINUTE TRACK ============ -->
+    <section data-track="60">
+      <h2>Without a runner: start free on <code>pi</code></h2>
+      <p class="small"><a href="https://pi.dev">pi</a> is a minimal, <strong>MIT-licensed</strong> coding agent. Ollama is a first-class provider. No account, no API key, no network.</p>
+      <pre><code class="language-json" data-trim>
+// ~/.pi/agent/models.json
+{ "providers": { "ollama": {
+    "baseUrl": "http://127.0.0.1:11434/v1",
+    "api": "openai-completions", "apiKey": "ollama",
+    "models": [ { "id": "qwen3.8-flash-next:125b-mlx" } ] } } }
+
+// ~/.pi/agent/settings.json
+{ "defaultProvider": "ollama", "defaultModel": "qwen3.8-flash-next:125b-mlx" }
+      </code></pre>
+      <pre><code class="language-bash" data-trim>
+ollama pull qwen3.8-flash-next:125b-mlx
+pi --offline            # or PI_OFFLINE=1 — no startup network calls at all
+      </code></pre>
+    </section>
+
+    <section data-track="60">
+      <h2><code>pi</code>'s philosophy, in <code>pi</code>'s own words</h2>
+      <blockquote class="small">"Pi is aggressively extensible so it doesn't have to dictate your workflow."<br>
+        <strong>"No MCP."</strong> &nbsp; <strong>"No permission popups."</strong> &nbsp; "No sub-agents." &nbsp; "No plan mode." &nbsp; "No built-in to-dos." &nbsp; "No background bash."</blockquote>
+      <ul class="small">
+        <li>Eight built-in tools — among them <code>bash</code>, <code>write</code>, and <code>edit</code></li>
+        <li>MCP is <strong>not in core</strong> — a third-party extension adds it</li>
+      </ul>
+      <p class="small muted">A deliberate engineering trade, not a defect — and the trade you inherit the moment the workflow is yours to supply.</p>
+    </section>
+
+    <section data-track="60">
+      <h2>Same model, no shell: <code>pi --no-builtin-tools</code></h2>
+      <pre><code class="language-bash" data-trim>
+pi install npm:pi-mcp-extension     # pi has no MCP in core — this adds it
+      </code></pre>
+      <pre><code class="language-json" data-trim>
+// .pi/mcp.json — already committed in this repo
+{ "mcpServers": { "spec-driven-server": {
+    "transport": "stdio", "command": "spec", "args": ["mcp", "serve"],
+    "lifecycle": "eager" } } }
+      </code></pre>
+      <pre><code class="language-bash" data-trim>
+pi -nbt          # built-ins off, extension tools stay on
+                 # tools arrive as mcp_spec_driven_server_&lt;tool&gt;
+      </code></pre>
+      <p class="small">No <code>bash</code>. No <code>write</code>. No <code>edit</code>. The same twenty-five tools the runner drives — and <strong>nothing about the model changed</strong>.</p>
+      <p class="small muted">The server is the constant: <code>spec</code>, Cursor, and <code>pi -nbt</code> all call <em>these</em> tools.</p>
+    </section>
+
+    <section data-track="60">
+      <h2>General agent, or spec-specific runner?</h2>
+      <p class="small">What changes is how much of the workflow you have to supply yourself.</p>
+      <div class="two-col">
+        <div>
+          <h3><code>spec</code> — spec-specific runner</h3>
+          <ul class="small">
+            <li>Does one job: spec → Gherkin → RED → GREEN → REFACTOR</li>
+            <li>The workflow is <strong>already encoded</strong>: per-command profiles, staging, phase gates</li>
+            <li>Prompts live in one auditable file, not in your head</li>
+          </ul>
+        </div>
+        <div>
+          <h3><code>pi</code> — general agent harness</h3>
+          <ul class="small">
+            <li>Works on <em>any</em> task, which is the point</li>
+            <li>The workflow is <strong>yours to build</strong>: prompts, <code>--skill</code>, prompt templates, extensions</li>
+            <li><code>-nbt</code> is a flag on one run — you re-supply it, and the sequencing, every time</li>
+          </ul>
+        </div>
+      </div>
+      <blockquote class="small">The question is whether the discipline is something you re-type or something that ships.</blockquote>
+    </section>
+
+    <!-- ============ WRAP — 30-MINUTE TRACK ============ -->
+    <section data-track="30">
+      <h2>What to take away</h2>
+      <ul>
+        <li><strong>Build a harness, not a prompt:</strong> the sequence, the tool surface, and the gates belong in software you can version and audit</li>
+        <li><strong>Tool surface beats model size:</strong> narrow the job far enough and a model on your laptop does work you would sign your name to</li>
+        <li><strong>A prompt is a suggestion; a tool that refuses is a guarantee</strong> — no refactor off green, nothing <code>implemented</code> without a tagged scenario</li>
+        <li><strong>The frontier model stops being the requirement:</strong> no key, no bill, no code leaving the building, and the same run reproducible in six months</li>
+      </ul>
+      <p class="small"><code>github.com/davidparry/spec-driven-agentic</code> — AGPL-3.0, and it runs on your hardware.</p>
+    </section>
+
+    <!-- ============ 57-60 min: WRAP ============ -->
+    <section data-track="60">
+      <h2>What you accomplished in 60 minutes</h2>
+      <ul>
+        <li>Drafted a requirement <em>with</em> an agent and iterated it to valid and clean</li>
+        <li>Drove a full spec-to-green cycle: requirement → Gherkin → RED → GREEN → refactor</li>
+        <li>Did it on a local model, because the harness carried the discipline instead of the model</li>
+        <li>Saw one server feed any host — and chose between a general agent and a specialized runner</li>
+        <li>Kept every engineering decision: the agent turned the crank, you steered</li>
+      </ul>
+      <h3 style="margin-top:0.4em">Keep building</h3>
+      <ul class="small">
+        <li>Point it at <em>your</em> project, add your own tools, swap stdio for HTTP</li>
+      </ul>
+    </section>
+
+    <section data-track="both">
+      <h2>Resources</h2>
+      <ul class="small">
+        <li>This repo: <a href="https://davidparry.github.io/spec-driven-agentic/">davidparry.github.io/spec-driven-agentic</a> — everything you used today, AGPL-3.0 licensed</li>
+        <li>The runner from the terminal: <code>student-follow-docs/harness-path.md</code> · the full walkthrough: <code>student-follow-docs/spec-binary-follow-along.md</code></li>
+        <li>Also free, for general work: <code>pi</code>, MIT — <a href="https://pi.dev">pi.dev</a> · MCP for it: <code>pi install npm:pi-mcp-extension</code> · runbook: <code>student-follow-docs/pi-path.md</code></li>
+        <li>Local model: <code>qwen3.8-flash-next:125b-mlx</code> via Ollama</li>
+        <li>MCP spec &amp; docs: <a href="https://modelcontextprotocol.io">modelcontextprotocol.io</a></li>
+        <li>MCP Inspector: <code>npx @modelcontextprotocol/inspector</code></li>
+        <li>Kent Beck, <em>Test-Driven Development: By Example</em> — still the book</li>
+      </ul>
+      <h1 style="margin-top:0.6em">Thank you!</h1>
+      <p class="muted">Questions — and let's see your green bars.</p>
+    </section>
+
+    <!-- ============ BACKUP: WIRE INSPECTION ============ -->
+    <section data-track="60">
+      <h2>Inspect the wire</h2>
+      <p class="small">Option A — MCP Inspector (browser UI + message log):</p>
+      <pre><code class="language-bash" data-trim>
+npx @modelcontextprotocol/inspector spec mcp serve --root $PWD
+      </code></pre>
+      <p class="small">Option B — be the client yourself; paste one line at a time:</p>
+      <pre><code class="language-bash" data-trim>
+spec mcp serve --root $PWD
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"me","version":"0"}}}
+{"jsonrpc":"2.0","method":"notifications/initialized"}
+{"jsonrpc":"2.0","id":2,"method":"tools/list"}
+{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"get_tdd_state","arguments":{}}}
+      </code></pre>
+      <ul class="small">
+        <li>The protocol is newline-delimited JSON on stdin/stdout — nothing hidden</li>
+        <li>Tool results are content blocks; <code>isError: true</code> lets agents read failures and self-correct</li>
+      </ul>
+    </section>
+
+  </div>
+</div>
+
+<nav class="track-switch" aria-label="Deck cut">
+  <a href="?60" data-cut="60" title="60-minute workshop cut (t)">60 min</a>
+  <a href="?30" data-cut="30" title="30-minute session cut (t)">30 min</a>
+</nav>
+
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/plugin/highlight/highlight.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/plugin/notes/notes.js"></script>
+<script>
+  // One deck, two cuts. Every top-level slide carries data-track="60" | "30" | "both";
+  // an untagged slide is treated as "both". The short cut is selected by a `?30`
+  // query string or by serving this file from a path containing "talk30", so the
+  // published /talk/ and /talk30/ URLs are the same file with no duplicated facts.
+  // `?60` forces the long cut, which is what lets the corner switch and the `t`
+  // key get back out of /talk30/.
+  // Slides are removed before Reveal.initialize so numbering and the hash agree.
+  var CUT = (function selectTrack() {
+    var params = new URLSearchParams(location.search);
+    var isShort = params.has('60') ? false
+      : params.has('30') || /talk-?30/.test(location.pathname);
+    var want = isShort ? '30' : '60';
+    document.querySelectorAll('.slides > section').forEach(function (slide) {
+      var track = slide.dataset.track || 'both';
+      if (track !== 'both' && track !== want) slide.remove();
+    });
+    document.title = (isShort ? '[30 min] ' : '') + document.title;
+    document.querySelector('.track-switch a[data-cut="' + want + '"]').classList.add('on');
+    return want;
+  })();
+
+  function swapCut() {
+    // No fragment: the cuts number their slides differently, so switching
+    // starts the other deck at the top rather than at a slide that moved.
+    location.href = location.pathname + (CUT === '30' ? '?60' : '?30');
+  }
+
+  Reveal.initialize({
+    hash: true,
+    slideNumber: 'c/t',
+    transition: 'fade',
+    // A 16:9 canvas fills a laptop screen; the 960x700 default is scaled to
+    // fit the height and leaves a dead column either side. The extra width is
+    // also what lets this content-dense deck keep the standard gutter.
+    width: 1280,
+    height: 720,
+    margin: 0.04,
+    keyboard: { 84: swapCut },
+    plugins: [RevealHighlight, RevealNotes]
+  });
+
+  // Reveal does not scale a slide that outgrows the canvas — it just lets the
+  // slide run off the bottom of the browser, and the last bullet becomes the
+  // one nobody sees. Step the type size down on those slides until they fit.
+  // Type size rather than a transform, so Reveal keeps centering them itself;
+  // small steps rather than one computed ratio, because reflowing the text
+  // changes the height that ratio was based on.
+  function fitTallSlides() {
+    var limit = Reveal.getConfig().height;
+    var base = parseFloat(getComputedStyle(document.querySelector('.reveal')).fontSize);
+    document.querySelectorAll('.slides > section').forEach(function (slide) {
+      slide.style.fontSize = '';
+      if (slide.scrollHeight <= limit) return;
+      var size = base;
+      var guard = 0;
+      while (slide.scrollHeight > limit && size > base * 0.5 && guard++ < 30) {
+        size *= 0.97;
+        slide.style.fontSize = size.toFixed(2) + 'px';
+      }
+    });
+    Reveal.layout();
+  }
+
+  // Measured again once the web fonts land, because text metrics — and so
+  // slide heights — change under the first pass, and again on every slide
+  // change, so a slide is always re-checked before it goes on screen.
+  Reveal.on('ready', fitTallSlides);
+  Reveal.on('slidechanged', fitTallSlides);
+  window.addEventListener('resize', fitTallSlides);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(fitTallSlides);
+</script>
+</body>
+</html>

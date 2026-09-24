@@ -1,0 +1,72 @@
+{
+  "project": "String Calculator Kata",
+  "description": "The SDD spec for the workshop kata: the versioned source of truth agents implement from. Each requirement's acceptance criteria are turned into executable Gherkin scenarios (Cucumber, BDD level) and JUnit tests (TDD level) by an agent, then implemented by the developer through the Red/Green/Refactor cycle.",
+  "requirements": [
+    {
+      "id": "REQ-001",
+      "title": "Empty string returns zero",
+      "status": "implemented",
+      "story": "As a user of the calculator, I want an empty string to be treated as zero so that missing input is safe.",
+      "acceptanceCriteria": [
+        "Given an empty string \"\", when add is called, then the result is 0",
+        "Given a null input, when add is called, then the result is 0"
+      ],
+      "featureFile": "kata/src/test/resources/features/string_calculator.feature"
+    },
+    {
+      "id": "REQ-002",
+      "title": "Single number returns its value",
+      "status": "implemented",
+      "story": "As a user, I want a single number string to return that number so that trivial input just works.",
+      "acceptanceCriteria": [
+        "Given \"7\", when add is called, then the result is 7",
+        "Given \"42\", when add is called, then the result is 42"
+      ],
+      "featureFile": "kata/src/test/resources/features/string_calculator.feature"
+    },
+    {
+      "id": "REQ-003",
+      "title": "Two numbers separated by a comma are summed",
+      "status": "pending",
+      "story": "As a user, I want comma-separated numbers to be summed so that I can add multiple values at once.",
+      "acceptanceCriteria": [
+        "Given \"1,2\", when add is called, then the result is 3",
+        "Given \"10,20\", when add is called, then the result is 30"
+      ],
+      "featureFile": "kata/src/test/resources/features/string_calculator.feature"
+    },
+    {
+      "id": "REQ-004",
+      "title": "Any amount of numbers is supported",
+      "status": "pending",
+      "story": "As a user, I want to add an unknown amount of numbers so that the calculator scales with my input.",
+      "acceptanceCriteria": [
+        "Given \"1,2,3,4,5\", when add is called, then the result is 15",
+        "Given \"0,0,0\", when add is called, then the result is 0"
+      ],
+      "featureFile": "kata/src/test/resources/features/string_calculator.feature"
+    },
+    {
+      "id": "REQ-005",
+      "title": "Newlines may be used as delimiters",
+      "status": "pending",
+      "story": "As a user, I want newlines to work as delimiters (in addition to commas) so that multi-line input is supported.",
+      "acceptanceCriteria": [
+        "Given \"1\\n2,3\", when add is called, then the result is 6",
+        "Given \"4\\n5\\n6\", when add is called, then the result is 15"
+      ],
+      "featureFile": "kata/src/test/resources/features/string_calculator.feature"
+    },
+    {
+      "id": "REQ-006",
+      "title": "Negative numbers are rejected",
+      "status": "pending",
+      "story": "As a user, I want negative numbers to be rejected with a clear error so that invalid input is never silently accepted.",
+      "acceptanceCriteria": [
+        "Given \"1,-2\", when add is called, then an IllegalArgumentException is thrown with a message containing \"negatives not allowed\"",
+        "Given \"-1,-2\", when add is called, then the exception message lists every negative number: -1 and -2"
+      ],
+      "featureFile": "kata/src/test/resources/features/string_calculator.feature"
+    }
+  ]
+}
