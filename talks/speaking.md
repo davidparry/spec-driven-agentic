@@ -1,3 +1,14 @@
+Two conference sessions are built on this repository, sharing one deck and one
+codebase:
+
+1. **Turn Off the Wi-Fi** — spec-driven development on a local model. The
+   argument about where the discipline should live.
+2. **[A Day in the Life of a TDD Agentic Developer](#a-day-in-the-life-of-a-tdd-agentic-developer)**
+   — the same discipline told as one developer's morning, with the harness
+   building its own 26th MCP tool live on stage.
+
+---
+
 # Turn Off the Wi-Fi: Spec-Driven Development That Delivers on a Local Model
 
 A conference session built on this repository. Everything it demonstrates runs
@@ -88,9 +99,16 @@ criterion, looping on an attempt that already failed — each with the
 deterministic check that now catches it, and an honest account of where a
 frontier model is still the right call.
 
-The harness and its server were built this way themselves: every tool has a
-numbered requirement, a Cucumber scenario, and a test that fails the build
-when spec and scenarios drift apart.
+The harness is held to the discipline it enforces.
+[`harness/requirements/requirements.json`](../harness/requirements/requirements.json)
+is the spec for the `spec` binary — numbered requirements, each with a Cucumber
+scenario carrying its tag — and
+[`harness/tests/spec_completeness.rs`](../harness/tests/spec_completeness.rs)
+fails the build on drift in either direction: a requirement whose scenario is
+missing, a tag left behind by a requirement that is gone, or an implemented
+requirement whose wording would not survive the harness's own review. The MCP
+surface gets the same treatment from the Java side, where `smoke-test/` carries
+its own catalog and a 26th tool fails that build until it is planned.
 
 Every layer is free and open source, and every layer runs on your hardware. To
 prove the point, the demo runs with the Wi-Fi switched off.
@@ -156,12 +174,13 @@ or LLM experience required; comfort with JUnit and Cucumber is assumed.
 
 ## Formats
 
-One deck, two cuts — [`slides/index.html`](slides/index.html) selects by
-query string, and <kbd>t</kbd> switches between them live.
+One deck, three cuts — [`slides/index.html`](slides/index.html) selects by
+query string, and <kbd>t</kbd> cycles through them live.
 
 | Format | Deck cut | What it covers |
 | --- | --- | --- |
 | **Conference session** (50 minutes) | [`?60`](slides/index.html?60) | The full narrative above — the harness first, taken from requirement to green on a local model, then pi as the free general-purpose on-ramp and the altitude comparison — with the live frontier-versus-local comparison and the *Where This Breaks* segment. The two exercise slides are delivered as demos from the stage rather than as hands-on time, which is what makes the 60-minute cut fit in 50. |
+| **A Day in the Life of a TDD Agentic Developer** (60 minutes) | [`?tdd`](slides/index.html?tdd) | A separate session, described [below](#a-day-in-the-life-of-a-tdd-agentic-developer): TDD in the agentic era told as one developer's morning, with the harness taking its own `HARNESS-013` from a vague draft to a green bar and growing a 26th MCP tool live. Shares the Red/Green/Refactor refresher and the harness argument with the cuts above; the demo and the closing segments are its own. Published at [/talktdd/](https://davidparry.github.io/spec-driven-agentic/talktdd/). |
 | **Short session** (30 minutes) | [`?30`](slides/index.html?30) | The harness and nothing else, demo-driven, with no hands-on segment: why a general agent gives a general result, what a purpose-built harness owns instead, then the runner taken from requirement to green with the Wi-Fi off — plus *Where This Breaks*. pi is 60-minute material and does not appear. Published at [/talk30/](https://davidparry.github.io/spec-driven-agentic/talk30/). |
 | **Hands-on workshop** (60 minutes) | [`?60`](slides/index.html?60) | Attendees run the loop on their own machines against a local model: draft a requirement, refine it until the wording review is clean, take it through RED, GREEN, and REFACTOR, then grade the run with `scripts/verify-workshop-run.sh check`. Companion material is the [workshop follow-along](../student-follow-docs/student-follow-along.md); the [pi path](../student-follow-docs/pi-path.md) is the free, no-IDE on-ramp, and the [harness path](../student-follow-docs/harness-path.md) covers attendees who prefer the terminal to an IDE. |
 
@@ -201,7 +220,97 @@ time — never the loop, and never the way it is verified.
 | The free general-purpose on-ramp: pi on Ollama, then pi with `--no-builtin-tools` against this server | [`.pi/mcp.json`](../.pi/mcp.json), [`student-follow-docs/pi-path.md`](../student-follow-docs/pi-path.md) |
 | The end-of-run grader that names the requirement id — where "right process, wrong requirement" is caught | [`scripts/verify-workshop-run.sh`](../scripts/verify-workshop-run.sh) |
 | The bundled MCP-server smoke test: launch, discover 25 tools, invoke | `smoke-test/`, captured run in [`student-follow-docs/step2.log`](../student-follow-docs/step2.log) |
-| The slide deck — one file, two cuts ([`?30`](slides/index.html?30) selects the short one, or press <kbd>t</kbd> in the deck) | [`slides/index.html`](slides/index.html) |
+| The slide deck — one file, three cuts ([`?30`](slides/index.html?30) and [`?tdd`](slides/index.html?tdd) select the others, or press <kbd>t</kbd> in the deck) | [`slides/index.html`](slides/index.html) |
+| The harness's own spec, and the build gate that fails on drift | [`harness/requirements/requirements.json`](../harness/requirements/requirements.json), [`harness/tests/spec_completeness.rs`](../harness/tests/spec_completeness.rs) |
+
+---
+
+# A Day in the Life of a TDD Agentic Developer
+
+**60 minutes · live demo · deck cut [`?tdd`](slides/index.html?tdd), published at
+[/talktdd/](https://davidparry.github.io/spec-driven-agentic/talktdd/)**
+
+## Abstract
+
+Test-Driven Development has long been a cornerstone of building reliable,
+maintainable software. But what happens when we bring intelligent agents into
+the loop? This session explores how requirements can automatically drive the
+creation of executable tests, and how developer-focused agents collaborate with
+humans to ensure all tests pass with confidence.
+
+We begin with a quick refresher on Red/Green/Refactor and show how agentic
+workflows extend TDD by generating tests directly from acceptance criteria while
+keeping the human firmly in control. Then, through a live demo, we walk from
+requirements to passing code: agents author the tests, a developer agent
+produces the code, and together with the human in the loop they iterate until
+the suite is green.
+
+The session is framed as **one developer's morning**. A requirement lands at
+9:00 saying almost nothing useful. By lunch it is implemented, proven, and
+traceable — and the thing it asked for has been built. The hook is two versions
+of that morning: the one everyone recognizes, where an agent returns 400 lines
+that compile, pass tests nobody asked for, and encode a design nobody approved;
+and the rerun, which is the rest of the talk.
+
+What makes the demo more than a kata is its subject. The harness is pointed at
+**itself**. `HARNESS-013` asks for `criteria_coverage` — a tool that reports,
+per requirement, which acceptance criteria have an asserting test and which do
+not. It starts structurally valid and badly written, and the wording review
+returns ten specific findings before a line of code exists. The room watches the
+criteria become a tagged Gherkin scenario and a failing test, watches a refactor
+request get refused on a red bar by a state machine rather than a prompt, and
+watches a developer agent produce an implementation that arrives as a reviewable
+diff because it has no shell and no free-hand write.
+
+Then the beat the room enjoys most. The server now answers with 26 tools, and
+nobody told the Java smoke test. `LiveSpecServerTest` fails, reporting
+`criteria_coverage` as *unexpected* — because `CLI-009` was written months ago
+to say "a 26th MCP tool fails the Java build until it is planned". One module's
+spec caught new surface area in another, with nobody remembering to look.
+
+The close is the thesis made literal: run the tool built at 10:15 against the
+requirement written at 9:10. Every acceptance criterion has an asserting test.
+The morning's work grades itself.
+
+Throughout, "human in the loop" is given a precise meaning: **three moments**.
+The wording, because an ambiguous requirement produces a meaningless test. The
+staged diff, because every write lands in a staging area rather than the working
+tree. The implementation, because that is the design you will live with.
+Everything between those three is turning the crank.
+
+## What attendees leave with
+
+- How acceptance criteria become executable tests without anyone re-typing the
+  requirement into a test file, and the build gate that keeps the two from
+  drifting apart.
+- The difference between a requirement that is **valid** and one that is
+  **usable**, demonstrated by a spec that passes structural validation and still
+  earns ten wording findings.
+- A concrete answer to "where should the human actually spend attention" —
+  three named moments rather than diffuse vigilance.
+- What it looks like when TDD's rules are **enforced in software**: a state
+  machine that refuses a red-bar refactor, and a status flip gated on a green
+  bar plus a scenario carrying the requirement's id.
+- A named catalog of the ways this goes wrong — including an agent making the
+  bar green by deleting the assertion — each with the deterministic check that
+  now catches it, and the one failure mode nothing catches.
+- A repository where the tool is held to its own discipline, and a test that
+  fails the build when it is not.
+
+## Who it is for
+
+Developers, tech leads, and architects who practise TDD and are now accountable
+for what coding agents produce. Level: intermediate. No MCP or LLM experience
+required; comfort with a unit test and a Gherkin scenario is assumed. The demo
+is Rust and Java, but nothing in the argument is language-specific.
+
+## Technical requirements
+
+Stage projector and my laptop. No conference network needed. On stage: the
+`spec` binary, Rust and Cargo, Java 21 and Maven, and Ollama running a local
+model. Presenter script and the verified paste-ready wording are in
+[`presenter-notes.md`](presenter-notes.md); the attendee companion is
+[`a-day-in-the-life.md`](../student-follow-docs/a-day-in-the-life.md).
 
 ## Booking
 

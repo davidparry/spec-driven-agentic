@@ -27,9 +27,14 @@ SITE_PATHS = {
     "student-follow-docs/setup-mcp.md": "../setup/",
     "student-follow-docs/greenfield-flow.md": "../greenfield/",
     "student-follow-docs/pi-path.md": "../pi/",
+    "student-follow-docs/a-day-in-the-life.md": "../day/",
     "talks/slides/index.html": "../talk/",
     "talks/slides/index.html?30": "../talk30/",
+    "talks/slides/index.html?tdd": "../talktdd/",
 }
+
+# One deck, three cuts: the same file picks its track from the URL.
+DECK_CUTS = ("talk", "talk30", "talktdd")
 
 PAGES = [
     {
@@ -67,6 +72,12 @@ PAGES = [
         "dest": "pi/index.html",
         "title": "The pi path",
         "description": "Drive the spec-driven server from pi, a free MIT-licensed agent on a local Ollama model.",
+    },
+    {
+        "src": "student-follow-docs/a-day-in-the-life.md",
+        "dest": "day/index.html",
+        "title": "A Day in the Life",
+        "description": "Replay the talk's morning: one requirement from vague draft to a green bar, building the harness's own 26th MCP tool.",
     },
 ]
 
@@ -139,17 +150,22 @@ def copy_static() -> None:
     if SITE.exists():
         shutil.rmtree(SITE)
     (SITE / "assets").mkdir(parents=True)
-    (SITE / "talk").mkdir()
-    (SITE / "talk30").mkdir()
     shutil.copy2(DOCS / "index.html", SITE / "index.html")
     for item in (DOCS / "assets").iterdir():
         if item.name == "page.template.html":
             continue
         shutil.copy2(item, SITE / "assets" / item.name)
-    # One deck, two cuts: the same file picks its track from the URL, so /talk/
-    # serves the 60-minute workshop and /talk30/ the 30-minute session.
-    shutil.copy2(ROOT / "talks" / "slides" / "index.html", SITE / "talk" / "index.html")
-    shutil.copy2(ROOT / "talks" / "slides" / "index.html", SITE / "talk30" / "index.html")
+    # /talk/ serves the 60-minute workshop, /talk30/ the 30-minute session, and
+    # /talktdd/ "A Day in the Life of a TDD Agentic Developer" — one source
+    # file, three tracks, selected by the path. Every sibling file in the
+    # slides directory ships with it: the deck references the QR image
+    # relatively, so copying index.html alone would publish a broken image.
+    slides = ROOT / "talks" / "slides"
+    for cut in DECK_CUTS:
+        (SITE / cut).mkdir()
+        for item in slides.iterdir():
+            if item.is_file():
+                shutil.copy2(item, SITE / cut / item.name)
     # The harness manual is an mdBook committed pre-built (mdbook build manual).
     shutil.copytree(DOCS / "manual", SITE / "manual")
     (SITE / ".nojekyll").write_text("", encoding="utf-8")

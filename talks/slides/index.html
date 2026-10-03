@@ -142,6 +142,57 @@
       </ul>
     </section>
 
+    <!-- ============ OPENING — A DAY IN THE LIFE (TDD TRACK) ============ -->
+    <section data-track="tdd">
+      <h1>A Day in the Life of a TDD&nbsp;Agentic Developer</h1>
+      <h3>One morning. One requirement. From "it is vague" to a green bar you would sign your name to.</h3>
+      <p class="muted">60-minute session &nbsp;·&nbsp; live demo &nbsp;·&nbsp; the harness builds its own 26th tool on stage</p>
+      <p><span class="badge red">RED</span> <span class="badge green">GREEN</span> <span class="badge refactor">REFACTOR</span> — with the human still holding the wheel</p>
+      <figure class="title-qr">
+        <img src="davidparry-qr-duke.png" alt="QR code">
+        <figcaption>Where to find me — davidparry.com</figcaption>
+      </figure>
+    </section>
+
+    <!-- ============ 0-4 min: THE HOOK — TWO MORNINGS ============ -->
+    <section data-track="tdd">
+      <h2>Two versions of the same morning</h2>
+      <div class="two-col">
+        <div>
+          <h3>The one you recognize</h3>
+          <ul class="small">
+            <li>You describe the feature in a chat box</li>
+            <li>400 lines come back. They compile</li>
+            <li>They pass tests <em>nobody asked for</em></li>
+            <li>They encode a design you never approved</li>
+            <li>You read all of it anyway — so what did you save?</li>
+          </ul>
+        </div>
+        <div>
+          <h3>The rerun</h3>
+          <ul class="small">
+            <li>The requirement is the thing you argue about — for ten minutes, once</li>
+            <li>The tests come <em>from</em> the acceptance criteria</li>
+            <li>The bar goes red before anything is implemented</li>
+            <li>You spend your attention at <strong>three</strong> points, on purpose</li>
+            <li>At 11:15 the work proves itself</li>
+          </ul>
+        </div>
+      </div>
+      <blockquote>Same agent. Same model. The difference is what it is allowed to do, and when.</blockquote>
+    </section>
+
+    <section data-track="tdd">
+      <h2>What you will leave with</h2>
+      <ul>
+        <li>Where <strong>Red/Green/Refactor</strong> actually changes when an agent turns the crank — and the one rule agents break first</li>
+        <li>How <strong>acceptance criteria become executable tests</strong> without anyone re-typing the requirement</li>
+        <li>The <strong>three moments</strong> a human should spend attention on, and why the other dozen are not worth it</li>
+        <li>What it looks like when the gates are <strong>software</strong> rather than a paragraph in a prompt</li>
+        <li>A repository where the tool is <strong>held to its own discipline</strong> — and a build that fails when it is not</li>
+      </ul>
+    </section>
+
     <section data-track="both">
       <h2>The stack, on this kata</h2>
       <div class="stack">
@@ -178,7 +229,7 @@
     </section>
 
     <!-- ============ 5-12 min: TDD REFRESHER ============ -->
-    <section data-track="both">
+    <section data-track="both tdd">
       <h2>Refresher: the discipline that scales</h2>
       <div class="cycle">
         <div class="step" style="background:#b71c1c">RED<br><span class="small">write a failing test</span></div>
@@ -194,7 +245,7 @@
       </ul>
     </section>
 
-    <section data-track="both">
+    <section data-track="both tdd">
       <h2>What changes in the agentic era?</h2>
       <div class="two-col">
         <div>
@@ -233,6 +284,26 @@
       </table>
       <ul class="small" style="margin-top:0.6em">
         <li>Agentic SDD: the spec is the source of truth; agents generate scenarios, tests, and code <em>from</em> it</li>
+      </ul>
+    </section>
+
+    <section data-track="tdd">
+      <h2>Three altitudes, in a working day</h2>
+      <table class="small">
+        <tr><th></th><th>Pins</th><th>Answers</th><th>On the harness itself</th></tr>
+        <tr><td><strong>SDD</strong> <span class="muted">spec-driven</span></td>
+            <td>the feature</td><td>what did we agree to build?</td>
+            <td><code>harness/requirements/requirements.json</code></td></tr>
+        <tr><td><strong>BDD</strong> <span class="muted">behavior-driven</span></td>
+            <td>one behavior</td><td>what would the business sign?</td>
+            <td><code>@HARNESS-013</code> in <code>tests/features/</code></td></tr>
+        <tr><td><strong>TDD</strong> <span class="muted">test-driven</span></td>
+            <td>one unit</td><td>does it work, right now?</td>
+            <td>the failing test, then <code>cargo test</code></td></tr>
+      </table>
+      <ul class="small" style="margin-top:0.6em">
+        <li>An agent can write at all three altitudes. The question is never <em>can it</em> — it is <strong>which one is it allowed to touch, and when</strong></li>
+        <li>Today the demo runs at all three, on <strong>this tool's own backlog</strong>: 13 requirements implemented, 1 pending</li>
       </ul>
     </section>
 
@@ -282,7 +353,7 @@ requirements/
       <blockquote>The answer is not a bigger model. It is a narrower job.</blockquote>
     </section>
 
-    <section data-track="both">
+    <section data-track="both tdd">
       <h2>Build the harness, not the prompt</h2>
       <p class="small">A <strong>purpose-built harness</strong> is software that already knows the job. The model is one component in it — and it can be the smallest one that still works.</p>
       <div class="two-col">
@@ -308,7 +379,7 @@ requirements/
       <blockquote class="small">Frontier capability buys slack. A harness means you do not need the slack.</blockquote>
     </section>
 
-    <section data-track="both">
+    <section data-track="both tdd">
       <h2>The missing piece: a protocol</h2>
       <p>For an agent to run <em>your</em> tests and respect <em>your</em> workflow, it needs a standard way to discover and call your tools.</p>
       <p style="margin-top:0.8em">That standard is the <strong>Model Context Protocol</strong>.</p>
@@ -355,7 +426,7 @@ requirements/
     </section>
 
     <!-- ============ 21-25 min: THE PLUMBING (pre-built) ============ -->
-    <section data-track="both">
+    <section data-track="both tdd">
       <h2>The server — already built</h2>
       <p class="small">One binary: <code>spec mcp serve --root ${workspaceFolder}</code>. Twenty-five tools in three groups:</p>
       <ul class="small">
@@ -364,6 +435,132 @@ requirements/
         <li><strong>Inspect</strong> — <code>project_root</code>, <code>project_inspect</code>, <code>command_run</code> (allowlisted, RED-gated)</li>
       </ul>
       <p class="small">A stdio server must <strong>never print to stdout</strong> — that corrupts the JSON-RPC stream. Diagnostics go to stderr.</p>
+    </section>
+
+    <!-- ============ 18-24 min: THE THREE MOMENTS (TDD TRACK) ============ -->
+    <section data-track="tdd">
+      <h2>The three moments that are yours</h2>
+      <p class="small">"Human in the loop" usually means <em>watch everything</em>, which means watch nothing. Put the attention where the irreversible decisions are.</p>
+      <table class="small">
+        <tr><th>When</th><th>What you are deciding</th><th>What stops the agent without you</th></tr>
+        <tr><td><strong>The wording</strong></td><td>Is this requirement unambiguous enough to generate a test from?</td>
+            <td>A deterministic wording review — <code>refine_requirement</code></td></tr>
+        <tr><td><strong>The staged diff</strong></td><td>Does this edit belong in my repository?</td>
+            <td>Every write lands in staging, never the working tree</td></tr>
+        <tr><td><strong>The implementation</strong></td><td>Is this the design I want to live with?</td>
+            <td>No shell, no free-hand write — a diff, or nothing</td></tr>
+      </table>
+      <blockquote class="small">Three decisions in a morning. Everything between them is turning the crank.</blockquote>
+    </section>
+
+    <!-- ============ 24-52 min: THE MORNING, LIVE ============ -->
+    <section data-track="tdd">
+      <h2>9:00 — the ticket lands</h2>
+      <pre><code class="language-bash" data-trim>
+spec --root harness status
+spec --root harness show HARNESS-013
+      </code></pre>
+      <blockquote class="small">HARNESS-013 — "Criteria coverage" — status: pending</blockquote>
+      <ul class="small">
+        <li>The <strong>catalog</strong> names the next piece of work. Not the chat history, not whatever was open in the editor</li>
+        <li>Thirteen requirements say <code>implemented</code>. Each of those has a tagged scenario, and a test proves it — <code>tests/spec_completeness.rs</code> fails the build otherwise</li>
+        <li>Today we build the <strong>26th MCP tool</strong>: given a requirement, which acceptance criteria have an asserting test, and which do not</li>
+      </ul>
+    </section>
+
+    <section data-track="tdd">
+      <h2>9:10 — valid is not the same as usable</h2>
+      <div class="two-col">
+        <div>
+          <h3><code>validate_spec</code> → <span class="badge green">valid</span></h3>
+          <p class="small">The shape is right: ids, statuses, every criterion phrased Given/When/Then.</p>
+          <blockquote class="small">"the harness should handle coverage properly so gaps are found easily"</blockquote>
+        </div>
+        <div>
+          <h3><code>refine_requirement</code> → <span class="badge red">10 findings</span></h3>
+          <ul class="small">
+            <li><code>story: missing the actor</code></li>
+            <li><code>'should' is ambiguous</code> · <code>'handle'</code> · <code>'properly'</code> · <code>'easily'</code></li>
+            <li><code>the outcome is not concrete — state the exact expected value after 'then'</code></li>
+            <li><code>criteria: only happy paths — add at least one edge case</code></li>
+          </ul>
+        </div>
+      </div>
+      <blockquote>A structurally valid requirement nobody could write a test from. <strong>This one is yours.</strong></blockquote>
+    </section>
+
+    <section data-track="tdd">
+      <h2>9:30 — the criteria become the tests</h2>
+      <pre><code class="language-bash" data-trim>
+spec --root harness scenario add  --feature tests/features/tool_coverage.feature --req HARNESS-013
+spec --root harness unittest generate HARNESS-013
+spec --root harness changes show     # ← yours: read it before it lands
+spec --root harness changes commit
+      </code></pre>
+      <ul class="small">
+        <li>The scenario is written <strong>from the acceptance criteria</strong> and tagged <code>@HARNESS-013</code> — nobody re-typed the requirement into a test</li>
+        <li>Both edits are <strong>staged</strong>. The working tree has not changed yet</li>
+      </ul>
+      <p class="small muted">This is the step the abstract promises: requirements driving executable tests. It is also the step where a human reads a diff.</p>
+    </section>
+
+    <section data-track="tdd">
+      <h2>10:00 — red, and a refactor that gets refused</h2>
+      <pre><code class="language-bash" data-trim>
+spec --root harness test        # RED — 1 failing
+spec --root harness refactor --note "tidy the coverage module"
+      </code></pre>
+      <blockquote>Refused: <code>Never refactor on a red bar</code></blockquote>
+      <ul class="small">
+        <li>A red bar is not a failure. It is <strong>proof the test can fail</strong> — the one thing a test written after the code never gives you</li>
+        <li>That refusal is a state machine in <code>harness/src/domain/tdd.rs</code>, not a sentence in a prompt. There is nothing to talk it out of</li>
+      </ul>
+    </section>
+
+    <section data-track="tdd">
+      <h2>10:15 — the developer agent writes the code</h2>
+      <pre><code class="language-bash" data-trim>
+spec --root harness implement HARNESS-013
+spec --root harness changes show     # ← yours: the third and last moment
+spec --root harness changes commit
+spec --root harness test             # GREEN
+      </code></pre>
+      <ul class="small">
+        <li>Seven tools for this step. No shell. No free-hand write. The attempt arrives as a <strong>reviewable diff</strong> or it does not arrive</li>
+        <li>The logic is already in <code>domain/coverage.rs</code> — ported from the workshop's own grader. The agent is wiring a tool, not inventing an algorithm</li>
+      </ul>
+    </section>
+
+    <section data-track="tdd">
+      <h2>10:50 — CI catches what you forgot</h2>
+      <p class="small">The server now answers with <strong>26</strong> tools. Nobody told the Java smoke test.</p>
+      <pre><code class="language-bash" data-trim>
+mvn -f smoke-test/pom.xml test -Dspec.binary=$(which spec)
+
+[ERROR] LiveSpecServerTest.liveSweep
+        the live spec binary serves exactly the 25 planned tools
+        unexpected: [criteria_coverage]
+[INFO] BUILD FAILURE
+      </code></pre>
+      <blockquote class="small">CLI-009: "As a maintainer, I want a 26th MCP tool to fail the Java build until it is planned."</blockquote>
+      <ul class="small">
+        <li>One module's spec caught new surface area in another — and nobody had to <em>remember</em> to look</li>
+        <li>This red bar was written months ago, for exactly this morning</li>
+      </ul>
+    </section>
+
+    <section data-track="tdd">
+      <h2>11:15 — the morning grades itself</h2>
+      <pre><code class="language-bash" data-trim>
+spec --root harness mark-implemented HARNESS-013   # gated: GREEN + a tagged scenario
+spec --root harness mcp call criteria_coverage --arg id=HARNESS-013
+      </code></pre>
+      <p class="small">Run the tool you built at 10:15 against the requirement you wrote at 9:10:</p>
+      <blockquote>Every acceptance criterion of HARNESS-013 has an asserting test. <span class="badge green">covered</span></blockquote>
+      <ul class="small">
+        <li>The requirement cannot say <code>implemented</code> without a green bar <em>and</em> a scenario carrying its tag</li>
+        <li>And now the drift gate covers 14 requirements instead of 13 — including this one's wording</li>
+      </ul>
     </section>
 
     <section data-track="60">
@@ -523,7 +720,7 @@ scripts/verify-workshop-run.sh check
       <p class="small muted">The same script grades either surface — the agent over the 25 tools, or the harness a step at a time. Four checks on the requirement you drafted, three on REQ-003, each named rather than diffed against a recorded solution.</p>
     </section>
 
-    <section data-track="both">
+    <section data-track="both tdd">
       <h2>Why this works reliably</h2>
       <ul>
         <li><strong>Valid spec first</strong>: <code>validate_spec</code> gates the pipeline — no scenario or code from a broken spec</li>
@@ -533,6 +730,39 @@ scripts/verify-workshop-run.sh check
         <li><strong>Portable</strong>: one server, any host</li>
       </ul>
       <blockquote class="small">The model supplies System 1. The tools and the human supply System 2.</blockquote>
+    </section>
+
+    <!-- ============ 52-57 min: MORNINGS THAT GO WRONG (TDD TRACK) ============ -->
+    <section data-track="tdd">
+      <h2>Mornings that go wrong</h2>
+      <p class="small">Every one of these happened in this repository. Each is now caught by something deterministic.</p>
+      <table class="small">
+        <tr><th>What the agent did</th><th>What catches it now</th></tr>
+        <tr><td>Made the bar green by <strong>deleting the assertion</strong></td>
+            <td>It never gets a shell or a writable test file — an attempt is a staged diff, and only <code>run_tests</code> reports a bar</td></tr>
+        <tr><td>Offered to "clean up" <strong>while tests were failing</strong></td>
+            <td>The state machine refuses REFACTOR from any phase but GREEN</td></tr>
+        <tr><td>Marked a requirement <strong>implemented with nothing proving it</strong></td>
+            <td>Gated on GREEN plus a scenario tagged with the requirement id</td></tr>
+        <tr><td>Asked to implement one requirement, <strong>quietly implemented two</strong></td>
+            <td>The staged diff is matched against the other pending requirements — it warns, and never blocks</td></tr>
+        <tr><td>Rewrote the production class while the real bug was a <strong>step expression</strong></td>
+            <td>The failure output is scanned for implicated files; the reply must name them</td></tr>
+        <tr><td>Did the process perfectly on <strong>the wrong requirement</strong></td>
+            <td>Nothing. The gates police <em>how</em>, never <em>what</em> — that one is still yours</td></tr>
+      </table>
+    </section>
+
+    <section data-track="tdd">
+      <h2>What your Tuesday looks like now</h2>
+      <ul>
+        <li>The requirement is the artifact you argue about — <strong>once, for ten minutes</strong>, before any code exists</li>
+        <li>Tests are generated <strong>from the acceptance criteria</strong>, so the spec and the suite cannot quietly disagree</li>
+        <li>The red bar comes <strong>first</strong>, and it is proof rather than paperwork</li>
+        <li>Refactoring is safe because the discipline is <strong>enforced in software</strong>, not remembered</li>
+        <li>You spend attention at <strong>three</strong> points instead of reading 400 lines you did not plan</li>
+      </ul>
+      <blockquote>The agent turns the crank. You still decide what gets built — and that is the part worth keeping.</blockquote>
     </section>
 
     <!-- ============ A LOCAL MODEL NEEDS THE LOOP — BOTH TRACKS ============ -->
@@ -652,10 +882,11 @@ pi -nbt          # built-ins off, extension tools stay on
       </ul>
     </section>
 
-    <section data-track="both">
+    <section data-track="both tdd">
       <h2>Resources</h2>
       <ul class="small">
         <li>This repo: <a href="https://davidparry.github.io/spec-driven-agentic/">davidparry.github.io/spec-driven-agentic</a> — everything you used today, AGPL-3.0 licensed</li>
+        <li data-track="tdd">Replay this morning, command by command: <a href="https://davidparry.github.io/spec-driven-agentic/day/">/day/</a> — <code>student-follow-docs/a-day-in-the-life.md</code></li>
         <li>The runner from the terminal: <code>student-follow-docs/harness-path.md</code> · the full walkthrough: <code>student-follow-docs/spec-binary-follow-along.md</code></li>
         <li>Also free, for general work: <code>pi</code>, MIT — <a href="https://pi.dev">pi.dev</a> · MCP for it: <code>pi install npm:pi-mcp-extension</code> · runbook: <code>student-follow-docs/pi-path.md</code></li>
         <li>Local model: <code>qwen3.8-flash-next:125b-mlx</code> via Ollama</li>
@@ -694,37 +925,65 @@ spec mcp serve --root $PWD
 <nav class="track-switch" aria-label="Deck cut">
   <a href="?60" data-cut="60" title="60-minute workshop cut (t)">60 min</a>
   <a href="?30" data-cut="30" title="30-minute session cut (t)">30 min</a>
+  <a href="?tdd" data-cut="tdd" title="A Day in the Life of a TDD Agentic Developer (t)">a day</a>
 </nav>
 
 <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/plugin/highlight/highlight.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/plugin/notes/notes.js"></script>
 <script>
-  // One deck, two cuts. Every top-level slide carries data-track="60" | "30" | "both";
-  // an untagged slide is treated as "both". The short cut is selected by a `?30`
-  // query string or by serving this file from a path containing "talk30", so the
-  // published /talk/ and /talk30/ URLs are the same file with no duplicated facts.
+  // One deck, three cuts. Every top-level slide carries data-track with one or
+  // more space-separated cut names: "60", "30", "tdd", or the shorthand "both".
+  // An untagged slide is treated as "both".
+  //
+  // "both" is literal — it expands to the two harness cuts, 60 and 30, and not
+  // to "tdd". The TDD talk is a different narrative with its own demo, so a
+  // slide joins it by saying so: data-track="both tdd". That keeps the shared
+  // material (the Red/Green/Refactor refresher, the three altitudes, where this
+  // breaks) single-source without the new cut silently inheriting slides
+  // written about the kata.
+  //
+  // A cut is selected by query string (`?30`, `?tdd`) or by serving this file
+  // from a path containing "talk30" or "talktdd", so the published /talk/,
+  // /talk30/ and /talktdd/ URLs are the same file with no duplicated facts.
   // `?60` forces the long cut, which is what lets the corner switch and the `t`
-  // key get back out of /talk30/.
+  // key get back out of the others.
   // Slides are removed before Reveal.initialize so numbering and the hash agree.
+  var CUTS = ['60', '30', 'tdd'];
+  var LABELS = { '30': '[30 min] ', 'tdd': '[A Day in the Life] ' };
+
   var CUT = (function selectTrack() {
     var params = new URLSearchParams(location.search);
-    var isShort = params.has('60') ? false
-      : params.has('30') || /talk-?30/.test(location.pathname);
-    var want = isShort ? '30' : '60';
+    var want = params.has('60') ? '60'
+      : params.has('tdd') || /talk-?tdd/.test(location.pathname) ? 'tdd'
+      : params.has('30') || /talk-?30/.test(location.pathname) ? '30'
+      : '60';
     document.querySelectorAll('.slides > section').forEach(function (slide) {
-      var track = slide.dataset.track || 'both';
-      if (track !== 'both' && track !== want) slide.remove();
+      if (tracksOf(slide).indexOf(want) === -1) slide.remove();
     });
-    document.title = (isShort ? '[30 min] ' : '') + document.title;
+    // A line inside a shared slide can belong to one cut on its own, so a
+    // resources entry can name the follow-along for the talk being given.
+    document.querySelectorAll('.slides [data-track]').forEach(function (line) {
+      if (tracksOf(line).indexOf(want) === -1) line.remove();
+    });
+    document.title = (LABELS[want] || '') + document.title;
     document.querySelector('.track-switch a[data-cut="' + want + '"]').classList.add('on');
     return want;
   })();
 
+  function tracksOf(el) {
+    var named = [];
+    (el.dataset.track || 'both').trim().split(/\s+/).forEach(function (track) {
+      if (track === 'both') { named.push('60', '30'); } else { named.push(track); }
+    });
+    return named;
+  }
+
   function swapCut() {
     // No fragment: the cuts number their slides differently, so switching
-    // starts the other deck at the top rather than at a slide that moved.
-    location.href = location.pathname + (CUT === '30' ? '?60' : '?30');
+    // starts the next deck at the top rather than at a slide that moved.
+    var next = CUTS[(CUTS.indexOf(CUT) + 1) % CUTS.length];
+    location.href = location.pathname + '?' + next;
   }
 
   Reveal.initialize({
