@@ -13,6 +13,7 @@ Feature: Requirement refinement
     Then the requirement is clean
     And the next step advises confirming the wording with the developer
 
+  @HARNESS-003
   Scenario: The workshop demo story earns exactly five findings
     Given a requirement "REQ-007" with story "the calculator should handle newlines quickly"
     And the requirement has criterion "Given the input "1\n2,3", when add is called, then the result is 6"

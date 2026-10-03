@@ -33,6 +33,7 @@ Feature: Project inspection
     When the project is inspected
     Then the language ".NET" is detected with framework "Reqnroll" and runtime "dotnet"
 
+  @HARNESS-010
   Scenario: Cargo.toml is Rust with cucumber-rs
     Given the project contains "Cargo.toml"
     When the project is inspected

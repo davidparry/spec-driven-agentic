@@ -1,0 +1,183 @@
+{
+  "project": "spec harness",
+  "description": "The spec for the spec harness itself. The harness holds its own work to the discipline it enforces on everyone else's: these requirements are the source of truth, the tagged Cucumber scenarios under tests/features are their executable form, and tests/spec_completeness.rs fails the build if the two drift apart. Point the harness at itself with spec --root harness.",
+  "requirements": [
+    {
+      "id": "HARNESS-001",
+      "title": "Refactoring is refused on a red bar",
+      "status": "implemented",
+      "story": "As a developer held to the discipline by tooling, I want the Red/Green/Refactor phase tracked from the test runs themselves so that a refactor can never begin while the bar is red.",
+      "acceptanceCriteria": [
+        "Given a fresh TDD session, when a failing test run is recorded, then the phase is \"RED\"",
+        "Given a fresh TDD session, when a passing test run is recorded, then the phase is \"GREEN\"",
+        "Given a session whose last run failed, when a refactor is attempted, then the refactor is refused with a message containing \"Never refactor on a red bar\"",
+        "Given a session whose last run passed, when a refactor is started, then the phase is \"REFACTOR\""
+      ],
+      "featureFile": "tests/features/tdd_state.feature"
+    },
+    {
+      "id": "HARNESS-002",
+      "title": "Structural problems in the spec are reported as exact issues",
+      "status": "implemented",
+      "story": "As a developer driving work from a requirements spec, I want structural problems reported as exact, actionable issues so that only a usable spec is ever turned into scenarios and code.",
+      "acceptanceCriteria": [
+        "Given a criterion that names no starting state, action and result, when the spec is validated, then the verdict is \"invalid\"",
+        "Given a well-formed pending requirement, when the spec is validated, then the verdict is \"valid\"",
+        "Given an implemented requirement whose feature file carries none of its tags, when the spec is validated, then an issue reads \"REQ-006: no scenario tagged @REQ-006 in features/x.feature - implemented requirements need executable scenarios\"",
+        "Given two requirements sharing one id, when the spec is validated, then an issue reads \"REQ-001: duplicate id - every requirement needs its own\""
+      ],
+      "featureFile": "tests/features/spec_validation.feature"
+    },
+    {
+      "id": "HARNESS-003",
+      "title": "Vague wording is rejected before any code exists",
+      "status": "implemented",
+      "story": "As a developer agreeing a spec with an agent, I want ambiguous wording called out one finding at a time so that a valid-but-vague requirement is reworded before a single test is generated from it.",
+      "acceptanceCriteria": [
+        "Given a story naming no actor, no benefit and three ambiguous words, when the requirement is refined, then there are 5 findings",
+        "Given a story that opens without an actor, when the requirement is refined, then a finding reads \"story: missing the actor - start with 'As a ...' so we know who this is for\"",
+        "Given a story and criteria naming an actor, a benefit, a concrete outcome and an edge case, when the requirement is refined, then the verdict is \"clean\"",
+        "Given a rewording staged but not committed, when the requirement is refined, then the reviewed wording is reported as \"staged\""
+      ],
+      "featureFile": "tests/features/requirement_refinement.feature"
+    },
+    {
+      "id": "HARNESS-004",
+      "title": "Authored changes are held in staging until a human commits them",
+      "status": "implemented",
+      "story": "As a developer keeping control of every edit an agent proposes, I want authored changes held in a staging area so that nothing reaches the working tree until I have read it as a diff.",
+      "acceptanceCriteria": [
+        "Given a feature file created through staging, when the working tree is read, then the working tree is empty",
+        "Given a feature file created through staging, when the staged changes are committed, then the working tree file contains \"Feature: Calc\"",
+        "Given a feature file created through staging, when the staged changes are discarded, then 0 staged changes remain",
+        "Given staged content that is not Gherkin, when the staged changes are validated, then the verdict is \"invalid\""
+      ],
+      "featureFile": "tests/features/staged_changes.feature"
+    },
+    {
+      "id": "HARNESS-005",
+      "title": "Each command is offered only the tools that step of the loop needs",
+      "status": "implemented",
+      "story": "As a developer running an LLM-backed command, I want that caller offered a named subset of the tool catalog so that the model stays on task and cannot stage or commit unless the step calls for it.",
+      "acceptanceCriteria": [
+        "Given the default profiles, when every one of them is inspected, then the only caller offered command_run is \"implement\"",
+        "Given the default profiles, when every one of them is inspected, then 0 of them offer a staging or commit tool",
+        "Given the caller \"spec-draft\", when its tools are listed offline, then the offered tools are \"list_requirements, get_requirement, validate_spec, refine_requirement\"",
+        "Given a config naming an invalid tool, when the tools are listed offline, then the offered tools exclude \"nope_tool\""
+      ],
+      "featureFile": "tests/features/tool_profiles.feature"
+    },
+    {
+      "id": "HARNESS-006",
+      "title": "Every build tool's report becomes one summary shape",
+      "status": "implemented",
+      "story": "As a developer running the loop in any supported language, I want each build tool's report parsed into a single summary shape so that the RED and GREEN phases are computed the same way everywhere.",
+      "acceptanceCriteria": [
+        "Given cargo test output whose result lines span two binaries, when the output is parsed, then the parsed run has 8 tests, 1 failures, 0 errors, 2 skipped",
+        "Given a Surefire report of 3 tests with 1 failure, when the report is parsed, then the parsed run has 3 tests, 1 failures, 0 errors, 1 skipped",
+        "Given a build that fails before any test runs, when the output is parsed, then the parsed run has 0 tests, 0 failures, 1 errors, 0 skipped",
+        "Given a project whose runtime is absent, when the tests are run, then the run is refused and the refusal names \"mvn\""
+      ],
+      "featureFile": "tests/features/test_runners.feature"
+    },
+    {
+      "id": "HARNESS-007",
+      "title": "Every next action starts from the spec, not from guesswork",
+      "status": "implemented",
+      "story": "As an agent driving the workflow, I want to list the requirements and read one enriched with its file locations so that the next action is chosen from the catalog rather than from a chat transcript.",
+      "acceptanceCriteria": [
+        "Given a pending requirement and an implemented one, when the requirements are listed, then 2 requirements are listed with their ids, titles and statuses",
+        "Given a requirement that lives in an included file, when the requirements are listed, then the listing names that file as its \"specFile\"",
+        "Given a known requirement id, when the requirement is shown, then the reply names its feature file and carries a workflow hint of 1 next step",
+        "Given an unknown requirement id, when the requirement is shown, then the reply is an error pointing at list_requirements"
+      ],
+      "featureFile": "tests/features/spec_reading.feature"
+    },
+    {
+      "id": "HARNESS-008",
+      "title": "A requirement cannot be marked implemented without proof",
+      "status": "implemented",
+      "story": "As a developer who owns the spec wording, I want drafting, status flips and scenario edits staged and gated so that the catalog stays a reviewed source of truth rather than a record of what an agent felt like doing.",
+      "acceptanceCriteria": [
+        "Given a session whose last run failed, when a requirement is marked implemented, then the flip is refused",
+        "Given a green bar and a scenario carrying the requirement's tag, when the requirement is marked implemented, then 1 staged change records the feature file",
+        "Given a green bar and no scenario carrying the tag, when the requirement is marked implemented, then the flip is refused and the message names the recovery commands",
+        "Given a draft the developer declines, when the wizard finishes, then 0 staged changes remain"
+      ],
+      "featureFile": "tests/features/spec_mutations.feature"
+    },
+    {
+      "id": "HARNESS-009",
+      "title": "Generated tests land in staging and fall back to a template",
+      "status": "implemented",
+      "story": "As a developer generating step definitions and unit tests, I want a deterministic template as the floor and model output used only after it validates so that a generation step can degrade but never break the run.",
+      "acceptanceCriteria": [
+        "Given a project with no model resolved, when step definitions are generated, then 1 staged change holds the deterministic template",
+        "Given invalid model output, when step definitions are generated, then 1 staged change holds the template rather than the model reply",
+        "Given a requirement carrying acceptance criteria, when a unit test is generated, then the staged test fails",
+        "Given a feature whose every step is already defined, when step definitions are generated, then the generation is refused"
+      ],
+      "featureFile": "tests/features/generation.feature"
+    },
+    {
+      "id": "HARNESS-010",
+      "title": "A project's ecosystems are detected and nothing is installed",
+      "status": "implemented",
+      "story": "As a developer pointing the harness at a project, I want its ecosystems detected from marker files and each runtime's presence reported so that execution is attempted only where a runtime already exists.",
+      "acceptanceCriteria": [
+        "Given a project containing \"Cargo.toml\", when the project is inspected, then the language \"Rust\" is detected with framework \"cucumber-rs\" and runtime \"cargo\"",
+        "Given a project containing \"pom.xml\", when the project is inspected, then the language \"Java\" is detected with framework \"Cucumber-JVM\" and runtime \"mvn\"",
+        "Given a project whose runtime is missing, when the project is inspected, then execution is disabled and authoring stays \"available\"",
+        "Given an empty directory, when the project is inspected, then the reply lists 5 supported ecosystems"
+      ],
+      "featureFile": "tests/features/project_inspection.feature"
+    },
+    {
+      "id": "HARNESS-011",
+      "title": "Undefined steps are found without running anything",
+      "status": "implemented",
+      "story": "As a developer about to scaffold step definitions, I want the steps that have no matching definition found by parsing the sources so that the gap is known without executing or installing anything.",
+      "acceptanceCriteria": [
+        "Given a Java project where one step of three carries a definition, when the missing steps are reported, then 2 steps are missing",
+        "Given a Java project whose definitions are written as Cucumber expressions, when the missing steps are reported, then 0 steps are missing",
+        "Given a Java project carrying step definitions, when the missing steps are reported, then the report names framework \"Cucumber-JVM\""
+      ],
+      "featureFile": "tests/features/steps_discovery.feature"
+    },
+    {
+      "id": "HARNESS-012",
+      "title": "One catalog is the entry point to a backlog spread over many files",
+      "status": "implemented",
+      "story": "As a developer growing a spec beyond one file, I want the root catalog to include child spec files so that the backlog scales while a single entry point still drives the workflow.",
+      "acceptanceCriteria": [
+        "Given a root catalog that includes a child spec file, when the requirements are listed, then 2 requirements merge into one backlog",
+        "Given an include naming a file that is absent from disk, when the spec is validated, then the verdict is \"invalid\"",
+        "Given includes that refer back to one another, when the spec is validated, then the cycle is reported as an error",
+        "Given a requirement that lives in an included file, when it is marked implemented, then the flip is written back to the file it lives in and 0 other spec files change"
+      ],
+      "featureFile": "tests/features/spec_includes.feature"
+    },
+    {
+      "id": "HARNESS-013",
+      "title": "Criteria coverage",
+      "status": "pending",
+      "story": "the harness should handle coverage properly so gaps are found easily",
+      "acceptanceCriteria": [
+        "Given a requirement, when coverage is requested, then the uncovered criteria are reported properly",
+        "Given a requirement with tests, when coverage is requested, then it works"
+      ]
+    },
+    {
+      "id": "HARNESS-014",
+      "title": "A test run narrows to the target that owns the feature",
+      "status": "implemented",
+      "story": "As a developer running one requirement's tests, I want the run narrowed to the test target that owns its feature file so that the bar I am watching is not buried under every other target in the crate.",
+      "acceptanceCriteria": [
+        "Given a crate whose tests directory holds \"tdd_state.rs\", when the tests are run for feature \"tests/features/tdd_state.feature\", then the run is scoped to \"--test tdd_state\"",
+        "Given a crate whose tests directory holds only \"cucumber.rs\", when the tests are run for feature \"tests/features/tdd_state.feature\", then the run is scoped to \"--test cucumber\"",
+        "Given a crate whose tests directory is missing any target that matches, when the tests are run for that feature, then the run carries no \"--test\" flag"
+      ],
+      "featureFile": "tests/features/test_runners.feature"
+    }
+  ]
+}

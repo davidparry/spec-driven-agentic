@@ -12,6 +12,7 @@ Feature: Spec catalog includes
   Background:
     Given a working spec with the pending requirement "REQ-001"
 
+  @HARNESS-012
   Scenario: Requirements from included files merge into one backlog
     Given the spec file "requirements/requirements.json" lists the include "core.json"
     And the spec file "requirements/core.json" holds the pending requirement "REQ-002"

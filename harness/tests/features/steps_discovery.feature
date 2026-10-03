@@ -15,6 +15,7 @@ Feature: Step-definition discovery
           Then the result is 3
       """
 
+  @HARNESS-011
   Scenario: Undefined steps are reported with the framework
     Given a Java project marker
     And a project source file "src/test/java/Steps.java" containing:

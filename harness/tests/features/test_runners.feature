@@ -1,5 +1,6 @@
 # Executable spec for the test runners — report parsing per build tool,
-# the compile-error rule, and the runtime_missing gate.
+# the compile-error rule, the runtime_missing gate, and the filter that
+# narrows a cargo run to the target owning one feature.
 Feature: Test runners
   As a developer running the TDD loop in any supported language
   I want each build tool's reports parsed into one summary shape
@@ -50,6 +51,7 @@ Feature: Test runners
     And a parsed failure detail is "Calc > fails: expected 3"
     And a parsed failure detail is "Calc > new: step \"later\" is undefined"
 
+  @HARNESS-006
   Scenario: Cargo test result lines are summed across binaries
     Given the cargo test output:
       """
@@ -72,3 +74,26 @@ Feature: Test runners
     When running the Maven tests is refused
     Then the refusal names runtime "mvn"
     And the refusal hint is "Install a JDK and Apache Maven, then rerun."
+
+  # Bare `cargo test` runs every target in the package, which buries one
+  # requirement's bar under the whole suite. These three scenarios pin
+  # how a feature filter picks the target to run.
+  @HARNESS-014
+  Scenario: A feature scopes the run to the test target sharing its name
+    Given a crate whose tests directory holds "tdd_state.rs, cucumber.rs"
+    When the cargo tests are run for feature "tests/features/tdd_state.feature"
+    Then a parsed failure detail contains "--test tdd_state"
+
+  @HARNESS-014
+  Scenario: A feature without its own target falls back to the cucumber runner
+    Given a crate whose tests directory holds "cucumber.rs"
+    When the cargo tests are run for feature "tests/features/tdd_state.feature"
+    Then a parsed failure detail contains "--test cucumber"
+
+  # Naming a --test target that does not exist makes cargo exit before
+  # running anything, so an unmatched feature leaves the run alone.
+  @HARNESS-014
+  Scenario: A feature matching no target leaves the run unscoped
+    Given a crate whose tests directory holds "unrelated.rs"
+    When the cargo tests are run for feature "tests/features/tdd_state.feature"
+    Then no parsed failure detail contains "--test"

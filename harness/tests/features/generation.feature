@@ -17,6 +17,7 @@ Feature: Hybrid generation into staging
           Then the result is 3
       """
 
+  @HARNESS-009
   Scenario: Without a model the template is staged
     When step definitions are generated without a model
     Then the generation is staged at "src/test/java/GeneratedSteps.java" from "template"

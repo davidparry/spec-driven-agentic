@@ -22,6 +22,7 @@ Feature: Per-command tool profiles
     When every default profile is inspected
     Then no default profile offers a staging or commit tool
 
+  @HARNESS-005
   Scenario: command_run appears only for implement
     When every default profile is inspected
     Then command_run appears only for implement

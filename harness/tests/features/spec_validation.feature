@@ -11,6 +11,7 @@ Feature: Spec validation
     Then the spec is valid
     And the next step advises writing the Gherkin scenario
 
+  @HARNESS-002
   Scenario: A criterion must be phrased Given/When/Then
     Given a pending requirement "REQ-007" with criterion "the result should be 6 for 1\n2,3"
     When the spec is validated

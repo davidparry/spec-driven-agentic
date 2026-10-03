@@ -5,6 +5,7 @@ Feature: Spec reading
   I want to list the requirements and read one enriched with locations
   So that every next action starts from the spec, not from guesswork
 
+  @HARNESS-007
   Scenario: Listing requirements shows ids, titles, and statuses
     Given a valid pending requirement "REQ-001"
     And an implemented requirement "REQ-002" with a scenario tagged in its feature file

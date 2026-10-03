@@ -291,6 +291,7 @@ Feature: Spec mutations
     Then the staged spec shows "REQ-001" as "implemented"
     And the staged spec names "features/calc.feature" as the feature file of "REQ-001"
 
+  @HARNESS-008
   Scenario: Marking implemented is refused off GREEN
     Given the persisted TDD phase is "RED"
     When marking requirement "REQ-001" implemented fails

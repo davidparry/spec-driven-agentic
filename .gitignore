@@ -41,8 +41,12 @@ target/
 _site/
 
 # Spec harness home: generated state stays untracked; configuration is shared.
+# Both roots the harness is pointed at: the repo itself, and the harness crate
+# when it is run against its own catalog.
 .spec/*
 !.spec/config.toml
+/harness/.spec/*
+!/harness/.spec/config.toml
 
 # macOS Finder metadata
 .DS_Store

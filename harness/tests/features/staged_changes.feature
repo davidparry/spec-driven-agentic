@@ -11,6 +11,7 @@ Feature: Staged changes
     Then 0 staged changes are reported
     And the changes next step starts with "Nothing is staged."
 
+  @HARNESS-004
   Scenario: Staged edits never touch the working tree
     Given the feature file "features/calc.feature" is created named "Calc" via staging
     Then the working tree file "features/calc.feature" does not exist

@@ -1,7 +1,7 @@
 //! Cargo test runner: runs `cargo test` and parses the `test result:`
 //! summary lines from its output.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 use regex::Regex;
@@ -48,6 +48,14 @@ impl<R: RuntimeProbe> TestRunner for CargoRunner<R> {
             });
         }
         let mut command = self.command.clone();
+        if let Some(target) = filter
+            .feature
+            .as_deref()
+            .and_then(|feature| test_target(&self.root, feature))
+        {
+            command.push("--test".into());
+            command.push(target);
+        }
         if let Some(scenario) = &filter.scenario {
             command.push(scenario.clone());
         }
@@ -62,6 +70,25 @@ impl<R: RuntimeProbe> TestRunner for CargoRunner<R> {
             ))),
         }
     }
+}
+
+/// The integration-test target that owns a feature file.
+///
+/// Bare `cargo test` builds and runs every target in the package, which
+/// on a crate of any size buries one requirement's bar under the whole
+/// suite. A feature filter narrows the run to `tests/<stem>.rs` when the
+/// project keeps a runner per feature, otherwise to the conventional
+/// `tests/cucumber.rs` that `spec init` scaffolds.
+///
+/// `None` leaves the run unscoped on purpose: naming a `--test` target
+/// that does not exist makes cargo exit before running anything, and a
+/// slow green bar beats a confusing red one.
+fn test_target(root: &Path, feature: &str) -> Option<String> {
+    let stem = Path::new(feature).file_stem()?.to_str()?;
+    [stem, "cucumber"]
+        .into_iter()
+        .find(|candidate| root.join("tests").join(format!("{candidate}.rs")).is_file())
+        .map(str::to_string)
 }
 
 /// Sum every `test result:` line; `None` when there is none (the build
@@ -153,6 +180,43 @@ mod tests {
         .run(&filter)
         .unwrap();
         assert_eq!(summary.tests, 1);
+    }
+
+    fn tests_dir_holding(dir: &std::path::Path, files: &[&str]) {
+        let tests = dir.join("tests");
+        std::fs::create_dir_all(&tests).unwrap();
+        for file in files {
+            std::fs::write(tests.join(file), "").unwrap();
+        }
+    }
+
+    #[test]
+    fn a_feature_scopes_to_the_test_target_that_shares_its_name() {
+        let dir = tempfile::tempdir().unwrap();
+        tests_dir_holding(dir.path(), &["tool_coverage.rs", "cucumber.rs"]);
+        assert_eq!(
+            test_target(dir.path(), "tests/features/tool_coverage.feature"),
+            Some("tool_coverage".into())
+        );
+    }
+
+    #[test]
+    fn a_feature_without_its_own_target_falls_back_to_the_cucumber_runner() {
+        let dir = tempfile::tempdir().unwrap();
+        tests_dir_holding(dir.path(), &["cucumber.rs"]);
+        assert_eq!(
+            test_target(dir.path(), "tests/features/tdd_state.feature"),
+            Some("cucumber".into())
+        );
+    }
+
+    /// Scoping to a target cargo does not have would fail the run
+    /// outright, so an unrecognized feature leaves the suite unscoped.
+    #[test]
+    fn a_feature_matching_no_target_leaves_the_run_unscoped() {
+        let dir = tempfile::tempdir().unwrap();
+        tests_dir_holding(dir.path(), &["other.rs"]);
+        assert_eq!(test_target(dir.path(), "features/calc.feature"), None);
     }
 
     #[test]

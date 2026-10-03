@@ -30,6 +30,7 @@ Feature: TDD state machine
     And the refactor log contains "extract parsing of the delimited input"
     And the suggestion is "A refactor is in progress. Call run_tests to prove the refactor kept the bar green."
 
+  @HARNESS-001
   Scenario: Refactoring is refused on a red bar
     Given a fresh TDD session
     When a failing test run is recorded

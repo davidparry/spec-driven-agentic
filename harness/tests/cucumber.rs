@@ -19,7 +19,7 @@ use spec_harness::adapters::fs_state::FsStateStore;
 use spec_harness::adapters::gherkin_features::GherkinFeatureCatalog;
 use spec_harness::adapters::mcp_client::McpToolBroker;
 use spec_harness::adapters::mcp_config::FsMcpRegistry;
-use spec_harness::adapters::runners::cargo::parse_cargo_output;
+use spec_harness::adapters::runners::cargo::{CargoRunner, parse_cargo_output};
 use spec_harness::adapters::runners::cucumber_js::parse_json_report;
 use spec_harness::adapters::runners::dotnet::parse_trx;
 use spec_harness::adapters::runners::maven::{MavenRunner, parse_surefire_xml};
@@ -1682,6 +1682,46 @@ fn parsed_failure_detail_contains(world: &mut SpecWorld, fragment: String) {
         details.iter().any(|d| d.contains(&fragment)),
         "details: {details:?}"
     );
+}
+
+#[then(regex = r#"^no parsed failure detail contains "(.+)"$"#)]
+fn no_parsed_failure_detail_contains(world: &mut SpecWorld, fragment: String) {
+    let details = &world.parsed_run().failure_details;
+    assert!(
+        !details.iter().any(|d| d.contains(&fragment)),
+        "details: {details:?}"
+    );
+}
+
+#[given(regex = r#"^a crate whose tests directory holds "([^"]*)"$"#)]
+fn crate_holding_test_targets(world: &mut SpecWorld, names: String) {
+    let tests = world.project_root().join("tests");
+    std::fs::create_dir_all(&tests).expect("tests dir");
+    for name in names.split(',').map(str::trim).filter(|n| !n.is_empty()) {
+        std::fs::write(tests.join(name), "").expect("test target");
+    }
+}
+
+/// Stands in for cargo with a command that echoes the arguments it was
+/// handed and then fails, so the scoping the filter chose is readable
+/// in the build-failure detail. `$0` is pinned so `$1` and `$2` are the
+/// arguments the runner appended, and empty when it appended none.
+#[when(regex = r#"^the cargo tests are run for feature "([^"]+)"$"#)]
+fn cargo_tests_run_for_feature(world: &mut SpecWorld, feature: String) {
+    let root = world.project_root();
+    let mut runtimes = HashMap::new();
+    runtimes.insert("cargo".to_string(), "cargo 1.90.0".to_string());
+    let runner = CargoRunner::new(root, InMemoryRuntimes(runtimes)).with_command(vec![
+        "sh".into(),
+        "-c".into(),
+        r#"echo "cargo test $1 $2"; exit 1"#.into(),
+        "cargo-test".into(),
+    ]);
+    let filter = TestFilter {
+        feature: Some(feature),
+        ..TestFilter::default()
+    };
+    world.parsed_run = Some(runner.run(&filter).expect("a build-failure summary"));
 }
 
 #[given(regex = r#"^a Maven project whose build prints "(.+)" and fails$"#)]
