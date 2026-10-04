@@ -9,6 +9,7 @@ use crate::application::spec_service::ProjectLayout;
 use crate::domain::SPEC_DIR;
 use crate::domain::language::{Language, detect_languages};
 use crate::domain::memory::ProjectStructure;
+use crate::domain::steps::source_extension;
 
 /// Where the requirements spec lives, relative to the project root.
 pub const SPEC_PATH: &str = "requirements/requirements.json";
@@ -74,33 +75,36 @@ pub fn detect_project_layout(root: &Path) -> ProjectLayout {
     scan_layout(root, &project_layout(root)).unwrap_or(workshop)
 }
 
-/// The scan is restricted to the module the build compiles: a Java file
-/// in a sibling module (or an orphan outside every module) is not what
-/// `spec show` should name.
+/// The scan is restricted to the module the build compiles: a source
+/// file in a sibling module (or an orphan outside every module) is not
+/// what `spec show` should name. It is also restricted to the project's
+/// own language — scanning for `.java` under a Rust root finds nothing
+/// and silently hands back the kata's Java paths.
 fn scan_layout(root: &Path, structure: &ProjectStructure) -> Option<ProjectLayout> {
+    // An extracted kata carries no manifest, so an undetectable language
+    // still means Java — the shape every workshop starts from.
+    let language = primary_language(root).unwrap_or(Language::Java);
     let module = match &structure.module_root {
         Some(relative) => root.join(relative),
         None => root.to_path_buf(),
     };
-    let mut java = Vec::new();
-    collect_files(&module, root, "java", &mut java);
+    let mut sources = Vec::new();
+    collect_files(&module, root, source_extension(language), &mut sources);
+    // Directory order is whatever the filesystem hands back, so sort
+    // before choosing: the same project must always show the same paths.
+    sources.sort();
     let step_definitions = structure
         .step_definitions
         .clone()
-        .filter(|path| java.contains(path))
-        .or_else(|| {
-            java.iter()
-                .find(|path| path.rsplit('/').next().unwrap_or("").contains("Steps"))
-                .cloned()
-        });
-    let test_location = java.iter().find(|path| is_unit_test(path)).cloned();
-    let production_location = java
-        .iter()
-        .find(|path| match &structure.production {
-            Some(root) => path.starts_with(&format!("{root}/")),
-            None => path.contains("src/main/"),
-        })
-        .cloned();
+        .filter(|path| sources.contains(path))
+        .or_else(|| best(&sources, |path| steps_rank(language, path)));
+    let test_location = best(&sources, |path| test_rank(language, path));
+    let production_location = best(&sources, |path| match &structure.production {
+        Some(root) => production_rank(language, path)
+            .filter(|_| path.starts_with(&format!("{root}/")))
+            .or_else(|| path.starts_with(&format!("{root}/")).then_some(LAST)),
+        None => production_rank(language, path),
+    });
     match (step_definitions, test_location, production_location) {
         (Some(step_definitions), Some(test_location), Some(production_location)) => {
             Some(ProjectLayout {
@@ -113,9 +117,87 @@ fn scan_layout(root: &Path, structure: &ProjectStructure) -> Option<ProjectLayou
     }
 }
 
-fn is_unit_test(path: &str) -> bool {
-    let name = path.rsplit('/').next().unwrap_or(path);
-    name.ends_with("Test.java") && !name.contains("RunCucumber")
+/// Rank beyond which a candidate is only a last resort.
+const LAST: u8 = u8::MAX;
+
+/// The lowest-ranked path, ties broken by the sorted order of `paths`.
+fn best(paths: &[String], rank: impl Fn(&str) -> Option<u8>) -> Option<String> {
+    paths
+        .iter()
+        .filter_map(|path| rank(path).map(|rank| (rank, path)))
+        .min_by_key(|(rank, _)| *rank)
+        .map(|(_, path)| path.clone())
+}
+
+/// The file that wires Gherkin steps to code, by each language's own
+/// naming convention. The cucumber *runner* is not a steps file.
+fn steps_rank(language: Language, path: &str) -> Option<u8> {
+    let name = file_name(path);
+    if name.contains("RunCucumber") {
+        return None;
+    }
+    match language {
+        Language::Java | Language::DotNet => name.contains("Steps").then_some(0),
+        Language::JavaScript | Language::TypeScript => {
+            (name.contains(".steps.") || path.contains("step_definitions/")).then_some(0)
+        }
+        Language::Rust => (path.contains("tests/") && name.contains("steps")).then_some(0),
+    }
+}
+
+/// Where a generated test belongs. Rust unit tests live beside the code
+/// in `#[cfg(test)] mod tests`, so the file to name is the integration
+/// test the generator writes — `tests/<requirement>_test.rs` — falling
+/// back to whatever else the tests directory already holds.
+fn test_rank(language: Language, path: &str) -> Option<u8> {
+    let name = file_name(path);
+    if name.contains("RunCucumber") {
+        return None;
+    }
+    match language {
+        Language::Java | Language::DotNet => name
+            .ends_with("Test.java")
+            .then_some(0)
+            .or_else(|| name.contains("Test").then_some(1)),
+        Language::JavaScript | Language::TypeScript => {
+            (name.contains(".test.") || name.contains(".spec.")).then_some(0)
+        }
+        Language::Rust => {
+            if !path.contains("tests/") {
+                return None;
+            }
+            name.ends_with("_test.rs").then_some(0).or_else(|| {
+                (steps_rank(language, path).is_none() && name != "cucumber.rs").then_some(1)
+            })
+        }
+    }
+}
+
+/// Production code is whatever the language builds from. The crate or
+/// module root is preferred, since that is the file a reader opens first.
+fn production_rank(language: Language, path: &str) -> Option<u8> {
+    let name = file_name(path);
+    match language {
+        Language::Java => path.contains("src/main/").then_some(0),
+        Language::DotNet => (!path.contains("Test")).then_some(0),
+        Language::JavaScript | Language::TypeScript => {
+            (path.contains("src/") && test_rank(language, path).is_none()).then_some(0)
+        }
+        Language::Rust => {
+            if !path.contains("src/") {
+                return None;
+            }
+            match name {
+                "lib.rs" => Some(0),
+                "main.rs" => Some(1),
+                _ => Some(2),
+            }
+        }
+    }
+}
+
+fn file_name(path: &str) -> &str {
+    path.rsplit('/').next().unwrap_or(path)
 }
 
 fn collect_files(dir: &Path, root: &Path, extension: &str, into: &mut Vec<String>) {
@@ -244,6 +326,29 @@ mod tests {
             layout.step_definitions,
             "src/test/java/com/example/StringCalculatorSteps.java"
         );
+    }
+
+    #[test]
+    fn a_rust_crate_is_named_by_its_own_paths_not_the_kata() {
+        // The bug this closes: the scan only ever looked for `.java`, so
+        // every Rust project fell through to the workshop kata and
+        // `spec show` sent the reader to a file that was not there.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let write = |rel: &str, body: &str| {
+            let path = root.join(rel);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(&path, body).unwrap();
+        };
+        write("Cargo.toml", "[package]\nname = \"demo\"\n");
+        write("src/lib.rs", "pub fn add() {}");
+        write("src/adapters/mod.rs", "");
+        write("tests/demo_test.rs", "#[test] fn t() {}");
+        write("tests/steps/generated.rs", "");
+        let layout = detect_project_layout(root);
+        assert_eq!(layout.production_location, "src/lib.rs");
+        assert_eq!(layout.test_location, "tests/demo_test.rs");
+        assert_eq!(layout.step_definitions, "tests/steps/generated.rs");
     }
 
     #[test]
