@@ -13,7 +13,18 @@ tree, and the next test run is the real validator.
 
 ```text
 Usage: spec implement [OPTIONS] <REQ_ID>
+
+Options:
+      --into <PATH>  Production file the work belongs in. Only needed
+                     when the step definitions are still pending, so
+                     nothing in the project points at one
 ```
+
+`--into` names the production file instead of letting the command work
+it out, and it is the only command that takes the flag. It is checked
+before anything else, so it also overrides an inference you disagree
+with. See [where the work lands](#where-the-work-lands) for when you
+need it.
 
 Requires a resolved model (configured with
 [`spec model use`](model.md#spec-model-use), passed with `--model`, or
@@ -128,24 +139,70 @@ the exact next command. The advice is printed as
 ## What the model may write
 
 The reply must be a strict JSON array of `{path, content}` file
-updates. Only two kinds of path are accepted:
+updates. Only two kinds of path are accepted: files already in the
+project's sources (the generated unit test and step definitions it
+needs to wire up), and the production file described below. Anything
+else in the reply is dropped. A reply with no usable update fails with
+`The model's reply held no usable file update.` — nothing is staged,
+and you implement by hand instead.
 
-- files already in the project's sources (the generated unit test and
-  step definitions it needs to wire up), and
-- the production file, named after the spec's `project` field by
-  ecosystem convention:
+A reply that would *destroy* a file it replaces is dropped too, and
+reported. Two things disqualify it: no longer declaring a name the
+file declares today, or braces that never close. Both describe a
+truncated or junk reply rather than a wrong one — the test run is what
+decides whether an attempt is any good, and it never gets to run when
+the reply deletes the code the tests were going to call. The refusal
+is per file, so the rest of an otherwise fine attempt is still staged.
 
-| Language | Production target |
-| --- | --- |
-| Java | `src/main/java/<Project>.java` |
-| JavaScript | `src/<project>.js` |
-| TypeScript | `src/<project>.ts` |
-| .NET | `<Project>.cs` |
-| Rust | `src/lib.rs` |
+## Where the work lands
 
-Anything else in the reply is dropped. A reply with no usable update
-fails with `The model's reply held no usable file update.` — nothing
-is staged, and you implement by hand instead.
+The production file is resolved in this order, and the first answer
+wins:
+
+1. **`--into <PATH>`**, when you passed it.
+2. **The evidence.** The bodies of the step definitions this
+   requirement's scenarios actually run through are matched against
+   the symbols each production file declares, and the file named
+   through the most *distinct* symbols is the target. Two independent
+   names are required and a tie counts as no answer, so one incidental
+   word match cannot decide it. This is why a scenario calling an MCP
+   tool lands in the server rather than in whatever file sorts first.
+3. **Convention**, when the name built from the spec's `project` field
+   exists and is actually specific to this project:
+
+   | Language | Conventional target |
+   | --- | --- |
+   | Java | `src/main/java/<Project>.java` |
+   | JavaScript | `src/<project>.js` |
+   | TypeScript | `src/<project>.ts` |
+   | .NET | `<Project>.cs` |
+   | Rust | `src/lib.rs` |
+
+   Rust's entry point is the same path in every crate, so it is
+   trusted only where renaming the project would change the answer.
+4. **The only candidate**, when exactly one file lives under the
+   production root — one candidate is not a guess.
+5. **The conventional path**, when there is no production code at all.
+   A greenfield project has nowhere else for the work to go.
+
+When none of those answer, the command refuses rather than guessing:
+
+```text
+Cannot tell which production file REQ-001 belongs in - no step definition its
+scenarios run through names any of them. Name it with spec implement REQ-001
+--into <path>, or write the steps first so they point at the code.
+```
+
+The usual cause is that every step the scenarios bind to is still a
+generated placeholder. A pending step body echoes its own Gherkin back
+in a `todo!` and names no production code, so there is nothing to infer
+from — those bodies are excluded from the evidence for exactly that
+reason. Either write a step body or two against the real types, or pass
+`--into`. The preflight shows the same gap before the model is called:
+
+```text
+production code (the attempt creates it when missing): unknown - pass --into <path> - missing
+```
 
 ## When an attempt reaches past its requirement
 
@@ -165,11 +222,19 @@ it, and a literal two requirements share can raise it when nothing is wrong.
 Read the staged diff and decide; that is the check this is a prompt for, not
 a replacement of.
 
-The implementation prompt is the largest call the harness makes, so a
-local model can need minutes to answer. The generation timeout
-defaults to 300 seconds; if you see `no reply within ...s`, raise
-`timeout_seconds` under `[llm]` in `.spec/config.toml` (see
+The implementation prompt is the largest call the harness makes, and
+against a real project it is slow: attempts on this repository's own
+crate have measured 20, 36 and 57 minutes on the recommended local
+model. The generation timeout defaults to 300 seconds, which is not
+enough for that; if you see `no reply within ...s`, everything
+generated so far is lost, and the fix is to raise `timeout_seconds`
+under `[llm]` in `.spec/config.toml` (see
 [`spec model`](model.md#the-llm-configuration-block)).
+
+Identical requests are served from the response cache without calling
+the model, so a repeated attempt is free — but the key is the whole
+prompt, and the attempt history is part of it, so a *second* attempt on
+the same requirement is always a fresh call.
 
 ## Where it fits
 
