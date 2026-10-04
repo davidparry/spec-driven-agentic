@@ -5,6 +5,7 @@
 
 use crate::domain::language::Language;
 use crate::domain::model::Requirement;
+use crate::domain::neighborhood;
 use crate::domain::prompts::{RenderedPrompt, render};
 use crate::domain::proposal::escape_controls;
 use crate::domain::steps::{MissingStep, extract_patterns, step_to_expression};
@@ -363,12 +364,22 @@ struct AttemptContext {
 /// The current failures keep full detail; old ones are context, not
 /// the assignment.
 const PROMPT_HISTORY_ATTEMPTS: usize = 3;
+
+/// How much source text one implementation prompt may carry, in bytes.
+/// A kata fits whole; a project of any size does not, and a model handed
+/// more than its context window answers with an error instead of a
+/// patch. Roughly 30k tokens, which leaves room for the requirement,
+/// the failures, the attempt history, and the reply.
+const PROMPT_SOURCE_BUDGET: usize = 120_000;
 const PROMPT_FAILURE_BRIEF_CHARS: usize = 300;
 
 /// Project files the failures point at, in the order they appear in
 /// `files`. Named by file name when the stack mentions one; otherwise
 /// every step-definition source when Cucumber reports an undefined step.
-fn implicated_paths<'a>(failures: &[String], files: &'a [(String, String)]) -> Vec<&'a str> {
+pub(crate) fn implicated_paths<'a>(
+    failures: &[String],
+    files: &'a [(String, String)],
+) -> Vec<&'a str> {
     let failure_text = failures.join("\n");
     let named: Vec<&str> = files
         .iter()
@@ -433,6 +444,14 @@ struct FileContext<'a> {
     content: &'a str,
 }
 
+/// One project file the prompt names but does not carry, so the model
+/// knows it exists and roughly what is in it.
+#[derive(serde::Serialize)]
+struct MappedContext<'a> {
+    path: &'a str,
+    symbols: String,
+}
+
 /// One dated TDD state, as the `[implementation]` user template consumes
 /// it: timestamp, phase, and last-run counts — no stack traces.
 #[derive(serde::Serialize)]
@@ -486,9 +505,26 @@ pub fn implementation_prompt(
             refactor_log: entry.refactor_log.clone(),
         })
         .collect();
-    let files_context: Vec<FileContext> = files
+    let implicated = implicated_paths(failures, files);
+    // The attempt has to write the production file and whatever the
+    // failures point at; everything else is only worth sending insofar
+    // as it explains those. Walking out from them keeps the prompt
+    // about this change instead of about the whole project.
+    let mut seeds = vec![production_path];
+    seeds.extend(implicated.iter().copied());
+    let selected = neighborhood::select(language, files, &seeds, PROMPT_SOURCE_BUDGET);
+    let files_context: Vec<FileContext> = selected
+        .included
         .iter()
         .map(|(path, content)| FileContext { path, content })
+        .collect();
+    let mapped: Vec<MappedContext> = selected
+        .mapped
+        .iter()
+        .map(|file| MappedContext {
+            path: file.path,
+            symbols: file.symbols.join(", "),
+        })
         .collect();
     // The project files the current failures name (by file name, which
     // covers bare stack-frame names and absolute paths alike). Observed
@@ -498,7 +534,6 @@ pub fn implementation_prompt(
     // Undefined Cucumber steps never name the glue file (the engine
     // never entered it), so those failures implicate the step-definition
     // sources even when the stack is only Cucumber internals.
-    let implicated = implicated_paths(failures, files);
     let attempt = history.len() + 1;
     tracing::debug!(requirement = %requirement.id, attempt, omitted, "implementation prompt");
     tracing::debug!(files = %files_context.len(), implicated = %implicated.len(), "prompt files");
@@ -520,6 +555,7 @@ pub fn implementation_prompt(
             instructions => crate::domain::tdd::STATE_INSTRUCTIONS,
             states => states_context,
             files => files_context,
+            mapped,
         },
     )
 }
@@ -2276,6 +2312,56 @@ io.cucumber.junit.platform.engine.UndefinedStepException: The step 'the result i
             prompt
                 .user
                 .contains("\n- src/test/java/GeneratedSteps.java\n")
+        );
+    }
+
+    #[test]
+    fn a_project_too_large_for_one_prompt_sends_the_neighborhood_and_maps_the_rest() {
+        // The bug this closes: every source file went into the prompt,
+        // so on a real crate the request was 463k tokens against a 262k
+        // window and the attempt died with a 400 instead of a patch.
+        let bulk = "// filler\n".repeat(20_000); // 200 KB each
+        let files = vec![
+            (
+                "src/noise_a.rs".into(),
+                format!("pub struct NoiseA;\n{bulk}"),
+            ),
+            (
+                "src/noise_b.rs".into(),
+                format!("pub struct NoiseB;\n{bulk}"),
+            ),
+            ("src/lib.rs".into(), "pub fn add() {}".to_string()),
+            ("tests/req_001_test.rs".into(), "#[test] fn t() {}".into()),
+        ];
+        let prompt = implementation_prompt(
+            Language::Rust,
+            &requirement(),
+            &["tests/req_001_test.rs: FAILED".into()],
+            &[],
+            &[],
+            &files,
+            "src/lib.rs",
+        );
+        assert!(
+            prompt.user.contains("--- src/lib.rs ---"),
+            "production is always sent"
+        );
+        assert!(
+            prompt.user.contains("--- tests/req_001_test.rs ---"),
+            "the implicated failing test is sent"
+        );
+        assert!(
+            !prompt.user.contains("--- src/noise_b.rs ---"),
+            "bulk past the budget is not sent"
+        );
+        assert!(
+            prompt.user.contains("- src/noise_b.rs: NoiseB"),
+            "but it is still named in the map"
+        );
+        assert!(
+            prompt.user.len() < PROMPT_SOURCE_BUDGET * 2,
+            "prompt was {} bytes",
+            prompt.user.len()
         );
     }
 

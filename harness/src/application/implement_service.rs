@@ -7,7 +7,7 @@ use serde::Serialize;
 
 use crate::application::LlmReplyError;
 use crate::application::assets::{
-    asset_survey, find_requirement, load_effective_spec, production_path,
+    asset_survey, find_requirement, load_effective_spec, production_path, scenario_evidence,
 };
 use crate::application::generation_service::ResolvedLlm;
 use crate::application::spec_service::ServiceError;
@@ -129,7 +129,21 @@ where
             .cloned()
             .map(|file| (file.path, file.content))
             .collect();
-        let production = production_path(&sources, self.language, &spec.project, &self.layout);
+        // The same evidence the preflight used, so the file it told the
+        // developer about is the file the attempt actually writes.
+        let evidence = scenario_evidence(
+            &self.features,
+            &sources,
+            self.language,
+            &format!("@{req_id}"),
+        )?;
+        let production = production_path(
+            &sources,
+            self.language,
+            &spec.project,
+            &self.layout,
+            &evidence,
+        );
         let prompt = implementation_prompt(
             self.language,
             requirement,

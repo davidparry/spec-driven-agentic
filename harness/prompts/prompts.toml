@@ -246,11 +246,19 @@ The {{ states | length }} most recent TDD state(s), oldest first:
 {{ state.timestamp }} {{ state.phase }} tests={{ state.tests }} failures={{ state.failures }} errors={{ state.errors }} skipped={{ state.skipped }}{% if state.refactor_log %} refactor: {{ state.refactor_log | join(", ") }}{% endif %}
 {% endfor -%}
 {% endif %}
-The project files:
+The project files, nearest to the change first:
 {% for file in files -%}
 --- {{ file.path }} ---
 {{ file.content }}
-{% endfor %}
+{% endfor -%}
+{% if mapped %}
+The rest of the project, named but not shown. Do not reply with any of
+these paths - you have not seen their contents. They are listed so you
+know what already exists and do not rewrite it somewhere else:
+{% for file in mapped -%}
+- {{ file.path }}{% if file.symbols %}: {{ file.symbols }}{% endif %}
+{% endfor -%}
+{% endif %}
 '''
 
 # `spec refactor`: clean up production code without changing behaviour.

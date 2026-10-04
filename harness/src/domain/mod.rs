@@ -44,6 +44,7 @@ pub mod layout;
 pub mod mcp_registry;
 pub mod memory;
 pub mod model;
+pub mod neighborhood;
 pub mod paths;
 pub mod prompts;
 pub mod proposal;

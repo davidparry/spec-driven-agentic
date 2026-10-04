@@ -13,7 +13,11 @@ use crate::domain::language::Language;
 use crate::domain::layout::{in_production_root, in_test_root};
 use crate::domain::memory::ProjectStructure;
 use crate::domain::model::{Requirement, Spec, SpecCatalog, resolve_catalog};
-use crate::domain::steps::{MissingStep, extract_patterns, find_missing, source_extension};
+use crate::domain::neighborhood;
+use crate::domain::steps::{
+    MissingStep, extract_definitions, extract_patterns, find_missing, pattern_matches,
+    source_extension, split_step,
+};
 use crate::ports::{ChangeStore, FeatureCatalog, SourceFiles, SpecRepository};
 
 /// The requirement with `req_id`, or the refusal naming the recovery
@@ -111,9 +115,10 @@ pub(crate) fn asset_survey(
             missing_steps.len()
         ));
     }
+    let steps_path = steps_path(&source_files, language, layout);
     assets.push(ImplementAsset {
         role: "step definitions (every step defined)".into(),
-        path: steps_path(&source_files, language, layout),
+        path: steps_path.clone(),
         present: missing_steps.is_empty(),
     });
 
@@ -131,11 +136,15 @@ pub(crate) fn asset_survey(
     }
     assets.push(ImplementAsset {
         role: "unit test".into(),
-        path: unit_path,
+        path: unit_path.clone(),
         present: unit_test_present,
     });
 
-    let production = production_path(&source_files, language, project, layout);
+    // The code that runs this requirement's scenarios is the evidence of
+    // where its production code belongs: step definitions reach the
+    // behavior, so whatever they reach is what the work is missing from.
+    let evidence = scenario_evidence(features, &source_files, language, &tag)?;
+    let production = production_path(&source_files, language, project, layout, &evidence);
     assets.push(ImplementAsset {
         role: "production code (the attempt creates it when missing)".into(),
         path: production.clone(),
@@ -144,13 +153,112 @@ pub(crate) fn asset_survey(
     Ok((assets, findings))
 }
 
+/// The code this requirement's own scenarios run through.
+///
+/// Each step of each scenario carrying the tag is matched to the step
+/// definition that binds it, and that definition's body is collected.
+/// The result names the behavior under test — the servers, services and
+/// types the scenarios actually reach — rather than the whole project.
+pub(crate) fn scenario_evidence(
+    features: &impl FeatureCatalog,
+    files: &[crate::ports::SourceFile],
+    language: Language,
+    tag: &str,
+) -> Result<String, ServiceError> {
+    let mut steps = Vec::new();
+    for summary in features.list()? {
+        let doc = features.read(&summary.path)?;
+        let feature_tags = doc.tags.clone();
+        for scenario in &doc.scenarios {
+            if !scenario.tags.iter().chain(&feature_tags).any(|t| t == tag) {
+                continue;
+            }
+            // Only the action and the assertion. A Given builds the
+            // fixture - requirements, specs, temp directories - and its
+            // code points at the harness's own plumbing rather than at
+            // the behavior the requirement is about.
+            let mut keyword = String::from("Given");
+            for step in &scenario.steps {
+                let (word, text) = split_step(step);
+                if word != "And" && word != "But" {
+                    keyword = word.to_string();
+                }
+                if keyword == "When" || keyword == "Then" {
+                    steps.push(text.to_string());
+                }
+            }
+        }
+    }
+    if steps.is_empty() {
+        return Ok(String::new());
+    }
+    let mut evidence = String::new();
+    for file in files {
+        let mut bodies = String::new();
+        for (pattern, body) in extract_definitions(language, &file.content) {
+            if steps.iter().any(|step| pattern_matches(&pattern, step)) {
+                bodies.push_str(body);
+                bodies.push('\n');
+            }
+        }
+        if bodies.is_empty() {
+            continue;
+        }
+        // A step usually delegates: the line naming the production type
+        // is one call further in, inside a helper the glue file keeps to
+        // itself. Follow those once, or the evidence stops at the test's
+        // own vocabulary.
+        evidence.push_str(&local_helpers(&bodies, &file.content));
+        evidence.push_str(&bodies);
+    }
+    Ok(evidence)
+}
+
+/// How much of a helper to follow. Shorter than a step's own window:
+/// this is one hop of context, not a second body of evidence.
+const HELPER_WINDOW: usize = 400;
+
+/// The bodies of the helpers `bodies` calls that `source` declares
+/// itself, one hop deep.
+fn local_helpers(bodies: &str, source: &str) -> String {
+    let mut seen = std::collections::HashSet::new();
+    let mut out = String::new();
+    for name in IDENTIFIER.find_iter(bodies) {
+        let name = name.as_str();
+        if !seen.insert(name) {
+            continue;
+        }
+        let Some(at) = source.find(&format!("fn {name}")) else {
+            continue;
+        };
+        let after = &source[at..];
+        let end = after
+            .char_indices()
+            .nth(HELPER_WINDOW)
+            .map_or(after.len(), |(i, _)| i);
+        out.push_str(&after[..end]);
+        out.push('\n');
+    }
+    out
+}
+
+static IDENTIFIER: std::sync::LazyLock<regex::Regex> =
+    std::sync::LazyLock::new(|| regex::Regex::new(r"[A-Za-z_][A-Za-z0-9_]{2,}").expect("valid"));
+
+/// The file that actually binds the Gherkin steps: the one holding the
+/// most definitions. Taking the first file with any pattern at all picks
+/// up a fixture or a prompt template that merely quotes one, and the
+/// whole survey then points at a file no scenario runs through.
 fn steps_file(
     files: &[crate::ports::SourceFile],
     language: Language,
 ) -> Option<&crate::ports::SourceFile> {
     files
         .iter()
-        .find(|file| !extract_patterns(language, &file.content).is_empty())
+        .map(|file| (extract_patterns(language, &file.content).len(), file))
+        .filter(|(defined, _)| *defined > 0)
+        .max_by(|a, b| a.0.cmp(&b.0).then_with(|| b.1.path.cmp(&a.1.path)))
+        .map(|(_, file)| file)
 }
 
 /// Where generated step definitions go: the file that already holds
@@ -209,25 +317,49 @@ pub(crate) fn unit_test_path(
         .unwrap_or_else(|| in_test_root(layout, &unit_test_file_name(language, req_id)))
 }
 
-/// The production file: an existing source under the layout's production
-/// root, otherwise the conventional path named after the spec project.
+/// The production file the work belongs in.
+///
+/// `evidence` is code that shows where the behavior is missing — the
+/// bodies of the step definitions this requirement's scenarios run
+/// through. When it is given, the production file whose symbols it
+/// mentions most wins. When it is empty, this falls back to convention:
+/// the path named after the spec project, else the first existing
+/// source under the production root.
 pub(crate) fn production_path(
     files: &[crate::ports::SourceFile],
     language: Language,
     project: &str,
     layout: &ProjectStructure,
+    evidence: &str,
 ) -> String {
+    let root = layout.production.as_deref();
+    let under_root = |path: &str| match root {
+        Some(root) => path.starts_with(&format!("{root}/")),
+        None => path.contains("src/main/"),
+    };
+    // Evidence first. The conventional name is a guess that has to be
+    // made before a project exists - for Rust it is always `src/lib.rs`
+    // - and on anything past a kata the guess is wrong. When the
+    // scenarios say which file the behavior is missing from, they
+    // outrank it.
+    if !evidence.trim().is_empty() {
+        let pairs: Vec<(String, String)> = files
+            .iter()
+            .map(|file| (file.path.clone(), file.content.clone()))
+            .collect();
+        if let Some(target) =
+            neighborhood::nearest_to_evidence(language, &pairs, evidence, under_root)
+        {
+            return target.to_string();
+        }
+    }
     let conventional = implementation_target_path(language, project);
     if files.iter().any(|file| file.path == conventional) {
         return conventional;
     }
-    let root = layout.production.as_deref();
     files
         .iter()
-        .find(|file| match root {
-            Some(root) => file.path.starts_with(&format!("{root}/")),
-            None => file.path.contains("src/main/"),
-        })
+        .find(|file| under_root(&file.path))
         .map(|file| file.path.clone())
         .unwrap_or_else(|| match root {
             Some(_) => in_production_root(layout, &implementation_file_name(language, project)),
@@ -301,6 +433,39 @@ mod tests {
     }
 
     #[test]
+    fn the_glue_file_is_the_one_binding_the_most_steps() {
+        // The bug this closes: a prompt template that quotes a single
+        // step pattern sorted ahead of the real glue file, so the
+        // survey, and the production target inferred from it, pointed at
+        // a file no scenario ever runs through.
+        let files = vec![
+            SourceFile {
+                path: "src/domain/generation.rs".into(),
+                content: r##"const SAMPLE: &str = "x";
+                    #[given("a calculator")]
+                    fn fixture() {}"##
+                    .into(),
+            },
+            SourceFile {
+                path: "tests/cucumber.rs".into(),
+                content: r##"
+                    #[given("a calculator")]
+                    fn a(w: &mut W) {}
+                    #[when("2 and 3 are added")]
+                    fn b(w: &mut W) {}
+                    #[then(regex = r#"^the result is "(\d+)"$"#)]
+                    fn c(w: &mut W) {}
+                "##
+                .into(),
+            },
+        ];
+        assert_eq!(
+            steps_path(&files, Language::Rust, &flat_layout(Language::Rust)),
+            "tests/cucumber.rs"
+        );
+    }
+
+    #[test]
     fn a_brownfield_test_without_the_req_id_is_the_generate_target_but_missing() {
         let sources = FakeSources(vec![SourceFile {
             path: "src/test/java/com/example/StringCalculatorTest.java".into(),
@@ -360,7 +525,8 @@ mod tests {
                 &files,
                 Language::Java,
                 "String Calculator Kata",
-                &flat_layout(Language::Java)
+                &flat_layout(Language::Java),
+                "",
             ),
             "src/main/java/com/example/StringCalculator.java"
         );

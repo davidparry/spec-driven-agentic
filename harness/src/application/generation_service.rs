@@ -309,7 +309,7 @@ where
         let conventional = unit_test_target_path(self.language, req_id);
         let existing = sources.iter().find(|file| file.path == target);
         let append = existing.is_some() && target != conventional;
-        let production = production_path(&sources, self.language, &spec.project, &self.layout);
+        let production = production_path(&sources, self.language, &spec.project, &self.layout, "");
         let production_type = production_type_name(&production);
         let package_line = existing.filter(|_| append).and_then(|file| {
             file.content

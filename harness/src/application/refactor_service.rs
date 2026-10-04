@@ -138,6 +138,7 @@ where
             self.language,
             &spec.project,
             &self.layout,
+            "",
         );
         let manifests = self.manifests()?;
         let scope = scope(&files, &self.layout, &focus, &manifests);
