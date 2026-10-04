@@ -503,12 +503,15 @@ impl Greenfield {
     ) -> Result<(), String> {
         let brief = tdd.implementation_brief(req_id).map_err(tdd_message)?;
         let work = prompter.working("Generating an implementation attempt - working");
+        // A greenfield project has no production file yet, so the
+        // target resolves by convention and never needs --into.
         let outcome = implement.generate(
             prompter,
             req_id,
             &brief.failures,
             &brief.history,
             &brief.states,
+            None,
         );
         drop(work);
         match outcome {

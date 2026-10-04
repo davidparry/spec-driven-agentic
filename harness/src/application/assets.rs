@@ -6,8 +6,8 @@
 use crate::application::spec_service::ServiceError;
 use crate::domain::feature::FeatureDoc;
 use crate::domain::generation::{
-    ImplementAsset, implementation_file_name, implementation_target_path, steps_target_path,
-    unit_test_file_name, unit_test_target_path,
+    ImplementAsset, implementation_file_name, implementation_target_path, is_pending_step_body,
+    steps_target_path, unit_test_file_name, unit_test_target_path,
 };
 use crate::domain::language::Language;
 use crate::domain::layout::{in_production_root, in_test_root};
@@ -79,11 +79,12 @@ pub(crate) fn asset_survey(
     features: &impl FeatureCatalog,
     sources: &impl SourceFiles,
     language: Language,
-    req_id: &str,
     requirement: &Requirement,
     project: &str,
     layout: &ProjectStructure,
+    explicit: Option<&str>,
 ) -> Result<(Vec<ImplementAsset>, Vec<String>), ServiceError> {
+    let req_id = requirement.id.as_str();
     let mut assets = Vec::new();
     let mut findings = Vec::new();
     let tag = format!("@{req_id}");
@@ -144,11 +145,30 @@ pub(crate) fn asset_survey(
     // where its production code belongs: step definitions reach the
     // behavior, so whatever they reach is what the work is missing from.
     let evidence = scenario_evidence(features, &source_files, language, &tag)?;
-    let production = production_path(&source_files, language, project, layout, &evidence);
+    let production = production_path(
+        &source_files,
+        language,
+        project,
+        layout,
+        &evidence,
+        explicit,
+    );
+    if production.is_none() {
+        findings.push(format!(
+            "Cannot tell which production file {req_id} belongs in - no step \
+             definition its scenarios run through names any of them. Name it \
+             with spec implement {req_id} --into <path>, or write the steps \
+             first so they point at the code."
+        ));
+    }
     assets.push(ImplementAsset {
         role: "production code (the attempt creates it when missing)".into(),
-        path: production.clone(),
-        present: source_files.iter().any(|file| file.path == production),
+        path: production
+            .clone()
+            .unwrap_or_else(|| "unknown - pass --into <path>".into()),
+        present: production
+            .as_ref()
+            .is_some_and(|path| source_files.iter().any(|file| &file.path == path)),
     });
     Ok((assets, findings))
 }
@@ -196,7 +216,15 @@ pub(crate) fn scenario_evidence(
     for file in files {
         let mut bodies = String::new();
         for (pattern, body) in extract_definitions(language, &file.content) {
-            if steps.iter().any(|step| pattern_matches(&pattern, step)) {
+            // A step generated minutes ago and still pending says
+            // nothing about where the code belongs. Dropping the whole
+            // window when a marker appears in it can cost a little real
+            // evidence where a window runs on into the next definition,
+            // which is the safe direction to err: too little evidence
+            // makes the caller ask, too much sends it somewhere wrong.
+            if steps.iter().any(|step| pattern_matches(&pattern, step))
+                && !is_pending_step_body(language, body)
+            {
                 bodies.push_str(body);
                 bodies.push('\n');
             }
@@ -322,16 +350,29 @@ pub(crate) fn unit_test_path(
 /// `evidence` is code that shows where the behavior is missing — the
 /// bodies of the step definitions this requirement's scenarios run
 /// through. When it is given, the production file whose symbols it
-/// mentions most wins. When it is empty, this falls back to convention:
-/// the path named after the spec project, else the first existing
-/// source under the production root.
+/// mentions most wins. `explicit` is the developer's own answer and
+/// outranks everything.
+///
+/// Convention is the last resort and is trusted only where it cannot be
+/// wrong: a conventional path that already exists, a project with no
+/// production code at all (the attempt creates the file anyway), or one
+/// that holds a single production file and so offers no choice.
+///
+/// `None` when the project has several production files and nothing
+/// points at any of them - the honest answer, and the one that makes
+/// the caller ask rather than guess.
 pub(crate) fn production_path(
     files: &[crate::ports::SourceFile],
     language: Language,
     project: &str,
     layout: &ProjectStructure,
     evidence: &str,
-) -> String {
+    explicit: Option<&str>,
+) -> Option<String> {
+    // The developer's own answer ends the question.
+    if let Some(path) = explicit {
+        return Some(path.to_string());
+    }
     let root = layout.production.as_deref();
     let under_root = |path: &str| match root {
         Some(root) => path.starts_with(&format!("{root}/")),
@@ -342,29 +383,65 @@ pub(crate) fn production_path(
     // - and on anything past a kata the guess is wrong. When the
     // scenarios say which file the behavior is missing from, they
     // outrank it.
-    if !evidence.trim().is_empty() {
-        let pairs: Vec<(String, String)> = files
-            .iter()
-            .map(|file| (file.path.clone(), file.content.clone()))
-            .collect();
-        if let Some(target) =
-            neighborhood::nearest_to_evidence(language, &pairs, evidence, under_root)
-        {
-            return target.to_string();
-        }
+    if let Some(target) = from_evidence(files, language, evidence, &under_root) {
+        return Some(target);
     }
     let conventional = implementation_target_path(language, project);
-    if files.iter().any(|file| file.path == conventional) {
-        return conventional;
+    if convention_names_this_project(language, project)
+        && files.iter().any(|file| file.path == conventional)
+    {
+        return Some(conventional);
     }
-    files
-        .iter()
-        .find(|file| under_root(&file.path))
-        .map(|file| file.path.clone())
-        .unwrap_or_else(|| match root {
+    let mut under: Vec<&crate::ports::SourceFile> =
+        files.iter().filter(|file| under_root(&file.path)).collect();
+    match under.len() {
+        // No production code yet, so there is nothing to disambiguate:
+        // convention names the file the attempt is about to create.
+        0 => Some(match root {
             Some(_) => in_production_root(layout, &implementation_file_name(language, project)),
             None => conventional,
-        })
+        }),
+        // One candidate is not a guess.
+        1 => Some(under.remove(0).path.clone()),
+        // Several, and nothing points at any of them. Taking the first
+        // is a coin flip whose loser is an implementation written into
+        // an unrelated module.
+        _ => None,
+    }
+}
+
+/// Whether convention names a file for *this* project, or only the
+/// ecosystem's entry point.
+///
+/// Java and C# fold the project name into the path, so an existing
+/// `StringCalculator.java` really is this kata's production file. Rust
+/// and the JS family have a fixed entry point instead - `src/lib.rs` is
+/// the answer whatever the project is called, and it exists in every
+/// crate ever generated. Trusting that would let convention win every
+/// time and put the work in the module list.
+///
+/// Asked by changing the project name and seeing whether the answer
+/// follows, rather than by listing which ecosystems are which.
+fn convention_names_this_project(language: Language, project: &str) -> bool {
+    let renamed = format!("{project} renamed");
+    implementation_file_name(language, project) != implementation_file_name(language, &renamed)
+}
+
+/// The file the scenarios' own code points at, when it points clearly.
+fn from_evidence(
+    files: &[crate::ports::SourceFile],
+    language: Language,
+    evidence: &str,
+    under_root: &impl Fn(&str) -> bool,
+) -> Option<String> {
+    if evidence.trim().is_empty() {
+        return None;
+    }
+    let pairs: Vec<(String, String)> = files
+        .iter()
+        .map(|file| (file.path.clone(), file.content.clone()))
+        .collect();
+    neighborhood::nearest_to_evidence(language, &pairs, evidence, under_root).map(str::to_string)
 }
 
 /// Simple class name of the production type (`StringCalculator.java` →
@@ -417,9 +494,25 @@ pub(crate) fn load_effective_catalog(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use super::*;
     use crate::ports::SourceFile;
-    use crate::test_support::{FakeSources, calculator_catalog, flat_layout};
+    use crate::test_support::{
+        FakeSources, InMemoryFeatureCatalog, calculator_catalog, flat_layout,
+    };
+
+    fn one_scenario_tagged(tag: &str, when: &str, then: &str) -> InMemoryFeatureCatalog {
+        InMemoryFeatureCatalog {
+            files: HashMap::from([(
+                "features/coverage.feature".to_string(),
+                format!(
+                    "Feature: Coverage\n\n  {tag}\n  Scenario: Reported\n    \
+                     When {when}\n    Then {then}\n"
+                ),
+            )]),
+        }
+    }
 
     fn req(id: &str) -> Requirement {
         Requirement {
@@ -430,6 +523,53 @@ mod tests {
             acceptance_criteria: vec!["Given a, when b, then 3".into()],
             feature_file: Some("features/calc.feature".into()),
         }
+    }
+
+    /// The definitions this requirement's scenarios bind to were
+    /// generated minutes ago and are still `todo!`. They echo the
+    /// Gherkin back and name no production code, so reading them as a
+    /// statement about where the work belongs is reading noise.
+    #[test]
+    fn step_definitions_nobody_has_written_yet_are_no_evidence() {
+        let features = one_scenario_tagged(
+            "@REQ-001",
+            "coverage is requested",
+            "the verdict is reported",
+        );
+        let files = vec![SourceFile {
+            path: "tests/cucumber.rs".into(),
+            content: "#[when(expr = \"coverage is requested\")]\n\
+                 fn a(_w: &mut SpecWorld) {\n    \
+                 todo!(\"implement step: coverage is requested\");\n}\n\
+                 #[then(expr = \"the verdict is reported\")]\n\
+                 fn b(_w: &mut SpecWorld) {\n    \
+                 todo!(\"implement step: the verdict is reported\");\n}\n"
+                .into(),
+        }];
+        let evidence =
+            scenario_evidence(&features, &files, Language::Rust, "@REQ-001").expect("evidence");
+        assert!(evidence.trim().is_empty(), "got: {evidence}");
+    }
+
+    /// The same shape once the steps are written: now there is code to
+    /// read, and the evidence names it.
+    #[test]
+    fn a_written_step_is_read_as_evidence() {
+        let features = one_scenario_tagged(
+            "@REQ-001",
+            "coverage is requested",
+            "the verdict is reported",
+        );
+        let files = vec![SourceFile {
+            path: "tests/cucumber.rs".into(),
+            content: "#[when(expr = \"coverage is requested\")]\n\
+                 fn a(w: &mut SpecWorld) {\n    \
+                 w.verdict = CoverageReport::for_requirement(&w.id);\n}\n"
+                .into(),
+        }];
+        let evidence =
+            scenario_evidence(&features, &files, Language::Rust, "@REQ-001").expect("evidence");
+        assert!(evidence.contains("CoverageReport"), "got: {evidence}");
     }
 
     #[test]
@@ -475,10 +615,10 @@ mod tests {
             &calculator_catalog(),
             &sources,
             Language::Java,
-            "REQ-003",
             &req("REQ-003"),
             "String Calculator Kata",
             &flat_layout(Language::Java),
+            None,
         )
         .unwrap();
         let unit = assets.iter().find(|a| a.role == "unit test").unwrap();
@@ -504,10 +644,10 @@ mod tests {
             &calculator_catalog(),
             &sources,
             Language::Java,
-            "REQ-003",
             &req("REQ-003"),
             "String Calculator Kata",
             &flat_layout(Language::Java),
+            None,
         )
         .unwrap();
         let unit = assets.iter().find(|a| a.role == "unit test").unwrap();
@@ -527,8 +667,171 @@ mod tests {
                 "String Calculator Kata",
                 &flat_layout(Language::Java),
                 "",
-            ),
-            "src/main/java/com/example/StringCalculator.java"
+                None,
+            )
+            .as_deref(),
+            Some("src/main/java/com/example/StringCalculator.java")
         );
+    }
+
+    /// The kata case: nothing is written yet, so there is nothing to
+    /// disambiguate and convention names the file to create.
+    #[test]
+    fn a_project_with_no_production_code_still_gets_the_conventional_target() {
+        let files = vec![SourceFile {
+            path: "src/test/java/com/example/StringCalculatorTest.java".into(),
+            content: "class StringCalculatorTest {}".into(),
+        }];
+        assert!(
+            production_path(
+                &files,
+                Language::Java,
+                "String Calculator Kata",
+                &flat_layout(Language::Java),
+                "",
+                None,
+            )
+            .is_some()
+        );
+    }
+
+    /// Production files exist and nothing points at one of them.
+    /// Answering anyway writes the implementation into whichever file
+    /// happened to sort first.
+    #[test]
+    fn a_project_whose_tests_point_nowhere_names_no_target() {
+        let files = vec![
+            SourceFile {
+                path: "src/main/java/com/example/Alpha.java".into(),
+                content: "class Alpha {}".into(),
+            },
+            SourceFile {
+                path: "src/main/java/com/example/Beta.java".into(),
+                content: "class Beta {}".into(),
+            },
+        ];
+        assert_eq!(
+            production_path(
+                &files,
+                Language::Java,
+                "String Calculator Kata",
+                &flat_layout(Language::Java),
+                "",
+                None,
+            ),
+            None
+        );
+    }
+
+    /// `src/lib.rs` is every crate's entry point, not this
+    /// requirement's production file. Letting it win because it happens
+    /// to exist is how the work ends up in the module list.
+    #[test]
+    fn a_rust_crates_entry_point_is_not_mistaken_for_the_target() {
+        let files = vec![
+            SourceFile {
+                path: "src/lib.rs".into(),
+                content: "pub mod mcp;\npub mod domain;".into(),
+            },
+            SourceFile {
+                path: "src/mcp.rs".into(),
+                content: "pub struct WorkflowServer {}".into(),
+            },
+        ];
+        assert_eq!(
+            production_path(
+                &files,
+                Language::Rust,
+                "spec harness",
+                &flat_layout(Language::Rust),
+                "",
+                None,
+            ),
+            None
+        );
+    }
+
+    /// A Java kata's conventional name carries the project in it, so an
+    /// existing file by that name really is the one.
+    #[test]
+    fn a_name_built_from_the_project_is_still_worth_trusting() {
+        let files = vec![
+            SourceFile {
+                path: "src/main/java/StringCalculatorKata.java".into(),
+                content: "class StringCalculatorKata {}".into(),
+            },
+            SourceFile {
+                path: "src/main/java/Other.java".into(),
+                content: "class Other {}".into(),
+            },
+        ];
+        assert_eq!(
+            production_path(
+                &files,
+                Language::Java,
+                "String Calculator Kata",
+                &flat_layout(Language::Java),
+                "",
+                None,
+            )
+            .as_deref(),
+            Some("src/main/java/StringCalculatorKata.java")
+        );
+    }
+
+    /// The developer's answer ends the question, whatever the evidence
+    /// would have said.
+    #[test]
+    fn an_explicit_target_outranks_everything_else() {
+        let files = vec![SourceFile {
+            path: "src/main/java/com/example/StringCalculator.java".into(),
+            content: "class StringCalculator {}".into(),
+        }];
+        assert_eq!(
+            production_path(
+                &files,
+                Language::Java,
+                "String Calculator Kata",
+                &flat_layout(Language::Java),
+                "",
+                Some("src/main/java/com/example/Elsewhere.java"),
+            )
+            .as_deref(),
+            Some("src/main/java/com/example/Elsewhere.java")
+        );
+    }
+
+    /// The preflight has to say it cannot tell, and name the way out.
+    #[test]
+    fn the_survey_asks_instead_of_guessing_when_nothing_points_at_the_code() {
+        let sources = FakeSources(vec![
+            SourceFile {
+                path: "src/main/java/com/example/Alpha.java".into(),
+                content: "class Alpha {}".into(),
+            },
+            SourceFile {
+                path: "src/main/java/com/example/Beta.java".into(),
+                content: "class Beta {}".into(),
+            },
+        ]);
+        let (assets, findings) = asset_survey(
+            &calculator_catalog(),
+            &sources,
+            Language::Java,
+            &req("REQ-003"),
+            "String Calculator Kata",
+            &flat_layout(Language::Java),
+            None,
+        )
+        .unwrap();
+        assert!(
+            findings.iter().any(|f| f.contains("--into")),
+            "got: {findings:?}"
+        );
+        let production = assets
+            .iter()
+            .find(|a| a.role.starts_with("production code"))
+            .expect("the production asset");
+        assert!(!production.present);
     }
 }

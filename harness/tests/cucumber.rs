@@ -2279,6 +2279,7 @@ fn implementation_generated(world: &mut SpecWorld, req_id: String) {
             &brief.failures,
             &brief.history,
             &brief.states,
+            None,
         )
         .unwrap();
     tdd.record_attempt(ImplementAttempt {
@@ -2301,7 +2302,7 @@ fn implement_readiness_checked(world: &mut SpecWorld, req_id: String) {
     world.readiness_report = Some(
         world
             .implement_service(false)
-            .readiness(&req_id, &phase, &brief.failures)
+            .readiness(&req_id, &phase, &brief.failures, None)
             .unwrap(),
     );
 }
@@ -2312,7 +2313,9 @@ fn implement_advice_asked(world: &mut SpecWorld, req_id: String) {
     let phase = tdd.state().unwrap().phase;
     let brief = tdd.implementation_brief(&req_id).unwrap();
     let service = world.implement_service(true);
-    let readiness = service.readiness(&req_id, &phase, &brief.failures).unwrap();
+    let readiness = service
+        .readiness(&req_id, &phase, &brief.failures, None)
+        .unwrap();
     world.implement_advice = service
         .advice(&mut NullPrompter, &req_id, &readiness, &brief.failures)
         .unwrap();
@@ -2415,7 +2418,7 @@ fn implementation_generation_fails(world: &mut SpecWorld, req_id: String, mode: 
     world.generation_error = Some(
         world
             .implement_service(mode == "with")
-            .generate(&mut NullPrompter, &req_id, &[], &[], &[])
+            .generate(&mut NullPrompter, &req_id, &[], &[], &[], None)
             .unwrap_err()
             .0,
     );

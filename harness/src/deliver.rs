@@ -856,12 +856,15 @@ impl Deliver {
     ) -> Result<(), String> {
         let brief = tdd.implementation_brief(req_id).map_err(tdd_message)?;
         let work = prompter.working("Generating an implementation attempt - working");
+        // Nobody is at the keyboard to answer --into; an unresolvable
+        // target surfaces as the refusal this returns.
         let outcome = implement.generate(
             prompter,
             req_id,
             &brief.failures,
             &brief.history,
             &brief.states,
+            None,
         );
         drop(work);
         match outcome {
@@ -933,10 +936,10 @@ impl Deliver {
             &self.feature_catalog(),
             &crate::wiring::overlay_sources(&self.root, layout.module_root.as_deref()),
             language,
-            req_id,
             requirement,
             &spec.project,
             &layout,
+            None,
         )
         .map_err(|e| e.0)?;
         Ok(findings.iter().any(|finding| finding.contains(needle)))

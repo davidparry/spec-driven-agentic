@@ -129,7 +129,14 @@ enum Command {
     #[command(subcommand)]
     Unittest(UnittestCommand),
     /// Ask the model to make the failing tests pass (stages the files)
-    Implement { req_id: String },
+    Implement {
+        req_id: String,
+        /// Production file the work belongs in. Only needed when the
+        /// step definitions are still pending, so nothing in the
+        /// project points at one.
+        #[arg(long, value_name = "PATH")]
+        into: Option<String>,
+    },
     /// Run tests and update the RED/GREEN/REFACTOR phase (run_tests)
     Test(TestArgs),
     /// Show the current TDD phase and last run (get_tdd_state)
@@ -713,7 +720,8 @@ fn execute(
                 }
             }
         }
-        Command::Implement { req_id } => {
+        Command::Implement { req_id, into } => {
+            let into = into.as_deref();
             const RED: &str = "\x1b[31m";
             const GREEN: &str = "\x1b[32m";
             const RESET: &str = "\x1b[0m";
@@ -738,7 +746,7 @@ fn execute(
                 brief.failures.len(),
                 brief.history.len()
             );
-            let readiness = service.readiness(req_id, &phase, &brief.failures)?;
+            let readiness = service.readiness(req_id, &phase, &brief.failures, into)?;
             for asset in &readiness.assets {
                 let mark = if asset.present {
                     format!("{GREEN}present{RESET}")
@@ -789,6 +797,7 @@ fn execute(
                     &brief.failures,
                     &brief.history,
                     &brief.states,
+                    into,
                 )
                 .map_err(anyhow::Error::from);
             drop(work);

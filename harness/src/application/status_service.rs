@@ -121,10 +121,10 @@ where
                     &self.features,
                     &self.sources,
                     self.language,
-                    &requirement.id,
                     requirement,
                     &spec.project,
                     &self.layout,
+                    None,
                 )?;
                 findings = gaps;
                 if findings.is_empty() {

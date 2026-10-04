@@ -14,6 +14,7 @@ use crate::application::LlmReplyError;
 use crate::application::assets::{find_requirement, load_effective_spec, production_path};
 use crate::application::generation_service::ResolvedLlm;
 use crate::application::spec_service::ServiceError;
+use crate::domain::generation::implementation_target_path;
 use crate::domain::language::Language;
 use crate::domain::memory::ProjectStructure;
 use crate::domain::model::{Requirement, TestRunSummary};
@@ -133,13 +134,19 @@ where
             None => None,
         };
         let files = self.project_files()?;
+        // Refactoring runs on GREEN, where the code already exists and
+        // this only scopes what may be rewritten; naming the
+        // conventional file when nothing is clearer costs nothing,
+        // because the next line reports it as absent.
         let focus = production_path(
             &self.sources.sources(source_extension(self.language))?,
             self.language,
             &spec.project,
             &self.layout,
             "",
-        );
+            None,
+        )
+        .unwrap_or_else(|| implementation_target_path(self.language, &spec.project));
         let manifests = self.manifests()?;
         let scope = scope(&files, &self.layout, &focus, &manifests);
         if scope.writable.is_empty() {

@@ -27,6 +27,16 @@ const MIN_SYMBOL_LEN: usize = 3;
 /// what the file is for, short enough that the map stays a map.
 const MAPPED_SYMBOLS: usize = 12;
 
+/// How many distinct symbols the evidence has to name before a file
+/// counts as the answer.
+///
+/// One is an accident. A pending step definition echoes its own Gherkin
+/// back in a `todo!`, so a single ordinary word of that text colliding
+/// with a declared name is enough to crown a file the requirement has
+/// nothing to do with. Two independent names is the cheapest threshold
+/// that a coincidence rarely clears.
+const MIN_EVIDENCE_SYMBOLS: usize = 2;
+
 /// The files chosen for one prompt, and a map of the ones left out.
 #[derive(Debug)]
 pub struct Selection<'a> {
@@ -128,8 +138,8 @@ pub fn nearest_production<'a>(
 /// requirement's own scenarios run through — so the symbols in it name
 /// the behavior under test rather than the project at large.
 ///
-/// `None` when the evidence mentions nothing any production file
-/// declares, which leaves the caller's own convention in charge.
+/// `None` when the evidence names too little to be sure, or names two
+/// files equally well, which leaves the decision to the caller.
 pub fn nearest_to_evidence<'a>(
     language: Language,
     files: &'a [(String, String)],
@@ -151,17 +161,20 @@ pub fn nearest_to_evidence<'a>(
             named[owner].insert(mention.as_str());
         }
     }
-    files
+    let mut ranked: Vec<(usize, &str)> = files
         .iter()
         .enumerate()
-        .filter(|(i, (path, _))| is_production(path) && !named[*i].is_empty())
-        .max_by(|a, b| {
-            named[a.0]
-                .len()
-                .cmp(&named[b.0].len())
-                .then_with(|| b.1.0.cmp(&a.1.0))
-        })
-        .map(|(_, (path, _))| path.as_str())
+        .filter(|(_, (path, _))| is_production(path))
+        .map(|(i, (path, _))| (named[i].len(), path.as_str()))
+        .filter(|(count, _)| *count >= MIN_EVIDENCE_SYMBOLS)
+        .collect();
+    ranked.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(b.1)));
+    let (best, path) = *ranked.first()?;
+    // A tie is not an answer. Two files the evidence names equally well
+    // means the evidence does not say which of them the work belongs
+    // in, and guessing writes the implementation into the wrong module.
+    let runner_up = ranked.get(1).map_or(0, |(count, _)| *count);
+    (best > runner_up).then_some(path)
 }
 
 /// Who declares what, and who leans on whom.
@@ -450,17 +463,54 @@ mod tests {
         // requirement runs through name the server instead.
         let files = vec![
             file("src/lib.rs", "pub fn report() {}"),
-            file("src/mcp.rs", "pub struct WorkflowServer {}"),
+            file(
+                "src/mcp.rs",
+                "pub struct WorkflowServer {}\npub struct ToolRequest {}",
+            ),
             file(
                 "src/domain/generation.rs",
                 "pub fn scenario_prompt() {} pub fn unit_test_prompt() {}",
             ),
         ];
-        let evidence = "let broker = WorkflowServer::new(root); WorkflowServer::call(name);";
+        let evidence =
+            "let broker = WorkflowServer::new(root); broker.call(ToolRequest::new(name));";
         assert_eq!(
             nearest_to_evidence(Language::Rust, &files, evidence, |path| path
                 .starts_with("src/")),
             Some("src/mcp.rs")
+        );
+    }
+
+    /// A pending step definition echoes its Gherkin back in a `todo!`,
+    /// and one ordinary word of that text can collide with a declared
+    /// name. One hit is a coincidence, not an answer.
+    #[test]
+    fn a_single_name_is_a_coincidence_rather_than_a_target() {
+        let files = vec![
+            file("src/domain/model.rs", "pub struct Requirement {}"),
+            file("src/mcp.rs", "pub struct WorkflowServer {}"),
+        ];
+        let evidence = "todo!(\"implement step: coverage is requested for a Requirement\");";
+        assert_eq!(
+            nearest_to_evidence(Language::Rust, &files, evidence, |path| path
+                .starts_with("src/")),
+            None
+        );
+    }
+
+    /// Two files the evidence names equally well means the evidence
+    /// does not say which; answering anyway is a coin flip.
+    #[test]
+    fn evidence_that_names_two_files_equally_names_neither() {
+        let files = vec![
+            file("src/one.rs", "pub struct Alpha {}\npub struct Beta {}"),
+            file("src/two.rs", "pub struct Gamma {}\npub struct Delta {}"),
+        ];
+        let evidence = "Alpha::new(); Beta::new(); Gamma::new(); Delta::new();";
+        assert_eq!(
+            nearest_to_evidence(Language::Rust, &files, evidence, |path| path
+                .starts_with("src/")),
+            None
         );
     }
 

@@ -16,11 +16,11 @@ use crate::application::spec_service::ServiceError;
 use crate::application::{DEFAULT_LLM_ATTEMPTS, LlmReplyError};
 use crate::domain::feature;
 use crate::domain::generation::{
-    append_step_definitions, looks_like_step_definitions, looks_like_step_fragment,
-    looks_like_unit_test, looks_like_unit_test_for, looks_like_unit_test_fragment,
-    polish_fragment_prompt, polish_prompt, splice_step_definitions, splice_unit_tests,
-    step_definitions_fragment, step_definitions_template, strip_code_fences, todo_placeholders,
-    unit_test_fragment, unit_test_target_path, unit_test_template,
+    append_step_definitions, implementation_target_path, looks_like_step_definitions,
+    looks_like_step_fragment, looks_like_unit_test, looks_like_unit_test_for,
+    looks_like_unit_test_fragment, polish_fragment_prompt, polish_prompt, splice_step_definitions,
+    splice_unit_tests, step_definitions_fragment, step_definitions_template, strip_code_fences,
+    todo_placeholders, unit_test_fragment, unit_test_target_path, unit_test_template,
 };
 use crate::domain::language::Language;
 use crate::domain::memory::ProjectStructure;
@@ -309,7 +309,17 @@ where
         let conventional = unit_test_target_path(self.language, req_id);
         let existing = sources.iter().find(|file| file.path == target);
         let append = existing.is_some() && target != conventional;
-        let production = production_path(&sources, self.language, &spec.project, &self.layout, "");
+        // Only the name of the type under test, for the generated test
+        // class to refer to. Convention is good enough for a name.
+        let production = production_path(
+            &sources,
+            self.language,
+            &spec.project,
+            &self.layout,
+            "",
+            None,
+        )
+        .unwrap_or_else(|| implementation_target_path(self.language, &spec.project));
         let production_type = production_type_name(&production);
         let package_line = existing.filter(|_| append).and_then(|file| {
             file.content

@@ -115,6 +115,7 @@ where
         failures: &[String],
         history: &[ImplementAttempt],
         states: &[StateEntry],
+        into: Option<&str>,
     ) -> Result<ImplementationReport, ServiceError> {
         let Some(llm) = &self.llm else {
             return Err(ServiceError(
@@ -137,13 +138,21 @@ where
             self.language,
             &format!("@{req_id}"),
         )?;
-        let production = production_path(
+        let Some(production) = production_path(
             &sources,
             self.language,
             &spec.project,
             &self.layout,
             &evidence,
-        );
+            into,
+        ) else {
+            return Err(ServiceError(format!(
+                "Cannot tell which production file {req_id} belongs in - no step \
+                 definition its scenarios run through names any of them. Name it \
+                 with spec implement {req_id} --into <path>, or write the steps \
+                 first so they point at the code."
+            )));
+        };
         let prompt = implementation_prompt(
             self.language,
             requirement,
@@ -248,6 +257,7 @@ where
         req_id: &str,
         phase: &str,
         failures: &[String],
+        into: Option<&str>,
     ) -> Result<ReadinessReport, ServiceError> {
         let spec = load_effective_spec(&self.spec, &self.store)?;
         let requirement = find_requirement(&spec, req_id)?;
@@ -273,10 +283,10 @@ where
             &self.features,
             &self.sources,
             self.language,
-            req_id,
             requirement,
             &spec.project,
             &self.layout,
+            into,
         )?;
         findings.extend(asset_findings);
 
@@ -417,7 +427,7 @@ mod tests {
     #[test]
     fn implement_without_a_model_is_refused() {
         let error = service(vec![], None)
-            .generate(&mut NullPrompter, "REQ-001", &[], &[], &[])
+            .generate(&mut NullPrompter, "REQ-001", &[], &[], &[], None)
             .unwrap_err();
         assert_eq!(
             error.0,
@@ -441,7 +451,7 @@ mod tests {
             serde_json::to_string(&steps.content).unwrap()
         );
         let report = service(vec![steps], Some(FakeLlm::replying(&reply)))
-            .generate(&mut NullPrompter, "REQ-001", &[], &[], &[])
+            .generate(&mut NullPrompter, "REQ-001", &[], &[], &[], None)
             .unwrap();
         assert_eq!(report.targets, vec!["src/main/java/Kata.java".to_string()]);
         assert!(report.staged);
@@ -457,7 +467,7 @@ mod tests {
         };
         let reply = r#"[{"path": "src/main/java/Kata.java", "content": "public class Kata { }"}]"#;
         let report = service(vec![steps], Some(FakeLlm::replying(reply)))
-            .generate(&mut NullPrompter, "REQ-001", &[], &[], &[])
+            .generate(&mut NullPrompter, "REQ-001", &[], &[], &[], None)
             .unwrap();
         assert_eq!(report.targets, vec!["src/main/java/Kata.java".to_string()]);
     }
@@ -472,7 +482,7 @@ mod tests {
         };
         let reply = r#"[{"path": "src/main/java/Kata.java", "content": "public class Kata {}"}]"#;
         let report = service(vec![production], Some(FakeLlm::replying(reply)))
-            .generate(&mut NullPrompter, "REQ-001", &[], &[], &[])
+            .generate(&mut NullPrompter, "REQ-001", &[], &[], &[], None)
             .unwrap();
         assert!(report.targets.is_empty());
         assert!(!report.staged);
@@ -495,7 +505,7 @@ mod tests {
         let reply = r#"[{"path": "src/main/java/Kata.java",
             "content": "public class Kata {\n  int add(String in) { return in.equals(\"1,2\") ? 3 : 0; }\n  int subtract(String in) { return in.equals(\"3,1\") ? 2 : 0; }\n}"}]"#;
         let report = service(vec![], Some(FakeLlm::replying(reply)))
-            .generate(&mut NullPrompter, "REQ-001", &[], &[], &[])
+            .generate(&mut NullPrompter, "REQ-001", &[], &[], &[], None)
             .unwrap();
         let warning = report.warning.expect("the scope warning");
         assert!(warning.contains("also satisfies REQ-002"), "{warning}");
@@ -509,7 +519,7 @@ mod tests {
         let reply = r#"[{"path": "src/main/java/Kata.java",
             "content": "public class Kata {\n  int add(String in) { return in.equals(\"1,2\") ? 3 : 0; }\n}"}]"#;
         let report = service(vec![], Some(FakeLlm::replying(reply)))
-            .generate(&mut NullPrompter, "REQ-001", &[], &[], &[])
+            .generate(&mut NullPrompter, "REQ-001", &[], &[], &[], None)
             .unwrap();
         assert_eq!(report.warning, None);
     }
@@ -525,7 +535,7 @@ mod tests {
             content: "old steps".into(),
         }];
         let report = service(sources, Some(FakeLlm::replying(reply)))
-            .generate(&mut NullPrompter, "REQ-001", &[], &[], &[])
+            .generate(&mut NullPrompter, "REQ-001", &[], &[], &[], None)
             .unwrap();
         let warning = report.warning.expect("both warnings");
         assert!(
@@ -554,6 +564,7 @@ mod tests {
                 &["Req001Test: TODO: assert".into()],
                 &[],
                 &[],
+                None,
             )
             .unwrap();
         assert_eq!(
@@ -596,6 +607,7 @@ mod tests {
                 &["Req001Test: TODO: assert".into()],
                 &[],
                 &[],
+                None,
             )
             .unwrap();
         assert_eq!(report.targets, vec!["src/test/java/Steps.java"]);
@@ -621,6 +633,7 @@ mod tests {
                 &["Req001Test: TODO: assert".into()],
                 &[],
                 &[],
+                None,
             )
             .unwrap();
         assert_eq!(report.warning, None);
@@ -639,7 +652,14 @@ mod tests {
         }];
         let service = service(sources, Some(FakeLlm::replying(reply)));
         let report = service
-            .generate(&mut NullPrompter, "REQ-001", &["todo".into()], &[], &[])
+            .generate(
+                &mut NullPrompter,
+                "REQ-001",
+                &["todo".into()],
+                &[],
+                &[],
+                None,
+            )
             .unwrap();
         assert_eq!(
             report.targets,
@@ -669,6 +689,7 @@ mod tests {
                 &["Req001Test: cannot find symbol".into()],
                 &history,
                 &[],
+                None,
             )
             .unwrap();
         let prompts = service.llm.as_ref().unwrap().chat().prompts.borrow();
@@ -701,7 +722,7 @@ mod tests {
             r#"[{"path": "not/a/project/file.java", "content": "x"}]"#,
         ] {
             let error = service(vec![], Some(FakeLlm::replying(reply)))
-                .generate(&mut NullPrompter, "REQ-001", &[], &[], &[])
+                .generate(&mut NullPrompter, "REQ-001", &[], &[], &[], None)
                 .unwrap_err();
             assert_eq!(error.0, "The model's reply held no usable file update.");
         }
@@ -710,7 +731,7 @@ mod tests {
     #[test]
     fn a_model_failure_during_implementation_is_reported() {
         let error = service(vec![], Some(FakeLlm::failing()))
-            .generate(&mut NullPrompter, "REQ-001", &[], &[], &[])
+            .generate(&mut NullPrompter, "REQ-001", &[], &[], &[], None)
             .unwrap_err();
         assert_eq!(error.0, "the model call failed - model crashed");
     }
@@ -718,7 +739,7 @@ mod tests {
     #[test]
     fn an_implementation_for_an_unknown_requirement_is_refused() {
         let error = service(vec![], Some(FakeLlm::replying("[]")))
-            .generate(&mut NullPrompter, "REQ-404", &[], &[], &[])
+            .generate(&mut NullPrompter, "REQ-404", &[], &[], &[], None)
             .unwrap_err();
         assert_eq!(
             error.0,
@@ -730,7 +751,7 @@ mod tests {
     fn readiness_is_clean_when_every_prerequisite_is_in_place() {
         let service = service(vec![covered_steps_source(), unit_test_source()], None);
         let report = service
-            .readiness("REQ-001", "RED", &["Req001Test: TODO: assert".into()])
+            .readiness("REQ-001", "RED", &["Req001Test: TODO: assert".into()], None)
             .unwrap();
         assert!(report.ready, "report: {report:?}");
         assert!(report.findings.is_empty());
@@ -756,7 +777,7 @@ mod tests {
     #[test]
     fn readiness_names_every_gap_and_the_step_to_take_instead() {
         let report = service(vec![], None)
-            .readiness("REQ-001", "START", &[])
+            .readiness("REQ-001", "START", &[], None)
             .unwrap();
         assert!(!report.ready);
         let has = |fragment: &str| {
@@ -779,7 +800,7 @@ mod tests {
     #[test]
     fn readiness_on_green_says_there_is_nothing_to_implement() {
         let report = service(vec![], None)
-            .readiness("REQ-001", "GREEN", &[])
+            .readiness("REQ-001", "GREEN", &[], None)
             .unwrap();
         assert!(
             report
@@ -792,7 +813,7 @@ mod tests {
     #[test]
     fn readiness_flags_a_missing_tag_and_an_already_implemented_requirement() {
         let report = service(vec![], None)
-            .readiness("REQ-002", "RED", &["boom".into()])
+            .readiness("REQ-002", "RED", &["boom".into()], None)
             .unwrap();
         assert!(
             report
@@ -801,7 +822,7 @@ mod tests {
                 .any(|f| f.contains("No scenario is tagged @REQ-002"))
         );
         let report = service(vec![], None)
-            .readiness("REQ-003", "RED", &["boom".into()])
+            .readiness("REQ-003", "RED", &["boom".into()], None)
             .unwrap();
         assert!(
             report
@@ -816,10 +837,13 @@ mod tests {
         let refusal = "No requirement with id REQ-404. Call spec list to see valid ids.";
         let service = service(vec![], Some(FakeLlm::replying("irrelevant")));
         assert_eq!(
-            service.readiness("REQ-404", "RED", &[]).unwrap_err().0,
+            service
+                .readiness("REQ-404", "RED", &[], None)
+                .unwrap_err()
+                .0,
             refusal
         );
-        let readiness = service.readiness("REQ-001", "START", &[]).unwrap();
+        let readiness = service.readiness("REQ-001", "START", &[], None).unwrap();
         assert_eq!(
             service
                 .advice(&mut NullPrompter, "REQ-404", &readiness, &[])
@@ -833,7 +857,7 @@ mod tests {
     fn advice_without_a_model_is_none() {
         let service = service(vec![], None);
         assert!(!service.has_model());
-        let readiness = service.readiness("REQ-001", "START", &[]).unwrap();
+        let readiness = service.readiness("REQ-001", "START", &[], None).unwrap();
         assert_eq!(
             service
                 .advice(&mut NullPrompter, "REQ-001", &readiness, &[])
@@ -851,7 +875,7 @@ mod tests {
             )),
         );
         assert!(service.has_model());
-        let readiness = service.readiness("REQ-001", "START", &[]).unwrap();
+        let readiness = service.readiness("REQ-001", "START", &[], None).unwrap();
         let advice = service
             .advice(&mut NullPrompter, "REQ-001", &readiness, &[])
             .unwrap()
@@ -866,7 +890,7 @@ mod tests {
     #[test]
     fn a_model_failure_during_advice_is_reported() {
         let service = service(vec![], Some(FakeLlm::failing()));
-        let readiness = service.readiness("REQ-001", "START", &[]).unwrap();
+        let readiness = service.readiness("REQ-001", "START", &[], None).unwrap();
         assert_eq!(
             service
                 .advice(&mut NullPrompter, "REQ-001", &readiness, &[])
@@ -879,7 +903,7 @@ mod tests {
     #[test]
     fn an_empty_advice_reply_is_reported_as_invalid() {
         let service = service(vec![], Some(FakeLlm::replying("   ")));
-        let readiness = service.readiness("REQ-001", "START", &[]).unwrap();
+        let readiness = service.readiness("REQ-001", "START", &[], None).unwrap();
         let error = service
             .advice(&mut NullPrompter, "REQ-001", &readiness, &[])
             .unwrap_err();
