@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+- `spec implement` refuses a reply that would destroy the file it is
+  replacing, rather than staging it for `changes commit` to apply.
+
+  Observed live: asked to add one tool to a 1124-line module, the model
+  replied with the single word `placeholder`. It was staged, applied,
+  and the next `spec test` reported `expected one of ! or ::, found
+  <eof>` — `git diff` read `1 file changed, 1 insertion(+), 1124
+  deletions(-)`. The test run is meant to be the validator for whether
+  an attempt is any good, and it never gets to run when the reply
+  deletes the code the tests were going to call.
+
+  Two things are now asked of a replacement, and only where the file
+  already exists — a path the project has never seen is the attempt
+  creating something, and has nothing to lose. Does it still declare
+  every name the file declares today, read with the same per-language
+  symbol extraction the neighborhood walk uses? And do its braces
+  close, which is what a reply cut off part-way through looks like when
+  the cut takes no declaration with it? Neither asks whether the code
+  is correct; both describe damage no correct attempt has ever done.
+
+  The brace scan is not a parser and does not pretend to be. It is
+  trusted about a replacement only once it has shown it can read the
+  original, which the project building is the witness for — so a file
+  whose syntax it misreads is left alone rather than falsely accused.
+
+  A refusal is per file: the rest of an otherwise fine attempt is still
+  staged, and the report names what was refused, what would have been
+  lost, and that `spec implement` should be run again.
+
 - `spec deliver` is a new top-level orchestrator: one command takes a
   requirement id, a plain-words requirement, or an empty directory all
   the way to implemented, and says at the end whether it got there.

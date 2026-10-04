@@ -19,6 +19,7 @@ use crate::domain::generation::{
 use crate::domain::language::Language;
 use crate::domain::memory::ProjectStructure;
 use crate::domain::model::Spec;
+use crate::domain::reply_guard::{Damage, damage};
 use crate::domain::steps::source_extension;
 use crate::domain::tdd::{ImplementAttempt, StateEntry};
 use crate::ports::{
@@ -194,6 +195,7 @@ where
         };
         let summary = format!("implementation attempt for {req_id} (llm)");
         let mut targets = Vec::new();
+        let mut refused = Vec::new();
         for update in &updates {
             // The model is shown every source file and often hands one
             // back word for word. Staging that puts a "modify" on the
@@ -203,14 +205,24 @@ where
                 tracing::debug!(path = %update.path, "implement: reply matches the file on disk");
                 continue;
             }
+            if let Some(damage) = replacing(&files, update, self.language) {
+                tracing::warn!(path = %update.path, ?damage, "implement: destructive reply refused");
+                refused.push((update.path.as_str(), damage));
+                continue;
+            }
             self.store.stage(&update.path, &update.content, &summary)?;
             targets.push(update.path.clone());
         }
-        // A reply without the production file is an incomplete attempt:
-        // the tests will stay RED. Stage what arrived, but say so.
         let production_written = targets.contains(&production);
-        let mut warnings = Vec::new();
-        if !production_written {
+        let production_refused = refused.iter().any(|(path, _)| *path == production);
+        let mut warnings: Vec<String> = refused
+            .iter()
+            .map(|(path, damage)| damage.describe(path))
+            .collect();
+        // A reply without the production file is an incomplete attempt:
+        // the tests will stay RED. Stage what arrived, but say so. A
+        // refusal has already said it, and said more.
+        if !production_written && !production_refused {
             warnings.push(if targets.is_empty() {
                 format!(
                     "The model left every file as it found it, including the \
@@ -367,6 +379,19 @@ fn is_unchanged(files: &[(String, String)], update: &FileUpdate) -> bool {
         .any(|(path, content)| *path == update.path && *content == update.content)
 }
 
+/// What staging this update would destroy, if the file already exists.
+///
+/// A path the project has never seen is the attempt creating something,
+/// and there is nothing there to lose.
+fn replacing(
+    files: &[(String, String)],
+    update: &FileUpdate,
+    language: Language,
+) -> Option<Damage> {
+    let (_, before) = files.iter().find(|(path, _)| *path == update.path)?;
+    damage(language, before, &update.content)
+}
+
 /// [`covers_all`] heuristic, which is why this warns rather than
 /// blocks: a shared input literal can make two requirements look alike,
 /// and only the developer can say whether the extra code belongs.
@@ -496,6 +521,100 @@ mod tests {
             "{}",
             report.next_step
         );
+    }
+
+    /// Observed live: asked to add one tool to a 1124-line module, the
+    /// model replied `placeholder`. It was staged, applied, and the
+    /// build stopped. The test run cannot be the validator for a reply
+    /// that deletes the code the tests were going to run.
+    #[test]
+    fn a_reply_that_would_delete_the_production_file_is_not_staged() {
+        let production = SourceFile {
+            path: "src/main/java/Kata.java".into(),
+            content: "public class Kata {\n  int add(String in) { return 0; }\n}".into(),
+        };
+        let reply = r#"[{"path": "src/main/java/Kata.java", "content": "placeholder"}]"#;
+        let service = service(vec![production], Some(FakeLlm::replying(reply)));
+        let report = service
+            .generate(
+                &mut NullPrompter,
+                "REQ-001",
+                &["boom".into()],
+                &[],
+                &[],
+                None,
+            )
+            .unwrap();
+        assert!(report.targets.is_empty());
+        assert!(!report.staged);
+        assert_eq!(
+            service.store.content("src/main/java/Kata.java").unwrap(),
+            None,
+            "nothing reached the staging area"
+        );
+        let warning = report.warning.expect("the refusal is reported");
+        assert!(warning.contains("Kata"), "{warning}");
+        assert!(warning.contains("not staged"), "{warning}");
+        assert!(
+            !warning.contains("left every file as it found it"),
+            "a refusal is not the model leaving the file alone: {warning}"
+        );
+        assert!(
+            report.next_step.contains("spec implement REQ-001"),
+            "{}",
+            report.next_step
+        );
+    }
+
+    /// The guard is per file: one bad update does not discard the rest
+    /// of an attempt that was otherwise fine.
+    #[test]
+    fn a_refusal_does_not_throw_away_the_rest_of_the_attempt() {
+        let steps = SourceFile {
+            path: "src/test/java/Steps.java".into(),
+            content: "class Steps {}".into(),
+        };
+        let production = SourceFile {
+            path: "src/main/java/Kata.java".into(),
+            content: "public class Kata {}".into(),
+        };
+        let reply = r#"[
+            {"path": "src/test/java/Steps.java", "content": "nothing left"},
+            {"path": "src/main/java/Kata.java", "content": "public class Kata { int add() { return 1; } }"}
+        ]"#;
+        let service = service(vec![steps, production], Some(FakeLlm::replying(reply)));
+        let report = service
+            .generate(
+                &mut NullPrompter,
+                "REQ-001",
+                &["boom".into()],
+                &[],
+                &[],
+                None,
+            )
+            .unwrap();
+        assert_eq!(report.targets, vec!["src/main/java/Kata.java"]);
+        assert!(report.staged);
+        let warning = report.warning.expect("the refused file is reported");
+        assert!(warning.contains("src/test/java/Steps.java"), "{warning}");
+    }
+
+    /// A path the project has never seen is the attempt creating a
+    /// file, and nothing can be lost from a file that is not there.
+    #[test]
+    fn a_brand_new_file_is_not_measured_against_anything() {
+        let reply = r#"[{"path": "src/main/java/Kata.java", "content": "placeholder"}]"#;
+        let report = service(vec![], Some(FakeLlm::replying(reply)))
+            .generate(
+                &mut NullPrompter,
+                "REQ-001",
+                &["boom".into()],
+                &[],
+                &[],
+                None,
+            )
+            .unwrap();
+        assert_eq!(report.targets, vec!["src/main/java/Kata.java"]);
     }
 
     #[test]

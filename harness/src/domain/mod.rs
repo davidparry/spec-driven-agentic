@@ -50,6 +50,7 @@ pub mod prompts;
 pub mod proposal;
 pub mod refactor;
 pub mod refiner;
+pub mod reply_guard;
 pub mod scaffold;
 pub mod scenario;
 pub mod spec_validator;
