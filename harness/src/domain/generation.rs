@@ -3,6 +3,10 @@
 //! output before it may replace a template. Everything here is pure text
 //! transformation.
 
+use std::sync::LazyLock;
+
+use regex::Regex;
+
 use crate::domain::language::Language;
 use crate::domain::model::Requirement;
 use crate::domain::neighborhood;
@@ -52,14 +56,55 @@ pub fn unit_test_target_path(language: Language, req_id: &str) -> String {
     }
 }
 
+/// The World a generated Rust file declares for itself when there is no
+/// existing file to read one from.
+const GENERATED_WORLD: &str = "GeneratedWorld";
+
+/// An existing definition is the most reliable witness of the World the
+/// project binds: it compiles today, so whatever type it takes is the
+/// one the new definitions must take too.
+static WORLD_PARAM: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"(?s)#\[(?:given|when|then)\s*\([^\]]*\)\]\s*(?:pub\s+)?(?:async\s+)?fn\s+[A-Za-z_][A-Za-z0-9_]*\s*\([^)]*?&mut\s+([A-Za-z_][A-Za-z0-9_]*)",
+    )
+    .expect("valid regex")
+});
+
+/// Failing that, the struct the derive is written on. Attributes may sit
+/// between the two - `#[world(init = Self::new)]` is common - so the
+/// span up to `struct` is skipped rather than required to be empty.
+static WORLD_DERIVE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?s)#\[derive\([^)]*\bWorld\b[^)]*\)\][^;{]*?\bstruct\s+([A-Za-z_][A-Za-z0-9_]*)")
+        .expect("valid regex")
+});
+
+/// The type Rust step definitions in `existing` take as their world.
+///
+/// `cucumber::World` is a trait, so a definition naming it is not a type
+/// error the model can be prompted out of - it simply does not compile.
+/// What a step binds is the struct the project derives `World` on, and
+/// that name belongs to the project, not to this generator.
+fn world_type(existing: &str) -> Option<String> {
+    WORLD_PARAM
+        .captures(existing)
+        .or_else(|| WORLD_DERIVE.captures(existing))
+        .map(|caps| caps[1].to_string())
+}
+
 /// A pending step-definition file covering every missing step. Steps
 /// whose texts collapse to the same cucumber expression (e.g. "the
 /// result is 3" and "the result is 5" both become "the result is
 /// {int}") share one definition - duplicates would make the runner
 /// refuse every scenario as ambiguous.
 pub fn step_definitions_template(language: Language, missing: &[MissingStep]) -> String {
-    let body =
-        step_definitions(language, missing, Vec::new(), &mut MemberNames::in_file("")).join("\n");
+    let body = step_definitions(
+        language,
+        missing,
+        Vec::new(),
+        &mut MemberNames::in_file(""),
+        GENERATED_WORLD,
+    )
+    .join("\n");
     match language {
         Language::Java => format!(
             "import io.cucumber.java.PendingException;\n\
@@ -80,9 +125,14 @@ pub fn step_definitions_template(language: Language, missing: &[MissingStep]) ->
              [Binding]\n\
              public class GeneratedSteps\n{{\n{body}}}\n"
         ),
+        // A greenfield file has no World to bind, and `crate::World` is
+        // a guess about a type the project may never declare. Declaring
+        // one here makes the file compile on its own; the first real
+        // step body replaces the fields.
         Language::Rust => format!(
-            "use cucumber::{{given, then, when}};\n\n\
-             use crate::World;\n\n{body}"
+            "use cucumber::{{World, given, then, when}};\n\n\
+             #[derive(Debug, Default, World)]\n\
+             pub struct {GENERATED_WORLD};\n\n{body}"
         ),
     }
 }
@@ -95,6 +145,7 @@ fn step_definitions(
     missing: &[MissingStep],
     mut seen: Vec<String>,
     names: &mut MemberNames,
+    world: &str,
 ) -> Vec<String> {
     missing
         .iter()
@@ -107,11 +158,16 @@ fn step_definitions(
                 true
             }
         })
-        .map(|step| step_definition(language, step, names))
+        .map(|step| step_definition(language, step, names, world))
         .collect()
 }
 
-fn step_definition(language: Language, step: &MissingStep, names: &mut MemberNames) -> String {
+fn step_definition(
+    language: Language,
+    step: &MissingStep,
+    names: &mut MemberNames,
+    world: &str,
+) -> String {
     let expression = step_to_expression(&step.text);
     let placeholders = count_placeholders(&expression);
     match language {
@@ -154,7 +210,7 @@ fn step_definition(language: Language, step: &MissingStep, names: &mut MemberNam
                 _ => format!(", arg{i}: String"),
             });
             format!(
-                "#[{keyword}(expr = \"{expr}\")]\nfn {name}(_world: &mut World{params}) {{\n    todo!(\"implement step: {text}\");\n}}\n",
+                "#[{keyword}(expr = \"{expr}\")]\nfn {name}(_world: &mut {world}{params}) {{\n    todo!(\"implement step: {text}\");\n}}\n",
                 keyword = step.keyword.to_lowercase(),
                 expr = escape_literal(&expression, '"'),
                 name = names.claim(snake_case(&name_source(&step.text))),
@@ -162,6 +218,30 @@ fn step_definition(language: Language, step: &MissingStep, names: &mut MemberNam
             )
         }
     }
+}
+
+/// What [`step_definition`] leaves in a body it has not filled in, per
+/// ecosystem. Kept beside the code that writes them so the two cannot
+/// drift apart.
+fn pending_markers(language: Language) -> &'static [&'static str] {
+    match language {
+        Language::Rust => &["todo!", "unimplemented!"],
+        Language::Java => &["PendingException"],
+        Language::DotNet => &["PendingStepException"],
+        Language::JavaScript | Language::TypeScript => &["return 'pending'", "return \"pending\""],
+    }
+}
+
+/// Whether `body` belongs to a step nobody has written yet.
+///
+/// A pending body is not evidence of anything. It echoes its own
+/// Gherkin back in the marker's message and names no production code,
+/// so reading it as a statement about where the behavior lives points
+/// at whichever file happens to share a word with the scenario text.
+pub fn is_pending_step_body(language: Language, body: &str) -> bool {
+    pending_markers(language)
+        .iter()
+        .any(|marker| body.contains(marker))
 }
 
 /// A failing (RED) unit-test file with one test per acceptance criterion.
@@ -930,6 +1010,7 @@ pub fn step_definitions_fragment(
         missing,
         extract_patterns(language, existing),
         &mut MemberNames::in_file(existing),
+        &world_type(existing).unwrap_or_else(|| GENERATED_WORLD.to_string()),
     );
     if definitions.is_empty() {
         return None;
@@ -974,7 +1055,7 @@ fn ensure_cucumber_imports(source: &str, language: Language) -> String {
             source,
             "import { Given, When, Then } from '@cucumber/cucumber';",
         ),
-        Language::Rust => ensure_leading_line(source, "use cucumber::{given, then, when};"),
+        Language::Rust => ensure_rust_cucumber_import(source),
     }
 }
 
@@ -983,6 +1064,74 @@ fn ensure_leading_line(source: &str, line: &str) -> String {
         return source.to_string();
     }
     format!("{line}\n{source}")
+}
+
+/// Every `use cucumber::...;` in the file, so what it already brings
+/// into scope can be read rather than string-matched as a whole line.
+static CUCUMBER_USE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?m)^\s*use\s+cucumber::([^;]*);").expect("valid regex"));
+
+/// The attribute macros a generated Rust step definition needs.
+const CUCUMBER_MACROS: [&str; 3] = ["given", "then", "when"];
+
+/// Bring in only the cucumber macros the file is missing, below its
+/// module header.
+///
+/// Two separate faults made the old whole-line approach emit code that
+/// would not compile. A file importing `cucumber::{World, given, then,
+/// when}` does not contain the literal line being looked for, so the
+/// same three macros were imported a second time (E0252); and
+/// prepending at byte 0 pushed the file's `//!` module docs below an
+/// item, which is E0753.
+fn ensure_rust_cucumber_import(source: &str) -> String {
+    let in_scope: Vec<&str> = CUCUMBER_USE
+        .captures_iter(source)
+        .flat_map(|caps| {
+            let body = caps.get(1).map_or("", |m| m.as_str());
+            identifiers_in(body)
+        })
+        .collect();
+    let glob = CUCUMBER_USE
+        .captures_iter(source)
+        .any(|caps| caps.get(1).is_some_and(|m| m.as_str().contains('*')));
+    let wanted: Vec<&str> = CUCUMBER_MACROS
+        .into_iter()
+        .filter(|name| !glob && !in_scope.contains(name))
+        .collect();
+    if wanted.is_empty() {
+        return source.to_string();
+    }
+    let import = format!("use cucumber::{{{}}};", wanted.join(", "));
+    let at = module_header_end(source);
+    let (header, rest) = source.split_at(at);
+    format!("{header}{import}\n\n{rest}")
+}
+
+/// The names a `use` path's braces list, ignoring punctuation.
+fn identifiers_in(body: &str) -> Vec<&str> {
+    body.split(|c: char| !c.is_alphanumeric() && c != '_')
+        .filter(|name| !name.is_empty())
+        .collect()
+}
+
+/// The byte offset past the module header - the first position an item
+/// may legally occupy.
+///
+/// `//!` doc comments and `#![...]` attributes describe the module they
+/// open and have to precede every item in it, so anything inserted
+/// above them stops the file compiling. A plain `//` comment is left
+/// alone: it usually introduces whatever follows it.
+fn module_header_end(source: &str) -> usize {
+    let mut at = 0;
+    for line in source.split_inclusive('\n') {
+        let trimmed = line.trim_start();
+        if trimmed.is_empty() || trimmed.starts_with("//!") || trimmed.starts_with("#![") {
+            at += line.len();
+        } else {
+            break;
+        }
+    }
+    at
 }
 
 fn ensure_java_import(source: &str, import: &str) -> String {
@@ -1343,16 +1492,142 @@ mod tests {
             Language::Rust,
             &[missing("When", "add is called with \"1,2\"")],
         );
-        assert!(code.contains("use cucumber::{given, then, when};"));
+        assert!(code.contains("use cucumber::{World, given, then, when};"));
         assert!(code.contains("#[when(expr = \"add is called with {string}\")]"));
-        assert!(code.contains("fn add_is_called_with(_world: &mut World, arg0: String)"));
+        assert!(code.contains("fn add_is_called_with(_world: &mut GeneratedWorld, arg0: String)"));
         assert!(code.contains("todo!"));
+    }
+
+    /// `World` is a trait. A greenfield file that binds it does not
+    /// compile, and there is no project type to borrow instead, so the
+    /// file has to bring its own.
+    #[test]
+    fn a_greenfield_rust_file_declares_the_world_it_binds() {
+        let code = step_definitions_template(Language::Rust, &[missing("Then", "it works")]);
+        assert!(code.contains("#[derive(Debug, Default, World)]"));
+        assert!(code.contains("pub struct GeneratedWorld;"));
+        assert!(!code.contains("_world: &mut World,"));
+        assert!(!code.contains("use crate::World;"));
+    }
+
+    /// The project names its own world, and the definitions already in
+    /// the file are the proof of what that name is.
+    #[test]
+    fn appended_definitions_bind_the_world_the_file_already_uses() {
+        let existing = "//! Glue.\n\n\
+             use cucumber::{World, given, then, when};\n\n\
+             #[derive(Debug, Default, World)]\n\
+             struct SpecWorld { seen: bool }\n\n\
+             #[given(expr = \"a spec\")]\n\
+             fn a_spec(_world: &mut SpecWorld) {}\n";
+        let fragment =
+            step_definitions_fragment(existing, Language::Rust, &[missing("Then", "it works")])
+                .expect("a new step to add");
+        assert!(fragment.contains("_world: &mut SpecWorld"));
+        assert!(!fragment.contains("_world: &mut World"));
+    }
+
+    /// `//!` describes the module it opens, so it has to come before
+    /// every item. An import put above it is E0753.
+    #[test]
+    fn a_module_doc_comment_keeps_its_place_when_an_import_is_added() {
+        let existing = "//! Glue for the suite.\n//! Second line.\n\n\
+             use std::collections::HashMap;\n\n\
+             fn helper(_m: HashMap<u8, u8>) {}\n";
+        let spliced = splice_step_definitions(existing, Language::Rust, "// fragment\n");
+        assert!(spliced.starts_with("//! Glue for the suite.\n//! Second line.\n"));
+        let import = spliced
+            .find("use cucumber::")
+            .expect("the macros are not in scope yet");
+        assert!(import > spliced.find("//! Second line.").expect("the docs"));
+    }
+
+    /// The file imports the same three macros alongside `World`, so a
+    /// whole-line search misses them and imports them twice (E0252).
+    #[test]
+    fn macros_already_in_scope_are_not_imported_a_second_time() {
+        let existing = "//! Glue.\n\n\
+             use cucumber::{World, given, then, when};\n\n\
+             #[derive(Debug, Default, World)]\n\
+             struct SpecWorld;\n";
+        let spliced = splice_step_definitions(existing, Language::Rust, "// fragment\n");
+        assert_eq!(spliced.matches("use cucumber::").count(), 1);
+    }
+
+    /// Only what is missing is added - a file holding two of the three
+    /// gets the third, not all three again.
+    #[test]
+    fn only_the_missing_macros_are_imported() {
+        let existing = "use cucumber::{given, when};\n\nstruct SpecWorld;\n";
+        let spliced = splice_step_definitions(existing, Language::Rust, "// fragment\n");
+        assert!(spliced.contains("use cucumber::{then};"));
+        assert_eq!(spliced.matches("given").count(), 1);
+    }
+
+    /// A glob already brings every macro in; adding named imports on top
+    /// of it is the same duplicate error by another route.
+    #[test]
+    fn a_glob_import_counts_as_every_macro_being_in_scope() {
+        let existing = "use cucumber::*;\n\nstruct SpecWorld;\n";
+        let spliced = splice_step_definitions(existing, Language::Rust, "// fragment\n");
+        assert_eq!(spliced.matches("use cucumber::").count(), 1);
+    }
+
+    /// A file that derives `World` but has no definition yet still says
+    /// which struct it is; the derive is the fallback witness.
+    #[test]
+    fn the_world_derive_names_the_type_when_no_definition_does() {
+        let existing = "//! Glue.\n\n\
+             use cucumber::World;\n\n\
+             #[derive(Debug, Default, World)]\n\
+             #[world(init = Self::new)]\n\
+             pub struct HarnessWorld { root: String }\n";
+        let fragment =
+            step_definitions_fragment(existing, Language::Rust, &[missing("When", "it runs")])
+                .expect("a new step to add");
+        assert!(fragment.contains("_world: &mut HarnessWorld"));
     }
 
     #[test]
     fn rust_int_placeholders_become_i64_parameters() {
         let code = step_definitions_template(Language::Rust, &[missing("Then", "the result is 3")]);
-        assert!(code.contains("fn the_result_is_3(_world: &mut World, arg0: i64)"));
+        assert!(code.contains("fn the_result_is_3(_world: &mut GeneratedWorld, arg0: i64)"));
+    }
+
+    /// What this module writes as a placeholder is what it has to
+    /// recognise later. A marker changed on one side and not the other
+    /// quietly turns generated boilerplate back into evidence.
+    #[test]
+    fn every_generated_placeholder_is_recognised_as_pending() {
+        for language in [
+            Language::Rust,
+            Language::Java,
+            Language::DotNet,
+            Language::JavaScript,
+            Language::TypeScript,
+        ] {
+            let code = step_definitions_template(language, &[missing("When", "it runs")]);
+            assert!(
+                is_pending_step_body(language, &code),
+                "{language:?} writes a placeholder it cannot recognise"
+            );
+        }
+    }
+
+    #[test]
+    fn a_step_someone_has_written_is_not_pending() {
+        assert!(!is_pending_step_body(
+            Language::Rust,
+            "fn adds(world: &mut SpecWorld) { world.calculator.add(\"1,2\"); }"
+        ));
+        assert!(!is_pending_step_body(
+            Language::Java,
+            "public void adds() { calculator.add(\"1,2\"); }"
+        ));
+        assert!(!is_pending_step_body(
+            Language::JavaScript,
+            "When('it runs', function () { return calculator.add('1,2'); });"
+        ));
     }
 
     #[test]
