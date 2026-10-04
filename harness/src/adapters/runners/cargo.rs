@@ -16,6 +16,10 @@ static RESULT_LINE: LazyLock<Regex> = LazyLock::new(|| {
 });
 static FAILED_TEST: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?m)^test (\S+) \.\.\. FAILED$").expect("valid regex"));
+static SCENARIO_LINE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(\d+) scenarios? \(([^)]*)\)").expect("valid regex"));
+static FAILED_SCENARIO: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?m)^\s*✘\s+(.+?)\s*$").expect("valid regex"));
 
 pub struct CargoRunner<R: RuntimeProbe> {
     root: PathBuf,
@@ -28,7 +32,11 @@ impl<R: RuntimeProbe> CargoRunner<R> {
         Self {
             root,
             probe,
-            command: vec!["cargo".into(), "test".into()],
+            // Without --no-fail-fast cargo stops at the first target
+            // that fails, so a red cucumber suite hides every unit test
+            // behind it and the bar reports on a run that never
+            // finished. A TDD loop needs the whole picture every time.
+            command: vec!["cargo".into(), "test".into(), "--no-fail-fast".into()],
         }
     }
 
@@ -61,7 +69,28 @@ impl<R: RuntimeProbe> TestRunner for CargoRunner<R> {
         }
         let outcome = run_command(&command, &self.root)?;
         let combined = outcome.combined();
-        match parse_cargo_output(&combined) {
+        // A cucumber-rs target is declared `harness = false`, so it
+        // prints its own scenario tally instead of libtest's `test
+        // result:` line. A crate can hold both kinds at once, so both
+        // shapes are read and added together — reading only one reports
+        // a green bar while the other half of the suite is red.
+        let summary = merge(
+            parse_cargo_output(&combined),
+            parse_cucumber_rs_output(&combined),
+        );
+        match summary {
+            // Cargo failed, yet nothing it printed accounts for it: a
+            // target that panicked before reporting, or output this
+            // cannot read. Surfacing it as an error keeps the phase off
+            // GREEN instead of certifying a run nobody verified.
+            Some(summary) if !outcome.success && summary.failures == 0 && summary.errors == 0 => {
+                let mut summary = summary;
+                summary.errors += 1;
+                summary
+                    .failure_details
+                    .push(format!("cargo test failed:\n{}", tail(&combined, 30)));
+                Ok(summary)
+            }
             Some(summary) => Ok(summary),
             None if !outcome.success => Ok(build_failure(&combined)),
             None => Err(RunnerError::Failed(format!(
@@ -116,6 +145,55 @@ pub fn parse_cargo_output(output: &str) -> Option<TestRunSummary> {
     Some(summary)
 }
 
+/// Add two summaries of the same run, each covering the targets the
+/// other cannot read. `None` only when neither reported anything.
+fn merge(a: Option<TestRunSummary>, b: Option<TestRunSummary>) -> Option<TestRunSummary> {
+    match (a, b) {
+        (Some(mut a), Some(b)) => {
+            a.tests += b.tests;
+            a.failures += b.failures;
+            a.errors += b.errors;
+            a.skipped += b.skipped;
+            a.failure_details.extend(b.failure_details);
+            Some(a)
+        }
+        (a, b) => a.or(b),
+    }
+}
+
+/// Read a cucumber-rs tally: `12 scenarios (10 passed, 2 failed)`, with
+/// the scenario as the unit of behavior — the same choice the
+/// cucumber-js runner makes, so a phase means the same thing in both.
+/// `None` when the output holds no such line.
+pub fn parse_cucumber_rs_output(output: &str) -> Option<TestRunSummary> {
+    let captures = SCENARIO_LINE.captures_iter(output).last()?;
+    let mut summary = TestRunSummary {
+        tests: captures[1].parse().expect("digits only"),
+        ..TestRunSummary::default()
+    };
+    for part in captures[2].split(',') {
+        let mut words = part.split_whitespace();
+        let (Some(count), Some(outcome)) = (words.next(), words.next()) else {
+            continue;
+        };
+        let count: u32 = count.parse().unwrap_or(0);
+        match outcome {
+            "failed" => summary.failures += count,
+            "skipped" => summary.skipped += count,
+            // A step cucumber could not match is not a failing
+            // assertion; it is a suite that never ran what it claims.
+            "parsing" | "undefined" => summary.errors += count,
+            _ => {}
+        }
+    }
+    for captures in FAILED_SCENARIO.captures_iter(output) {
+        summary
+            .failure_details
+            .push(format!("{}: FAILED", captures[1].trim()));
+    }
+    Some(summary)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -130,6 +208,63 @@ mod tests {
         assert_eq!(summary.tests, 3);
         assert_eq!(summary.failures, 0);
         assert_eq!(summary.skipped, 1);
+    }
+
+    #[test]
+    fn a_cucumber_rs_tally_is_read_when_there_is_no_libtest_line() {
+        // The bug this closes: scoping a run to one feature lands on the
+        // `harness = false` cucumber target, whose output has no `test
+        // result:` line, and a passing suite came back as a hard error.
+        let output = "[Summary]\n262 scenarios (262 passed)\n1509 steps (1509 passed)\n";
+        assert!(parse_cargo_output(output).is_none());
+        let summary = parse_cucumber_rs_output(output).unwrap();
+        assert_eq!((summary.tests, summary.failures), (262, 0));
+    }
+
+    #[test]
+    fn a_failing_cucumber_run_reports_its_failed_scenarios() {
+        let output = "   ✘  Then a parsed failure detail contains \"--test tdd_state\"\n\
+                      262 scenarios (260 passed, 2 failed)\n";
+        let summary = parse_cucumber_rs_output(output).unwrap();
+        assert_eq!((summary.tests, summary.failures), (262, 2));
+        assert_eq!(
+            summary.failure_details,
+            vec!["Then a parsed failure detail contains \"--test tdd_state\": FAILED"]
+        );
+    }
+
+    #[test]
+    fn an_output_with_no_tally_at_all_is_none() {
+        assert!(parse_cucumber_rs_output("error: could not compile").is_none());
+    }
+
+    #[test]
+    fn libtest_and_cucumber_targets_in_one_run_are_added_together() {
+        // The bug this closes: a crate holding both kinds reported only
+        // the libtest half, so a red cucumber suite still read GREEN.
+        let output = format!("{PASSING}\n12 scenarios (10 passed, 2 failed)\n");
+        let summary = merge(
+            parse_cargo_output(&output),
+            parse_cucumber_rs_output(&output),
+        )
+        .unwrap();
+        assert_eq!((summary.tests, summary.failures), (15, 2));
+    }
+
+    #[test]
+    fn a_failing_run_that_reported_no_failure_is_an_error_not_a_green_bar() {
+        // A target that panics before printing its tally leaves a
+        // summary that accounts for none of the failure; the bar must
+        // not come back clean just because the output looked clean.
+        let runner = CargoRunner::new(PathBuf::from("."), FakeRuntimeProbe::with(&["cargo"]))
+            .with_command(vec![
+                "sh".into(),
+                "-c".into(),
+                format!("printf '%s' '{PASSING}'; exit 101"),
+            ]);
+        let summary = runner.run(&TestFilter::default()).unwrap();
+        assert_eq!((summary.tests, summary.failures), (3, 0));
+        assert_eq!(summary.errors, 1);
     }
 
     #[test]
