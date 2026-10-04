@@ -139,7 +139,24 @@ spec --root harness changes commit
 spec --root harness unittest generate HARNESS-013
 spec --root harness changes show
 spec --root harness changes commit
+spec --root harness steps missing
 ```
+
+**Check the count, do not assume it.** Whether any steps come back
+missing depends on how the model worded the scenarios — it may reuse
+definitions the suite already has and report none, or invent new
+phrasings and report a dozen. Both happen. If the list is not empty:
+
+```bash
+spec --root harness steps generate
+spec --root harness changes commit
+spec --root harness steps missing       # 0
+```
+
+One more model call, about a minute. The stubs bind the project's own
+`SpecWorld`, read off the glue file rather than assumed — worth saying
+out loud if anyone has been bitten by a generator that emitted the
+`World` *trait* and would not compile.
 
 ## 10:00 — RED
 
@@ -176,6 +193,17 @@ them, follows those one hop into their helpers, and takes the production
 file those name through the most distinct symbols. Worth ten seconds on
 stage — it is the same "evidence, not configuration" argument the talk
 makes about the spec.
+
+**If it refuses here, that is still the argument.** When every step the
+scenarios bind to is a pending `todo!()`, nothing names any production
+code and the harness says so instead of picking a file. It needs two
+independent names before it will commit, so one accidental word match
+cannot decide it. Recover by naming the file yourself and carry on —
+the refusal is a better story than a lucky guess:
+
+```bash
+spec --root harness implement HARNESS-013 --into src/mcp.rs
+```
 
 Say the scope out loud, because the slide now promises it: what lands is
 **one `#[tool]` method** in `harness/src/mcp.rs`. That is a real tool
@@ -303,7 +331,9 @@ side: the reworded catalog, the new feature file, the generated test,
 the implementation, and the Java-side 26 bump all go with the branch.
 `git clean` is safe here precisely *because* you are back on `trunk`
 with nothing of your own in the working tree — which is the other reason
-to make the branch before you walk on.
+to make the branch before you walk on. If you are rehearsing from a
+working copy that *does* carry unpushed work, `git clean -nd harness/
+smoke-test/` lists what would go before anything is removed.
 
 Step 3 is the one that is easy to forget and silently ruins the next
 run: `mvn ... -Dspec.binary=$(which spec)` would stay red from the

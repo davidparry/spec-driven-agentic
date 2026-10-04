@@ -139,7 +139,24 @@ spec --root harness scenario generate HARNESS-013 --feature tests/features/tool_
 spec --root harness unittest generate HARNESS-013
 spec --root harness changes show
 spec --root harness changes commit
+spec --root harness steps missing
 ```
+
+How many steps come back missing depends on how the model worded the
+scenarios. It may reuse step definitions the suite already has and
+report none; it may invent new phrasings and report a dozen. Both are
+fine, but anything in the list has to be defined before the bar can run:
+
+```bash
+spec --root harness steps generate      # only if the list was not empty
+spec --root harness changes show
+spec --root harness changes commit
+spec --root harness steps missing       # 0 now
+```
+
+The generated definitions are `todo!()` stubs that bind the project's
+own `SpecWorld`. They compile, they fail, and filling them in is the
+next person's job — which is exactly what RED means.
 
 > These two are the only slow steps of the morning. On a local model
 > expect `scenario generate` to take about five minutes and `unittest
@@ -195,6 +212,23 @@ that: the harness matched your When/Then steps to the step definitions
 that bind them, followed those one hop into the helpers they call, and
 picked the production file those name through the most distinct symbols.
 The scenarios you wrote at 9:30 are what pointed it there.
+
+**If it refuses instead**, saying it cannot tell which production file
+`HARNESS-013` belongs in, the inference worked correctly and found
+nothing to go on. That happens when every step your scenarios bind to
+is still a `todo!()` stub: a pending step names no production code, so
+there is nothing pointing anywhere. Two independent names are needed
+before the harness will commit to a file, and one accidental match is
+not enough. Either write a step body or two against the real types, or
+name the file yourself:
+
+```bash
+spec --root harness implement HARNESS-013 --into src/mcp.rs
+```
+
+Refusing is the point. A guess here writes a morning's work into an
+unrelated module and the bar still goes green on the tests that did not
+need it.
 
 **Scope check.** What lands here is one `#[tool(...)]` method on the
 router in `harness/src/mcp.rs` — the 26th. That is enough to make it
@@ -359,13 +393,23 @@ become the tests.
 - **`implement` refuses with missing steps** — run `spec --root harness
   steps missing` and read the list. It should be empty before you
   implement; anything in it is a Gherkin step with no matching
-  definition.
+  definition. `spec --root harness steps generate` writes the stubs.
+- **`implement` refuses because it cannot tell which file** — your
+  steps are all still pending, so nothing names the production code.
+  Pass `--into src/mcp.rs`, or write a step body against the real
+  types and let the inference find it.
 
 ### Start over
 
 Throw the branch away. That is why you made one — it takes the reworded
 catalog, the feature file, the generated test, the implementation, and
 the Java-side changes with it in one go:
+
+> `git clean -fd` deletes untracked files outright. On a fresh clone
+> that is exactly the morning's output and nothing else. If you have
+> your own unpushed work under `harness/`, check `git clean -nd
+> harness/ smoke-test/` first — the `-n` lists what would go without
+> removing anything.
 
 ```bash
 # 1. everything the morning wrote, tracked and untracked alike
