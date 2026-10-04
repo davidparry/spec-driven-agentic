@@ -12,6 +12,8 @@ about 28 minutes.
 
 ```bash
 cd <repo>
+git switch trunk && git pull
+git switch -c talk-$(date +%Y%m%d)         # never demo on trunk
 scripts/preflight.sh                       # model, binary, toolchains
 spec --root harness validate               # must be valid: true
 spec --root harness refine HARNESS-013     # must report 10 findings
@@ -19,6 +21,14 @@ spec --root harness list                   # HARNESS-013 is the only pending one
 cargo test --manifest-path harness/Cargo.toml --test spec_completeness
 mvn -f smoke-test/pom.xml test -Dspec.binary=$(which spec)
 ```
+
+**Make the branch before anything else.** Every mutation of the next 28
+minutes — the reworded catalog, the new feature file, the generated
+test, the implementation, the Java-side bump — lands in the working
+tree. On a branch, giving the talk again is one `git branch -D`. On
+`trunk` it is an archaeology exercise, and the thing you will miss is
+the catalog, which leaves `refine HARNESS-013` clean on the first pass
+and kills the 9:10 beat.
 
 **The `-Dspec.binary` flag is not optional.** `LiveSpecServerTest` is
 annotated `@EnabledIfSystemProperty(named = "spec.binary", ...)`. Without
@@ -95,12 +105,25 @@ spec --root harness refine HARNESS-013 # clean: true
 ## 9:30 — the criteria become an executable scenario
 
 ```bash
-spec --root harness scenario add --feature tests/features/tool_coverage.feature --req HARNESS-013
+spec --root harness feature create --path tests/features/tool_coverage.feature --name "Criteria coverage"
+spec --root harness scenario generate HARNESS-013 --feature tests/features/tool_coverage.feature
 spec --root harness changes show
 ```
 
-The scenario is written **from the acceptance criteria** and tagged
-`@HARNESS-013`. Nobody re-typed the requirement into a test.
+`generate`, not `add`. `add` appends one scenario you have already
+written out step by step; `generate` is the one that reads the
+acceptance criteria and derives the scenarios from them — which is the
+whole point of the beat. The feature file has to exist first, but a
+staged file is readable by the next command, so there is no commit
+between these two.
+
+**This is the slow one.** About five minutes on the big local model, one
+model call. Have something to say while it runs: this is the natural
+place for the "who wrote the test" argument.
+
+Four scenarios come back, written **from the acceptance criteria** and
+tagged `@HARNESS-013` — one per criterion. Nobody re-typed the
+requirement into a test.
 
 ### This beat is yours
 
@@ -145,6 +168,20 @@ spec --root harness implement HARNESS-013
 
 What it is allowed to touch: no shell, no free-hand write. The
 implementation lands in staging.
+
+The preflight prints where the code will land, and it should say
+`src/mcp.rs`. Nothing declares that: the harness matches the
+requirement's own When/Then steps to the step definitions that bind
+them, follows those one hop into their helpers, and takes the production
+file those name through the most distinct symbols. Worth ten seconds on
+stage — it is the same "evidence, not configuration" argument the talk
+makes about the spec.
+
+Say the scope out loud, because the slide now promises it: what lands is
+**one `#[tool]` method** in `harness/src/mcp.rs`. That is a real tool
+over the protocol and nothing more — no `spec coverage` subcommand, no
+profile offering it to an agent, no prompt naming it. The homework slide
+after the close covers all three.
 
 ### This beat is yours
 
@@ -207,63 +244,81 @@ spec --root harness mcp call criteria_coverage --arg id=HARNESS-013
 Every acceptance criterion written at 9:10 has an asserting test. The
 morning's work grades itself.
 
+## 11:20 — hand them the rest of it
+
+One slide, and it is a confession: we shipped the tool, not the adoption.
+Point at the three gaps and say which one you would do first.
+
+```bash
+spec --root harness tools enable criteria_coverage --for status
+spec --root harness tools list --for status
+```
+
+That is the cheap one — no recompile, it persists in `.spec/config.toml`,
+and it demos in ten seconds if you have time. The other two are a
+`Command` arm in `main.rs` and four prompt edits
+(`[tool_rules]`, step 8 of `workflow.md`, `[advice]`, `[mcp]`). The
+follow-along doc spells out which callers to pick and, more usefully,
+which to skip — `implement` itself being the trap: give the implementing
+model a coverage oracle and it writes to the report instead of the test.
+
+The line that lands: *a registered tool that no profile offers and no
+prompt mentions is a tool nobody calls.*
+
 ## If it goes wrong
 
 - **The model stalls on `implement`.** Write the code by hand and keep
   talking. The point of the segment is the gates, not the generation.
-- **`refine` comes back clean on the first pass.** You are on the wrong
-  branch; HARNESS-013 should be the vague draft.
+- **`refine` comes back clean on the first pass.** A previous run's
+  reword survived. You branched from a dirty `trunk`, or you never reset
+  the last talk. `git checkout trunk -- harness/requirements/` fixes it
+  on the spot.
 - **`spec test` is slow.** The scoped filter should keep it to the one
   test binary. If it is running the whole suite, pass the filter
   explicitly rather than waiting.
-- **Reset to the stage state:** see below. `git checkout` alone is not
-  enough — the demo leaves two new files and a rebuilt binary behind.
+- **Reset to the stage state:** see below. Throwing the branch away is
+  not enough on its own — the TDD phase and the rebuilt binary live
+  outside git.
 
 ## Reset, to give the talk again
 
-The demo mutates tracked files, creates two untracked ones, writes TDD
-state, and reinstalls the binary. Undo all four, in this order.
+Three kinds of residue, and git only knows about the first.
 
 ```bash
-# 1. tracked edits: the reworded + implemented HARNESS-013, the
-#    criteria_coverage registration, and the whole Java-side 26 bump
-git checkout -- harness/ smoke-test/
+# 1. everything the demo wrote, tracked and untracked alike
+git switch trunk
+git branch -D talk-<date>
+git clean -fd harness/ smoke-test/
 
-# 2. files the demo created, which git checkout does not touch.
-#    Once the stage state is committed, prefer the catch-all:
-#      git clean -fd harness/ smoke-test/
-rm -f harness/tests/features/tool_coverage.feature \
-      harness/tests/harness_013_test.rs
+# 2. the TDD phase, staging, and cached model replies - all gitignored,
+#    so step 1 leaves them behind and the next run starts mid-cycle
+rm -rf harness/.spec/staged harness/.spec/state.json harness/.spec/cache
 
-# 3. staging and the TDD phase, or the next run starts mid-cycle
-rm -rf harness/.spec/staged harness/.spec/state.json
-
-# 4. the binary now serves 26 tools - put a 25-tool one back on PATH
+# 3. the binary on PATH now serves 26 tools - put a 25-tool one back
 cargo install --path harness --force
 ```
 
-Step 2 is only safe as `git clean -fd` once the stage state is
-committed; before that, `git clean` would take the catalog and the drift
-gate with it. The explicit `rm -f` is safe either way.
+Because the demo ran on its own branch, step 1 is the whole of the git
+side: the reworded catalog, the new feature file, the generated test,
+the implementation, and the Java-side 26 bump all go with the branch.
+`git clean` is safe here precisely *because* you are back on `trunk`
+with nothing of your own in the working tree — which is the other reason
+to make the branch before you walk on.
 
-The two named files are the ones the demo *always* creates. The
-implementation itself is normally edits to tracked files under
-`harness/src/` — `production_path` resolves to an existing source, and
-the model is shown the files and hands them back rewritten, so step 1
-reverts it. But `implement` stages whatever `{path, content}` pairs the
-model returns, and nothing stops it inventing a new module. After a run
-that went off-script, check `git status` for untracked files under
-`harness/src/` before you trust the reset.
-
-Step 4 is the one that is easy to forget and silently ruins the next
+Step 3 is the one that is easy to forget and silently ruins the next
 run: `mvn ... -Dspec.binary=$(which spec)` would stay red from the
-previous talk, and `refine HARNESS-013` would come back clean.
+previous talk, and the 10:50 beat would never fire.
 
 Confirm you are back at the starting state:
 
 ```bash
-spec mcp tools --json | python3 -c 'import sys,json;print(len(json.load(sys.stdin)))'   # 25
-spec --root harness refine HARNESS-013    # 10 findings
+git status --short                        # clean
+spec mcp tools | wc -l                    # 25
+spec --root harness refine HARNESS-013    # clean: false, 10 findings
 spec --root harness list                  # HARNESS-013 pending, 13 implemented
 mvn -f smoke-test/pom.xml test -Dspec.binary=$(which spec)   # green
 ```
+
+If `refine` comes back clean, the catalog survived the reset and the
+9:10 beat is dead — you are still on the talk branch, or you gave the
+talk on `trunk`.

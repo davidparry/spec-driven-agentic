@@ -1,0 +1,16 @@
+# spec harness configuration for the harness's own spec.
+#
+# The talk drives HARNESS-013 from this root, so the model and the
+# timeout are pinned here rather than inherited. Without this file the
+# demo picks up whatever model happens to be installed, which is how a
+# rehearsal ends up on a different model than the slides advertise.
+
+[llm]
+model = "qwen3.8-flash-next:125b-mlx"
+endpoint = "http://localhost:11434"
+# `spec scenario generate` against a 14-requirement spec runs long on a
+# local model; the default 300 cuts it off partway.
+timeout_seconds = 900
+# Identical requests reuse the cached response in .spec/cache/, so a
+# rehearsal run just before the talk makes the live run fast.
+cache_ttl_seconds = 600

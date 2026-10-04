@@ -528,6 +528,7 @@ spec --root harness test             # GREEN
       <ul class="small">
         <li>Seven tools for this step. No shell. No free-hand write. The attempt arrives as a <strong>reviewable diff</strong> or it does not arrive</li>
         <li>The logic is already in <code>domain/coverage.rs</code> — ported from the workshop's own grader. The agent is wiring a tool, not inventing an algorithm</li>
+        <li>What lands is <strong>one <code>#[tool]</code> method</strong> in <code>harness/src/mcp.rs</code> — the 26th. That is the whole scope today; the rest of the wiring is on the next slide</li>
       </ul>
     </section>
 
@@ -560,7 +561,28 @@ spec --root harness mcp call criteria_coverage --arg id=HARNESS-013
       <ul class="small">
         <li>The requirement cannot say <code>implemented</code> without a green bar <em>and</em> a scenario carrying its tag</li>
         <li>And now the drift gate covers 14 requirements instead of 13 — including this one's wording</li>
+        <li>Note the command: <code>mcp call</code>. There is no <code>spec coverage</code> yet — and that is deliberate</li>
       </ul>
+    </section>
+
+    <section data-track="tdd">
+      <h2>A tool, not yet a command — your homework</h2>
+      <p class="small">We built the <strong>tool</strong>. Adding a tool and adopting a tool are two different jobs, and we only had time for the first.</p>
+      <table class="small">
+        <tr><th>Already true</th><th>Still yours to do</th></tr>
+        <tr><td><code>spec mcp serve</code> answers with 26 tools — any MCP host can call it</td>
+            <td><strong>No agent is offered it.</strong> Profiles live in <code>domain/tool_profile.rs</code>; I would add it to <code>implement-advice</code>, <code>status</code>, and <code>ask</code></td></tr>
+        <tr><td><code>spec mcp call criteria_coverage --arg id=…</code> works today</td>
+            <td><strong>No prompt names it.</strong> <code>[tool_rules]</code> in <code>prompts/prompts.toml</code>, step 8 of <code>prompts/workflow.md</code>, and <code>[advice]</code>'s list of next commands</td></tr>
+        <tr><td>The Java smoke test plans for it, so CI stays honest</td>
+            <td><strong>No <code>spec coverage HARNESS-013</code>.</strong> That is a new arm on <code>Command</code> in <code>main.rs</code> plus a service</td></tr>
+      </table>
+      <p class="small">The cheapest of the three is one command — no recompile, it persists in <code>.spec/config.toml</code>:</p>
+      <pre><code class="language-bash" data-trim>
+spec --root harness tools enable criteria_coverage --for status
+spec --root harness tools list --for status      # it is in the profile now
+      </code></pre>
+      <blockquote>A registered tool that no profile offers and no prompt mentions is a tool nobody calls.</blockquote>
     </section>
 
     <section data-track="60">
