@@ -205,6 +205,31 @@ the refusal is a better story than a lucky guess:
 spec --root harness implement HARNESS-013 --into src/mcp.rs
 ```
 
+### Rehearse this beat, or it eats a third of the session
+
+`implement` against this crate measured **20m04s**. You cannot spend
+that on stage, and you must not try to fill it — so arrive with it
+already cached.
+
+Run the whole morning end to end beforehand. Identical requests are
+served from `.spec/cache/` without a model call, and `cache_ttl_seconds`
+in `harness/.spec/config.toml` is a day, so a rehearsal the night before
+makes the live run return in seconds. The cache key is the prompt: run
+the same commands in the same order, or you pay the twenty minutes in
+front of the room. Rehearse *to the end* — the 10:50 and 11:05 beats
+call the model too.
+
+Two ways this bites. If you clear `harness/.spec/cache` during cleanup
+you have thrown the rehearsal away, so do that only when you intend to
+rehearse again. And if the morning drifts — a scenario reworded, a
+`changes discard`, a different `--into` — the prompt changes and the
+cache misses. Have the decision ready: say the number out loud, kill it,
+and move to the 10:50 beat with the implementation you rehearsed.
+
+If it times out rather than answering, the model wanted longer than
+`timeout_seconds` under `[llm]` and everything generated so far is lost.
+That is 3600 here for this step alone.
+
 Say the scope out loud, because the slide now promises it: what lands is
 **one `#[tool]` method** in `harness/src/mcp.rs`. That is a real tool
 over the protocol and nothing more — no `spec coverage` subcommand, no
@@ -318,9 +343,15 @@ git switch trunk
 git branch -D talk-<date>
 git clean -fd harness/ smoke-test/
 
-# 2. the TDD phase, staging, and cached model replies - all gitignored,
-#    so step 1 leaves them behind and the next run starts mid-cycle
-rm -rf harness/.spec/staged harness/.spec/state.json harness/.spec/cache
+# 2. the TDD phase and staging - gitignored, so step 1 leaves them
+#    behind and the next run starts mid-cycle
+rm -rf harness/.spec/staged harness/.spec/state.json
+
+# 2b. the cached model replies - ONLY if you are rehearsing again
+#     afterwards. This is what makes the live run take seconds
+#     instead of twenty minutes; clearing it the morning of the talk
+#     means paying for implement on stage.
+rm -rf harness/.spec/cache
 
 # 3. the binary on PATH now serves 26 tools - put a 25-tool one back
 cargo install --path harness --force

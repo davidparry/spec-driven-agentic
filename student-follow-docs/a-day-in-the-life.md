@@ -158,10 +158,12 @@ The generated definitions are `todo!()` stubs that bind the project's
 own `SpecWorld`. They compile, they fail, and filling them in is the
 next person's job — which is exactly what RED means.
 
-> These two are the only slow steps of the morning. On a local model
-> expect `scenario generate` to take about five minutes and `unittest
-> generate` about two. They are one model call each — if a step returns
-> in a second, it was a cache hit from an earlier run, which is fine.
+> The model calls are the slow part of the morning. Measured against the
+> pinned local model: `scenario generate` about four minutes, `steps
+> generate` about one, `unittest generate` well under one — and
+> `implement`, at 10:15, twenty. If a step returns in a second it was a
+> cache hit from an earlier run, which is fine, and at 10:15 it is the
+> whole plan: see [the note there](#about-that-twenty-minutes).
 
 Note `scenario generate`, not `scenario add`. `add` appends one scenario
 you have already written, step by step; `generate` is the one that reads
@@ -229,6 +231,29 @@ spec --root harness implement HARNESS-013 --into src/mcp.rs
 Refusing is the point. A guess here writes a morning's work into an
 unrelated module and the bar still goes green on the tests that did not
 need it.
+
+### About that twenty minutes
+
+`implement` is the one step that sends the whole neighborhood of the
+change to the model and asks for working code back. Against this crate
+that measured 20m04s, which is a third of the session to sit and watch.
+
+So run the morning once before you need it. Identical requests are
+answered from `.spec/cache/` without calling the model at all, and the
+TTL in `harness/.spec/config.toml` is a day — so a rehearsal the night
+before makes every step of the real run return in seconds. The cache
+key is the prompt, so the replay only holds if you run the same
+commands in the same order: a different `--into`, an edited scenario,
+or a stray `changes discard` changes the prompt and you pay the twenty
+minutes again.
+
+Clear it with `rm -rf harness/.spec/cache` when you want the slow,
+honest version back.
+
+**If it times out instead of answering**, the model needed longer than
+`timeout_seconds` under `[llm]` and everything it had generated is
+gone. That ceiling is 3600 here for exactly this step; a project with
+more source in the neighborhood may need more again.
 
 **Scope check.** What lands here is one `#[tool(...)]` method on the
 router in `harness/src/mcp.rs` — the 26th. That is enough to make it
@@ -417,9 +442,13 @@ git switch trunk
 git branch -D my-morning
 git clean -fd harness/ smoke-test/
 
-# 2. the TDD phase, staging, and cached replies are gitignored,
-#    so step 1 leaves them behind and the next run starts mid-cycle
-rm -rf harness/.spec/staged harness/.spec/state.json harness/.spec/cache
+# 2. the TDD phase and staging are gitignored, so step 1 leaves them
+#    behind and the next run starts mid-cycle
+rm -rf harness/.spec/staged harness/.spec/state.json
+
+# 2b. the cached model replies - only if you want the slow, honest
+#     run back. Keeping them is what makes a second pass quick.
+rm -rf harness/.spec/cache
 
 # 3. if you reinstalled the binary at 10:50, put a 25-tool one back
 cargo install --path harness --force
