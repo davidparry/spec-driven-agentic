@@ -34,9 +34,15 @@ static CSHARP_DEF: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"\[(?:Given|When|Then|StepDefinition)\s*\(\s*@?"((?:[^"\\]|\\.)*)"\s*\)\]"#)
         .expect("valid regex")
 });
+/// Rust has two string forms and step definitions use both. A hashed raw
+/// string is the idiomatic way to write a regex containing quotes —
+/// `r#"^the agent may use "([^"]+)"$"#` — so its body has to be read to
+/// the closing `"#` rather than to the first quote inside it. Matching
+/// that alternative first keeps the plain branch from claiming the `r#`
+/// opener and truncating the pattern at the first embedded quote.
 static RUST_DEF: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r##"#\[(?:given|when|then)\s*\(\s*(?:(?:regex|expr)\s*=\s*)?r?#?"((?:[^"\\]|\\.)*)"#?\s*\)\]"##,
+        r##"#\[(?:given|when|then)\s*\(\s*(?:(?:regex|expr)\s*=\s*)?(?:r#+"(.*?)"#+|r?"((?:[^"\\]|\\.)*)")\s*\)\]"##,
     )
     .expect("valid regex")
 });
@@ -52,25 +58,53 @@ pub fn source_extension(language: Language) -> &'static str {
     }
 }
 
-/// Extract every step-definition pattern declared in one source file.
-pub fn extract_patterns(language: Language, source: &str) -> Vec<String> {
-    let regex = match language {
+/// How much of the code after a step definition to keep as its body. A
+/// step binds a line of Gherkin to a few calls; this is generous enough
+/// to catch them without parsing the language.
+const BODY_WINDOW: usize = 800;
+
+fn definition_regex(language: Language) -> &'static Regex {
+    match language {
         Language::Java => &JAVA_DEF,
         Language::JavaScript | Language::TypeScript => &JS_DEF,
         Language::DotNet => &CSHARP_DEF,
         Language::Rust => &RUST_DEF,
-    };
-    regex
+    }
+}
+
+/// Extract every step-definition pattern declared in one source file.
+pub fn extract_patterns(language: Language, source: &str) -> Vec<String> {
+    extract_definitions(language, source)
+        .into_iter()
+        .map(|(pattern, _)| pattern)
+        .collect()
+}
+
+/// Every step definition with the code that follows it.
+///
+/// The body is what tells you which part of the project a step reaches:
+/// a scenario saying `mcp call "coverage"` names no file, but the step
+/// that binds it constructs the server, and the server is the thing the
+/// behavior is missing from.
+pub fn extract_definitions(language: Language, source: &str) -> Vec<(String, &str)> {
+    definition_regex(language)
         .captures_iter(source)
-        .map(|c| {
-            unescape_literal(
-                c.iter()
+        .map(|captures| {
+            let pattern = unescape_literal(
+                captures
+                    .iter()
                     .skip(1)
                     .flatten()
                     .next()
                     .expect("one capture group matches")
                     .as_str(),
-            )
+            );
+            let after = &source[captures.get(0).expect("whole match").end()..];
+            let body = match after.char_indices().nth(BODY_WINDOW) {
+                Some((end, _)) => &after[..end],
+                None => after,
+            };
+            (pattern, body)
         })
         .collect()
 }
@@ -179,7 +213,7 @@ pub fn find_missing(features: &[FeatureDoc], patterns: &[String]) -> Vec<Missing
     missing
 }
 
-fn split_step(step: &str) -> (&str, &str) {
+pub fn split_step(step: &str) -> (&str, &str) {
     match step.split_once(' ') {
         Some((keyword, text)) => (keyword, text),
         None => (step, ""),
@@ -275,6 +309,26 @@ mod tests {
         assert_eq!(
             extract_patterns(Language::Rust, source),
             vec!["a calculator", "^the result is (\\d+)$"]
+        );
+    }
+
+    #[test]
+    fn a_hashed_raw_string_keeps_the_quotes_inside_its_pattern() {
+        // The bug this closes: the body was read to the first quote
+        // inside the raw string, so `^the agent may use ` was all that
+        // came back and every step it defines was reported missing.
+        let source = r######"
+            #[given(regex = r#"^the agent may use "([^"]+)"$"#)]
+            fn may_use(w: &mut W, names: String) {}
+            #[then(regex = r##"^the reply is "(.+)" exactly"##)]
+            fn reply(w: &mut W, text: String) {}
+        "######;
+        assert_eq!(
+            extract_patterns(Language::Rust, source),
+            vec![
+                r#"^the agent may use "([^"]+)"$"#,
+                r#"^the reply is "(.+)" exactly"#
+            ]
         );
     }
 
