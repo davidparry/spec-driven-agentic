@@ -109,10 +109,10 @@ As a developer closing out a requirement, I want each acceptance criterion repor
 **Acceptance criteria**
 
 ```
-Given a requirement whose every criterion is matched by a tagged scenario and an asserting test, when coverage is requested, then the verdict is "covered"
-Given a requirement with 3 criteria of which 1 is matched by no asserting test, when coverage is requested, then 1 criterion is reported uncovered
-Given a requirement id that is absent from the spec, when coverage is requested, then the reply is an error naming the unknown id
-Given a requirement carrying 0 acceptance criteria, when coverage is requested, then the verdict is "uncovered"
+Given a requirement whose every criterion is matched by a tagged scenario and an asserting test, when the criteria_coverage MCP tool is called with its id, then the verdict is "covered"
+Given a requirement with 3 criteria of which 1 is matched by no asserting test, when the criteria_coverage MCP tool is called with its id, then 1 criterion is reported uncovered
+Given a requirement id that is absent from the spec, when the criteria_coverage MCP tool is called with it, then the reply is an error naming the unknown id
+Given a requirement carrying 0 acceptance criteria, when the criteria_coverage MCP tool is called with its id, then the verdict is "uncovered"
 ```
 
 ```bash
@@ -161,9 +161,10 @@ next person's job — which is exactly what RED means.
 > The model calls are the slow part of the morning. Measured against the
 > pinned local model: `scenario generate` about four minutes, `steps
 > generate` about one, `unittest generate` well under one — and
-> `implement`, at 10:15, twenty. If a step returns in a second it was a
-> cache hit from an earlier run, which is fine, and at 10:15 it is the
-> whole plan: see [the note there](#about-that-twenty-minutes).
+> `implement`, at 10:15, anywhere from twenty minutes to an hour per
+> attempt. If a step returns in a second it was a cache hit from an
+> earlier run, which is fine, and at 10:15 it is the whole plan: see
+> [the note there](#this-step-is-slow-and-it-may-not-succeed).
 
 Note `scenario generate`, not `scenario add`. `add` appends one scenario
 you have already written, step by step; `generate` is the one that reads
@@ -232,23 +233,30 @@ Refusing is the point. A guess here writes a morning's work into an
 unrelated module and the bar still goes green on the tests that did not
 need it.
 
-### About that twenty minutes
+### This step is slow, and it may not succeed
 
-`implement` is the one step that sends the whole neighborhood of the
-change to the model and asks for working code back. Against this crate
-that measured 20m04s, which is a third of the session to sit and watch.
+`implement` sends the whole neighborhood of the change to the model and
+asks for working code back. Against this crate, three measured
+attempts took 20, 36 and 57 minutes, and the two that returned code
+produced Rust that did not compile — once a `Vec<String>` used as a
+`String`, once a syntax error. Nothing was lost either time: the build
+caught it, the bar stayed RED, and the next attempt is briefed with the
+failure. That loop is the system working. It is also not something to
+sit through.
 
-So run the morning once before you need it. Identical requests are
-answered from `.spec/cache/` without calling the model at all, and the
-TTL in `harness/.spec/config.toml` is a day — so a rehearsal the night
-before makes every step of the real run return in seconds. The cache
-key is the prompt, so the replay only holds if you run the same
-commands in the same order: a different `--into`, an edited scenario,
-or a stray `changes discard` changes the prompt and you pay the twenty
-minutes again.
+So run the morning before you need it, and keep the result. Identical
+requests are answered from `.spec/cache/` without calling the model at
+all, and the TTL in `harness/.spec/config.toml` is a day, so a
+rehearsal the night before replays in seconds. Two things to know about
+that cache: the key is the prompt, so a different `--into`, an edited
+scenario, or a stray `changes discard` misses it and you pay full price
+again; and expired entries are swept on the next write, so raising the
+TTL afterwards does not bring back a run you have already let go stale.
 
-Clear it with `rm -rf harness/.spec/cache` when you want the slow,
-honest version back.
+If rehearsal never gives you an attempt that compiles, that is the
+honest answer for this model on this requirement, and the thing to do
+is implement it yourself and show the diff. Watching a model fail three
+times is a worse use of the hour than reading good code out loud.
 
 **If it times out instead of answering**, the model needed longer than
 `timeout_seconds` under `[llm]` and everything it had generated is

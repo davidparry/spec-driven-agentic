@@ -89,11 +89,19 @@ As a developer closing out a requirement, I want each acceptance criterion repor
 **Acceptance criteria**
 
 ```
-Given a requirement whose every criterion is matched by a tagged scenario and an asserting test, when coverage is requested, then the verdict is "covered"
-Given a requirement with 3 criteria of which 1 is matched by no asserting test, when coverage is requested, then 1 criterion is reported uncovered
-Given a requirement id that is absent from the spec, when coverage is requested, then the reply is an error naming the unknown id
-Given a requirement carrying 0 acceptance criteria, when coverage is requested, then the verdict is "uncovered"
+Given a requirement whose every criterion is matched by a tagged scenario and an asserting test, when the criteria_coverage MCP tool is called with its id, then the verdict is "covered"
+Given a requirement with 3 criteria of which 1 is matched by no asserting test, when the criteria_coverage MCP tool is called with its id, then 1 criterion is reported uncovered
+Given a requirement id that is absent from the spec, when the criteria_coverage MCP tool is called with it, then the reply is an error naming the unknown id
+Given a requirement carrying 0 acceptance criteria, when the criteria_coverage MCP tool is called with its id, then the verdict is "uncovered"
 ```
+
+Every criterion names the tool on purpose, and it is worth a sentence on
+stage. An earlier draft said "when coverage is requested" and the
+implementation that came back was a plain `requirement_coverage()`
+function — correct against those criteria, and useless to the 10:50
+beat, because nothing had asked for a tool. The criteria are the
+contract. If the 26th tool is what you want to show, the criteria have
+to say so.
 
 ```bash
 spec --root harness reword HARNESS-013
@@ -205,26 +213,33 @@ the refusal is a better story than a lucky guess:
 spec --root harness implement HARNESS-013 --into src/mcp.rs
 ```
 
-### Rehearse this beat, or it eats a third of the session
+### Do not run this live without a rehearsed result in the cache
 
-`implement` against this crate measured **20m04s**. You cannot spend
-that on stage, and you must not try to fill it — so arrive with it
-already cached.
+Three measured attempts against this crate took **20, 36 and 57
+minutes**, and the two that returned code did not compile — a
+`Vec<String>` used as a `String`, then a syntax error. Assume this step
+cannot be performed in front of the room.
 
-Run the whole morning end to end beforehand. Identical requests are
-served from `.spec/cache/` without a model call, and `cache_ttl_seconds`
-in `harness/.spec/config.toml` is a day, so a rehearsal the night before
-makes the live run return in seconds. The cache key is the prompt: run
-the same commands in the same order, or you pay the twenty minutes in
-front of the room. Rehearse *to the end* — the 10:50 and 11:05 beats
-call the model too.
+Rehearse the whole morning beforehand and keep the cache. Identical
+requests are served from `.spec/cache/` without a model call, and
+`cache_ttl_seconds` in `harness/.spec/config.toml` is a day, so a
+rehearsal the night before replays in seconds. Rehearse *to the end* —
+10:50 and 11:05 call the model too. Two ways it bites: clearing
+`harness/.spec/cache` during cleanup throws the rehearsal away, and any
+drift from the rehearsed command order changes the prompt and misses.
 
-Two ways this bites. If you clear `harness/.spec/cache` during cleanup
-you have thrown the rehearsal away, so do that only when you intend to
-rehearse again. And if the morning drifts — a scenario reworded, a
-`changes discard`, a different `--into` — the prompt changes and the
-cache misses. Have the decision ready: say the number out loud, kill it,
-and move to the 10:50 beat with the implementation you rehearsed.
+**Go on stage knowing which version you are giving.** If rehearsal
+produced an attempt that compiles and goes green, the cache replays it
+and the beat is live. If it did not — which is the likelier outcome on
+a local model — implement it yourself beforehand, stage it, and run
+this beat as `changes show` → `changes commit` → green. Say that out
+loud; "the model needed three tries and I wrote it in the end" is a
+truer story about agentic TDD than a green bar nobody saw earned, and
+the guard rails you have been demonstrating all morning are exactly
+what made the failure safe.
+
+What you must not do is start a model call you cannot time-box and
+improvise over it.
 
 If it times out rather than answering, the model wanted longer than
 `timeout_seconds` under `[llm]` and everything generated so far is lost.
