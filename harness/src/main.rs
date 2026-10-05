@@ -51,7 +51,7 @@ use spec_harness::application::tool_service::ToolService;
 use spec_harness::bootstrap::{prompt_language, refresh_project_memory, settle_project_memory};
 use spec_harness::deliver::{DEFAULT_ATTEMPTS, Deliver, DeliverOptions, parse_target};
 use spec_harness::domain::config_report::{ConfigSource, LLM_MODEL_KEY};
-use spec_harness::domain::decision::Transition;
+use spec_harness::domain::decision::{DECISION_PLANE_HELP, Transition};
 use spec_harness::domain::language::Language;
 use spec_harness::domain::mcp_registry::ServerSpec;
 use spec_harness::domain::prompts::ask_prompt;
@@ -67,6 +67,40 @@ use spec_harness::ports::{
 use spec_harness::repl::{Ending, is_greenfield_start, offer_greenfield, run_shell};
 use spec_harness::wiring::{self, DynLlm};
 use spec_harness::workspace::{SPEC_PATH, detect_project_layout, project_layout};
+
+/// `spec refine --help`.
+///
+/// Refinement judges automatically, so the help has to say both what
+/// turns that on and what turns it off — a reader who never configured
+/// a decision model should be able to tell, from this text alone, that
+/// none of it is happening to them.
+fn refine_help() -> String {
+    format!(
+        "Review one requirement's wording for quality (refine_requirement).\n\n\
+         The findings come from deterministic rules and are the whole of this \
+         command until a decision model is configured with `spec judge use \
+         <model>`. With one configured, each criterion is also judged.\n\n\
+         {DECISION_PLANE_HELP}\n\n\
+         Set `mode = \"off\"` under `[decision]` to keep the model configured \
+         for `spec judge` while this command stops asking."
+    )
+}
+
+/// `spec judge criterion --help`.
+///
+/// The one judgment a human asks for by name, which is why it answers
+/// even under `mode = "off"` and why that exception is stated here
+/// rather than left to be discovered.
+fn judge_criterion_help() -> String {
+    format!(
+        "Judge one acceptance criterion and show the typed answer.\n\n\
+         {DECISION_PLANE_HELP}\n\n\
+         This command runs whatever `[decision] mode` says, including \
+         `off`: that setting suppresses the automatic judgments inside \
+         `spec refine`, not one a human typed. It reports and never gates — \
+         the exit code is about whether the question could be put at all."
+    )
+}
 
 #[derive(Parser)]
 #[command(
@@ -205,7 +239,11 @@ enum SpecCommand {
     /// Validate the requirements spec on disk (validate_spec)
     Validate,
     /// Review one requirement's wording for quality (refine_requirement)
-    Refine { req_id: String },
+    #[command(long_about = refine_help())]
+    Refine {
+        /// The requirement to review, e.g. REQ-003
+        req_id: String,
+    },
     /// Reword an existing requirement (staged). Flags skip the wizard.
     Reword {
         req_id: String,
@@ -412,6 +450,7 @@ enum JudgeCommand {
     /// never llm.model)
     Use { model_name: String },
     /// Judge one acceptance criterion and show the typed answer
+    #[command(long_about = judge_criterion_help())]
     Criterion {
         /// A requirement id whose criteria are judged, e.g. REQ-003.
         /// Omit when using --text.
@@ -419,6 +458,7 @@ enum JudgeCommand {
         /// Judge this wording instead of a requirement's criteria
         #[arg(long, conflicts_with = "req_id")]
         text: Option<String>,
+        /// Print the whole judgment record as JSON
         #[arg(long)]
         json: bool,
     },

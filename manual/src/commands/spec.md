@@ -307,6 +307,19 @@ than a verdict:
 
 Those keys are absent entirely until a decision model is configured.
 
+The question is `measurable/v1`: could a test check this criterion with
+one unambiguous result? The probability is read against a decision band
+of **0.80** — at or above reads `HOLDS`, at or below `0.20` reads
+`FAILS`, and anything between is `INCONCLUSIVE` and used for nothing.
+That band is a dead zone, not an accuracy score. The **measured
+accuracy**, against the 32-criterion labelled set in
+`tests/decision_live.rs`, is 0 misses, 1 false alarm and 3 left unsure.
+Both numbers, and why they are different in kind, are in
+[`spec judge`](judge.md#how-well-does-it-work).
+
+To keep a decision model configured for `spec judge` while this command
+stops asking, set `mode = "off"` under `[decision]`.
+
 ---
 
 ## spec reword

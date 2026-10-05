@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-1e5fb135.js";
+            window.path_to_searchindex_js = "../searchindex-f5fc82f3.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-2ab172c3.js"></script>
@@ -411,6 +411,17 @@ than a verdict:</p>
 }
 </code></pre>
 <p>Those keys are absent entirely until a decision model is configured.</p>
+<p>The question is <code>measurable/v1</code>: could a test check this criterion with
+one unambiguous result? The probability is read against a decision band
+of <strong>0.80</strong> — at or above reads <code>HOLDS</code>, at or below <code>0.20</code> reads
+<code>FAILS</code>, and anything between is <code>INCONCLUSIVE</code> and used for nothing.
+That band is a dead zone, not an accuracy score. The <strong>measured
+accuracy</strong>, against the 32-criterion labelled set in
+<code>tests/decision_live.rs</code>, is 0 misses, 1 false alarm and 3 left unsure.
+Both numbers, and why they are different in kind, are in
+<a href="judge.html#how-well-does-it-work"><code>spec judge</code></a>.</p>
+<p>To keep a decision model configured for <code>spec judge</code> while this command
+stops asking, set <code>mode = "off"</code> under <code>[decision]</code>.</p>
 <hr>
 <h2 id="spec-reword"><a class="header" href="#spec-reword">spec reword</a></h2>
 <p>Reword an existing backlog item (staged). Interactive wizard is the

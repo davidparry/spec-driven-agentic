@@ -59,8 +59,9 @@ output quality is not. See [Ollama model](../harness/README.md#ollama-model).
 
 Optionally, and separately from the model above, a *decision* model lets
 `refine_requirement` carry a judgment on whether each acceptance
-criterion is measurable. It needs Ollama 0.35+ and nothing on this page
-depends on it:
+criterion is measurable. It needs Ollama 0.35+ and a `spec` built from
+this repository (`cargo install --path harness`), because `spec judge`
+landed after `v0.7.0` was tagged. Nothing on this page depends on it:
 
 ```bash
 ollama pull nimble
@@ -126,7 +127,7 @@ This repo already ships the server registration at
 There is no `--root` in those args, so `spec` uses the current directory.
 **Launch pi from the repository root** or the server will serve the wrong
 project. `spec` must be on PATH (`cargo install --path harness`) and must
-report **0.5.5 or newer** — check with `spec --version`.
+report **0.7.0 or newer** — check with `spec --version`.
 
 Now start pi with its own tools switched off:
 
@@ -240,7 +241,7 @@ Continue with [harness-path.md](harness-path.md).
 | Symptom | Cause |
 | --- | --- |
 | `/mcp` shows no servers | pi was started outside the repo root, or the project was not trusted — restart with `--approve` |
-| Tools listed but every call errors | `spec` is not on PATH; check `spec --version` reports 0.5.5 or newer |
+| Tools listed but every call errors | `spec` is not on PATH; check `spec --version` reports 0.7.0 or newer |
 | Model missing from `/model` | No auth configured for the provider — keep the placeholder `apiKey` in `models.json` |
 | Tool calls vanish mid-stream | Ollama's OpenAI-compat shim drops `tool_calls` when streaming; use a tool-capable model and a current Ollama |
 | Server serves the wrong project | No `--root` in `.pi/mcp.json`; `cd` to the repository root first |

@@ -67,10 +67,13 @@ list of bare commands, one per step.
 
 You need:
 
-- **`spec` on PATH.** Check with `spec --version`; you want **0.5.5 or
-  newer**, the first release that prints its `nextStep` advice as commands
-  you can paste rather than as the tool names the MCP server uses — which
-  is the dialect every reply on this page is quoted in. Install with
+- **`spec` on PATH.** Check with `spec --version`; you want **0.7.0 or
+  newer**. 0.5.5 was the first release that prints its `nextStep` advice as
+  commands you can paste rather than as the tool names the MCP server uses
+  — which is the dialect every reply on this page is quoted in — but the
+  floor is 0.7.0, because this page reads and writes `.spec/config.toml`
+  and the `.spec/` directory replaced the flat `.spec.toml` in 0.6.0.
+  Install with
   `cargo install --path harness` from the repository root, or use a GitHub
   release binary, or `harness/target/release/spec`.
 - **Java 21+** (`java -version`)
@@ -1774,6 +1777,10 @@ git branch -D spec-gates
 About ten minutes, and the only exercise here that needs a second model
 pulled. Skip it freely; nothing else depends on it.
 
+It also needs a `spec` built from this repository — `cargo install
+--path harness`. `spec judge` landed after `v0.7.0` was tagged, so the
+published binary you have been using up to here does not answer it.
+
 Extra B showed the wording review refusing five things about a story.
 Those rules are fixed, which is why the reply is byte-identical every
 time. It is also why they can be fooled.
@@ -1954,9 +1961,18 @@ echo "exit: $?"
 ```
 
 ```text
-Error: decision model 'not-pulled:9b' is not installed - pull it first (e.g. `ollama pull not-pulled:9b`)
+Error: Decision model 'not-pulled:9b' cannot answer decisions here - install it to continue:
+    ollama pull not-pulled:9b
+or choose one already installed:
+    spec judge use nimble:latest
+installed: nimble:latest
 exit: 1
 ```
+
+That check runs before the request, not after it: `spec judge` is the
+one command whose whole purpose is a judgment, so it confirms a model
+can answer before paying for a round trip, and names the command that
+fixes it either way.
 
 Then stop Ollama (`pkill ollama`, or point `endpoint` under `[decision]`
 at a port with nothing on it) and run `spec refine REQ-007` again:

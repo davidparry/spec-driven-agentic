@@ -44,6 +44,35 @@ Feature: Local decision model judgments
     And the refinement carries a judgment for 1 criterion
     And the judgment action is "CONTINUE"
 
+  # `off` means the workflow asks nothing of its own accord, and that has
+  # to hold on every surface that judges automatically rather than only
+  # the one that happened to check it first. The endpoint here is a
+  # closed port: a judgment that was asked for would fail against it, so
+  # a clean refinement is proof the question was never put.
+  Scenario: The MCP refinement tool asks nothing when judgment is off
+    Given the decision model is unreachable
+    And a decision model "nimble:test" is configured
+    And the decision mode is "off"
+    And a requirement "REQ-007" with story "As a user, I want sums so that totals come from one input."
+    And the requirement has criterion "Given a request, when it is served, then the response completes before the user notices"
+    When the requirement "REQ-007" is refined by the MCP tool
+    Then the refinement findings are unchanged by the judgment
+    And the refinement carries no judgment
+    And the refinement notes nothing about the decision model
+
+  # The same tool with judgment left on, to show the scenario above is
+  # the mode talking and not a step that quietly does nothing.
+  Scenario: The MCP refinement tool judges when the mode allows it
+    Given a decision model "nimble:test" is configured
+    And the decision mode is "advisory"
+    And the decision model answers "measurable" with the probability 0.04
+    And a requirement "REQ-007" with story "As a user, I want fast replies so that the page feels alive."
+    And the requirement has criterion "Given a request, when it is served, then the response completes before the user notices"
+    When the requirement "REQ-007" is refined by the MCP tool
+    Then the refinement findings are unchanged by the judgment
+    And the refinement carries a judgment for 1 criterion
+    And the judgment action is "CONTINUE"
+
   Scenario: An unreachable decision model leaves the refiner's verdict exactly as it was
     Given the decision model is unreachable
     And the decision mode is "advisory"

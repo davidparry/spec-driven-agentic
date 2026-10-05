@@ -492,7 +492,7 @@ spec --root harness show HARNESS-013
     <section data-track="tdd">
       <h2>9:30 — the criteria become the tests</h2>
       <pre><code class="language-bash" data-trim>
-spec --root harness scenario add  --feature tests/features/tool_coverage.feature --req HARNESS-013
+spec --root harness scenario generate HARNESS-013 --feature tests/features/tool_coverage.feature
 spec --root harness unittest generate HARNESS-013
 spec --root harness changes show     # ← yours: read it before it lands
 spec --root harness changes commit

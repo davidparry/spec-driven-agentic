@@ -138,6 +138,10 @@ Only if you set it up before walking on. Skip freely — nothing later
 refers to it. Worth doing for a room that keeps asking whether a model
 could do the reviewing.
 
+Setting it up means a `spec` built from this repository, not the
+published release: `spec judge` landed after `v0.7.0` was tagged. Check
+with `spec judge models` before the session rather than on stage.
+
 The wording review you just ran is a fixed rule set, and it has a hole.
 One rule asks whether the clause after `then` *looks* concrete: a
 number, a quoted value, a named error. Any number satisfies it:

@@ -63,6 +63,33 @@ pub const MIN_CRITERIA: usize = 2;
 /// and a project is expected to re-measure it against its own wording.
 pub const DEFAULT_MIN_CONFIDENCE: f64 = 0.80;
 
+/// What every surface that reaches the decision model tells the user.
+///
+/// One string rather than three, because the alternative is three
+/// copies of two numbers that must never disagree. The numbers are
+/// different in kind and the wording says so: the threshold is a dead
+/// band around an answer, while the hit rate is the evaluation result.
+/// Ollama's own documentation is explicit that its confidence figure is
+/// not calibrated correctness, so presenting `0.80` as "80% accurate"
+/// would be wrong.
+///
+/// The figures come from `tests/decision_live.rs`; re-run it after any
+/// change to the wording in `prompts/prompts.toml` and update both
+/// places together.
+pub const DECISION_PLANE_HELP: &str = "\
+Each acceptance criterion is put to the model as the question \
+`measurable/v1`: could a test check this with one unambiguous result? \
+The reply is a probability read against a decision band of 0.80 - at or \
+above reads HOLDS, at or below 0.20 reads FAILS, and anything between \
+is INCONCLUSIVE and used for nothing.
+
+That band is a dead zone, not an accuracy score. Measured accuracy, \
+against the 32-criterion labelled set in tests/decision_live.rs: 0 \
+misses, 1 false alarm, 3 left unsure.
+
+A judgment is advice about wording. It never changes `findings`, \
+`clean`, a test result, or whether a requirement is implemented.";
+
 /// Whether judgments run at all, and whether they may refuse work.
 ///
 /// `Advisory` is the default because a probability is not a gate until

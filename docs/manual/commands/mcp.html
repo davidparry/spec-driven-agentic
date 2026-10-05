@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-1e5fb135.js";
+            window.path_to_searchindex_js = "../searchindex-f5fc82f3.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-2ab172c3.js"></script>
@@ -312,6 +312,38 @@ is <strong>template-only</strong> (<code>source: "template"</code>).</p>
 </tbody>
 </table>
 </div>
+<h2 id="the-one-tool-that-calls-a-decision-model"><a class="header" href="#the-one-tool-that-calls-a-decision-model">The one tool that calls a decision model</a></h2>
+<p><code>refine_requirement</code> is the only tool here that asks anything of a
+model, and it does so only when a <a href="judge.html">decision model</a> is
+configured. The other 24 never call one.</p>
+<p>When it does, each acceptance criterion is put to that model as the
+question <code>measurable/v1</code> — could a test check this with one unambiguous
+result? — and the reply gains <code>judgments</code>, <code>judgmentAdvisories</code> and
+<code>judgmentAction</code>. Those keys are absent entirely otherwise, which is the
+compatibility promise: a host reading this tool today sees no change
+until someone opts in.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th></th><th>Value</th><th>What it is</th></tr>
+</thead>
+<tbody>
+<tr><td>Decision band</td><td><strong>0.80</strong></td><td>The probability needed before an answer counts as a verdict. At or above reads <code>HOLDS</code>, at or below <code>0.20</code> reads <code>FAILS</code>, between is <code>INCONCLUSIVE</code> and used for nothing. Not an accuracy figure</td></tr>
+<tr><td>Measured accuracy</td><td><strong>0 misses, 1 false alarm, 3 unsure</strong></td><td>The result over a 32-criterion labelled set at that band — see <a href="judge.html#how-well-does-it-work"><code>spec judge</code></a></td></tr>
+</tbody>
+</table>
+</div>
+<p>Two rules hold whatever the project configured:</p>
+<ul>
+<li><strong>It reports and never gates.</strong> Even where <code>[decision] mode = "enforce"</code> would make the CLI exit nonzero, this tool stays advisory.
+An exit code is something a human watches; a tool reply an agent reads
+is not the place to stop a workflow.</li>
+<li><strong><code>mode = "off"</code> stops it asking.</strong> The model stays configured for
+<code>spec judge</code>, which a human types, while automatic judgments —
+including this tool’s — go quiet.</li>
+</ul>
+<p><code>clean</code> and <code>findings</code> come from the deterministic rules either way. A
+judgment is advice about wording, never a verdict on the code.</p>
 <h2 id="command_run-the-guarded-command-line"><a class="header" href="#command_run-the-guarded-command-line">command_run: the guarded command line</a></h2>
 <p><code>command_run</code> lets an agent run one dev-tool command during the
 implementation phase — building, compiling, or installing what the

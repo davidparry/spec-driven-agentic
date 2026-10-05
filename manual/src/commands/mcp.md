@@ -144,6 +144,37 @@ is **template-only** (`source: "template"`).
 | `project_inspect` | [`spec inspect`](inspect.md) |
 | `command_run` | — (MCP and the `implement` profile; see below) |
 
+## The one tool that calls a decision model
+
+`refine_requirement` is the only tool here that asks anything of a
+model, and it does so only when a [decision model](judge.md) is
+configured. The other 24 never call one.
+
+When it does, each acceptance criterion is put to that model as the
+question `measurable/v1` — could a test check this with one unambiguous
+result? — and the reply gains `judgments`, `judgmentAdvisories` and
+`judgmentAction`. Those keys are absent entirely otherwise, which is the
+compatibility promise: a host reading this tool today sees no change
+until someone opts in.
+
+| | Value | What it is |
+| --- | --- | --- |
+| Decision band | **0.80** | The probability needed before an answer counts as a verdict. At or above reads `HOLDS`, at or below `0.20` reads `FAILS`, between is `INCONCLUSIVE` and used for nothing. Not an accuracy figure |
+| Measured accuracy | **0 misses, 1 false alarm, 3 unsure** | The result over a 32-criterion labelled set at that band — see [`spec judge`](judge.md#how-well-does-it-work) |
+
+Two rules hold whatever the project configured:
+
+- **It reports and never gates.** Even where `[decision] mode =
+  "enforce"` would make the CLI exit nonzero, this tool stays advisory.
+  An exit code is something a human watches; a tool reply an agent reads
+  is not the place to stop a workflow.
+- **`mode = "off"` stops it asking.** The model stays configured for
+  `spec judge`, which a human types, while automatic judgments —
+  including this tool's — go quiet.
+
+`clean` and `findings` come from the deterministic rules either way. A
+judgment is advice about wording, never a verdict on the code.
+
 ## command_run: the guarded command line
 
 `command_run` lets an agent run one dev-tool command during the

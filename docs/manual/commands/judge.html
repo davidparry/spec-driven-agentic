@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-1e5fb135.js";
+            window.path_to_searchindex_js = "../searchindex-f5fc82f3.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-2ab172c3.js"></script>
@@ -419,6 +419,10 @@ someone opts in.</p>
 <p>The MCP reply always reports and never gates, even in a project
 configured to enforce. An exit code is a thing a human watches; a tool
 reply an agent reads is not the place to stop a workflow.</p>
+<p><code>mode = "off"</code> does reach this tool, though. It judges on its own
+initiative rather than because anyone typed a command, so it is one of
+the surfaces that goes quiet — the reply carries the deterministic
+findings and no judgment keys, exactly as if no model were configured.</p>
 <hr>
 <h2 id="the-decision-configuration-block"><a class="header" href="#the-decision-configuration-block">The [decision] configuration block</a></h2>
 <pre><code class="language-toml">[decision]
@@ -438,7 +442,7 @@ somewhere else.</p>
 <tr><th>Mode</th><th>What a judgment does</th></tr>
 </thead>
 <tbody>
-<tr><td><code>off</code></td><td>Nothing is asked. <code>spec judge</code> still works, because a human typed it</td></tr>
+<tr><td><code>off</code></td><td>Nothing is asked automatically — not by <code>spec refine</code>, and not by the <code>refine_requirement</code> MCP tool. <code>spec judge</code> still answers, because a human typed it</td></tr>
 <tr><td><code>advisory</code></td><td><strong>The default.</strong> The answer is reported beside the deterministic result and changes nothing</td></tr>
 <tr><td><code>enforce</code></td><td>A <code>FAILS</code> verdict exits nonzero asking for <code>REWORK</code>; an <code>INCONCLUSIVE</code> one asks to <code>ESCALATE</code> to a human. A failed request is an error, never an approval</td></tr>
 </tbody>
@@ -473,6 +477,21 @@ cargo test --test decision_live -- --ignored --nocapture
 threshold sweep, so you can see where the model and the labels disagree
 and judge for yourself.</p>
 <h3 id="what-it-scores"><a class="header" href="#what-it-scores">What it scores</a></h3>
+<p>Two numbers get quoted about this question, and they are not the same
+kind of thing. Keeping them apart is the whole point of the table:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th></th><th>Value</th><th>What it is</th></tr>
+</thead>
+<tbody>
+<tr><td>Decision band</td><td><strong>0.80</strong></td><td>A policy input. The probability needed before an answer counts as a verdict at all; <code>1 - 0.80 = 0.20</code> is its mirror. Not a correctness figure — Ollama’s own documentation says its confidence is not calibrated correctness</td></tr>
+<tr><td>Measured accuracy</td><td><strong>0 misses, 1 false alarm, 3 unsure</strong></td><td>The evaluation result over the 32 labelled criteria, at that band</td></tr>
+</tbody>
+</table>
+</div>
+<p>“Misses” are the direction that matters: vague wording waved through as
+measurable. There are none.</p>
 <p>Against <code>nimble:latest</code> at the shipped threshold, nothing vague is
 judged measurable — including all eight criteria written to look
 finished, one of which is a direct prompt-injection attempt.</p>

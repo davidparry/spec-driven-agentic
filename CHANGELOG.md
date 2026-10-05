@@ -138,6 +138,27 @@
   server outright. The request now runs on the blocking pool, and the
   service is built where it is used rather than on the runtime thread.
 
+- `[decision] mode = "off"` now reaches `refine_requirement` over MCP.
+  It stopped `spec refine` asking and was never applied to the tool, so
+  a project that had switched judgment off still had every criterion
+  sent to the model by any agent calling the tool — the one surface
+  where nobody is watching an exit code to notice.
+
+  The guard is not inside the function that asks. `spec judge criterion`
+  reaches the model through that same function and is *supposed* to
+  answer under `off`, because a human typed it; putting the check there
+  would have broken the one command whose entire purpose is a judgment.
+  So the distinction is not which function runs but who asked, and an
+  automatic caller now says so by taking its service from
+  `DecisionService::when_asking`, which hands back nothing when a
+  project has turned judgment off. `off` means no questions are asked
+  on its own initiative, which is what the setting always said.
+
+  Proven the way a silent request has to be: the conformance test points
+  the tool at a closed port, so a judgment that was still being asked
+  fails loudly rather than passing quietly. Removing the fix makes it
+  report the connection it should never have attempted.
+
 - `spec implement` refuses a reply that would destroy the file it is
   replacing, rather than staging it for `changes commit` to apply.
 

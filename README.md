@@ -2,11 +2,11 @@
 
 [![CI](https://github.com/davidparry/spec-driven-agentic/actions/workflows/ci.yml/badge.svg?branch=trunk)](https://github.com/davidparry/spec-driven-agentic/actions/workflows/ci.yml)
 [![Release](https://github.com/davidparry/spec-driven-agentic/actions/workflows/release.yml/badge.svg)](https://github.com/davidparry/spec-driven-agentic/actions/workflows/release.yml)
-[![spec harness](https://img.shields.io/github/v/release/davidparry/tdd-bdd-agentic?label=spec%20harness)](https://github.com/davidparry/spec-driven-agentic/releases/latest)
-[![Harness coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdavidparry%2Ftdd-bdd-agentic%2Fbadges%2Fcoverage.json)](https://github.com/davidparry/spec-driven-agentic/actions/workflows/ci.yml)
+[![spec harness](https://img.shields.io/github/v/release/davidparry/spec-driven-agentic?label=spec%20harness)](https://github.com/davidparry/spec-driven-agentic/releases/latest)
+[![Harness coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdavidparry%2Fspec-driven-agentic%2Fbadges%2Fcoverage.json)](https://github.com/davidparry/spec-driven-agentic/actions/workflows/ci.yml)
 [![Java coverage gate](https://img.shields.io/badge/JaCoCo-100%25%20gate-brightgreen)](pom.xml)
 [![Quality gates](https://img.shields.io/badge/SpotBugs%20%7C%20PMD%20%7C%20clippy-enforced-blue)](.github/workflows/ci.yml)
-[![License: AGPL-3.0](https://img.shields.io/github/license/davidparry/tdd-bdd-agentic)](LICENSE)
+[![License: AGPL-3.0](https://img.shields.io/github/license/davidparry/spec-driven-agentic)](LICENSE)
 
 > **Site:** [https://davidparry.github.io/spec-driven-agentic/](https://davidparry.github.io/spec-driven-agentic/)
 > Install `spec`, download binaries, open the talk, and read the
@@ -25,7 +25,8 @@ and a probability — can judge whether an acceptance criterion is
 actually measurable ([`spec judge`](https://davidparry.github.io/spec-driven-agentic/manual/commands/judge.html)).
 It is off until you configure it, and a judgment is advice about
 wording: it never changes a test result, a requirement's status, or a
-deterministic finding.
+deterministic finding. It landed after `v0.7.0` was tagged, so it needs
+a build from this repository until the next release.
 
 > **The workshop** — the 60-minute class, the kata, the slides, the student
 > guide, and the exercises — is in [`talks/WORKSHOP.md`](talks/WORKSHOP.md).
@@ -50,7 +51,7 @@ Only `config.toml` is meant to be committed. The other children are gitignored. 
 
 ## Install `spec`
 
-Use the published installer from the [spec site](https://davidparry.github.io/spec-driven-agentic/). It places `spec` on your PATH. You want **0.5.5 or newer**.
+Use the published installer from the [spec site](https://davidparry.github.io/spec-driven-agentic/). It places `spec` on your PATH. You want **0.7.0 or newer** — the `.spec/` directory described above replaced the flat `.spec.toml` in 0.6.0.
 
 macOS and Linux:
 

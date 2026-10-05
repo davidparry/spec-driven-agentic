@@ -33,7 +33,7 @@ use spec_harness::application::agent_service::{
     Agent, AgentConfig, DEFAULT_MAX_ROUNDS, NullPrompter,
 };
 use spec_harness::application::change_service::{ChangeService, ChangesReport};
-use spec_harness::application::decision_service::DecisionService;
+use spec_harness::application::decision_service::{DecisionService, apply_review};
 use spec_harness::application::generation_service::{
     GenerationReport, GenerationService, MissingStepsReport, ResolvedLlm,
 };
@@ -4466,6 +4466,39 @@ fn the_requirement_is_refined_with_judgment(world: &mut SpecWorld, id: String) {
     world.refinement = Some(report);
 }
 
+/// The chain the `refine_requirement` MCP tool walks, step for step.
+///
+/// It cannot call `judge_refinement` the way the CLI does: the report is
+/// borrowed on the async side while the blocking decision client runs on
+/// another thread, so the tool weakens the service, takes it only if the
+/// policy asks, and reviews the criteria itself. Reproduced here rather
+/// than booting a server, because it is that sequence - not the
+/// transport - that once let `off` through.
+#[when(regex = r#"^the requirement "([^"]+)" is refined by the MCP tool$"#)]
+fn the_requirement_is_refined_by_the_mcp_tool(world: &mut SpecWorld, id: String) {
+    let mut report = world
+        .spec_service()
+        .refine_requirement(&id)
+        .expect("requirement exists");
+    world.findings_before_judgment = Some(report.findings.clone());
+    let criteria = world
+        .spec
+        .requirements
+        .iter()
+        .find(|requirement| requirement.id == id)
+        .expect("requirement exists")
+        .acceptance_criteria
+        .clone();
+    if let Some(service) = world.decision_service().into_advisory().when_asking() {
+        let review = service.review_criteria(&id, &criteria);
+        if let Err(error) = apply_review(service.policy(), &mut report, review) {
+            world.judge_error = Some(error);
+        }
+        world.judgment = report.judgments.first().cloned();
+    }
+    world.refinement = Some(report);
+}
+
 #[when("the decision readiness is checked with nothing configured")]
 fn the_decision_readiness_is_checked_unconfigured(world: &mut SpecWorld) {
     world.decision_readiness = Some(world.model_service().decision_readiness(None));
@@ -4660,6 +4693,18 @@ fn refinement_carries_no_judgment(world: &mut SpecWorld) {
         world.refinement().judgments.is_empty(),
         "judgments: {:?}",
         world.refinement().judgments
+    );
+}
+
+/// Silence, not an apology. A question nobody asked has no failure to
+/// report, so `off` must leave the note empty — a note would tell a
+/// reader a judgment was attempted and lost.
+#[then("the refinement notes nothing about the decision model")]
+fn refinement_notes_nothing(world: &mut SpecWorld) {
+    assert_eq!(
+        world.refinement().judgment_note,
+        None,
+        "nothing was asked, so there is nothing to report"
     );
 }
 

@@ -3,7 +3,7 @@
   STEP 0 — Launch the server
 ========================================================================
 The client starts spec mcp serve as a child process and talks JSON-RPC 2.0 over stdin/stdout.
-Command: /Users/davidparry/.cargo/bin/spec mcp serve --root /Users/davidparry/code/github/tdd-bdd-agentic
+Command: /Users/davidparry/code/github/spec-driven-agentic/harness/target/release/spec mcp serve --root /Users/davidparry/code/github/spec-driven-agentic
 
 ========================================================================
   STEP 1 — tools/list (discovery)
@@ -22,7 +22,7 @@ JSON-RPC request: method="tools/list" — the agent asks what it is allowed to d
 - feature_read: Read one parsed feature file: tags, scenarios, and steps.
 - get_requirement: Get the user story and acceptance criteria for one requirement.
 - get_tdd_state: Get the current phase of the Red/Green/Refactor cycle, the last test run summary, interpretation instructions, at most the three latest dated state entries, and a suggested next step.
-- list_requirements: List every requirement of the kata with its id, title, and implementation status.
+- list_requirements: List every requirement of the kata with its id, title, implementation status, and the spec file it lives in.
 - project_inspect: Detect the project's languages, BDD frameworks, runtimes, and whether test execution is possible.
 - project_root: The absolute project root this server uses for every other tool (the --root this process was started with; default ".").
 - refine_requirement: Review one requirement's wording for quality: ambiguous language, a story missing its actor or rationale, outcomes that are not measurable, criteria covering more than one action, and missing edge cases.
@@ -44,7 +44,6 @@ JSON-RPC request: method="tools/list" — the agent asks what it is allowed to d
 JSON-RPC request: method="tools/call" params={"name":"get_tdd_state","arguments":{}}
 Result:
     {
-      "instructions": "This file is the TDD phase log. `instructions` is this guide, not workflow state. `entries` is chronological, oldest first; each entry is the machine at `timestamp` (UTC RFC 3339). `phase` is START, RED, GREEN, or REFACTOR. Never refactor on RED; never mark a requirement implemented off GREEN. `lastRun` is test counts at that moment; failure details live on the test-run reply. `refactorLog` is every spec refactor --note, in order. `attemptLog` is model implementation attempts for the requirement in flight; a GREEN run clears it. Each attempt records what it wrote (`targets`), the failures it was briefed with (`failures`), and the output of the first run after it (`outcome`; empty means no run verified it). When briefing a model, include only the three most recent entries. Older entries stay on disk for humans.",
       "phase": "START",
       "lastRun": {
         "tests": 0,
@@ -52,9 +51,10 @@ Result:
         "errors": 0,
         "skipped": 0
       },
+      "nextStep": "No tests have been run yet. Call run_tests to establish a baseline.",
       "refactorLog": [],
       "entries": [],
-      "nextStep": "No tests have been run yet. Call run_tests to establish a baseline."
+      "instructions": "This file is the TDD phase log. `instructions` is this guide, not workflow state. `entries` is chronological, oldest first; each entry is the machine at `timestamp` (UTC RFC 3339). `phase` is START, RED, GREEN, or REFACTOR. Never refactor on RED; never mark a requirement implemented off GREEN. `lastRun` is test counts at that moment; failure details live on the test-run reply. `refactorLog` is every spec refactor --note, in order. `attemptLog` is model implementation attempts for the requirement in flight; a GREEN run clears it. Each attempt records what it wrote (`targets`), the failures it was briefed with (`failures`), and the output of the first run after it (`outcome`; empty means no run verified it). When briefing a model, include only the three most recent entries. Older entries stay on disk for humans."
     }
 
 ========================================================================
@@ -68,32 +68,38 @@ Result:
         {
           "id": "REQ-001",
           "title": "Empty string returns zero",
-          "status": "implemented"
+          "status": "implemented",
+          "file": "requirements/requirements.json"
         },
         {
           "id": "REQ-002",
           "title": "Single number returns its value",
-          "status": "implemented"
+          "status": "implemented",
+          "file": "requirements/requirements.json"
         },
         {
           "id": "REQ-003",
           "title": "Two numbers separated by a comma are summed",
-          "status": "pending"
+          "status": "pending",
+          "file": "requirements/requirements.json"
         },
         {
           "id": "REQ-004",
           "title": "Any amount of numbers is supported",
-          "status": "pending"
+          "status": "pending",
+          "file": "requirements/requirements.json"
         },
         {
           "id": "REQ-005",
           "title": "Newlines may be used as delimiters",
-          "status": "pending"
+          "status": "pending",
+          "file": "requirements/requirements.json"
         },
         {
           "id": "REQ-006",
           "title": "Negative numbers are rejected",
-          "status": "pending"
+          "status": "pending",
+          "file": "requirements/requirements.json"
         }
       ]
     }
@@ -155,13 +161,14 @@ Result:
       "id": "REQ-001",
       "clean": true,
       "findings": [],
+      "source": "working tree",
       "nextStep": "The wording reads clean. Confirm it with the developer, then write the Gherkin scenario from the acceptance criteria."
     }
 JSON-RPC request: method="tools/call" params={"name":"project_root","arguments":{}}
 Result:
     {
       "nextStep": "Call list_requirements to see the backlog at this root.",
-      "root": "/Users/davidparry/code/github/tdd-bdd-agentic"
+      "root": "/Users/davidparry/code/github/spec-driven-agentic"
     }
 JSON-RPC request: method="tools/call" params={"name":"project_inspect","arguments":{}}
 Result:
@@ -192,6 +199,20 @@ Result:
       "path": "kata/src/test/resources/features/string_calculator.feature",
       "name": "String Calculator addition",
       "tags": [],
+      "comments": [
+        "# The executable behavior spec (BDD level) for the String Calculator kata.",
+        "#",
+        "# Each scenario is tagged with the requirement it verifies. Scenarios for",
+        "# REQ-001 and REQ-002 ship with the workshop as the worked example; during",
+        "# the workshop the agent appends scenarios for REQ-003+ generated from the",
+        "# acceptance criteria in requirements/requirements.json — the human reviews",
+        "# the spec, then the loop runs RED -> GREEN -> REFACTOR."
+      ],
+      "description": [
+        "As a user of the calculator",
+        "I want delimited number strings to be summed safely",
+        "So that any input produces a predictable result"
+      ],
       "scenarios": [
         {
           "name": "An empty string returns zero",
@@ -226,6 +247,10 @@ Result:
             "Then the result is 42"
           ]
         }
+      ],
+      "trailing": [
+        "  # REQ-003+: scenarios are written live during the workshop from the",
+        "  # acceptance criteria. Ask the agent to call get_requirement(\"REQ-003\")."
       ]
     }
 JSON-RPC request: method="tools/call" params={"name":"changes_show","arguments":{}}

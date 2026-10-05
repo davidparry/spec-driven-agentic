@@ -566,7 +566,10 @@ mvn -f kata/pom.xml test
 
 ## Optional — the decision model (Extra F)
 
-Needs Ollama 0.35 or newer. Nothing above depends on it.
+Needs Ollama 0.35 or newer, and a `spec` built from this repository
+(`cargo install --path harness`) — `spec judge` landed after `v0.7.0`
+was tagged and is in no published binary yet. Nothing above depends on
+it.
 
 Step 94
 

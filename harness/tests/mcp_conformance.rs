@@ -370,6 +370,30 @@ async fn validate_spec_reports_valid_with_the_forward_looking_next_step() {
     client.cancel().await.unwrap();
 }
 
+/// `decision.mode = "off"` has to reach this tool, which judges on its
+/// own initiative rather than because a human typed anything.
+///
+/// The endpoint is a closed port, so the two cases are told apart by
+/// what the reply carries: honouring `off` asks nothing and says
+/// nothing, while asking would fail against that port and leave a
+/// `judgmentNote`. Driven over the real transport because the bug this
+/// pins was in the tool's own wiring, not in the service beneath it.
+#[tokio::test]
+async fn refine_requirement_asks_no_judgment_when_the_mode_is_off() {
+    let dir = tempfile::tempdir().unwrap();
+    write_project(dir.path());
+    write_decision_config(dir.path(), &closed_endpoint(), "off");
+    let client = connect_default(dir.path()).await;
+
+    let body = call_json(&client, "refine_requirement", json!({"id": "REQ-001"})).await;
+
+    assert_eq!(body["clean"], true, "{body}");
+    assert_eq!(body.get("judgments"), None, "{body}");
+    assert_eq!(body.get("judgmentNote"), None, "nothing was asked: {body}");
+    assert_eq!(body.get("judgmentAction"), None, "{body}");
+    client.cancel().await.unwrap();
+}
+
 #[tokio::test]
 async fn refine_requirement_reports_clean_and_unknown_ids_error() {
     let dir = tempfile::tempdir().unwrap();
@@ -459,6 +483,16 @@ fn serve_one_decision(status: u16, body: &'static str) -> String {
             .as_bytes(),
         );
     });
+    format!("http://127.0.0.1:{port}")
+}
+
+/// A port nothing is listening on: a decision call aimed here fails
+/// immediately, so "no judgment was asked for" and "a judgment failed"
+/// stay distinguishable in the reply.
+fn closed_endpoint() -> String {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a free port");
+    let port = listener.local_addr().expect("a local address").port();
+    drop(listener);
     format!("http://127.0.0.1:{port}")
 }
 
@@ -556,13 +590,7 @@ async fn refine_requirement_reports_a_judgment_without_touching_the_deterministi
 async fn refine_requirement_survives_an_unreachable_decision_model() {
     let dir = tempfile::tempdir().unwrap();
     write_project(dir.path());
-    let closed = {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
-        drop(listener);
-        format!("http://127.0.0.1:{port}")
-    };
-    write_decision_config(dir.path(), &closed, "advisory");
+    write_decision_config(dir.path(), &closed_endpoint(), "advisory");
     let client = connect_default(dir.path()).await;
 
     let body = call_json(&client, "refine_requirement", json!({"id": "REQ-001"})).await;

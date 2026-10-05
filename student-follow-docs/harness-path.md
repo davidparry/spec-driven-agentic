@@ -33,11 +33,13 @@ cargo install --path harness
 spec --version
 ```
 
-Requires `spec` **0.5.5 or newer** — check with `spec --version`. The
+Requires `spec` **0.7.0 or newer** — check with `spec --version`. The
 generation behavior this page describes, where the polish pass sees only
-the newly generated members, arrived during 0.5.x development; 0.5.5 is
-the floor because it is the first *release* carrying everything this page
-states as fact. The ones that change what you do, rather than what you
+the newly generated members, arrived during 0.5.x development, but the
+floor is 0.7.0 because this page reads and writes `.spec/config.toml`:
+the `.spec/` directory replaced the flat `.spec.toml` in 0.6.0, and
+0.7.0 is the newest release, so it is the one everything here was
+checked against. The ones that change what you do, rather than what you
 read:
 
 - `spec validate` **exits nonzero when `valid` is false.** It used to
@@ -439,8 +441,10 @@ reachable with `spec reword`, which is what the advice used to name.
 
 A second, separate local model that writes nothing and answers one
 bounded question with a typed value and a probability. Needs Ollama
-0.35+ (`/v1/systemone`). Off until configured; nothing above depends on
-it.
+0.35+ (`/v1/systemone`), and a `spec` built from this repository
+(`cargo install --path harness`) — the decision plane landed after
+`v0.7.0` was tagged, so no published binary answers `spec judge` yet.
+Off until configured; nothing above depends on it.
 
 ```bash
 ollama pull nimble

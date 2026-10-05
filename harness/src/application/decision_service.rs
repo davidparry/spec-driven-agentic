@@ -79,6 +79,19 @@ impl<D: DecisionModel> DecisionService<D> {
         }
     }
 
+    /// The service, but only on the surfaces that judge automatically.
+    ///
+    /// `off` means the workflow asks nothing of its own accord. The
+    /// check cannot live in [`Self::review_criteria`], because `spec
+    /// judge` reaches the model through that same function and is
+    /// *supposed* to answer under `off` — a human typed it. So the
+    /// distinction is not which function runs but who asked, and an
+    /// automatic caller says so by taking its service from here:
+    /// `None` leaves it nothing to call.
+    pub fn when_asking(self) -> Option<Self> {
+        self.policy.asks().then_some(self)
+    }
+
     /// One bounded judgment: can this acceptance criterion be checked by
     /// a test with a single unambiguous result?
     ///
@@ -618,6 +631,47 @@ mod tests {
             assert_eq!(weakened.policy().threshold, 0.70, "the threshold is kept");
             assert_eq!(weakened.model(), "nimble:test");
         }
+    }
+
+    /// `off` has to reach every surface that judges on its own
+    /// initiative, not just the refinement path that happened to check
+    /// it first. A caller holding no service cannot ask a question.
+    #[test]
+    fn an_automatic_surface_is_handed_no_service_when_judgment_is_off() {
+        assert!(
+            service(ScriptedDecision::answering(&[]), Mode::Off)
+                .when_asking()
+                .is_none(),
+            "off asks nothing automatically"
+        );
+        for mode in [Mode::Advisory, Mode::Enforce] {
+            assert!(
+                service(ScriptedDecision::answering(&[]), mode)
+                    .when_asking()
+                    .is_some(),
+                "{mode} asks"
+            );
+        }
+    }
+
+    /// The other half of the same rule, and the reason the check is not
+    /// simply put inside `review_criteria`: `spec judge` goes through
+    /// that function too, and answers under `off` because a human asked
+    /// for this one judgment rather than the workflow asking for all of
+    /// them.
+    #[test]
+    fn a_judgment_a_human_typed_still_answers_when_the_workflow_is_off() {
+        let service = service(ScriptedDecision::answering(&[0.97]), Mode::Off);
+        let review = service
+            .review_criteria("REQ-007", &["then the result is 3".into()])
+            .expect("the model answered");
+        assert_eq!(review.judgments.len(), 1);
+        assert_eq!(review.action, Transition::Continue, "off never gates");
+        assert_eq!(
+            service.client.asked.borrow().len(),
+            1,
+            "the question was actually put"
+        );
     }
 
     /// When several criteria disagree about what should happen, the most

@@ -314,6 +314,11 @@ The MCP reply always reports and never gates, even in a project
 configured to enforce. An exit code is a thing a human watches; a tool
 reply an agent reads is not the place to stop a workflow.
 
+`mode = "off"` does reach this tool, though. It judges on its own
+initiative rather than because anyone typed a command, so it is one of
+the surfaces that goes quiet — the reply carries the deterministic
+findings and no judgment keys, exactly as if no model were configured.
+
 ---
 
 ## The [decision] configuration block
@@ -335,7 +340,7 @@ somewhere else.
 
 | Mode | What a judgment does |
 | --- | --- |
-| `off` | Nothing is asked. `spec judge` still works, because a human typed it |
+| `off` | Nothing is asked automatically — not by `spec refine`, and not by the `refine_requirement` MCP tool. `spec judge` still answers, because a human typed it |
 | `advisory` | **The default.** The answer is reported beside the deterministic result and changes nothing |
 | `enforce` | A `FAILS` verdict exits nonzero asking for `REWORK`; an `INCONCLUSIVE` one asks to `ESCALATE` to a human. A failed request is an error, never an approval |
 
@@ -378,6 +383,17 @@ threshold sweep, so you can see where the model and the labels disagree
 and judge for yourself.
 
 ### What it scores
+
+Two numbers get quoted about this question, and they are not the same
+kind of thing. Keeping them apart is the whole point of the table:
+
+| | Value | What it is |
+| --- | --- | --- |
+| Decision band | **0.80** | A policy input. The probability needed before an answer counts as a verdict at all; `1 - 0.80 = 0.20` is its mirror. Not a correctness figure — Ollama's own documentation says its confidence is not calibrated correctness |
+| Measured accuracy | **0 misses, 1 false alarm, 3 unsure** | The evaluation result over the 32 labelled criteria, at that band |
+
+"Misses" are the direction that matters: vague wording waved through as
+measurable. There are none.
 
 Against `nimble:latest` at the shipped threshold, nothing vague is
 judged measurable — including all eight criteria written to look

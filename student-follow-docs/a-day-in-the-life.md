@@ -21,7 +21,10 @@ it describes.
 
 ## Prerequisites
 
-- `spec` on PATH (0.7.0 or newer) — `spec --version`
+- `spec` **built from this repository**, on PATH — `cargo install --path
+  harness`, then `spec --version`. Not the published release: this walk
+  uses `spec judge`, and the decision plane landed after `v0.7.0` was
+  tagged, so no downloadable binary has it yet.
 - Rust toolchain — `cargo --version`
 - Java 21 and Maven, for the smoke test that catches you at the end
 - Optional: Ollama with a local model pulled, if you want the generation

@@ -326,7 +326,12 @@ impl WorkflowServer {
         let criteria = requirement.acceptance_criteria;
         let asked = tokio::task::spawn_blocking(move || {
             let _span = tool_call("refine_requirement");
-            let service = wiring::decision_service(&root, None)?.into_advisory();
+            // `when_asking` is what makes `off` mean off here. This tool
+            // judges on its own initiative, so it is one of the surfaces
+            // that stays quiet when a project turned judgment off.
+            let service = wiring::decision_service(&root, None)?
+                .into_advisory()
+                .when_asking()?;
             let review = service.review_criteria(&req_id, &criteria);
             Some((service.policy(), review))
         })
@@ -334,7 +339,10 @@ impl WorkflowServer {
 
         let (policy, review) = match asked {
             Ok(Some(pair)) => pair,
-            // The model stopped being configured between the two reads.
+            // Either the mode is `off`, or the model stopped being
+            // configured between the two reads. Both mean no judgment
+            // was asked for, which is not a failure to get one: the
+            // reply carries the deterministic findings and no note.
             Ok(None) => return,
             // The blocking task panicked or was cancelled. Not an
             // answer, so it is reported as a failure to get one.
@@ -460,11 +468,18 @@ impl WorkflowServer {
         story missing its actor or rationale, outcomes that are not measurable, criteria \
         covering more than one action, and missing edge cases. Reword the requirement from \
         the findings and call again - iterate until there are no findings, then have the \
-        developer approve the wording before writing any scenario. When a decision model \
-        is configured the reply also carries judgments: a local model's opinion on whether \
-        each criterion is measurable, with the question asked and the probability it \
-        answered. Judgments are advice about wording and are never a verdict on the code; \
-        findings and clean come from the deterministic rules either way."
+        developer approve the wording before writing any scenario. When a decision model is \
+        configured the reply also carries judgments, under judgments/judgmentAdvisories/\
+        judgmentAction, and those keys are absent entirely when one is not. Each criterion \
+        is put to the model as the question `measurable/v1`: could a test check this with \
+        one unambiguous result? The answer is a probability read against a decision band of \
+        0.80 - at or above reads HOLDS, at or below 0.20 reads FAILS, between is \
+        INCONCLUSIVE and used for nothing. That band is a dead zone, not an accuracy score; \
+        measured accuracy against a 32-criterion labelled set is 0 misses, 1 false alarm and \
+        3 left unsure. Judgments are advice about wording and never a verdict on the code: \
+        findings and clean come from the deterministic rules either way, this tool always \
+        reports and never gates even where the project configured enforcement, and \
+        `[decision] mode = \"off\"` stops it asking at all."
     )]
     async fn refine_requirement(
         &self,
