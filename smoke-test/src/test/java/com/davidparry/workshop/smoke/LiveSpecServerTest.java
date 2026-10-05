@@ -18,7 +18,7 @@ class LiveSpecServerTest {
     Path project;
 
     @Test
-    @DisplayName("the live spec binary serves exactly the 25 planned tools")
+    @DisplayName("the live spec binary serves exactly the planned tools")
     void liveSweep() throws IOException {
         seedProject(project);
         Path spec = Path.of(System.getProperty("spec.binary"));

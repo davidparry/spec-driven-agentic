@@ -5,7 +5,7 @@ codebase:
    argument about where the discipline should live.
 2. **[A Day in the Life of a TDD Agentic Developer](#a-day-in-the-life-of-a-tdd-agentic-developer)**
    — the same discipline told as one developer's morning, with the harness
-   building its own 26th MCP tool live on stage.
+   building itself a new MCP tool live on stage.
 
 ---
 
@@ -40,7 +40,7 @@ afternoon.
 
 **We start with the harness.** `spec` is a single binary that does one job: take
 a requirement from a validated spec to a green bar. Underneath it is an MCP
-server with 25 tools, none of which calls a model by default — the same input
+server whose tools are exactly the ones the loop needs, none of which calls a model by default — the same input
 gives the same answer — and on top of it a runner that owns the parts a prompt
 cannot be trusted with. The sequence is fixed: a requirement's structure is validated, its
 wording survives a review that rejects ambiguity like *should*, *handles*, and
@@ -64,7 +64,7 @@ inventing.
 `qwen3.8-flash-next:125b-mlx` on the laptop on stage, Wi-Fi off, and produces
 work you would sign your name to — not because the model improved, but because
 nothing is asking it to remember the discipline. We run the identical
-**contracts** twice — once with a frontier agent in Cursor (all 25 tools), once
+**contracts** twice — once with a frontier agent in Cursor (every tool on offer), once
 locally — and compare the diffs. Then we look at what makes the local model hold
 up: JSON-only response contracts, one-finding-at-a-time correction,
 validate-and-retry that feeds the invalid reply back, and deterministic
@@ -109,7 +109,7 @@ fails the build on drift in either direction: a requirement whose scenario is
 missing, a tag left behind by a requirement that is gone, or an implemented
 requirement whose wording would not survive the harness's own review. The MCP
 surface gets the same treatment from the Java side, where `smoke-test/` carries
-its own catalog and a 26th tool fails that build until it is planned.
+its own catalog and an unplanned tool fails that build until someone plans it.
 
 Every layer is free and open source, and every layer runs on your hardware. To
 prove the point, the demo runs with the Wi-Fi switched off.
@@ -181,7 +181,7 @@ query string, and <kbd>t</kbd> cycles through them live.
 | Format | Deck cut | What it covers |
 | --- | --- | --- |
 | **Conference session** (50 minutes) | [`?60`](slides/index.html?60) | The full narrative above — the harness first, taken from requirement to green on a local model, then pi as the free general-purpose on-ramp and the altitude comparison — with the live frontier-versus-local comparison and the *Where This Breaks* segment. The two exercise slides are delivered as demos from the stage rather than as hands-on time, which is what makes the 60-minute cut fit in 50. |
-| **A Day in the Life of a TDD Agentic Developer** (60 minutes) | [`?tdd`](slides/index.html?tdd) | A separate session, described [below](#a-day-in-the-life-of-a-tdd-agentic-developer): TDD in the agentic era told as one developer's morning, with the harness taking its own `HARNESS-013` from a vague draft to a green bar and growing a 26th MCP tool live. Shares the Red/Green/Refactor refresher and the harness argument with the cuts above; the demo and the closing segments are its own. Published at [/talktdd/](https://davidparry.github.io/spec-driven-agentic/talktdd/). |
+| **A Day in the Life of a TDD Agentic Developer** (60 minutes) | [`?tdd`](slides/index.html?tdd) | A separate session, described [below](#a-day-in-the-life-of-a-tdd-agentic-developer): TDD in the agentic era told as one developer's morning, with the harness taking its own `HARNESS-013` from a vague draft to a green bar and growing a new MCP tool live. Shares the Red/Green/Refactor refresher and the harness argument with the cuts above; the demo and the closing segments are its own. Published at [/talktdd/](https://davidparry.github.io/spec-driven-agentic/talktdd/). |
 | **Short session** (30 minutes) | [`?30`](slides/index.html?30) | The harness and nothing else, demo-driven, with no hands-on segment: why a general agent gives a general result, what a purpose-built harness owns instead, then the runner taken from requirement to green with the Wi-Fi off — plus *Where This Breaks*. pi is 60-minute material and does not appear. Published at [/talk30/](https://davidparry.github.io/spec-driven-agentic/talk30/). |
 | **Hands-on workshop** (60 minutes) | [`?60`](slides/index.html?60) | Attendees run the loop on their own machines against a local model: draft a requirement, refine it until the wording review is clean, take it through RED, GREEN, and REFACTOR, then grade the run with `scripts/verify-workshop-run.sh check`. Companion material is the [workshop follow-along](../student-follow-docs/student-follow-along.md); the [pi path](../student-follow-docs/pi-path.md) is the free, no-IDE on-ramp, and the [harness path](../student-follow-docs/harness-path.md) covers attendees who prefer the terminal to an IDE. |
 
@@ -210,7 +210,7 @@ time — never the loop, and never the way it is verified.
 | Shown live | Where it lives |
 | --- | --- |
 | The purpose-built runner: one binary, one job, per-command tool profiles | `harness/src/main.rs` (`spec`), `spec tools profiles` |
-| The 25-tool MCP server enforcing the loop | `harness/src/mcp.rs` (`spec mcp serve`) |
+| The MCP server enforcing the loop | `harness/src/mcp.rs` (`spec mcp serve`) |
 | The deterministic structure and wording reviews | `harness/src/domain/` (spec validator, requirement refiner) |
 | The state machine that refuses a red-bar refactor | `harness/src/domain/tdd.rs` (`TddStateMachine`) |
 | The requirements catalog that drives everything | `requirements/requirements.json` |
@@ -220,7 +220,7 @@ time — never the loop, and never the way it is verified.
 | Every prompt sent to the model, in one auditable file | `harness/prompts/prompts.toml` |
 | The free general-purpose on-ramp: pi on Ollama, then pi with `--no-builtin-tools` against this server | [`.pi/mcp.json`](../.pi/mcp.json), [`student-follow-docs/pi-path.md`](../student-follow-docs/pi-path.md) |
 | The end-of-run grader that names the requirement id — where "right process, wrong requirement" is caught | [`scripts/verify-workshop-run.sh`](../scripts/verify-workshop-run.sh) |
-| The bundled MCP-server smoke test: launch, discover 25 tools, invoke | `smoke-test/`, captured run in [`student-follow-docs/step2.log`](../student-follow-docs/step2.log) |
+| The bundled MCP-server smoke test: launch, discover the tools, invoke | `smoke-test/`, captured run in [`student-follow-docs/step2.log`](../student-follow-docs/step2.log) |
 | The slide deck — one file, three cuts ([`?30`](slides/index.html?30) and [`?tdd`](slides/index.html?tdd) select the others, or press <kbd>t</kbd> in the deck) | [`slides/index.html`](slides/index.html) |
 | The harness's own spec, and the build gate that fails on drift | [`harness/requirements/requirements.json`](../harness/requirements/requirements.json), [`harness/tests/spec_completeness.rs`](../harness/tests/spec_completeness.rs) |
 
@@ -263,10 +263,11 @@ request get refused on a red bar by a state machine rather than a prompt, and
 watches a developer agent produce an implementation that arrives as a reviewable
 diff because it has no shell and no free-hand write.
 
-Then the beat the room enjoys most. The server now answers with 26 tools, and
+Then the beat the room enjoys most. The server now answers with one more tool
+than the plan names, and
 nobody told the Java smoke test. `LiveSpecServerTest` fails, reporting
 `criteria_coverage` as *unexpected* — because `CLI-009` was written months ago
-to say "a 26th MCP tool fails the Java build until it is planned". One module's
+to say that an unplanned MCP tool fails the Java build until it is planned. One module's
 spec caught new surface area in another, with nobody remembering to look.
 
 The close is the thesis made literal: run the tool built at 10:15 against the

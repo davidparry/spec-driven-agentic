@@ -1,7 +1,7 @@
 # A Day in the Life of a TDD Agentic Developer — presenter notes
 
-Stage script for the 60-minute talk. The demo builds the harness's own
-26th MCP tool, `criteria_coverage`, from a requirement that starts vague.
+Stage script for the 60-minute talk. The demo builds the harness a new
+MCP tool of its own, `criteria_coverage`, from a requirement that starts vague.
 Everything below is the presenter's copy; the attendee version is
 [a-day-in-the-life.md](../student-follow-docs/a-day-in-the-life.md).
 
@@ -33,11 +33,12 @@ and kills the 9:10 beat.
 **The `-Dspec.binary` flag is not optional.** `LiveSpecServerTest` is
 annotated `@EnabledIfSystemProperty(named = "spec.binary", ...)`. Without
 it that test is silently skipped, the Java build stays green when the
-server grows a 26th tool, and the best beat in the talk does not fire.
-Verified: 25 tools green, 26 tools `BUILD FAILURE`.
+server grows a tool the plan does not name, and the best beat in the
+talk does not fire. Verified: the planned set green, one tool past it
+`BUILD FAILURE`.
 
 The starting state is: 13 implemented requirements, one vague pending
-draft, 25 tools served, every bar green. If `spec_completeness` is red
+draft, exactly the planned tools served, every bar green. If `spec_completeness` is red
 before you start, the catalog and the feature tags have drifted — fix
 that, do not demo around it.
 
@@ -122,7 +123,7 @@ stage. An earlier draft said "when coverage is requested" and the
 implementation that came back was a plain `requirement_coverage()`
 function — correct against those criteria, and useless to the 10:50
 beat, because nothing had asked for a tool. The criteria are the
-contract. If the 26th tool is what you want to show, the criteria have
+contract. If a new MCP tool is what you want to show, the criteria have
 to say so.
 
 ```bash
@@ -339,18 +340,18 @@ spec --root harness state      # phase: GREEN
 
 ## 10:50 — CI catches what you forgot
 
-This is the moment the room should enjoy. The server now answers with 26
-tools. Nobody told the Java smoke test.
+This is the moment the room should enjoy. The server now answers with one
+more tool than the plan names. Nobody told the Java smoke test.
 
 ```bash
 mvn -f smoke-test/pom.xml test -Dspec.binary=$(which spec)
 ```
 
-`LiveSpecServerTest` fails: *the live spec binary serves exactly the 25
+`LiveSpecServerTest` fails: *the live spec binary serves exactly the
 planned tools*. The sweep reports `criteria_coverage` as **unexpected** —
 a tool the server answers with that no one planned for. `CLI-009` was
-written for exactly this: "a 26th MCP tool fails the Java build until it
-is planned". One module's spec caught new surface area in another, and
+written for exactly this: an unplanned MCP tool fails the Java build
+until it is planned. One module's spec caught new surface area in another, and
 nobody had to remember to look.
 
 Fix it in front of them: add `criteria_coverage` to `ToolPlan`, bump the
@@ -440,13 +441,14 @@ rm -rf harness/.spec/staged harness/.spec/state.json
 #     means paying for implement on stage.
 rm -rf harness/.spec/cache
 
-# 3. the binary on PATH now serves 26 tools - put a 25-tool one back
+# 3. the binary on PATH now serves the tool you added on stage -
+#     put a trunk build back
 cargo install --path harness --force
 ```
 
 Because the demo ran on its own branch, step 1 is the whole of the git
 side: the reworded catalog, the new feature file, the generated test,
-the implementation, and the Java-side 26 bump all go with the branch.
+the implementation, and the Java-side plan update all go with the branch.
 `git clean` is safe here precisely *because* you are back on `trunk`
 with nothing of your own in the working tree — which is the other reason
 to make the branch before you walk on. If you are rehearsing from a
@@ -461,7 +463,7 @@ Confirm you are back at the starting state:
 
 ```bash
 git status --short                        # clean
-spec mcp tools | wc -l                    # 25
+spec mcp tools | wc -l                    # the planned count, not one more
 spec --root harness refine HARNESS-013    # clean: false, 10 findings
 spec --root harness list                  # HARNESS-013 pending, 13 implemented
 mvn -f smoke-test/pom.xml test -Dspec.binary=$(which spec)   # green

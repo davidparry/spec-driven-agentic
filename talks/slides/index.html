@@ -146,7 +146,7 @@
     <section data-track="tdd">
       <h1>A Day in the Life of a TDD&nbsp;Agentic Developer</h1>
       <h3>One morning. One requirement. From "it is vague" to a green bar you would sign your name to.</h3>
-      <p class="muted">60-minute session &nbsp;·&nbsp; live demo &nbsp;·&nbsp; the harness builds its own 26th tool on stage</p>
+      <p class="muted">60-minute session &nbsp;·&nbsp; live demo &nbsp;·&nbsp; the harness builds itself a new tool on stage</p>
       <p><span class="badge red">RED</span> <span class="badge green">GREEN</span> <span class="badge refactor">REFACTOR</span> — with the human still holding the wheel</p>
       <figure class="title-qr">
         <img src="davidparry-qr-duke.png" alt="QR code">
@@ -202,7 +202,7 @@
         </div>
         <div class="down">▼ &nbsp;stdio, JSON-RPC 2.0</div>
         <div class="layer">
-          <b>MCP</b> — <code>spec mcp serve</code>, 25 tools
+          <b>MCP</b> — <code>spec mcp serve</code>, the workflow's tools
           <span class="muted">· <strong>deterministic</strong> by default: no tool calls a model — same input, same answer</span>
         </div>
         <div class="down">▼ &nbsp;every tool reads and writes one spec</div>
@@ -393,7 +393,7 @@ requirements/
 +-----------------------------+          +---------------------------+
 |  HOST (Cursor, Claude, ...) |          |  MCP SERVER (yours!)      |
 |                             |  stdio / |                           |
-|   +---------------------+   |   HTTP   |  25 tools                 |
+|   +---------------------+   |   HTTP   |  tools                    |
 |   | MCP CLIENT          |&lt;--+----------+&gt;  resources               |
 |   | (one per server)    |   | JSON-RPC |  prompts                  |
 |   +---------------------+   |   2.0    |                           |
@@ -464,7 +464,7 @@ spec --root harness show HARNESS-013
       <ul class="small">
         <li>The <strong>catalog</strong> names the next piece of work. Not the chat history, not whatever was open in the editor</li>
         <li>Thirteen requirements say <code>implemented</code>. Each of those has a tagged scenario, and a test proves it — <code>tests/spec_completeness.rs</code> fails the build otherwise</li>
-        <li>Today we build the <strong>26th MCP tool</strong>: given a requirement, which acceptance criteria have an asserting test, and which do not</li>
+        <li>Today we build <strong>a new MCP tool</strong>: given a requirement, which acceptance criteria have an asserting test, and which do not</li>
       </ul>
     </section>
 
@@ -528,22 +528,22 @@ spec --root harness test             # GREEN
       <ul class="small">
         <li>Seven tools for this step. No shell. No free-hand write. The attempt arrives as a <strong>reviewable diff</strong> or it does not arrive</li>
         <li>The logic is already in <code>domain/coverage.rs</code> — ported from the workshop's own grader. The agent is wiring a tool, not inventing an algorithm</li>
-        <li>What lands is <strong>one <code>#[tool]</code> method</strong> in <code>harness/src/mcp.rs</code> — the 26th. That is the whole scope today; the rest of the wiring is on the next slide</li>
+        <li>What lands is <strong>one <code>#[tool]</code> method</strong> in <code>harness/src/mcp.rs</code>. That is the whole scope today; the rest of the wiring is on the next slide</li>
       </ul>
     </section>
 
     <section data-track="tdd">
       <h2>10:50 — CI catches what you forgot</h2>
-      <p class="small">The server now answers with <strong>26</strong> tools. Nobody told the Java smoke test.</p>
+      <p class="small">The server now answers with <strong>one more tool than the plan names</strong>. Nobody told the Java smoke test.</p>
       <pre><code class="language-bash" data-trim>
 mvn -f smoke-test/pom.xml test -Dspec.binary=$(which spec)
 
 [ERROR] LiveSpecServerTest.liveSweep
-        the live spec binary serves exactly the 25 planned tools
+        the live spec binary serves exactly the planned tools
         unexpected: [criteria_coverage]
 [INFO] BUILD FAILURE
       </code></pre>
-      <blockquote class="small">CLI-009: "As a maintainer, I want a 26th MCP tool to fail the Java build until it is planned."</blockquote>
+      <blockquote class="small">CLI-009 asks for exactly this: a tool the plan does not name fails the Java build until someone plans it.</blockquote>
       <ul class="small">
         <li>One module's spec caught new surface area in another — and nobody had to <em>remember</em> to look</li>
         <li>This red bar was written months ago, for exactly this morning</li>
@@ -570,7 +570,7 @@ spec --root harness mcp call criteria_coverage --arg id=HARNESS-013
       <p class="small">We built the <strong>tool</strong>. Adding a tool and adopting a tool are two different jobs, and we only had time for the first.</p>
       <table class="small">
         <tr><th>Already true</th><th>Still yours to do</th></tr>
-        <tr><td><code>spec mcp serve</code> answers with 26 tools — any MCP host can call it</td>
+        <tr><td><code>spec mcp serve</code> answers with the new tool too — any MCP host can call it</td>
             <td><strong>No agent is offered it.</strong> Profiles live in <code>domain/tool_profile.rs</code>; I would add it to <code>implement-advice</code>, <code>status</code>, and <code>ask</code></td></tr>
         <tr><td><code>spec mcp call criteria_coverage --arg id=…</code> works today</td>
             <td><strong>No prompt names it.</strong> <code>[tool_rules]</code> in <code>prompts/prompts.toml</code>, step 8 of <code>prompts/workflow.md</code>, and <code>[advice]</code>'s list of next commands</td></tr>
@@ -740,7 +740,7 @@ scripts/verify-workshop-run.sh check
   FAIL  REQ-003 unit test asserts every acceptance criterion (0 @Test naming REQ-003) - no @Test names REQ-003
       </code></pre>
       <p class="small">Three FAILs and <strong>nothing is broken</strong>: the whole Red/Green/Refactor arc ran on REQ-007 — pending, and the freshest thing in the agent's context. Every gate fired in the right order, because nothing was out of order.</p>
-      <p class="small muted">The same script grades either surface — the agent over the 25 tools, or the harness a step at a time. Four checks on the requirement you drafted, three on REQ-003, each named rather than diffed against a recorded solution.</p>
+      <p class="small muted">The same script grades either surface — the agent over the MCP tools, or the harness a step at a time. Four checks on the requirement you drafted, three on REQ-003, each named rather than diffed against a recorded solution.</p>
     </section>
 
     <section data-track="both tdd">

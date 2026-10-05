@@ -13,7 +13,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class ToolPlanTest {
 
     @Test
-    @DisplayName("the plan names exactly 25 tools and no extras")
+    @DisplayName("the plan names exactly the tools the server may serve, and no extras")
     void planIsExactlyTwentyFive() {
         assertThat(ToolPlan.size()).isEqualTo(25);
         assertThat(ToolPlan.names()).hasSize(25);
