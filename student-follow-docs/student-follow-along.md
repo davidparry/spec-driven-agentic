@@ -4,7 +4,7 @@ Your step-by-step companion for the 60-minute workshop. Everything the
 presenter does, you do — this page has the exact commands, the exact agent
 prompts, and what you should see at every step.
 
-**The big idea:** there is one MCP server — `spec mcp serve` (25 tools).
+**The big idea:** there is one MCP server — `spec mcp serve`.
 Cursor talks to it, so does the bundled `smoke-test.jar`, and so does a free
 local agent if you take the [pi path](pi-path.md). Your
 hour is the workflow it enables: draft a requirement *with* an agent, let the
@@ -44,7 +44,7 @@ You need:
   `qwen3.8-flash-next:125b-mlx` pulled. Two Wi-Fi-off alternatives, both on the
   **same server**:
   [the pi path](pi-path.md) — a free MIT agent you run with
-  `pi -nbt` so these 25 tools are all it gets — and
+  `pi -nbt` so these tools are all it gets — and
   [the harness path](harness-path.md), the `spec` runner
   with narrower tools per command. The harness path is the command
   reference; if you would rather be walked through it the way this page
@@ -133,7 +133,7 @@ and the absolute repo paths in the log will differ on your machine.)
 
 **Expect:**
 
-- **STEP 1** — **25 tools** discovered. The frozen seven you already know
+- **STEP 1** — **every planned tool** discovered. The frozen seven you already know
   (`list_requirements`, `get_requirement`, `validate_spec`,
   `refine_requirement`, `run_tests`, `get_tdd_state`, `start_refactor`) plus
   authoring/staging (`scenario_add`, `unit_test_create`, `changes_show`,

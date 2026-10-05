@@ -9,8 +9,11 @@
 //! The rule for what belongs in this file: a fact with exactly one
 //! source of truth, restated somewhere a human reads. The source wins,
 //! and a failure names the file, the line, and what the source says.
-//! `notes/published-facts.md` records the facts and the ones
-//! deliberately left unguarded.
+//!
+//! Facts left unguarded on purpose, because they are observations
+//! rather than contracts: timings, the probabilities quoted in
+//! transcripts, slide counts, and the test counts in kata walkthroughs,
+//! which change legitimately as a student adds scenarios.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -178,8 +181,8 @@ fn every_documented_tool_count_is_the_number_the_server_serves() {
     let served = tools_the_server_lists();
     assert_eq!(
         served, 25,
-        "the server's tool count moved; update notes/published-facts.md with the new number \
-         and the reason before changing this assertion"
+        "the server's tool count moved. Every page that states it needs the new \
+         number before this assertion is changed to match"
     );
 
     let mut wrong = Vec::new();
@@ -463,8 +466,8 @@ fn the_decision_band_the_pages_quote_is_the_one_the_code_applies() {
     let applied = spec_harness::domain::decision::DEFAULT_MIN_CONFIDENCE;
     assert_eq!(
         applied, 0.80,
-        "the decision band moved; the pages quoting 0.80 and \
-         notes/published-facts.md both need the new number"
+        "the decision band moved. Every page quoting 0.80 needs the new number, \
+         and the figures measured against the old band no longer describe it"
     );
 
     // Stated as a band with both edges, so the complement matters too.

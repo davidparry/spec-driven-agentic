@@ -2,7 +2,7 @@
 
 Replay the talk's morning on your own machine. One requirement arrives
 vague, and by the end it is implemented, proven, and traceable — and the
-thing you built is the harness's own 26th MCP tool.
+thing you built is a new MCP tool for the harness itself.
 
 This is the attendee copy. The deck is at
 [`talks/slides/index.html?tdd`](../talks/slides/index.html?tdd).
@@ -331,7 +331,7 @@ gone. That ceiling is 3600 here for exactly this step; a project with
 more source in the neighborhood may need more again.
 
 **Scope check.** What lands here is one `#[tool(...)]` method on the
-router in `harness/src/mcp.rs` — the 26th. That is enough to make it
+router in `harness/src/mcp.rs`. That is enough to make it
 real over the protocol: `spec mcp serve` will advertise it, and
 `spec mcp call` can invoke it. It is *not* enough to make it a `spec`
 subcommand, and no agent will reach for it until you say so. Both of
@@ -343,25 +343,24 @@ generation.
 
 ## 10:50 — get caught
 
-Your server now answers with 26 tools. The Java smoke test still expects
-25.
+Your server now answers with a tool the Java smoke test's plan does not
+name.
 
 The smoke test launches the `spec` on your PATH, not the source tree, so
 install what you just wrote before you run it — otherwise the sweep
-counts the 25 tools of the binary you started the morning with and the
+inspects the binary you started the morning with and the
 build stays green for the wrong reason:
 
 ```bash
 cargo install --path harness --force    # release build, a minute or two
-spec mcp tools | wc -l                  # 26 now; it was 25 this morning
+spec mcp tools | wc -l                  # one more than this morning
 mvn -f smoke-test/pom.xml test -Dspec.binary=$(which spec)
 ```
 
 `LiveSpecServerTest` fails, and the sweep reports `criteria_coverage` as
-**unexpected**. That is `CLI-009` doing its job:
-
-> As a maintainer, I want a 26th MCP tool to fail the Java build until it
-> is planned so that the smoke test cannot silently skip new surface area.
+**unexpected**. That is `CLI-009` doing its job: it asks for an MCP tool
+the plan does not name to fail the Java build until someone plans it, so
+that the smoke test cannot silently skip new surface area.
 
 **The `-Dspec.binary` flag matters.** `LiveSpecServerTest` is annotated
 `@EnabledIfSystemProperty(named = "spec.binary", ...)`; without it the
@@ -525,7 +524,7 @@ rm -rf harness/.spec/staged harness/.spec/state.json
 #     run back. Keeping them is what makes a second pass quick.
 rm -rf harness/.spec/cache
 
-# 3. if you reinstalled the binary at 10:50, put a 25-tool one back
+# 3. if you reinstalled the binary at 10:50, put a trunk build back
 cargo install --path harness --force
 
 # 4. confirm you are back at the start

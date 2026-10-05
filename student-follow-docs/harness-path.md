@@ -1,8 +1,8 @@
 # Finish the String Calculator workshop with `spec`
 
 The 60-minute hour in [student-follow-along.md](student-follow-along.md)
-uses Cursor against **the same** `spec mcp serve` (all 25 tools, including
-staging). The [pi path](pi-path.md) points a free, local, general-purpose
+uses Cursor against **the same** `spec mcp serve` (every tool it exposes,
+including staging). The [pi path](pi-path.md) points a free, local, general-purpose
 agent at that same server. This page is the same end state — every
 requirement `implemented`, including Exercise 1’s **REQ-007** — driven with
 `spec` commands instead.
