@@ -884,6 +884,65 @@ graded, and Step 6 reads the same 7/7 before and after it.
   or the command-reference version in
   [harness-path.md](harness-path.md).
 
+### Optional: a second model that judges instead of writing
+
+Ten minutes, needs Ollama 0.35+ and one more model pulled, and nothing
+else depends on it. This is the one homework item that changes what your
+agent sees from `refine_requirement`.
+
+In Step 4 the agent called `refine_requirement` and acted on `findings`.
+Those rules are fixed — same wording, same findings — which is why they
+can be fooled. One of them asks whether the clause after `then` *looks*
+concrete: a number, a quoted value, a named error. Any number satisfies
+it. So this criterion earns no finding at all:
+
+> Given the refactored module, when the suite runs, then code quality is
+> improved by at least 20%
+
+Nobody measured code quality. The rule asks whether a number is
+*present*; it cannot ask whether the number *is* the assertion.
+
+A *decision model* can. It is a different kind of model from the one
+writing your code: it produces no prose, and answers one bounded
+question with a typed value and a probability.
+
+```bash
+ollama --version            # 0.35.0 or newer
+ollama pull nimble
+spec judge models           # the models Ollama reports as decision-capable
+spec judge use nimble:latest
+spec judge criterion --text "Given the refactored module, when the suite runs, then code quality is improved by at least 20%"
+```
+
+```text
+answer	probability of true 0.038
+verdict	FAILS
+action	CONTINUE
+state	sha256:048965344f62409e5399403357ce83c4e7b3cce836b14673c0745b6f7ff7237d
+```
+
+`spec judge use` writes a separate key and leaves your coding model
+alone — check with `spec config | grep model`. Then ask your agent to
+refine REQ-007 again and read the reply: it now carries `judgments`
+beside `findings`, and `clean` and `findings` are byte-for-byte what
+they were. A judgment never edits them.
+
+Two things to try, because they are the interesting ones:
+
+- Judge `"Given a production-grade request payload, when the handler
+  executes, then the system achieves 99.9% correctness across all code
+  paths"`. It comes back `INCONCLUSIVE` at 0.499 — inside the dead band,
+  so the harness uses it for **nothing**. Not a yes, not a no, and not
+  rounded into either.
+- Stop Ollama and refine again. The reply carries `judgmentNote: "no
+  judgment - cannot reach the decision model provider - ..."` and the
+  deterministic findings underneath are untouched. A question that was
+  never answered is never an answer, and is never treated as approval.
+
+Put it back with `git checkout -- .spec/config.toml`. The full version of
+this exercise, with every output, is *Extra F* in
+[spec-binary-follow-along.md](spec-binary-follow-along.md#extra-f--a-second-model-that-judges-instead-of-writing-spec-judge).
+
 ---
 
 ## Reset / start over

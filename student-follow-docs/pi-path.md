@@ -57,6 +57,20 @@ pi --offline                                # or PI_OFFLINE=1: no startup networ
 A smaller tool-capable model works too; the workflow is identical and the
 output quality is not. See [Ollama model](../harness/README.md#ollama-model).
 
+Optionally, and separately from the model above, a *decision* model lets
+`refine_requirement` carry a judgment on whether each acceptance
+criterion is measurable. It needs Ollama 0.35+ and nothing on this page
+depends on it:
+
+```bash
+ollama pull nimble
+spec judge use nimble:latest
+```
+
+The judgment is advice about wording and never changes `clean` or
+`findings` — see
+[Decision model](../harness/README.md#decision-model-optional).
+
 ## Step A — pi as it ships
 
 Run `pi` in the repo and ask it to do something. It works, and it is

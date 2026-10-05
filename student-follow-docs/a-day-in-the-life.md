@@ -126,6 +126,70 @@ Do not skip `changes show`. Every mutation the harness makes lands in
 staging first; this is the first of three places the morning asks for
 your judgment.
 
+### Optional: ask a second model the question the rules cannot
+
+Skip this unless you have a decision model pulled — Ollama 0.35 or newer
+and `ollama pull nimble`. It adds about three minutes and changes nothing
+downstream. The flag below configures nothing, so there is no cleanup.
+
+`refine` just gave you ten findings from a fixed rule set. Those rules
+have a blind spot worth seeing. One of them asks whether the clause after
+`then` *looks* concrete — a number, a quoted value, a named error. Any
+number satisfies it, so `refine` reports **nothing at all** about this:
+
+```bash
+spec --decision-model nimble:latest judge criterion --text "Given the refactored module, when the suite runs, then code quality is improved by at least 20%"
+```
+
+```text
+answer	probability of true 0.038
+verdict	FAILS
+```
+
+Nobody measured code quality. The rule asks whether a number is
+*present*; it cannot ask whether the number *is* the assertion. A
+decision model can — it writes no prose and answers one bounded question
+with a probability.
+
+Now ask it about the wording you just committed:
+
+```bash
+spec --root harness --decision-model nimble:latest judge criterion HARNESS-013
+```
+
+```text
+criterion	Given a requirement id that is absent from the spec, when the criteria_coverage MCP tool is called with it, then the reply is an error naming the unknown id
+answer	probability of true 0.855
+verdict	HOLDS
+action	CONTINUE
+input	HARNESS-013 acceptance criterion 3
+state	sha256:cf5a07a68ecc239ac89c6210470a587886d2c353d091b560730d5caf8ea9a98f
+```
+
+That is one of four, and the other three come back `INCONCLUSIVE` at
+0.269, 0.745 and 0.298. Which is not the result you were expecting, and
+is the reason this section exists. All four of those criteria are
+testable — you can write the assert for each without asking anyone what
+a word means. The judgment confidently agrees with one of them.
+
+The two scoring in the 0.2s are a known weakness of this question: their
+assertion is a quoted string, but the quoted word (`"covered"`) reads
+like a judgement and the model weighs the word over the quotes. The
+repository records it rather than hiding it —
+`cargo test --test decision_live -- --ignored --nocapture` prints it as a
+false alarm — and it is one reason the default mode is advisory.
+
+So read `INCONCLUSIVE` as exactly what it says: the answer landed in the
+dead band and **the harness used it for nothing**. Not a yes, not a no,
+not rounded into either, and not a reason to touch wording you have
+already reasoned about. Then read `action`: `CONTINUE`. The model
+answered a question; the harness decided what to do about it, which was
+nothing.
+
+The three places this morning asks for *your* judgment are still exactly
+three. A judgment is not one of them, and this run is a decent argument
+for why not.
+
 ## 9:30 — turn the criteria into tests
 
 The scenarios go in a feature file of their own, so it has to exist

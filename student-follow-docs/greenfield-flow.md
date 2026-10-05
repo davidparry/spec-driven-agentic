@@ -85,6 +85,12 @@ flowchart TD
    approves the wording. Nothing downstream exists until this gate is
    passed.
 
+   With a [decision model](../harness/README.md#decision-model-optional)
+   configured, `refine_requirement` also reports whether each criterion
+   looks measurable. That judgment is advice on wording: `clean` still
+   comes from the deterministic rules, and the human approval below is
+   still the gate. Neither one moves because a model agreed.
+
 **Phase 2 — the spec becomes executable (BDD):**
 
 5. `kata/src/test/resources/features/string_calculator.feature` — the first

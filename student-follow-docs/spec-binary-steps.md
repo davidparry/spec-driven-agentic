@@ -563,3 +563,55 @@ Step 93
 ```text
 mvn -f kata/pom.xml test
 ```
+
+## Optional — the decision model (Extra F)
+
+Needs Ollama 0.35 or newer. Nothing above depends on it.
+
+Step 94
+
+```text
+ollama pull nimble
+```
+
+Step 95
+
+```text
+spec judge models
+```
+
+Step 96
+
+```text
+spec judge use nimble:latest
+```
+
+Step 97
+
+```text
+spec config | grep -E "llm.model|decision.model"
+```
+
+Step 98
+
+```text
+spec judge criterion --text "Given the refactored module, when the suite runs, then code quality is improved by at least 20%"
+```
+
+Step 99
+
+```text
+spec judge criterion --text "Given a production-grade request payload, when the handler executes, then the system achieves 99.9% correctness across all code paths"
+```
+
+Step 100
+
+```text
+spec refine REQ-007
+```
+
+Step 101
+
+```text
+git checkout -- .spec/config.toml
+```

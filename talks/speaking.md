@@ -28,7 +28,8 @@ and encode a design you never approved. The industry's answer is "use a bigger
 model." That answer costs you your budget, your code's confidentiality, and
 your ability to reproduce a result six months from now. It also misreads the
 problem: a bigger model is a better System 1, and System 2 has to come from
-somewhere else.
+somewhere else. A model trained to decide rather than to write is still
+System 1 — faster and typed, but holding no ground truth.
 
 There is a better answer, and Java developers have had it for twenty years:
 write the specification first, and make the tests the contract. The way to make
@@ -39,9 +40,9 @@ afternoon.
 
 **We start with the harness.** `spec` is a single binary that does one job: take
 a requirement from a validated spec to a green bar. Underneath it is an MCP
-server with 25 tools, none of which calls a model — the same input gives the
-same answer — and on top of it a runner that owns the parts a prompt cannot be
-trusted with. The sequence is fixed: a requirement's structure is validated, its
+server with 25 tools, none of which calls a model by default — the same input
+gives the same answer — and on top of it a runner that owns the parts a prompt
+cannot be trusted with. The sequence is fixed: a requirement's structure is validated, its
 wording survives a review that rejects ambiguity like *should*, *handles*, and
 *properly*, the accepted criteria become a tagged Gherkin scenario and a JUnit
 test **through those tools**, the suite goes red, and only then is production
@@ -154,7 +155,7 @@ failure the project actually hit; each is now caught by a deterministic check.
 | Fixing the wrong file | Rewrote the production class repeatedly while the real bug was a Cucumber step expression that did not match the scenario line, down to a trailing period | The failure output is scanned for implicated files, and the reply must include them |
 | Silent scope loss | Dropped an acceptance criterion during a rewording pass | Rewording addresses **one** finding at a time and must return every criterion |
 | Looping | Repeated an attempt that had already failed | Attempt history — targets written and what the following test run reported — is fed into the next prompt |
-| Ambiguity leaking into the spec | Wrote "handles negatives properly" | A deterministic wording review rejects a fixed list of ambiguous words before any code is written |
+| Ambiguity leaking into the spec | Wrote "handles negatives properly" | A deterministic wording review rejects a fixed list of ambiguous words before any code is written. Optionally a decision model answers one typed question beside it — *is this criterion measurable* — which catches wording the fixed list cannot, and is advice rather than a gate |
 | Refactoring on red | Offered to "clean up" while tests were failing | The TDD state machine refuses the transition from any phase but GREEN |
 | Premature completion | Marked a requirement implemented with nothing proving it | `requirement_mark_implemented` requires GREEN plus a scenario tagged with the requirement ID |
 | Right process, wrong requirement | Asked for "the next pending id", took the requirement it had just drafted to green instead — correct discipline, every gate satisfied, an hour spent on work nobody asked for | Nothing in the loop, and that is the point: the phase gates police *how* the agent works, never *what it works on*. The prompt names the id, and the end-of-run verifier grades that id by name |

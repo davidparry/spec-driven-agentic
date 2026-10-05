@@ -142,6 +142,13 @@ Ctrl-C.
 a **deterministic** rule set, not a model. Same input, same findings,
 every time. Only the *repair* (`spec reword`) calls a model.
 
+One caveat, and only if you do [Extra F](#extra-f--a-second-model-that-judges-instead-of-writing-spec-judge):
+once a *decision* model is configured, `spec refine` does make a call —
+one short request per criterion, well under a second each. It adds
+`judgments` to the reply and changes neither `findings` nor `clean`,
+which stay the deterministic rule set they always were. Until you
+configure one, the table above is exact.
+
 Timings above are from the observed run against a local model on a laptop.
 They vary widely — five findings in one `spec reword` finished in about 50
 seconds, while a single finding on another requirement took about 70. Ten
@@ -1303,7 +1310,9 @@ you can see why it behaves the way it does, and it is the most
 instructive quarter-hour on the page — but it is after-class material.
 
 Do them in the order below. Extra C moves REQ-007 into another file, so
-Extras A and B want to run before it.
+Extras A and B want to run before it. Extra F needs a second model
+pulled and is the only one that does, so it is last and entirely
+optional.
 
 Everything here works the same whether REQ-007 is still `pending` or
 already `implemented`. `spec validate` does not read `status`, and
@@ -1757,6 +1766,228 @@ cd -
 git worktree remove --force /tmp/spec-gates
 git branch -D spec-gates
 ```
+
+---
+
+### Extra F — a second model that judges instead of writing (`spec judge`)
+
+About ten minutes, and the only exercise here that needs a second model
+pulled. Skip it freely; nothing else depends on it.
+
+Extra B showed the wording review refusing five things about a story.
+Those rules are fixed, which is why the reply is byte-identical every
+time. It is also why they can be fooled.
+
+**Do this** — find the hole first, with no model involved at all:
+
+```bash
+spec judge criterion --text "Given the refactored module, when the suite runs, then code quality is improved by at least 20%"
+```
+
+That fails, because you have no decision model configured yet:
+
+```text
+Error: No decision model configured - pick one with spec judge models, then spec judge use <model-name> (or pass --decision-model)
+```
+
+Good — that is the shipped state. Nothing in the harness asks a model
+anything until you say so. Now put that criterion through the
+deterministic review instead. Add it to REQ-007 by hand in
+`requirements/requirements.json`, then:
+
+```bash
+spec refine REQ-007
+```
+
+**Expect** no finding about that criterion. One of the rules asks whether
+the clause after `then` looks concrete — a number, a quoted value, a
+named error — and `20%` is a number, so the rule is satisfied. But nobody
+measured code quality. The criterion is untestable and the rules cannot
+see it. **The rule asks whether a number is present; it cannot ask
+whether the number is the assertion.**
+
+**Do this** — now set up the second model. It needs Ollama 0.35 or newer:
+
+```bash
+ollama --version                 # 0.35.0 or newer
+ollama pull nimble
+spec judge models
+```
+
+**Expect** the models Ollama says can answer decisions:
+
+```text
+nimble:latest
+```
+
+That list is Ollama's answer, not a hardcoded one — the harness asks
+which models report the `decision` capability. Keep it:
+
+```bash
+spec judge use nimble:latest
+```
+
+```text
+Configured decision model: nimble:latest
+Written to: /Users/you/code/spec-driven-agentic/.spec/config.toml ([decision] model)
+The generative model is unchanged - see llm.model in spec config.
+```
+
+That last line is the point. Check it:
+
+```bash
+spec config | grep -E "llm.model|decision.model"
+```
+
+```text
+llm.model	qwen3.8-flash-next:125b-mlx	/Users/you/.../.spec/config.toml
+decision.model	nimble:latest	/Users/you/.../.spec/config.toml
+```
+
+Two models, two jobs, two keys. Try it the wrong way round and the tool
+says so:
+
+```bash
+spec model use nimble:latest
+```
+
+```text
+'nimble:latest' is a decision model and cannot do generative work - set it as the decision model instead: spec judge use nimble:latest
+```
+
+**Do this** — ask the question the rules could not:
+
+```bash
+spec judge criterion --text "Given the refactored module, when the suite runs, then code quality is improved by at least 20%"
+```
+
+```text
+model	nimble:latest
+question	measurable/v1
+mode	advisory
+min_confidence	0.8
+
+criterion	Given the refactored module, when the suite runs, then code quality is improved by at least 20%
+answer	probability of true 0.038
+verdict	FAILS
+action	CONTINUE
+input	--text
+state	sha256:048965344f62409e5399403357ce83c4e7b3cce836b14673c0745b6f7ff7237d
+tokens	in 385 out 1
+
+judgment (measurable/v1): criterion "...": the outcome may not be measurable - nimble:latest says probability of true 0.038
+
+A judgment is advice about wording. It does not change the spec, the test bar, or whether a requirement is implemented.
+```
+
+Read the record, because the record is the real lesson:
+
+- `question` is `measurable/v1` — the question is **versioned**. Change
+  its wording and the threshold you calibrated is no longer evidence
+  about anything, so it becomes `v2`.
+- `answer` is the raw number the model returned. Not a grade, not a
+  score out of ten: the probability it assigned to "yes".
+- `verdict` is that number after the threshold. `action` is what the
+  harness **did** — `CONTINUE`, i.e. nothing. The model does not get to
+  pick that column.
+- `state` is a SHA-256 of the exact brief that was sent. Months later you
+  can prove which words were judged.
+- `input` says what was summarized. Here, the text you typed.
+
+**Do this** — see it refuse to answer:
+
+```bash
+spec judge criterion --text "Given a production-grade request payload, when the handler executes, then the system achieves 99.9% correctness across all code paths"
+```
+
+```text
+answer	probability of true 0.499
+verdict	INCONCLUSIVE
+action	CONTINUE
+```
+
+That is the best thing in this exercise. 0.499 is inside the dead band
+around `min_confidence`, so the harness reports `INCONCLUSIVE` and uses
+it for **nothing**. It is not a yes and not a no, and it does not get
+rounded into one. A judgment plane that always has an opinion is worse
+than one that admits when it does not.
+
+**Do this** — see it get one wrong:
+
+```bash
+spec judge criterion --text 'Given a requirement, when coverage is requested, then the verdict is "covered"'
+```
+
+```text
+answer	probability of true 0.090
+verdict	FAILS
+```
+
+That criterion is measurable. The assertion is an exact quoted string —
+two engineers would write the same assert. The model reads the quoted
+word as a judgement and says no, confidently.
+
+This is a known false alarm, not a surprise: it is in the repository's
+own labeled evaluation, with a note explaining the shape. Which is the
+point of the whole optional extra. The judgment is advice from something
+that is wrong sometimes and sounds equally sure either way, so it is
+reported beside the deterministic findings and never allowed to replace
+them. You overrule it; it does not overrule you.
+
+**Do this** — see the judgment attached to the real wording review:
+
+```bash
+spec refine REQ-007
+```
+
+The reply now carries `judgments`, `judgmentAdvisories`, and
+`judgmentAction` **alongside** `findings` and `clean`. Compare them:
+`clean` and `findings` are exactly what they were before you pulled a
+second model. A judgment never edits them. It sits beside them,
+labelled, and you decide what to do.
+
+**Do this** — break it on purpose, which is the last thing worth seeing:
+
+```bash
+spec judge criterion --decision-model not-pulled:9b --text "Given an empty string, when add is called, then the result is 0"
+echo "exit: $?"
+```
+
+```text
+Error: decision model 'not-pulled:9b' is not installed - pull it first (e.g. `ollama pull not-pulled:9b`)
+exit: 1
+```
+
+Then stop Ollama (`pkill ollama`, or point `endpoint` under `[decision]`
+at a port with nothing on it) and run `spec refine REQ-007` again:
+
+```json
+{
+  "clean": false,
+  "findings": ["... exactly as before ..."],
+  "judgmentNote": "no judgment - cannot reach the decision model provider - ..."
+}
+```
+
+Note what that is **not**. It is not "clean". It is not a pass. It says
+*no judgment was taken* and names why, and the deterministic review is
+untouched underneath. A question that was never answered is never an
+answer — and a tool that quietly treated a failed request as approval
+would be the single worst bug this feature could have.
+
+**Do this** — put it back when you are done:
+
+```bash
+spec judge current            # confirm what is configured
+git checkout -- .spec/config.toml
+```
+
+**What to take from this.** The deterministic rules and the judgment are
+answering different questions, and neither replaces the other. The rules
+are cheap, exact, and repeatable, and they are the only thing allowed to
+decide `clean`. The judgment reaches wording the rules cannot and comes
+with a probability, a version, and a digest — so you can argue with it.
+Then *you* approve the wording. That gate never moved.
 
 ---
 

@@ -203,7 +203,7 @@
         <div class="down">▼ &nbsp;stdio, JSON-RPC 2.0</div>
         <div class="layer">
           <b>MCP</b> — <code>spec mcp serve</code>, 25 tools
-          <span class="muted">· <strong>deterministic</strong>: no tool calls a model — same input, same answer</span>
+          <span class="muted">· <strong>deterministic</strong> by default: no tool calls a model — same input, same answer</span>
         </div>
         <div class="down">▼ &nbsp;every tool reads and writes one spec</div>
         <div class="layer">
@@ -349,7 +349,7 @@ requirements/
           </ul>
         </div>
       </div>
-      <p class="small muted">Both columns are System 1: fast, fluent, confident, holding no ground truth of its own. A bigger model is a better System 1.</p>
+      <p class="small muted">Both columns are System 1: fast, fluent, confident, holding no ground truth of its own. A bigger model is a better System 1 — and so is one trained to decide rather than to write.</p>
       <blockquote>The answer is not a bigger model. It is a narrower job.</blockquote>
     </section>
 
@@ -444,7 +444,7 @@ requirements/
       <table class="small">
         <tr><th>When</th><th>What you are deciding</th><th>What stops the agent without you</th></tr>
         <tr><td><strong>The wording</strong></td><td>Is this requirement unambiguous enough to generate a test from?</td>
-            <td>A deterministic wording review — <code>refine_requirement</code></td></tr>
+            <td>A deterministic wording review — <code>refine_requirement</code>. A decision model can advise here; it cannot approve</td></tr>
         <tr><td><strong>The staged diff</strong></td><td>Does this edit belong in my repository?</td>
             <td>Every write lands in staging, never the working tree</td></tr>
         <tr><td><strong>The implementation</strong></td><td>Is this the design I want to live with?</td>
@@ -643,6 +643,7 @@ spec ask "what is pending?"
         <li><code>validate_spec</code> owns <strong>structure</strong> — unique id, a real user story, criteria phrased Given/When/Then</li>
         <li><code>refine_requirement</code> owns <strong>wording</strong> — rejects "should", "handle", "quickly", stories with no why, happy-path-only coverage</li>
         <li>Neither is a model call — both are deterministic</li>
+        <li class="muted">Opt into a decision model and <code>refine_requirement</code> adds a typed second opinion — beside the findings, never instead of them</li>
       </ul>
     </section>
 
@@ -752,6 +753,7 @@ scripts/verify-workshop-run.sh check
         <li><strong>Portable</strong>: one server, any host</li>
       </ul>
       <blockquote class="small">The model supplies System 1. The tools and the human supply System 2.</blockquote>
+      <p class="small muted">A model that answers with a probability instead of prose has not crossed that line. It is a faster, typed System 1 — which is why its answer is reported, and the bar, the staging gate, and the human stay where they are.</p>
     </section>
 
     <!-- ============ 52-57 min: MORNINGS THAT GO WRONG (TDD TRACK) ============ -->

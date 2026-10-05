@@ -261,7 +261,9 @@ no duplicate warning. (Reuse an existing title or criterion verbatim and
 
 `spec refine` reads staged-first and says which copy it graded in a
 `source` field of `"staged"` or `"working tree"`, so reword and refine
-loop against the staged text and only need one commit at the end.
+loop against the staged text and only need one commit at the end. With a
+[decision model](#optional-the-decision-model) configured it also
+carries `judgments`; `findings` and `clean` stay deterministic.
 `spec validate` is the other half of the pair: it reads the **committed**
 spec by contract, says so in its `nextStep` when a spec edit is staged,
 and points at the staged-aware `spec changes validate`.
@@ -432,6 +434,61 @@ include, so open the parent spec file the issue names and delete the
 repeated entry from its "includes" array`. Both close with `the rule
 against hand-editing covers wording, not catalog structure`. Neither is
 reachable with `spec reword`, which is what the advice used to name.
+
+## Optional: the decision model
+
+A second, separate local model that writes nothing and answers one
+bounded question with a typed value and a probability. Needs Ollama
+0.35+ (`/v1/systemone`). Off until configured; nothing above depends on
+it.
+
+```bash
+ollama pull nimble
+spec judge models             # only what Ollama reports as decision-capable
+spec judge use nimble:latest  # writes [decision] model, never llm.model
+spec judge current            # model, endpoint, timeout, mode, threshold
+spec judge criterion REQ-007            # every criterion, human-readable
+spec judge criterion REQ-007 --json     # the same record as an object
+spec judge criterion --text "<wording>" # judge wording with no requirement
+spec --decision-model nimble:latest judge criterion REQ-007   # one run only
+```
+
+The one question asked is `measurable/v1`: *can this acceptance
+criterion be checked by a test with a single unambiguous result?* It
+reaches wording the rule set cannot. The rules ask whether the clause
+after `then` looks concrete — a number, a quoted literal, a named error
+— so `then code quality is improved by at least 20%` earns no finding,
+while nobody measured code quality.
+
+`[decision]` in `.spec/config.toml`, all optional:
+
+```toml
+[decision]
+model = "nimble:latest"
+endpoint = "http://localhost:11434"   # defaults to the [llm] endpoint
+timeout_seconds = 60
+mode = "advisory"                     # off | advisory | enforce
+min_confidence = 0.8
+```
+
+What a judgment may do, in full: be reported. It never changes `clean`,
+`findings`, a test result, a requirement's status, the staging area, or
+the human wording gate. `enforce` lets a failing or unsure answer exit
+nonzero asking for rework or a human — it can stop work, never approve
+it. A request that failed leaves `judgmentNote` saying no judgment was
+taken, and is never read as approval.
+
+`min_confidence` is a dead band: at or above reads `HOLDS`, at or below
+`1 - threshold` reads `FAILS`, between is `INCONCLUSIVE` and used for
+nothing. Ollama's own `confidence` figure measures how concentrated the
+answer distribution is, which its docs are explicit is *not* calibrated
+correctness.
+
+The labeled evaluation behind the shipped threshold is
+`harness/tests/decision_live.rs` —
+`cargo test --test decision_live -- --ignored --nocapture` prints every
+answer, a confusion matrix, and a threshold sweep against your own
+model.
 
 ## Reset
 

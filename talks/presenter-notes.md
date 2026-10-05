@@ -41,6 +41,28 @@ draft, 25 tools served, every bar green. If `spec_completeness` is red
 before you start, the catalog and the feature tags have drifted — fix
 that, do not demo around it.
 
+**Optional, and off unless you turn it on: the decision model.** If you
+mean to show the 9:10 aside below, do this before you walk on, because
+the first call pays a cold-start cost of about a third of a second and
+nothing else in the talk does:
+
+```bash
+ollama --version                                    # 0.35 or newer, or skip the aside
+ollama pull nimble
+spec judge models                                   # nimble:latest must be listed
+spec --root harness --decision-model nimble:latest judge criterion HARNESS-013
+spec config | grep -E "llm.model|decision.model"    # llm.model unchanged, decision.model unset
+```
+
+Use the **flag**, not `spec judge use`. The flag configures nothing, so
+there is no config edit in your diff and nothing to reset. It also keeps
+the "the coding model is untouched" claim trivially true on stage: the
+last command above shows `decision.model` with no value at all.
+
+If `ollama --version` is older than 0.35 there is no `/v1/systemone` and
+the aside cannot run. Cut it. Nothing later in the talk refers back to
+it.
+
 ## 9:00 — the ticket lands
 
 ```bash
@@ -109,6 +131,52 @@ spec --root harness changes show       # read the diff out loud
 spec --root harness changes commit
 spec --root harness refine HARNESS-013 # clean: true
 ```
+
+### Optional aside, 90 seconds: a model that judges instead of writing
+
+Only if you set it up before walking on. Skip freely — nothing later
+refers to it. Worth doing for a room that keeps asking whether a model
+could do the reviewing.
+
+The wording review you just ran is a fixed rule set, and it has a hole.
+One rule asks whether the clause after `then` *looks* concrete: a
+number, a quoted value, a named error. Any number satisfies it:
+
+```bash
+spec --decision-model nimble:latest judge criterion \
+  --text "Given the refactored module, when the suite runs, then code quality is improved by at least 20%"
+```
+
+`refine` reports **nothing at all** about that criterion. The judgment
+reads it at 0.038, `FAILS`. Nobody measured code quality. The rule asks
+whether a number is present; it cannot ask whether the number *is* the
+assertion.
+
+Then turn it on the wording the room just approved:
+
+```bash
+spec --root harness --decision-model nimble:latest judge criterion HARNESS-013
+```
+
+**Know this result before you show it.** One of the four comes back
+`HOLDS` at 0.855. The other three come back `INCONCLUSIVE` at 0.269,
+0.745 and 0.298 — and all four are testable. The two in the 0.2s are a
+known false alarm: their assertion is a quoted string, but the quoted
+word (`"covered"`) reads like a judgement and the model weighs the word
+over the quotes. It is in the repository's labeled evaluation with a
+note saying so.
+
+Do not apologise for it — it is the strongest version of the point.
+Three answers that are wrong or unsure about wording four engineers
+agreed on, delivered with exactly the same confident tone as the right
+one. Say the line: *this is why it is reported and not obeyed.* Then
+read `action`: `CONTINUE`. The deterministic `clean: true` above did not
+move, and neither did the three moments that are yours.
+
+If Ollama is not running, the command fails with `cannot reach the
+decision model provider` and a nonzero exit. That is also a usable beat
+— a question that was never answered is never an answer, and never an
+approval — but only if you say it on purpose rather than discovering it.
 
 ## 9:30 — the criteria become an executable scenario
 
