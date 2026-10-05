@@ -58,3 +58,4 @@ _site/
 /harness/.cargo
 /harness/.cargo/
 /harness/.spec-history
+/notes/
