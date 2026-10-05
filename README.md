@@ -18,6 +18,15 @@ RED, GREEN, REFACTOR. `spec mcp serve` is the same binary as an MCP server
 manual is [searchable online](https://davidparry.github.io/spec-driven-agentic/manual/);
 the harness itself is documented in [`harness/README.md`](harness/README.md).
 
+Generation uses a local coding model ([`spec model`](https://davidparry.github.io/spec-driven-agentic/manual/commands/model.html)).
+Optionally, a second and different local model — a *decision* model,
+which writes nothing and answers bounded questions with a typed value
+and a probability — can judge whether an acceptance criterion is
+actually measurable ([`spec judge`](https://davidparry.github.io/spec-driven-agentic/manual/commands/judge.html)).
+It is off until you configure it, and a judgment is advice about
+wording: it never changes a test result, a requirement's status, or a
+deterministic finding.
+
 > **The workshop** — the 60-minute class, the kata, the slides, the student
 > guide, and the exercises — is in [`talks/WORKSHOP.md`](talks/WORKSHOP.md).
 > Students start at [`student-follow-along.md`](student-follow-docs/student-follow-along.md).
@@ -28,7 +37,7 @@ Everything the harness writes for a project lives in one hidden directory, `.spe
 
 ```text
 .spec/
-  config.toml    tracked — LLM, timeouts, per-command tool profiles
+  config.toml    tracked — LLM, decision model, timeouts, tool profiles
   state.json     TDD phase log
   memory.json    discovered language, libraries, and layout
   history        interactive-shell command history
@@ -101,6 +110,18 @@ everything that ships — the harness, the command manual, and the site:
    `trunk`; a clean local run means a clean deploy.
 
 One-time tools: `cargo install mdbook` and `pip install markdown`.
+
+Two suites are `#[ignore]`d because they need a live local Ollama, so
+run them by hand when you have touched what they cover:
+
+```bash
+cd harness
+cargo test --test decision_live -- --ignored --nocapture   # the decision model and its labeled evaluation
+cargo test --test greenfield_e2e -- --ignored --nocapture  # the full generative loop (minutes)
+```
+
+`decision_live` skips itself with a printed reason when no
+decision-capable model is installed, so it is safe to run anywhere.
 
 If you touched the Java smoke test, also run `mvn -pl smoke-test verify` and
 `mvn -f kata/pom.xml test` (the standalone kata). The multi-platform

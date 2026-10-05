@@ -11,7 +11,8 @@ use clap::{Args, Parser, Subcommand};
 use spec_harness::adapters::auto_prompt::AutoPrompter;
 use spec_harness::adapters::chat_cache::{CachedConversation, DEFAULT_CACHE_TTL};
 use spec_harness::adapters::config::{
-    TomlModelStore, TomlToolStore, config_path, inspect_config, refactor_attempts, tools_settings,
+    TomlDecisionStore, TomlModelStore, TomlToolStore, config_path, inspect_config,
+    refactor_attempts, tools_settings,
 };
 use spec_harness::adapters::console_prompt::ConsolePrompter;
 use spec_harness::adapters::fs_project::FsProjectFiles;
@@ -50,13 +51,16 @@ use spec_harness::application::tool_service::ToolService;
 use spec_harness::bootstrap::{prompt_language, refresh_project_memory, settle_project_memory};
 use spec_harness::deliver::{DEFAULT_ATTEMPTS, Deliver, DeliverOptions, parse_target};
 use spec_harness::domain::config_report::{ConfigSource, LLM_MODEL_KEY};
+use spec_harness::domain::decision::Transition;
 use spec_harness::domain::language::Language;
 use spec_harness::domain::mcp_registry::ServerSpec;
 use spec_harness::domain::prompts::ask_prompt;
 use spec_harness::domain::spec_validator::{is_structural_issue, structural_repair};
 use spec_harness::domain::tdd::ImplementAttempt;
 use spec_harness::domain::tool_profile::{Caller, resolve};
-use spec_harness::domain::{CACHE_DIR, HISTORY_FILE, LOG_DIR, RECOMMENDED_MODEL, spec_rel};
+use spec_harness::domain::{
+    CACHE_DIR, HISTORY_FILE, LOG_DIR, RECOMMENDED_DECISION_MODEL, RECOMMENDED_MODEL, spec_rel,
+};
 use spec_harness::greenfield::Greenfield;
 use spec_harness::mcp::{WorkflowServer, builtin_tool_definitions};
 use spec_harness::ports::{
@@ -76,6 +80,11 @@ struct Cli {
     /// Override the configured LLM model for this invocation
     #[arg(long, global = true)]
     model: Option<String>,
+
+    /// Override the configured decision model for this invocation.
+    /// Separate from --model: the two roles are different models.
+    #[arg(long, global = true, value_name = "MODEL")]
+    decision_model: Option<String>,
 
     /// Project root (where requirements/ and .spec/config.toml live)
     #[arg(long, global = true, default_value = ".")]
@@ -151,6 +160,9 @@ enum Command {
     /// LLM model discovery and selection (Ollama)
     #[command(subcommand)]
     Model(ModelCommand),
+    /// Decision model: selection, and bounded judgments you can inspect
+    #[command(subcommand)]
+    Judge(JudgeCommand),
     /// Print resolved configuration and where each value came from
     Config {
         /// Print JSON instead of the tab-separated table
@@ -385,6 +397,35 @@ enum ModelCommand {
     Use { model_name: String },
 }
 
+/// The decision role, deliberately parallel to `spec model` rather than
+/// folded into it: a decision model and a coding model are not
+/// interchangeable, and one command that set "the model" would make it
+/// look as though they were.
+#[derive(Subcommand)]
+enum JudgeCommand {
+    /// List installed models that can answer decisions
+    Models,
+    /// Show the resolved decision model, mode, and threshold
+    Current {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Persist the decision model choice (writes [decision] model,
+    /// never llm.model)
+    Use { model_name: String },
+    /// Judge one acceptance criterion and show the typed answer
+    Criterion {
+        /// A requirement id whose criteria are judged, e.g. REQ-003.
+        /// Omit when using --text.
+        req_id: Option<String>,
+        /// Judge this wording instead of a requirement's criteria
+        #[arg(long, conflicts_with = "req_id")]
+        text: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
 #[derive(Subcommand)]
 enum McpCommand {
     /// Serve the MCP tools over stdio
@@ -527,6 +568,7 @@ fn main() -> anyhow::Result<()> {
             match execute(
                 &cli.root,
                 cli.model.as_deref(),
+                cli.decision_model.as_deref(),
                 cli.retry,
                 cli.tools.as_deref(),
                 cli.max_rounds,
@@ -606,6 +648,7 @@ fn init_logging(debug: bool, root: &Path) -> Option<tracing_appender::non_blocki
 fn execute(
     root: &Path,
     model: Option<&str>,
+    decision_model: Option<&str>,
     retry: Option<u32>,
     tools: Option<&str>,
     max_rounds: Option<u32>,
@@ -613,8 +656,17 @@ fn execute(
 ) -> anyhow::Result<()> {
     let attempts = resolve_llm_attempts(root, retry);
     match command {
-        Command::Spec(command) => run_spec(root, model, attempts, tools, max_rounds, command),
+        Command::Spec(command) => run_spec(
+            root,
+            model,
+            decision_model,
+            attempts,
+            tools,
+            max_rounds,
+            command,
+        ),
         Command::Model(command) => run_model(root, model, command),
+        Command::Judge(command) => run_judge(root, decision_model, command),
         Command::Config { json } => {
             let report = config_report(root);
             if *json {
@@ -891,6 +943,13 @@ fn announce_session_model(root: &Path, flag: Option<&str>) -> bool {
              model, e.g.: ollama pull {RECOMMENDED_MODEL} \
              (mileage varies with models not trained for development)"
         ),
+        SessionModel::NoGenerativeModel { installed } => println!(
+            "Ollama has {} installed, which answers decisions rather than chat - \
+             generation will use deterministic templates. Pull a coding model too, \
+             e.g.: ollama pull {RECOMMENDED_MODEL} (the decision model stays \
+             available to spec judge)",
+            installed.join(", ")
+        ),
         SessionModel::ProviderDown(_) => println!(
             "Ollama is not reachable - generation will use deterministic \
              templates. Install it from https://ollama.com, start it, and \
@@ -982,6 +1041,7 @@ fn interactive_shell_loop(
                     match execute(
                         line_root,
                         line_model,
+                        cli.decision_model.as_deref(),
                         line_retry,
                         cli.tools.as_deref(),
                         cli.max_rounds,
@@ -1366,6 +1426,7 @@ fn run_scenario(
 fn run_spec(
     root: &Path,
     model: Option<&str>,
+    decision_model: Option<&str>,
     attempts: u32,
     tools: Option<&str>,
     max_rounds: Option<u32>,
@@ -1428,7 +1489,18 @@ fn run_spec(
                     .into(),
                 (true, _) => report.next_step,
             };
-            print_json(&report)
+            // The deterministic verdict is already decided and printed
+            // below whatever happens next. A configured decision model
+            // adds a bounded judgment beside it; an unreachable one
+            // adds a note and nothing else.
+            let gated = judge_refinement(root, decision_model, &mut report)?;
+            print_json(&report)?;
+            if gated {
+                // Enforcing mode asked for rework or a human. The reply
+                // is already on stdout; the exit code is the gate.
+                return Err(NonzeroExit.into());
+            }
+            Ok(())
         }
         SpecCommand::Draft {
             title,
@@ -1579,6 +1651,167 @@ fn cached_chat(root: &Path, model_flag: Option<&str>) -> Option<(String, CachedC
             Some((model, chat))
         }
         ModelResolution::Unavailable(_) => None,
+    }
+}
+
+/// Attaches the decision model's judgment to a refinement reply.
+///
+/// Returns whether the harness is gating on it, which only an enforcing
+/// mode can cause. With no decision model configured this does nothing
+/// at all and the reply is byte-for-byte what it has always been.
+fn judge_refinement(
+    root: &Path,
+    flag: Option<&str>,
+    report: &mut spec_harness::application::spec_service::RefinementReport,
+) -> anyhow::Result<bool> {
+    let Some(service) = wiring::decision_service(root, flag) else {
+        return Ok(false);
+    };
+    let criteria = match spec_service(root).get_requirement(&report.id) {
+        Ok(requirement) => requirement.acceptance_criteria,
+        // The caller already refined this id successfully, so a failure
+        // here is not worth turning into the command's error.
+        Err(_) => return Ok(false),
+    };
+    match service.judge_refinement(report, &criteria) {
+        Ok(action) => Ok(action != Transition::Continue),
+        // Enforcing mode with no answer. Never silently an approval:
+        // the refusal is the command's error.
+        Err(error) => Err(anyhow::anyhow!(
+            "decision gate refused to pass without an answer - {error}"
+        )),
+    }
+}
+
+fn run_judge(root: &Path, flag: Option<&str>, command: &JudgeCommand) -> anyhow::Result<()> {
+    match command {
+        JudgeCommand::Models => {
+            let models = model_service(root).decision_models()?;
+            if models.is_empty() {
+                println!(
+                    "No decision models installed - pull one first (e.g. `ollama pull \
+                     {RECOMMENDED_DECISION_MODEL}`), then: spec judge use \
+                     {RECOMMENDED_DECISION_MODEL}"
+                );
+                return Ok(());
+            }
+            for model in models {
+                println!("{model}");
+            }
+            Ok(())
+        }
+        JudgeCommand::Current { json } => {
+            let settings = wiring::resolved_decision(root, flag);
+            let source = if flag.is_some() {
+                "--decision-model flag"
+            } else if settings.model.is_some() {
+                "configuration"
+            } else {
+                "(unset)"
+            };
+            if *json {
+                return print_json(&serde_json::json!({
+                    "model": settings.model,
+                    "source": source,
+                    "endpoint": settings.endpoint,
+                    "timeoutSeconds": settings.timeout.as_secs(),
+                    "mode": settings.policy.mode,
+                    "minConfidence": settings.policy.threshold,
+                    "question": spec_harness::domain::decision::MEASURABLE_QUESTION,
+                }));
+            }
+            match &settings.model {
+                Some(model) => println!("{model} (from {source})"),
+                None => println!(
+                    "No decision model configured - judgments are off. Pick one with: \
+                     spec judge models, then spec judge use <model-name>"
+                ),
+            }
+            println!("endpoint\t{}", settings.endpoint);
+            println!("timeout_seconds\t{}", settings.timeout.as_secs());
+            println!("mode\t{}", settings.policy.mode);
+            println!("min_confidence\t{}", settings.policy.threshold);
+            Ok(())
+        }
+        JudgeCommand::Use { model_name } => {
+            let available = model_service(root).decision_models();
+            if let Ok(models) = &available
+                && !models.is_empty()
+                && !models.iter().any(|m| m == model_name)
+            {
+                anyhow::bail!(
+                    "'{model_name}' cannot answer decisions - installed decision models: {}",
+                    models.join(", ")
+                );
+            }
+            TomlDecisionStore::new(config_file(root)).persist(model_name)?;
+            let file = config_file(root);
+            let shown = file.canonicalize().unwrap_or(file);
+            println!("Configured decision model: {model_name}");
+            println!("Written to: {} ([decision] model)", shown.display());
+            println!("The generative model is unchanged - see llm.model in spec config.");
+            Ok(())
+        }
+        JudgeCommand::Criterion { req_id, text, json } => {
+            let Some(service) = wiring::decision_service(root, flag) else {
+                anyhow::bail!(
+                    "No decision model configured - pick one with spec judge models, \
+                     then spec judge use <model-name> (or pass --decision-model)"
+                );
+            };
+            let (input, criteria) = match (req_id, text) {
+                (_, Some(text)) => ("--text".to_string(), vec![text.clone()]),
+                (Some(req_id), None) => {
+                    let requirement = spec_service(root).get_requirement(req_id)?;
+                    (req_id.clone(), requirement.acceptance_criteria)
+                }
+                (None, None) => anyhow::bail!(
+                    "name a requirement (spec judge criterion REQ-003) or pass \
+                     --text \"<acceptance criterion>\""
+                ),
+            };
+            if criteria.is_empty() {
+                anyhow::bail!("{input} has no acceptance criteria to judge");
+            }
+            let review = service
+                .review_criteria(&input, &criteria)
+                .map_err(|error| anyhow::anyhow!("{error}"))?;
+            if *json {
+                return print_json(&review);
+            }
+            println!("model\t{}", service.model());
+            println!(
+                "question\t{}",
+                spec_harness::domain::decision::MEASURABLE_QUESTION
+            );
+            println!("mode\t{}", service.policy().mode);
+            println!("min_confidence\t{}", service.policy().threshold);
+            for (criterion, judgment) in criteria.iter().zip(&review.judgments) {
+                println!();
+                println!("criterion\t{criterion}");
+                println!("answer\t{}", judgment.answer.summary());
+                println!("verdict\t{}", judgment.verdict);
+                println!("action\t{}", judgment.action);
+                println!("input\t{}", judgment.provenance.input);
+                println!("state\t{}", judgment.provenance.state);
+                println!(
+                    "tokens\tin {} out {}",
+                    judgment.usage.input_tokens, judgment.usage.output_tokens
+                );
+            }
+            if !review.advisories.is_empty() {
+                println!();
+                for advisory in &review.advisories {
+                    println!("{advisory}");
+                }
+            }
+            println!();
+            println!(
+                "A judgment is advice about wording. It does not change the spec, the \
+                 test bar, or whether a requirement is implemented."
+            );
+            Ok(())
+        }
     }
 }
 

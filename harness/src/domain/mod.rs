@@ -5,6 +5,16 @@
 /// against. Named in pull hints and the `spec init` scaffold.
 pub const RECOMMENDED_MODEL: &str = "qwen3.8-flash-next:125b-mlx";
 
+/// The decision model the judgment exercise and its evaluation were run
+/// against, named in `ollama pull` hints only.
+///
+/// A suggestion, never an assumption: nothing in the harness treats this
+/// as installed, selects it automatically, or infers a capability from
+/// the name. Which models can answer decisions is a question for the
+/// provider — see
+/// [`ModelCatalog::capabilities`](crate::ports::ModelCatalog::capabilities).
+pub const RECOMMENDED_DECISION_MODEL: &str = "nimble";
+
 /// Hidden parent for configuration, state, cache, logs, and staging.
 pub const SPEC_DIR: &str = ".spec";
 
@@ -37,6 +47,7 @@ pub fn spec_rel(name: &str) -> String {
 pub mod command_policy;
 pub mod config_report;
 pub mod coverage;
+pub mod decision;
 pub mod feature;
 pub mod generation;
 pub mod language;

@@ -29,10 +29,12 @@ use crate::adapters::process_runtime::ProcessRuntimeProbe;
 use crate::adapters::runners::detect_runner;
 use crate::application::agent_service::NullPrompter;
 use crate::application::command_service::CommandService;
+use crate::application::decision_service::apply_review;
 use crate::application::generation_service::{GenerationService, ResolvedLlm};
 use crate::application::inspect_service::InspectService;
 use crate::application::spec_mutation_service::SpecMutationService;
 use crate::application::tdd_service::{TddError, TddService};
+use crate::domain::decision::{DEFAULT_MIN_CONFIDENCE, Mode, Policy};
 use crate::domain::tools::{ToolDefinition, ToolOrigin};
 use crate::ports::{FeatureCatalog as _, SpecRepository as _, TestFilter, TestRunner};
 use crate::wiring;
@@ -208,8 +210,13 @@ fn nullable_u64(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
 }
 
 /// Logs a tool invocation and opens a span so the result events emitted
-/// by `json_result`/`error_result` carry the tool name. Safe to hold in
-/// the async handlers because none of them await while it is alive.
+/// by `json_result`/`error_result` carry the tool name.
+///
+/// An `EnteredSpan` is not `Send`, so it must not be held across an
+/// await: the handler's future would stop being `Send` and the tool
+/// router cannot box it. A handler that does await scopes this to its
+/// synchronous part and opens a fresh span for the rest — see
+/// `refine_requirement`.
 fn tool_call(tool: &'static str) -> tracing::span::EnteredSpan {
     let span = tracing::info_span!("mcp", tool);
     let entered = span.entered();
@@ -285,6 +292,64 @@ impl WorkflowServer {
         FsChangeStore,
     > {
         wiring::spec_service(&self.root, workshop_layout())
+    }
+
+    /// Adds the decision model's judgment to a refinement reply, when one
+    /// is configured.
+    ///
+    /// Deliberately infallible: an MCP host asking about wording gets the
+    /// deterministic findings whatever the decision model does, and a
+    /// judgment that could not be taken says so in `judgmentNote` instead
+    /// of failing the call. The enforcing mode lives on the CLI, where a
+    /// human is watching an exit code — a tool reply that an agent reads
+    /// is not the place to gate a workflow.
+    async fn attach_judgment(
+        &self,
+        id: &str,
+        report: &mut crate::application::spec_service::RefinementReport,
+    ) {
+        // Nothing but a config read happens on the runtime thread.
+        if wiring::resolved_decision(&self.root, None).model.is_none() {
+            return;
+        }
+        let Ok(requirement) = self.spec_service().get_requirement(id) else {
+            return;
+        };
+
+        // Everything else goes to the blocking pool. The decision client
+        // is `reqwest::blocking`, which builds and drives its own
+        // runtime: constructing or calling it on a runtime thread both
+        // stalls the host and risks a nested-runtime panic. The service
+        // is therefore built where it is used.
+        let root = self.root.clone();
+        let req_id = report.id.clone();
+        let criteria = requirement.acceptance_criteria;
+        let asked = tokio::task::spawn_blocking(move || {
+            let _span = tool_call("refine_requirement");
+            let service = wiring::decision_service(&root, None)?.into_advisory();
+            let review = service.review_criteria(&req_id, &criteria);
+            Some((service.policy(), review))
+        })
+        .await;
+
+        let (policy, review) = match asked {
+            Ok(Some(pair)) => pair,
+            // The model stopped being configured between the two reads.
+            Ok(None) => return,
+            // The blocking task panicked or was cancelled. Not an
+            // answer, so it is reported as a failure to get one.
+            Err(error) => (
+                Policy::new(Mode::Advisory, DEFAULT_MIN_CONFIDENCE),
+                Err(crate::ports::DecisionError::Unavailable(format!(
+                    "the judgment task did not finish - {error}"
+                ))),
+            ),
+        };
+        // The policy came back from `into_advisory`, so this cannot
+        // refuse — but a warning beats an `unwrap` if that ever changes.
+        if let Err(error) = apply_review(policy, report, review) {
+            tracing::warn!(%error, "unreachable: advisory judgment failed");
+        }
     }
 
     fn scenario_service(
@@ -395,18 +460,29 @@ impl WorkflowServer {
         story missing its actor or rationale, outcomes that are not measurable, criteria \
         covering more than one action, and missing edge cases. Reword the requirement from \
         the findings and call again - iterate until there are no findings, then have the \
-        developer approve the wording before writing any scenario."
+        developer approve the wording before writing any scenario. When a decision model \
+        is configured the reply also carries judgments: a local model's opinion on whether \
+        each criterion is measurable, with the question asked and the probability it \
+        answered. Judgments are advice about wording and are never a verdict on the code; \
+        findings and clean come from the deterministic rules either way."
     )]
     async fn refine_requirement(
         &self,
         Parameters(params): Parameters<IdParam>,
     ) -> Result<CallToolResult, McpError> {
+        // Scoped: this handler awaits a judgment below, and the span
+        // guard is not `Send`.
+        let mut report = {
+            let _span = tool_call("refine_requirement");
+            tracing::debug!(id = %params.id, "tool arguments");
+            match self.spec_service().refine_requirement(&params.id) {
+                Ok(report) => report,
+                Err(e) => return Ok(error_result(e)),
+            }
+        };
+        self.attach_judgment(&params.id, &mut report).await;
         let _span = tool_call("refine_requirement");
-        tracing::debug!(id = %params.id, "tool arguments");
-        Ok(match self.spec_service().refine_requirement(&params.id) {
-            Ok(report) => json_result(&report),
-            Err(e) => error_result(e),
-        })
+        Ok(json_result(&report))
     }
 
     #[tool(

@@ -35,10 +35,10 @@
             const path_to_root = "";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "searchindex-a00b6607.js";
+            window.path_to_searchindex_js = "searchindex-a361ab77.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-72ae98bc.js"></script>
+        <script src="toc-2ab172c3.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -196,8 +196,12 @@ or your editor.</li>
 <li><a href="commands/spec.html#spec-validate"><code>spec validate</code></a> until the
 structure is valid.</li>
 <li><a href="commands/spec.html#spec-refine"><code>spec refine &lt;id&gt;</code></a> until
-there are no wording findings.</li>
-<li>A human approves the wording. This is the first human gate.</li>
+there are no wording findings. With a
+<a href="commands/judge.html">decision model</a> configured, this step also
+reports a judgment on whether each criterion is measurable — advice
+that sits beside the findings and changes none of them.</li>
+<li>A human approves the wording. This is the first human gate.
+A judgment never stands in for this approval.</li>
 </ol>
 <h2 id="the-two-altitudes"><a class="header" href="#the-two-altitudes">The two altitudes</a></h2>
 <ul>

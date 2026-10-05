@@ -35,10 +35,10 @@
             const path_to_root = "";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "searchindex-a00b6607.js";
+            window.path_to_searchindex_js = "searchindex-a361ab77.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-72ae98bc.js"></script>
+        <script src="toc-2ab172c3.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -212,8 +212,26 @@ full story):</p>
 <ol>
 <li><code>--model</code> flag — this invocation only.</li>
 <li><code>model</code> in <code>.spec/config.toml</code> — the persisted project choice.</li>
-<li>Discovery — the first installed Ollama model, session-only.</li>
+<li>Discovery — the first installed Ollama model that can do generative
+work, session-only.</li>
 </ol>
+<h2 id="--decision-model-model"><a class="header" href="#--decision-model-model"><code>--decision-model &lt;MODEL&gt;</code></a></h2>
+<p>Override the <a href="commands/judge.html">decision model</a> for this invocation
+only. Separate from <code>--model</code>, because the two roles are two different
+models: one writes, the other answers bounded questions about evidence.</p>
+<pre><code class="language-bash">spec --decision-model nimble:latest judge criterion REQ-003
+</code></pre>
+<p>Resolution order:</p>
+<ol>
+<li><code>--decision-model</code> flag — this invocation only.</li>
+<li><code>model</code> under <code>[decision]</code> in <code>.spec/config.toml</code>, written by
+<code>spec judge use</code>.</li>
+<li>Nothing. With no decision model named, no judgment is asked for and
+every command behaves as it did before the decision plane existed.</li>
+</ol>
+<p>The flag names a model; it does not change <code>decision.mode</code>, so passing
+it to a project configured as <code>advisory</code> does not start enforcing
+anything.</p>
 <h2 id="--debug"><a class="header" href="#--debug"><code>--debug</code></a></h2>
 <p>Verbose diagnostic logging: the full prompts sent to the model and its
 responses, cache hits and misses, resolved configuration, MCP tool

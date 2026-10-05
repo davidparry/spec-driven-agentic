@@ -30,6 +30,7 @@
 - [spec refactor](commands/refactor.md)
 - [spec changes](commands/changes.md)
 - [spec model](commands/model.md)
+- [spec judge](commands/judge.md)
 - [spec config](commands/config.md)
 - [spec mcp](commands/mcp.md)
 - [spec tools](commands/tools.md)

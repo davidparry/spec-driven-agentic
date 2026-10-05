@@ -60,3 +60,11 @@ model this harness is developed and run against is
 `qwen3.8-flash-next:125b-mlx` — see [Getting started](getting-started.md)
 and [`spec model`](commands/model.md). Your mileage will vary with
 other models, especially those not trained for development work.
+
+Optionally, a second and quite different local model can be configured:
+a *decision model*, which writes nothing and instead answers one bounded
+question about evidence with a typed value and a probability. The
+harness uses one to judge whether an acceptance criterion is measurable,
+which the deterministic wording rules cannot decide. It is off until you
+configure it, and what it is allowed to do is deliberately narrow — see
+[`spec judge`](commands/judge.md).

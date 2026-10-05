@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-a00b6607.js";
+            window.path_to_searchindex_js = "../searchindex-a361ab77.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-72ae98bc.js"></script>
+        <script src="../toc-2ab172c3.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -227,9 +227,20 @@ tools.call_timeout_seconds	300	(default)
 tools.cache_ttl_seconds	86400	(default)
 tools.mcp_config	(unset)	(default)
 refactor.attempts	10	(default)
+decision.model	(unset)	(default)
+decision.endpoint	http://localhost:11434	/Users/you/code/calculator/.spec/config.toml
+decision.timeout_seconds	60	(default)
+decision.mode	advisory	(default)
+decision.min_confidence	0.8	(default)
 tools.profiles.spec-draft	list_requirements, get_requirement, validate_spec, refine_requirement	(default)
 tools.profiles.implement	get_requirement, feature_read, …	(default)
 </code></pre>
+<p>The five <code>decision.*</code> rows describe the
+<a href="judge.html">decision model</a> — a second, separate model from <code>llm.model</code>
+above. <code>decision.model</code> is <code>(unset)</code> until <code>spec judge use</code> names one,
+and while it is unset nothing asks a judgment. <code>decision.endpoint</code> is
+attributed to the file when either it or <code>[llm] endpoint</code> supplied the
+host, since the decision plane defaults to wherever Ollama already is.</p>
 <p><code>refactor.attempts</code> is how many write-then-test rounds
 <a href="refactor.html"><code>spec refactor</code></a> may spend before it restores the code it
 started from. Each round costs a model call and a full test run, so it is
@@ -251,16 +262,19 @@ or has no models pulled.</p>
 <h2 id="see-also"><a class="header" href="#see-also">See also</a></h2>
 <ul>
 <li><a href="model.html"><code>spec model</code></a> — persist <code>llm.model</code>.</li>
+<li><a href="judge.html"><code>spec judge</code></a> — persist <code>decision.model</code>, and what the
+other four <code>decision.*</code> keys do.</li>
 <li><a href="tools.html"><code>spec tools</code></a> — per-command profiles and <code>mcp.json</code> tools.</li>
-<li><a href="../global-flags.html">Global flags</a> — <code>--model</code>, <code>--retry</code>, <code>--tools</code>
-override a value for one run and are not written to the file.</li>
+<li><a href="../global-flags.html">Global flags</a> — <code>--model</code>, <code>--decision-model</code>,
+<code>--retry</code>, <code>--tools</code> override a value for one run and are not written
+to the file.</li>
 </ul>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../commands/model.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../commands/judge.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
@@ -274,7 +288,7 @@ override a value for one run and are not written to the file.</li>
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../commands/model.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../commands/judge.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 

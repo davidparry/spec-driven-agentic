@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-a00b6607.js";
+            window.path_to_searchindex_js = "../searchindex-a361ab77.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-72ae98bc.js"></script>
+        <script src="../toc-2ab172c3.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -186,6 +186,10 @@
 the model only to <em>polish</em> deterministic templates in the generation
 commands. Everything works without a model; generation just stays at
 template quality.</p>
+<p>This page is about the <strong>generative</strong> model: the one that writes. A
+<em>decision</em> model is a separate choice with its own key and its own
+command — see <a href="judge.html"><code>spec judge</code></a>. Setting one never changes the
+other, and a model that can only answer decisions is refused here.</p>
 <p>The model this harness is developed and run against is
 <code>qwen3.8-flash-next:125b-mlx</code>. Pull it with
 <code>ollama pull qwen3.8-flash-next:125b-mlx</code>, then persist the choice with
@@ -206,11 +210,17 @@ Commands: list, current, use
 <li><strong><code>--model</code> flag</strong> — this invocation only, never persisted.</li>
 <li><strong>Configuration</strong> — the <code>model</code> key in <code>.spec/config.toml</code> under the
 project root, written by <code>spec model use</code>.</li>
-<li><strong>Discovery</strong> — the first model installed in Ollama, as a
-session-only default. Nothing is written to disk.</li>
+<li><strong>Discovery</strong> — the first model installed in Ollama <em>that can do
+generative work</em>, as a session-only default. Nothing is written to
+disk.</li>
 </ol>
 <p>If Ollama is unreachable or has no models, LLM-backed generation falls
 back to deterministic templates.</p>
+<p>Discovery skips a model only when Ollama positively reports that it
+answers decisions and cannot complete text — so a machine with
+<a href="judge.html">a decision model</a> installed does not end up using it to write
+code. A model whose capabilities Ollama cannot report keeps the
+behaviour it always had and stays a candidate.</p>
 <hr>
 <h2 id="spec-model-list"><a class="header" href="#spec-model-list">spec model list</a></h2>
 <p>List the models installed in Ollama, marking the one that would
@@ -249,7 +259,10 @@ session default and the output tells you it is not saved:</p>
 Written to /Users/you/code/calculator/.spec/config.toml
 </code></pre>
 <p>The choice is validated against Ollama’s installed models — a name
-Ollama does not have is rejected rather than silently saved.</p>
+Ollama does not have is rejected rather than silently saved. So is a
+model that can only answer decisions:</p>
+<pre><code class="language-text">'nimble:latest' is a decision model and cannot do generative work - set it as the decision model instead: spec judge use nimble:latest
+</code></pre>
 <h2 id="the-llm-configuration-block"><a class="header" href="#the-llm-configuration-block">The [llm] configuration block</a></h2>
 <p>Everything model-related lives under <code>[llm]</code> in <code>.spec/config.toml</code>:</p>
 <pre><code class="language-toml">[llm]
@@ -281,6 +294,8 @@ it explicitly (<code>no reply within 300s ... set timeout_seconds under [llm]</c
 </div>
 <h2 id="see-also"><a class="header" href="#see-also">See also</a></h2>
 <ul>
+<li><a href="judge.html"><code>spec judge</code></a> — the <strong>decision</strong> model, a separate choice
+under <code>[decision]</code>.</li>
 <li><a href="../global-flags.html">Global flags</a> — the <code>--model</code> override.</li>
 <li><a href="config.html"><code>spec config</code></a> — dump every key and where it came from.</li>
 <li><a href="steps.html#source-template-or-llm"><code>spec steps generate</code></a> — how LLM
@@ -295,7 +310,7 @@ output is validated before it can stage.</li>
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="../commands/config.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../commands/judge.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -309,7 +324,7 @@ output is validated before it can stage.</li>
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="../commands/config.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../commands/judge.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>

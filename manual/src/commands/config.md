@@ -51,9 +51,21 @@ tools.call_timeout_seconds	300	(default)
 tools.cache_ttl_seconds	86400	(default)
 tools.mcp_config	(unset)	(default)
 refactor.attempts	10	(default)
+decision.model	(unset)	(default)
+decision.endpoint	http://localhost:11434	/Users/you/code/calculator/.spec/config.toml
+decision.timeout_seconds	60	(default)
+decision.mode	advisory	(default)
+decision.min_confidence	0.8	(default)
 tools.profiles.spec-draft	list_requirements, get_requirement, validate_spec, refine_requirement	(default)
 tools.profiles.implement	get_requirement, feature_read, …	(default)
 ```
+
+The five `decision.*` rows describe the
+[decision model](judge.md) — a second, separate model from `llm.model`
+above. `decision.model` is `(unset)` until `spec judge use` names one,
+and while it is unset nothing asks a judgment. `decision.endpoint` is
+attributed to the file when either it or `[llm] endpoint` supplied the
+host, since the decision plane defaults to wherever Ollama already is.
 
 `refactor.attempts` is how many write-then-test rounds
 [`spec refactor`](refactor.md) may spend before it restores the code it
@@ -82,6 +94,9 @@ or has no models pulled.
 ## See also
 
 - [`spec model`](model.md) — persist `llm.model`.
+- [`spec judge`](judge.md) — persist `decision.model`, and what the
+  other four `decision.*` keys do.
 - [`spec tools`](tools.md) — per-command profiles and `mcp.json` tools.
-- [Global flags](../global-flags.md) — `--model`, `--retry`, `--tools`
-  override a value for one run and are not written to the file.
+- [Global flags](../global-flags.md) — `--model`, `--decision-model`,
+  `--retry`, `--tools` override a value for one run and are not written
+  to the file.

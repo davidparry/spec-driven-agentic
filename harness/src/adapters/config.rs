@@ -11,10 +11,12 @@ use std::time::Duration;
 use crate::adapters::spec_home::{ensure_parent, spec_file};
 use crate::domain::CONFIG_FILE;
 use crate::domain::config_report::{
-    ConfigFileStatus, ConfigReport, DEFAULT_REFACTOR_ATTEMPTS, DEFAULT_TOOLS_CACHE_TTL_SECONDS,
-    DEFAULT_TOOLS_CALL_TIMEOUT_SECONDS, DEFAULT_TOOLS_CONFIRM,
-    DEFAULT_TOOLS_DISCOVERY_TIMEOUT_SECONDS, DEFAULT_TOOLS_MAX_ROUNDS, PresentValues, build_report,
+    ConfigFileStatus, ConfigReport, DEFAULT_DECISION_TIMEOUT_SECONDS, DEFAULT_LLM_ENDPOINT,
+    DEFAULT_REFACTOR_ATTEMPTS, DEFAULT_TOOLS_CACHE_TTL_SECONDS, DEFAULT_TOOLS_CALL_TIMEOUT_SECONDS,
+    DEFAULT_TOOLS_CONFIRM, DEFAULT_TOOLS_DISCOVERY_TIMEOUT_SECONDS, DEFAULT_TOOLS_MAX_ROUNDS,
+    PresentValues, build_report,
 };
+use crate::domain::decision::{DEFAULT_MIN_CONFIDENCE, Mode, Policy};
 use crate::domain::tool_profile::ProfileOverrides;
 use crate::ports::{LlmError, ModelStore, ToolError, ToolStore};
 
@@ -107,6 +109,17 @@ fn present_from_table(table: &toml::Table) -> PresentValues {
     if let Some(refactor) = table.get("refactor").and_then(|v| v.as_table()) {
         present.refactor_attempts = toml_u32(refactor, "attempts").filter(|n| *n > 0);
     }
+    if let Some(decision) = table.get("decision").and_then(|v| v.as_table()) {
+        present.decision_model = toml_string(decision, "model");
+        present.decision_endpoint = toml_string(decision, "endpoint");
+        present.decision_timeout_seconds = toml_u64(decision, "timeout_seconds");
+        // An unspellable mode is no mode: a typo falling through to
+        // `enforce` would be a config error that starts refusing work.
+        present.decision_mode = toml_string(decision, "mode")
+            .filter(|raw| crate::domain::decision::Mode::parse(raw).is_some());
+        present.decision_min_confidence =
+            toml_f64(decision, "min_confidence").filter(|n| (0.0..=1.0).contains(n));
+    }
     present
 }
 
@@ -132,6 +145,15 @@ fn toml_u64(table: &toml::Table, key: &str) -> Option<u64> {
 
 fn toml_u32(table: &toml::Table, key: &str) -> Option<u32> {
     toml_u64(table, key).and_then(|n| u32::try_from(n).ok())
+}
+
+/// A threshold reads as a float, and `min_confidence = 1` is a
+/// perfectly reasonable thing to write for an integer value.
+fn toml_f64(table: &toml::Table, key: &str) -> Option<f64> {
+    let value = table.get(key)?;
+    value
+        .as_float()
+        .or_else(|| value.as_integer().map(|n| n as f64))
 }
 
 pub struct TomlModelStore {
@@ -190,6 +212,99 @@ impl ToolsSettings {
 
 pub fn tools_settings(path: &Path) -> ToolsSettings {
     ToolsSettings::from_present(present_values(path))
+}
+
+/// The resolved `[decision]` block: which local model judges, where it
+/// lives, how long it gets, and the policy its answers are read against.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DecisionSettings {
+    /// `None` when no decision model is configured, which is the
+    /// shipped state. Nothing asks a question until this is set.
+    pub model: Option<String>,
+    pub endpoint: String,
+    pub timeout: Duration,
+    pub policy: Policy,
+}
+
+/// The `[decision]` block as the harness will act on it.
+///
+/// The endpoint falls back to `[llm] endpoint` before the built-in
+/// default, so a project that moved its Ollama says so once.
+pub fn decision_settings(path: &Path) -> DecisionSettings {
+    let present = present_values(path);
+    let endpoint = present
+        .decision_endpoint
+        .clone()
+        .or_else(|| present.endpoint.clone())
+        .unwrap_or_else(|| DEFAULT_LLM_ENDPOINT.to_string());
+    let mode = present
+        .decision_mode
+        .as_deref()
+        .and_then(Mode::parse)
+        .unwrap_or_default();
+    let threshold = present
+        .decision_min_confidence
+        .unwrap_or(DEFAULT_MIN_CONFIDENCE);
+    let settings = DecisionSettings {
+        model: present.decision_model.clone(),
+        endpoint,
+        timeout: Duration::from_secs(
+            present
+                .decision_timeout_seconds
+                .unwrap_or(DEFAULT_DECISION_TIMEOUT_SECONDS),
+        ),
+        policy: Policy::new(mode, threshold),
+    };
+    tracing::debug!(
+        model = ?settings.model,
+        endpoint = %settings.endpoint,
+        mode = %settings.policy.mode,
+        threshold = settings.policy.threshold,
+        "config: decision settings"
+    );
+    settings
+}
+
+/// Persists the decision model choice under `[decision]`.
+///
+/// Its own store rather than a second method on [`TomlModelStore`]: the
+/// two roles are different keys, and the one mistake worth making
+/// impossible is a decision model landing in `llm.model`.
+pub struct TomlDecisionStore {
+    config_file: PathBuf,
+}
+
+impl TomlDecisionStore {
+    pub fn new(config_file: PathBuf) -> Self {
+        Self { config_file }
+    }
+
+    pub fn configured(&self) -> Option<String> {
+        decision_settings(&self.config_file).model
+    }
+
+    /// Edit `[decision] model` and nothing else, on the same terms as
+    /// `spec model use`: every comment in the file survives.
+    pub fn persist(&self, model: &str) -> Result<(), LlmError> {
+        tracing::debug!(model, file = %self.config_file.display(), "config: persisting decision model");
+        if let Some(table) = read_table(&self.config_file)
+            && let Some(decision) = table.get("decision")
+            && !decision.is_table()
+        {
+            return Err(LlmError("config: [decision] is not a table".into()));
+        }
+        let current = fs::read_to_string(&self.config_file).unwrap_or_default();
+        write_config(
+            &self.config_file,
+            &set_in_section(&current, "decision", "model", model),
+        )
+        .map_err(|e| {
+            LlmError(format!(
+                "config: cannot write {} - {e}",
+                self.config_file.display()
+            ))
+        })
+    }
 }
 
 /// `[refactor] attempts`, the write-then-test budget `spec refactor`
@@ -402,29 +517,35 @@ fn write_config(path: &Path, contents: &str) -> std::io::Result<()> {
     fs::write(path, contents)
 }
 
-/// The file with its `model` line replaced, and every other byte of it
-/// left exactly as the author wrote it - comments, key order, blank
+/// The file with its `[llm] model` line replaced, and every other byte
+/// of it left exactly as the author wrote it.
+fn set_model(current: &str, model: &str) -> String {
+    set_in_section(current, "llm", "model", model)
+}
+
+/// The file with `[section] key` set to `value`, and every other byte of
+/// it left exactly as the author wrote it - comments, key order, blank
 /// lines and all.
 ///
-/// A file with no `model` key under `[llm]` gains one directly below
-/// the header; a file with no `[llm]` section gains the section at the
-/// end. A commented-out `# model = ...` is a comment, not the key, and
-/// is left alone.
-fn set_model(current: &str, model: &str) -> String {
-    let assignment = format!("model = {}", toml::Value::String(model.to_string()));
+/// A file with no `key` under the section gains one directly below the
+/// header; a file with no section gains the section at the end. A
+/// commented-out `# key = ...` is a comment, not the key, and is left
+/// alone.
+fn set_in_section(current: &str, section: &str, key: &str, value: &str) -> String {
+    let assignment = format!("{key} = {}", toml::Value::String(value.to_string()));
     let mut lines: Vec<String> = current.lines().map(str::to_string).collect();
-    match find_model_line(&lines) {
+    match find_key_line(&lines, section, key) {
         Some(at) => {
             let indent = leading_space(&lines[at]).to_string();
             lines[at] = format!("{indent}{assignment}");
         }
-        None => match find_llm_header(&lines) {
+        None => match find_header(&lines, section) {
             Some(at) => lines.insert(at + 1, assignment),
             None => {
                 if !lines.is_empty() {
                     lines.push(String::new());
                 }
-                lines.push("[llm]".to_string());
+                lines.push(format!("[{section}]"));
                 lines.push(assignment);
             }
         },
@@ -434,22 +555,24 @@ fn set_model(current: &str, model: &str) -> String {
     text
 }
 
-/// The index of the line assigning `model` inside `[llm]`, if the file
+/// The index of the line assigning `key` inside `[section]`, if the file
 /// has one.
-fn find_model_line(lines: &[String]) -> Option<usize> {
-    let mut in_llm = false;
+fn find_key_line(lines: &[String], section: &str, key: &str) -> Option<usize> {
+    let header = format!("[{section}]");
+    let mut inside = false;
     lines.iter().position(|line| {
         let trimmed = line.trim();
         if trimmed.starts_with('[') {
-            in_llm = trimmed == "[llm]";
+            inside = trimmed == header;
         }
-        in_llm && is_key_assignment(trimmed, "model")
+        inside && is_key_assignment(trimmed, key)
     })
 }
 
-/// The index of the `[llm]` header line, if the file has one.
-fn find_llm_header(lines: &[String]) -> Option<usize> {
-    lines.iter().position(|line| line.trim() == "[llm]")
+/// The index of the `[section]` header line, if the file has one.
+fn find_header(lines: &[String], section: &str) -> Option<usize> {
+    let header = format!("[{section}]");
+    lines.iter().position(|line| line.trim() == header)
 }
 
 fn leading_space(line: &str) -> &str {
@@ -846,5 +969,149 @@ mod tests {
             report.setting("llm.model").unwrap().source,
             crate::domain::config_report::ConfigSource::Default
         );
+    }
+
+    // ---- [decision] ----------------------------------------------------
+
+    fn decision_store_in(dir: &tempfile::TempDir) -> TomlDecisionStore {
+        TomlDecisionStore::new(dir.path().join(CONFIG_FILE))
+    }
+
+    #[test]
+    fn a_persisted_decision_model_reads_back_and_the_generative_one_is_untouched() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(CONFIG_FILE);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, "[llm]\nmodel = \"coder:test\"\n").unwrap();
+        let store = decision_store_in(&dir);
+
+        assert_eq!(store.configured(), None, "nothing is configured yet");
+        store.persist("nimble:test").unwrap();
+
+        assert_eq!(store.configured(), Some("nimble:test".into()));
+        assert_eq!(
+            TomlModelStore::new(path).configured(),
+            Some("coder:test".into()),
+            "writing the decision model must not touch llm.model"
+        );
+    }
+
+    #[test]
+    fn a_decision_table_that_is_not_a_table_is_refused_rather_than_overwritten() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(CONFIG_FILE);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, "decision = \"nonsense\"\n").unwrap();
+        let error = decision_store_in(&dir).persist("nimble:test").unwrap_err();
+        assert!(error.0.contains("[decision] is not a table"), "{error:?}");
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            "decision = \"nonsense\"\n",
+            "the file is left exactly as it was"
+        );
+    }
+
+    #[test]
+    fn a_decision_model_that_cannot_be_written_reports_the_path() {
+        let dir = tempfile::tempdir().unwrap();
+        // A directory where the file should be: the write has to fail.
+        let path = dir.path().join(CONFIG_FILE);
+        fs::create_dir_all(&path).unwrap();
+        let error = TomlDecisionStore::new(path.clone())
+            .persist("nimble:test")
+            .unwrap_err();
+        assert!(error.0.contains("cannot write"), "{error:?}");
+        assert!(error.0.contains(&path.display().to_string()), "{error:?}");
+    }
+
+    #[test]
+    fn decision_settings_default_when_the_table_is_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = decision_settings(&dir.path().join(CONFIG_FILE));
+        assert_eq!(settings.model, None);
+        assert_eq!(settings.endpoint, DEFAULT_LLM_ENDPOINT);
+        assert_eq!(
+            settings.policy.mode,
+            crate::domain::decision::Mode::Advisory
+        );
+        assert_eq!(settings.policy.threshold, DEFAULT_MIN_CONFIDENCE);
+    }
+
+    #[test]
+    fn the_decision_endpoint_falls_back_to_the_llm_endpoint() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(CONFIG_FILE);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(
+            &path,
+            "[llm]\nendpoint = \"http://ollama.internal:11434\"\n",
+        )
+        .unwrap();
+        assert_eq!(
+            decision_settings(&path).endpoint,
+            "http://ollama.internal:11434",
+            "one host, stated once"
+        );
+
+        fs::write(
+            &path,
+            "[llm]\nendpoint = \"http://a:1\"\n[decision]\nendpoint = \"http://b:2\"\n",
+        )
+        .unwrap();
+        assert_eq!(
+            decision_settings(&path).endpoint,
+            "http://b:2",
+            "an explicit decision endpoint wins"
+        );
+    }
+
+    /// A mode nobody can spell is no mode at all. The alternative — a
+    /// typo falling through to `enforce` — would start refusing work
+    /// because of a misspelling.
+    #[test]
+    fn an_unspellable_mode_and_an_out_of_range_threshold_fall_back_to_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(CONFIG_FILE);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(
+            &path,
+            "[decision]\nmode = \"enfroce\"\nmin_confidence = 4.2\n",
+        )
+        .unwrap();
+        let settings = decision_settings(&path);
+        assert_eq!(
+            settings.policy.mode,
+            crate::domain::decision::Mode::Advisory
+        );
+        assert_eq!(settings.policy.threshold, DEFAULT_MIN_CONFIDENCE);
+    }
+
+    #[test]
+    fn a_stated_mode_threshold_and_timeout_are_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(CONFIG_FILE);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(
+            &path,
+            "[decision]\nmodel = \"nimble:test\"\nmode = \"enforce\"\n\
+             min_confidence = 0.85\ntimeout_seconds = 30\n",
+        )
+        .unwrap();
+        let settings = decision_settings(&path);
+        assert_eq!(settings.model, Some("nimble:test".into()));
+        assert_eq!(settings.policy.mode, crate::domain::decision::Mode::Enforce);
+        assert_eq!(settings.policy.threshold, 0.85);
+        assert_eq!(settings.timeout, std::time::Duration::from_secs(30));
+    }
+
+    /// `min_confidence = 1` is a reasonable thing to write, and TOML
+    /// reads it as an integer.
+    #[test]
+    fn a_whole_number_threshold_is_read_as_a_float() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(CONFIG_FILE);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, "[decision]\nmin_confidence = 1\n").unwrap();
+        assert_eq!(decision_settings(&path).policy.threshold, 1.0);
     }
 }

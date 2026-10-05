@@ -439,6 +439,141 @@ async fn refine_requirement_reports_clean_and_unknown_ids_error() {
     client.cancel().await.unwrap();
 }
 
+/// A one-shot HTTP server answering a single decision request.
+fn serve_one_decision(status: u16, body: &'static str) -> String {
+    use std::io::{Read as _, Write as _};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        let Ok((mut stream, _)) = listener.accept() else {
+            return;
+        };
+        let mut buffer = [0u8; 16384];
+        let _ = stream.read(&mut buffer);
+        let _ = stream.write_all(
+            format!(
+                "HTTP/1.1 {status} X\r\ncontent-type: application/json\r\n\
+                 content-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            )
+            .as_bytes(),
+        );
+    });
+    format!("http://127.0.0.1:{port}")
+}
+
+fn write_decision_config(root: &Path, endpoint: &str, mode: &str) {
+    fs::create_dir_all(root.join(".spec")).unwrap();
+    fs::write(
+        root.join(".spec/config.toml"),
+        format!(
+            "[decision]\nmodel = \"nimble:test\"\nendpoint = \"{endpoint}\"\nmode = \"{mode}\"\n"
+        ),
+    )
+    .unwrap();
+}
+
+/// With no decision model configured the reply is exactly what it has
+/// always been. This is the compatibility promise: a host that reads
+/// `refine_requirement` today sees no new keys until someone opts in.
+#[tokio::test]
+async fn refine_requirement_carries_no_judgment_keys_until_a_model_is_configured() {
+    let dir = tempfile::tempdir().unwrap();
+    write_project(dir.path());
+    let client = connect_default(dir.path()).await;
+
+    let body = call_json(&client, "refine_requirement", json!({"id": "REQ-001"})).await;
+    let keys: Vec<&String> = body.as_object().unwrap().keys().collect();
+    for absent in [
+        "judgments",
+        "judgmentAction",
+        "judgmentAdvisories",
+        "judgmentNote",
+    ] {
+        assert!(
+            body.get(absent).is_none(),
+            "{absent} should be absent, keys were {keys:?}"
+        );
+    }
+
+    client.cancel().await.unwrap();
+}
+
+/// A configured decision model adds a judgment beside the deterministic
+/// verdict and changes neither `clean` nor `findings`.
+#[tokio::test]
+async fn refine_requirement_reports_a_judgment_without_touching_the_deterministic_verdict() {
+    let dir = tempfile::tempdir().unwrap();
+    write_project(dir.path());
+    let endpoint = serve_one_decision(
+        200,
+        r#"{"model":"nimble:test",
+            "answers":{"measurable":{"type":"noul","noul":0.04}},
+            "usage":{"input_tokens":151,"output_tokens":1}}"#,
+    );
+    // Enforcing on purpose: an MCP reply must report rather than gate,
+    // whatever the project configured.
+    write_decision_config(dir.path(), &endpoint, "enforce");
+    let client = connect_default(dir.path()).await;
+
+    let body = call_json(&client, "refine_requirement", json!({"id": "REQ-001"})).await;
+    assert_eq!(
+        body["clean"], true,
+        "the deterministic verdict stands: {body}"
+    );
+    assert_eq!(body["findings"], json!([]), "{body}");
+
+    let judgments = body["judgments"].as_array().expect("judgments");
+    assert_eq!(judgments.len(), 1, "{body}");
+    let judgment = &judgments[0];
+    assert_eq!(judgment["question"], "measurable/v1");
+    assert_eq!(judgment["model"], "nimble:test");
+    assert_eq!(judgment["verdict"], "FAILS");
+    assert_eq!(
+        judgment["action"], "CONTINUE",
+        "an MCP reply never gates, even configured to enforce: {body}"
+    );
+    assert_eq!(judgment["mode"], "advisory", "{body}");
+    assert!(
+        judgment["provenance"]["state"]
+            .as_str()
+            .unwrap()
+            .starts_with("sha256:")
+    );
+    assert_eq!(body["judgmentAction"], "CONTINUE", "{body}");
+    assert_eq!(
+        body["judgmentAdvisories"].as_array().unwrap().len(),
+        1,
+        "{body}"
+    );
+
+    client.cancel().await.unwrap();
+}
+
+/// An unreachable decision model leaves the wording review working and
+/// says plainly that no judgment was taken.
+#[tokio::test]
+async fn refine_requirement_survives_an_unreachable_decision_model() {
+    let dir = tempfile::tempdir().unwrap();
+    write_project(dir.path());
+    let closed = {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        format!("http://127.0.0.1:{port}")
+    };
+    write_decision_config(dir.path(), &closed, "advisory");
+    let client = connect_default(dir.path()).await;
+
+    let body = call_json(&client, "refine_requirement", json!({"id": "REQ-001"})).await;
+    assert_eq!(body["clean"], true, "{body}");
+    assert!(body.get("judgments").is_none(), "{body}");
+    let note = body["judgmentNote"].as_str().expect("a note");
+    assert!(note.contains("no judgment"), "{note}");
+
+    client.cancel().await.unwrap();
+}
+
 #[tokio::test]
 async fn run_tests_reports_red_then_start_refactor_is_refused() {
     let dir = tempfile::tempdir().unwrap();

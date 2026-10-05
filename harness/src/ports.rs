@@ -115,6 +115,20 @@ pub struct ModelInfo {
 /// installed.
 pub trait ModelCatalog {
     fn models(&self) -> Result<Vec<ModelInfo>, LlmError>;
+
+    /// What the provider says this model can do, e.g. `completion`,
+    /// `tools`, `decision`. `None` when the provider cannot say —
+    /// an older provider, an unreachable one, or a model it has no
+    /// metadata for.
+    ///
+    /// Role separation keys on this rather than on model names: a
+    /// decision model is one the provider calls
+    /// [`DECISION_CAPABILITY`](crate::domain::decision::DECISION_CAPABILITY),
+    /// not one whose tag the harness happens to recognize. An unknown
+    /// answer must leave existing behaviour alone, never guess.
+    fn capabilities(&self, _model: &str) -> Option<Vec<String>> {
+        None
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -160,6 +174,115 @@ impl<T: LlmConversation + ?Sized> LlmConversation for std::sync::Arc<T> {
         self.as_ref().chat(model, messages, tools)
     }
 }
+
+/// One decision round trip: a bounded question set about a curated
+/// brief, answered in a single pass by a local decision model.
+///
+/// Deliberately a different port from [`LlmConversation`]. The two roles
+/// are not interchangeable at either end — a chat model rejects a
+/// decision request, and a decision model asked to chat returns prose
+/// nobody asked for — and keeping them apart in the type system is what
+/// stops a generative command picking up a decision model by accident.
+pub trait DecisionModel {
+    fn decide(
+        &self,
+        model: &str,
+        request: &crate::domain::decision::Request,
+    ) -> Result<crate::domain::decision::Outcome, DecisionError>;
+}
+
+/// Why a decision did not come back.
+///
+/// Typed rather than a string because the policy branches on these: an
+/// advisory judgment degrades to "no judgment" on every one of them,
+/// and an enforcing one refuses on every one of them. Neither may ever
+/// read a failure as an answer, so the variants carry enough to tell a
+/// user exactly what to fix.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DecisionError {
+    /// The request was malformed and was refused before it was sent.
+    Invalid(String),
+    /// The provider could not be reached at all.
+    Unavailable(String),
+    /// The provider answered but has no decision route — Ollama older
+    /// than 0.35. Carries the endpoint so the hint can name it.
+    Unsupported { endpoint: String },
+    /// The named model is not pulled.
+    ModelMissing { model: String },
+    /// The model is installed but cannot answer decisions — a chat
+    /// model, or one whose weights the scoring runner cannot use.
+    /// `detail` is the provider's own sentence, which distinguishes
+    /// "does not support decision" from "use a local GGUF model".
+    NotADecisionModel { model: String, detail: String },
+    /// The brief, or the prompt it rendered into, was too big. The
+    /// server does not truncate, so this is the caller's to fix.
+    TooLarge(String),
+    /// No reply inside the configured budget.
+    Timeout { seconds: u64 },
+    /// The reply was not the documented shape.
+    Malformed(String),
+    /// The reply answered questions that were not asked, or left asked
+    /// ones unanswered. Reading a mismatched answer as a verdict is how
+    /// a judgment plane silently judges the wrong thing.
+    UnexpectedAnswers {
+        missing: Vec<String>,
+        unexpected: Vec<String>,
+    },
+    /// The server failed to load, render, or score.
+    ScoringFailed(String),
+}
+
+impl std::fmt::Display for DecisionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Invalid(detail) => write!(f, "the decision request was refused - {detail}"),
+            Self::Unavailable(detail) => {
+                write!(f, "cannot reach the decision model provider - {detail}")
+            }
+            Self::Unsupported { endpoint } => write!(
+                f,
+                "{endpoint} has no {path} route - decision models need Ollama 0.35 or newer",
+                path = crate::domain::decision::SYSTEMONE_PATH
+            ),
+            Self::ModelMissing { model } => write!(
+                f,
+                "decision model '{model}' is not installed - pull it first \
+                 (e.g. `ollama pull {model}`)"
+            ),
+            Self::NotADecisionModel { model, detail } => write!(
+                f,
+                "'{model}' cannot answer decisions - {detail}; pick a model whose \
+                 capabilities include '{capability}' (see `spec judge models`)",
+                capability = crate::domain::decision::DECISION_CAPABILITY
+            ),
+            Self::TooLarge(detail) => write!(f, "the decision brief is too large - {detail}"),
+            Self::Timeout { seconds } => write!(
+                f,
+                "no decision within {seconds}s - set timeout_seconds under [decision] in \
+                 .spec/config.toml to wait longer"
+            ),
+            Self::Malformed(detail) => write!(f, "unexpected decision reply - {detail}"),
+            Self::UnexpectedAnswers {
+                missing,
+                unexpected,
+            } => {
+                write!(f, "the decision reply did not match the questions asked")?;
+                if !missing.is_empty() {
+                    write!(f, " - unanswered: {}", missing.join(", "))?;
+                }
+                if !unexpected.is_empty() {
+                    write!(f, " - never asked: {}", unexpected.join(", "))?;
+                }
+                Ok(())
+            }
+            Self::ScoringFailed(detail) => {
+                write!(f, "the decision model failed to answer - {detail}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for DecisionError {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolError(pub String);
@@ -463,3 +586,114 @@ pub trait CommandExecutor {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecError(pub String);
 string_error!(ExecError);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every reason a decision can fail has to tell the reader what to
+    /// do about it. These sentences are the whole user interface when
+    /// the decision plane does not work, and a judgment that fails
+    /// silently is the one failure mode this feature must not have.
+    #[test]
+    fn every_decision_failure_names_something_the_reader_can_do() {
+        let cases = [
+            (
+                DecisionError::Invalid("questions must contain 1-64 fields".into()),
+                "questions must contain",
+            ),
+            (
+                DecisionError::Unavailable("connection refused".into()),
+                "cannot reach",
+            ),
+            (
+                DecisionError::Unsupported {
+                    endpoint: "http://localhost:11434".into(),
+                },
+                "Ollama 0.35 or newer",
+            ),
+            (
+                DecisionError::ModelMissing {
+                    model: "nimble".into(),
+                },
+                "ollama pull nimble",
+            ),
+            (
+                DecisionError::NotADecisionModel {
+                    model: "llama3.2".into(),
+                    detail: "does not support decision".into(),
+                },
+                "spec judge models",
+            ),
+            (
+                DecisionError::TooLarge("72 KiB over the 64 KiB budget".into()),
+                "64 KiB budget",
+            ),
+            (
+                DecisionError::Timeout { seconds: 60 },
+                "timeout_seconds under [decision]",
+            ),
+            (
+                DecisionError::Malformed("missing field `noul`".into()),
+                "missing field",
+            ),
+            (
+                DecisionError::ScoringFailed("failed to load model".into()),
+                "failed to load model",
+            ),
+        ];
+        for (error, expected) in cases {
+            let sentence = error.to_string();
+            assert!(
+                sentence.contains(expected),
+                "{error:?} should mention {expected:?}, said: {sentence}"
+            );
+        }
+    }
+
+    /// A mismatched answer set names both halves of the mismatch, since
+    /// either one on its own leaves the reader guessing.
+    #[test]
+    fn a_mismatched_answer_set_names_what_was_missing_and_what_was_extra() {
+        let both = DecisionError::UnexpectedAnswers {
+            missing: vec!["measurable".into()],
+            unexpected: vec!["urgency".into()],
+        }
+        .to_string();
+        assert!(both.contains("unanswered: measurable"), "{both}");
+        assert!(both.contains("never asked: urgency"), "{both}");
+
+        let missing_only = DecisionError::UnexpectedAnswers {
+            missing: vec!["measurable".into()],
+            unexpected: vec![],
+        }
+        .to_string();
+        assert!(
+            missing_only.contains("unanswered: measurable"),
+            "{missing_only}"
+        );
+        assert!(!missing_only.contains("never asked"), "{missing_only}");
+
+        let extra_only = DecisionError::UnexpectedAnswers {
+            missing: vec![],
+            unexpected: vec!["urgency".into()],
+        }
+        .to_string();
+        assert!(!extra_only.contains("unanswered"), "{extra_only}");
+        assert!(extra_only.contains("never asked: urgency"), "{extra_only}");
+    }
+
+    /// The default capability answer is "the provider did not say",
+    /// which is deliberately different from "it can do nothing" — the
+    /// model filter treats the two differently.
+    #[test]
+    fn a_catalog_that_cannot_report_capabilities_says_nothing_rather_than_none() {
+        struct Silent;
+        impl ModelCatalog for Silent {
+            fn models(&self) -> Result<Vec<ModelInfo>, LlmError> {
+                Ok(vec![])
+            }
+        }
+        assert_eq!(Silent.capabilities("anything"), None);
+    }
+}

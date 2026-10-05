@@ -41,7 +41,30 @@ full story):
 
 1. `--model` flag — this invocation only.
 2. `model` in `.spec/config.toml` — the persisted project choice.
-3. Discovery — the first installed Ollama model, session-only.
+3. Discovery — the first installed Ollama model that can do generative
+   work, session-only.
+
+## `--decision-model <MODEL>`
+
+Override the [decision model](commands/judge.md) for this invocation
+only. Separate from `--model`, because the two roles are two different
+models: one writes, the other answers bounded questions about evidence.
+
+```bash
+spec --decision-model nimble:latest judge criterion REQ-003
+```
+
+Resolution order:
+
+1. `--decision-model` flag — this invocation only.
+2. `model` under `[decision]` in `.spec/config.toml`, written by
+   `spec judge use`.
+3. Nothing. With no decision model named, no judgment is asked for and
+   every command behaves as it did before the decision plane existed.
+
+The flag names a model; it does not change `decision.mode`, so passing
+it to a project configured as `advisory` does not start enforcing
+anything.
 
 ## `--debug`
 

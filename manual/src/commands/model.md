@@ -6,6 +6,11 @@ the model only to *polish* deterministic templates in the generation
 commands. Everything works without a model; generation just stays at
 template quality.
 
+This page is about the **generative** model: the one that writes. A
+*decision* model is a separate choice with its own key and its own
+command — see [`spec judge`](judge.md). Setting one never changes the
+other, and a model that can only answer decisions is refused here.
+
 The model this harness is developed and run against is
 `qwen3.8-flash-next:125b-mlx`. Pull it with
 `ollama pull qwen3.8-flash-next:125b-mlx`, then persist the choice with
@@ -30,11 +35,18 @@ Highest priority first:
 1. **`--model` flag** — this invocation only, never persisted.
 2. **Configuration** — the `model` key in `.spec/config.toml` under the
    project root, written by `spec model use`.
-3. **Discovery** — the first model installed in Ollama, as a
-   session-only default. Nothing is written to disk.
+3. **Discovery** — the first model installed in Ollama *that can do
+   generative work*, as a session-only default. Nothing is written to
+   disk.
 
 If Ollama is unreachable or has no models, LLM-backed generation falls
 back to deterministic templates.
+
+Discovery skips a model only when Ollama positively reports that it
+answers decisions and cannot complete text — so a machine with
+[a decision model](judge.md) installed does not end up using it to write
+code. A model whose capabilities Ollama cannot report keeps the
+behaviour it always had and stays a candidate.
 
 ---
 
@@ -102,7 +114,12 @@ Written to /Users/you/code/calculator/.spec/config.toml
 ```
 
 The choice is validated against Ollama's installed models — a name
-Ollama does not have is rejected rather than silently saved.
+Ollama does not have is rejected rather than silently saved. So is a
+model that can only answer decisions:
+
+```text
+'nimble:latest' is a decision model and cannot do generative work - set it as the decision model instead: spec judge use nimble:latest
+```
 
 ## The [llm] configuration block
 
@@ -136,6 +153,8 @@ it explicitly (`no reply within 300s ... set timeout_seconds under
 
 ## See also
 
+- [`spec judge`](judge.md) — the **decision** model, a separate choice
+  under `[decision]`.
 - [Global flags](../global-flags.md) — the `--model` override.
 - [`spec config`](config.md) — dump every key and where it came from.
 - [`spec steps generate`](steps.md#source-template-or-llm) — how LLM

@@ -9,6 +9,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use crate::adapters::config::{DecisionSettings, config_path, decision_settings};
 use crate::adapters::fs_memory::{FsMemoryStore, FsProjectInventory};
 use crate::adapters::fs_project::FsProjectFiles;
 use crate::adapters::fs_sources::FsSourceFiles;
@@ -16,8 +17,10 @@ use crate::adapters::fs_spec::{FsFeatureFiles, FsSpecRepository};
 use crate::adapters::fs_staging::FsChangeStore;
 use crate::adapters::fs_state::FsStateStore;
 use crate::adapters::gherkin_features::GherkinFeatureCatalog;
+use crate::adapters::ollama_decision::OllamaDecision;
 use crate::adapters::overlay::{OverlayCatalog, OverlaySources};
 use crate::application::change_service::ChangeService;
+use crate::application::decision_service::DecisionService;
 use crate::application::generation_service::{GenerationService, ResolvedLlm};
 use crate::application::implement_service::ImplementService;
 use crate::application::memory_service::{MemoryAwareConversation, MemoryService};
@@ -46,6 +49,36 @@ pub type SessionLlm = Option<(String, DynLlm)>;
 
 pub fn spec_repository(root: &Path) -> FsSpecRepository {
     FsSpecRepository::new(root.join(SPEC_PATH))
+}
+
+/// The `[decision]` block with a one-run `--decision-model` applied.
+pub fn resolved_decision(root: &Path, flag: Option<&str>) -> DecisionSettings {
+    let mut settings = decision_settings(&config_path(root));
+    if let Some(model) = flag {
+        settings.model = Some(model.to_string());
+    }
+    settings
+}
+
+/// The judgment service, when a decision model has been named.
+///
+/// `None` is the shipped state and is not an error: with no
+/// `[decision] model` set, nothing asks a question and every command
+/// behaves exactly as it did before the decision plane existed. The
+/// mode is deliberately *not* consulted here — `spec judge` runs
+/// because a human typed it, while `off` suppresses the automatic
+/// judgments inside the workflow.
+pub fn decision_service(
+    root: &Path,
+    flag: Option<&str>,
+) -> Option<DecisionService<OllamaDecision>> {
+    let settings = resolved_decision(root, flag);
+    let model = settings.model?;
+    Some(DecisionService::new(
+        model,
+        OllamaDecision::with_timeout(settings.endpoint, settings.timeout),
+        settings.policy,
+    ))
 }
 
 pub fn change_store(root: &Path) -> FsChangeStore {
@@ -247,5 +280,59 @@ mod tests {
             )
             .unwrap();
         assert_eq!(turn.content, "m:s:p");
+    }
+
+    /// No decision model named is the shipped state, and it is not an
+    /// error: nothing asks a question and every command behaves exactly
+    /// as it did before the decision plane existed.
+    #[test]
+    fn no_decision_model_named_means_no_judgment_service_at_all() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(decision_service(dir.path(), None).is_none());
+        assert_eq!(resolved_decision(dir.path(), None).model, None);
+    }
+
+    #[test]
+    fn the_decision_model_flag_wins_over_the_file_for_one_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = config_path(dir.path());
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            "[decision]\nmodel = \"from-file\"\nmode = \"enforce\"\n",
+        )
+        .unwrap();
+
+        assert_eq!(
+            resolved_decision(dir.path(), None).model,
+            Some("from-file".into())
+        );
+        let overridden = resolved_decision(dir.path(), Some("from-flag"));
+        assert_eq!(overridden.model, Some("from-flag".into()));
+        assert_eq!(
+            overridden.policy.mode,
+            crate::domain::decision::Mode::Enforce,
+            "the flag names a model; it does not change the mode"
+        );
+
+        let service = decision_service(dir.path(), Some("from-flag")).expect("a service");
+        assert_eq!(service.model(), "from-flag");
+    }
+
+    /// `spec judge` runs because a human typed it, so building the
+    /// service does not consult the mode. Only the automatic judgments
+    /// inside the workflow honour `off`.
+    #[test]
+    fn a_mode_of_off_still_builds_a_service_for_an_explicit_ask() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = config_path(dir.path());
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            "[decision]\nmodel = \"nimble:test\"\nmode = \"off\"\n",
+        )
+        .unwrap();
+        let service = decision_service(dir.path(), None).expect("a service");
+        assert_eq!(service.policy().mode, crate::domain::decision::Mode::Off);
     }
 }

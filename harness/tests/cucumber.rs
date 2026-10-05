@@ -9,7 +9,9 @@ use cucumber::gherkin::Step;
 use cucumber::{World, given, then, when};
 
 use spec_harness::adapters::auto_prompt::AutoPrompter;
-use spec_harness::adapters::config::{TomlToolStore, config_path, inspect_config};
+use spec_harness::adapters::config::{
+    TomlDecisionStore, TomlToolStore, config_path, inspect_config,
+};
 use spec_harness::adapters::fs_project::FsProjectFiles;
 use spec_harness::adapters::fs_scaffold::FsScaffoldWriter;
 use spec_harness::adapters::fs_sources::FsSourceFiles;
@@ -19,6 +21,7 @@ use spec_harness::adapters::fs_state::FsStateStore;
 use spec_harness::adapters::gherkin_features::GherkinFeatureCatalog;
 use spec_harness::adapters::mcp_client::McpToolBroker;
 use spec_harness::adapters::mcp_config::FsMcpRegistry;
+use spec_harness::adapters::ollama_decision::OllamaDecision;
 use spec_harness::adapters::runners::cargo::{CargoRunner, parse_cargo_output};
 use spec_harness::adapters::runners::cucumber_js::parse_json_report;
 use spec_harness::adapters::runners::dotnet::parse_trx;
@@ -30,6 +33,7 @@ use spec_harness::application::agent_service::{
     Agent, AgentConfig, DEFAULT_MAX_ROUNDS, NullPrompter,
 };
 use spec_harness::application::change_service::{ChangeService, ChangesReport};
+use spec_harness::application::decision_service::DecisionService;
 use spec_harness::application::generation_service::{
     GenerationReport, GenerationService, MissingStepsReport, ResolvedLlm,
 };
@@ -59,10 +63,12 @@ use spec_harness::application::tool_service::{self, ToolService};
 use spec_harness::bootstrap::refresh_project_memory;
 use spec_harness::deliver::{Deliver, DeliverOptions, DeliverReport, parse_target};
 use spec_harness::domain::CACHE_DIR;
+use spec_harness::domain::decision::{DEFAULT_MIN_CONFIDENCE, Judgment, Mode, Policy, Verdict};
 use spec_harness::domain::feature::{FeatureDoc, FeatureSummary};
 use spec_harness::domain::language::{Language, detect_languages};
 use spec_harness::domain::mcp_registry::{RegistryLoad, ServerSpec, parse_registry};
 use spec_harness::domain::model::{self, Requirement, Spec, TestRunSummary};
+use spec_harness::domain::refiner::RequirementRefiner;
 use spec_harness::domain::tdd::{
     ImplementAttempt, StateEntry, TddPhase, TddSnapshot, TddStateMachine,
 };
@@ -74,11 +80,11 @@ use spec_harness::domain::tools::{
 use spec_harness::greenfield::{Greenfield, GreenfieldReport};
 use spec_harness::mcp::{WorkflowServer, builtin_tool_definitions};
 use spec_harness::ports::{
-    ChangeStore, FeatureCatalog, FeatureError, FeatureFiles, InteractiveShell, LlmConversation,
-    LlmError, McpRegistrySource, ModelCatalog, ModelInfo, ModelStore, ProjectFiles, PromptError,
-    Prompter, RunnerError, RuntimeProbe, ShellError, ShellLine, SpecError, SpecRepository,
-    StageError, StagedChange, StateStore, TestFilter, TestRunner, ToolBroker, ToolDiscovery,
-    ToolError,
+    ChangeStore, DecisionError, FeatureCatalog, FeatureError, FeatureFiles, InteractiveShell,
+    LlmConversation, LlmError, McpRegistrySource, ModelCatalog, ModelInfo, ModelStore,
+    ProjectFiles, PromptError, Prompter, RunnerError, RuntimeProbe, ShellError, ShellLine,
+    SpecError, SpecRepository, StageError, StagedChange, StateStore, TestFilter, TestRunner,
+    ToolBroker, ToolDiscovery, ToolError,
 };
 use spec_harness::repl::{Ending, ShellSummary, offer_greenfield, run_shell};
 use spec_harness::wiring::{DynLlm, RunnerFactory, project_memory_service};
@@ -190,6 +196,15 @@ struct SpecWorld {
     registry: Option<spec_harness::domain::mcp_registry::RegistryLoad>,
     config_text: Option<String>,
     staged_spec: Option<Spec>,
+    model_capabilities: HashMap<String, Vec<String>>,
+    decision_model: Option<String>,
+    decision_mode: Option<String>,
+    decision_reply: Option<(u16, String)>,
+    decision_unreachable: bool,
+    judgment: Option<Judgment>,
+    judge_error: Option<DecisionError>,
+    decision_list: Option<Vec<String>>,
+    findings_before_judgment: Option<Vec<String>>,
 }
 
 // ---- fakes implementing the ports ----------------------------------------
@@ -257,11 +272,21 @@ impl FeatureFiles for InMemoryFeatures {
     }
 }
 
-struct FakeCatalog(Result<Vec<ModelInfo>, LlmError>);
+struct FakeCatalog {
+    models: Result<Vec<ModelInfo>, LlmError>,
+    /// What the provider says each model can do. A model absent from the
+    /// map stands for one whose capabilities could not be read, which is
+    /// a different answer from "it can do nothing".
+    capabilities: HashMap<String, Vec<String>>,
+}
 
 impl ModelCatalog for FakeCatalog {
     fn models(&self) -> Result<Vec<ModelInfo>, LlmError> {
-        self.0.clone()
+        self.models.clone()
+    }
+
+    fn capabilities(&self, model: &str) -> Option<Vec<String>> {
+        self.capabilities.get(model).cloned()
     }
 }
 
@@ -348,7 +373,10 @@ impl SpecWorld {
     fn model_service(&self) -> ModelService<FakeCatalog, FakeStore> {
         let catalog = self.catalog.clone().unwrap_or_else(|| Ok(vec![]));
         ModelService::new(
-            FakeCatalog(catalog),
+            FakeCatalog {
+                models: catalog,
+                capabilities: self.model_capabilities.clone(),
+            },
             FakeStore {
                 configured: self.configured_model.clone(),
                 persisted: Arc::clone(&self.persisted_model),
@@ -4236,6 +4264,398 @@ fn registry_duplicate_or_distinct(world: &mut SpecWorld, fragment: String) {
         load.problems,
         load.servers
     );
+}
+
+// ---- decision model steps ----------------------------------------------------
+
+/// A one-shot HTTP server standing in for Ollama's decision endpoint.
+///
+/// The scenarios drive the real adapter through a real socket, so the
+/// request shape, the status-code mapping and the answer checking are all
+/// the production code rather than a fake agreeing with itself.
+fn serve_decision(status: u16, body: String) -> String {
+    use std::io::{Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a free port");
+    let port = listener.local_addr().expect("a local address").port();
+    std::thread::spawn(move || {
+        let Ok((mut stream, _)) = listener.accept() else {
+            return;
+        };
+        let mut buffer = [0u8; 16384];
+        let _ = stream.read(&mut buffer);
+        let reason = if (200..300).contains(&status) {
+            "OK"
+        } else {
+            "ERROR"
+        };
+        let response = format!(
+            "HTTP/1.1 {status} {reason}\r\ncontent-type: application/json\r\n\
+             content-length: {}\r\nconnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        let _ = stream.write_all(response.as_bytes());
+    });
+    format!("http://127.0.0.1:{port}")
+}
+
+/// A port nothing is listening on, for the unreachable scenarios.
+fn closed_endpoint() -> String {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a free port");
+    let port = listener.local_addr().expect("a local address").port();
+    drop(listener);
+    format!("http://127.0.0.1:{port}")
+}
+
+impl SpecWorld {
+    fn decision_policy(&self) -> Policy {
+        let mode = self
+            .decision_mode
+            .as_deref()
+            .and_then(Mode::parse)
+            .unwrap_or_default();
+        Policy::new(mode, DEFAULT_MIN_CONFIDENCE)
+    }
+
+    fn decision_service(&self) -> DecisionService<OllamaDecision> {
+        let model = self
+            .decision_model
+            .clone()
+            .unwrap_or_else(|| "nimble:test".into());
+        let endpoint = if self.decision_unreachable {
+            closed_endpoint()
+        } else {
+            let (status, body) = self
+                .decision_reply
+                .clone()
+                .expect("the decision model was given a reply to make");
+            serve_decision(status, body)
+        };
+        DecisionService::new(
+            model,
+            OllamaDecision::with_timeout(endpoint, std::time::Duration::from_secs(2)),
+            self.decision_policy(),
+        )
+    }
+
+    fn judgment(&self) -> &Judgment {
+        self.judgment.as_ref().expect("a judgment was reached")
+    }
+
+    fn judge_error(&self) -> &DecisionError {
+        self.judge_error.as_ref().expect("judging failed")
+    }
+}
+
+#[given(regex = r#"^a decision model "([^"]+)" is configured$"#)]
+fn a_decision_model_is_configured(world: &mut SpecWorld, model: String) {
+    world.decision_model = Some(model);
+}
+
+#[given(regex = r#"^the decision mode is "([^"]+)"$"#)]
+fn the_decision_mode_is(world: &mut SpecWorld, mode: String) {
+    assert!(Mode::parse(&mode).is_some(), "unknown mode {mode:?}");
+    world.decision_mode = Some(mode);
+}
+
+#[given(regex = r#"^the decision model answers "([^"]+)" with the probability (\d*\.?\d+)$"#)]
+fn the_decision_model_answers(world: &mut SpecWorld, question: String, probability: f64) {
+    world.decision_reply = Some((
+        200,
+        serde_json::json!({
+            "model": world.decision_model.clone().unwrap_or_else(|| "nimble:test".into()),
+            "answers": { question: { "type": "noul", "noul": probability } },
+            "usage": { "input_tokens": 151, "output_tokens": 1 },
+        })
+        .to_string(),
+    ));
+}
+
+#[given(regex = r#"^the decision model replies with the body "(.+)"$"#)]
+fn the_decision_model_replies_with_body(world: &mut SpecWorld, body: String) {
+    world.decision_reply = Some((200, body));
+}
+
+#[given("the decision model is unreachable")]
+fn the_decision_model_is_unreachable(world: &mut SpecWorld) {
+    world.decision_unreachable = true;
+}
+
+#[given("the decision endpoint reports the model is not found")]
+fn the_endpoint_reports_not_found(world: &mut SpecWorld) {
+    let model = world.decision_model.clone().unwrap_or_default();
+    world.decision_reply = Some((
+        404,
+        serde_json::json!({ "error": format!("model {model:?} not found, try pulling it first") })
+            .to_string(),
+    ));
+}
+
+#[given("the decision endpoint reports the model does not support decision")]
+fn the_endpoint_reports_no_decision_support(world: &mut SpecWorld) {
+    let model = world.decision_model.clone().unwrap_or_default();
+    world.decision_reply = Some((
+        400,
+        serde_json::json!({ "error": format!("model {model:?} does not support decision") })
+            .to_string(),
+    ));
+}
+
+#[given(regex = r#"^Ollama reports the model "([^"]+)" with the capability "([^"]+)"$"#)]
+fn ollama_reports_capability(world: &mut SpecWorld, model: String, capability: String) {
+    world
+        .model_capabilities
+        .entry(model.clone())
+        .or_default()
+        .push(capability);
+    push_installed(world, model);
+}
+
+#[given(regex = r#"^Ollama reports the model "([^"]+)" with no readable capabilities$"#)]
+fn ollama_reports_unreadable_capabilities(world: &mut SpecWorld, model: String) {
+    world.model_capabilities.remove(&model);
+    push_installed(world, model);
+}
+
+fn push_installed(world: &mut SpecWorld, model: String) {
+    let installed = match world.catalog.get_or_insert_with(|| Ok(vec![])) {
+        Ok(models) => models,
+        Err(_) => return,
+    };
+    installed.push(ModelInfo {
+        name: model,
+        size_bytes: Some(1),
+        modified_at: None,
+    });
+}
+
+#[when(regex = r#"^the criterion "(.+)" is judged$"#)]
+fn the_criterion_is_judged(world: &mut SpecWorld, criterion: String) {
+    match world
+        .decision_service()
+        .judge_criterion("--text", &criterion)
+    {
+        Ok(judgment) => world.judgment = Some(judgment),
+        Err(error) => world.judge_error = Some(error),
+    }
+}
+
+#[when(regex = r#"^the requirement "([^"]+)" is refined with judgment$"#)]
+fn the_requirement_is_refined_with_judgment(world: &mut SpecWorld, id: String) {
+    let mut report = world
+        .spec_service()
+        .refine_requirement(&id)
+        .expect("requirement exists");
+    world.findings_before_judgment = Some(report.findings.clone());
+    let criteria = world
+        .spec
+        .requirements
+        .iter()
+        .find(|requirement| requirement.id == id)
+        .expect("requirement exists")
+        .acceptance_criteria
+        .clone();
+    let service = world.decision_service();
+    let outcome = service.judge_refinement(&mut report, &criteria);
+    world.judgment = report.judgments.first().cloned();
+    if let Err(error) = outcome {
+        world.judge_error = Some(error);
+    }
+    world.refinement = Some(report);
+}
+
+#[when("the decision models are listed")]
+fn the_decision_models_are_listed(world: &mut SpecWorld) {
+    world.decision_list = Some(
+        world
+            .model_service()
+            .decision_models()
+            .expect("the catalog answered"),
+    );
+}
+
+#[when(regex = r#"^the decision model "([^"]+)" is persisted$"#)]
+fn the_decision_model_is_persisted(world: &mut SpecWorld, model: String) {
+    let path = config_path(&world.project_root());
+    TomlDecisionStore::new(path)
+        .persist(&model)
+        .expect("the decision model was written");
+}
+
+#[then(regex = r#"^the judgment verdict is "([^"]+)"$"#)]
+fn the_judgment_verdict_is(world: &mut SpecWorld, expected: String) {
+    let verdict = match expected.as_str() {
+        "measurable" => Verdict::Holds,
+        "not measurable" => Verdict::Fails,
+        "inconclusive" => Verdict::Inconclusive,
+        other => panic!("unknown verdict {other:?}"),
+    };
+    let judgment = world.judgment();
+    assert_eq!(
+        judgment.verdict,
+        verdict,
+        "answer was {}",
+        judgment.answer.summary()
+    );
+}
+
+#[then(regex = r#"^the judgment records the model "([^"]+)"$"#)]
+fn the_judgment_records_the_model(world: &mut SpecWorld, expected: String) {
+    assert_eq!(world.judgment().model, expected);
+}
+
+#[then(regex = r#"^the judgment records the question "([^"]+)"$"#)]
+fn the_judgment_records_the_question(world: &mut SpecWorld, expected: String) {
+    assert_eq!(world.judgment().question, expected);
+}
+
+#[then(regex = r#"^the judgment action is "([^"]+)"$"#)]
+fn the_judgment_action_is(world: &mut SpecWorld, expected: String) {
+    assert_eq!(world.judgment().action.to_string(), expected);
+}
+
+#[then(regex = r#"^the regex refiner reported no finding at all for "(.+)"$"#)]
+fn the_refiner_found_nothing(world: &mut SpecWorld, criterion: String) {
+    // Guards the premise of the scenario above: were the deterministic
+    // rules already catching this wording, the judgment would be
+    // decoration. The judgment has to be the only thing that noticed.
+    assert!(world.judgment.is_some(), "the criterion was judged first");
+    let mut requirement = base_requirement("REQ-007");
+    requirement.acceptance_criteria = vec![criterion.clone()];
+    let findings = RequirementRefiner.review(&requirement);
+    // The coverage rule fires on any single-criterion requirement, so
+    // only findings about the criterion's own wording are the premise.
+    let about_wording: Vec<_> = findings
+        .iter()
+        .filter(|finding| finding.starts_with("criterion \""))
+        .collect();
+    assert!(
+        about_wording.is_empty(),
+        "{criterion:?} is already caught deterministically: {about_wording:?}"
+    );
+}
+
+#[then("the refinement findings are unchanged by the judgment")]
+fn findings_unchanged_by_judgment(world: &mut SpecWorld) {
+    let before = world
+        .findings_before_judgment
+        .clone()
+        .expect("the refinement ran");
+    assert_eq!(
+        world.refinement().findings,
+        before,
+        "a judgment rewrote the deterministic findings"
+    );
+}
+
+#[then(regex = r"^the refinement carries a judgment for (\d+) criterion$")]
+fn refinement_carries_judgments(world: &mut SpecWorld, count: usize) {
+    assert_eq!(world.refinement().judgments.len(), count);
+}
+
+#[then("the refinement carries no judgment")]
+fn refinement_carries_no_judgment(world: &mut SpecWorld) {
+    assert!(
+        world.refinement().judgments.is_empty(),
+        "judgments: {:?}",
+        world.refinement().judgments
+    );
+}
+
+#[then("the refinement notes the decision model was unavailable")]
+fn refinement_notes_unavailable(world: &mut SpecWorld) {
+    let note = world
+        .refinement()
+        .judgment_note
+        .clone()
+        .expect("a note about the decision model");
+    // The note has to say there is no judgment, not merely that
+    // something went wrong, so nobody reads silence as approval.
+    assert!(note.contains("no judgment"), "{note}");
+    assert!(note.contains("cannot reach"), "{note}");
+}
+
+#[then("judging fails because the decision model was unavailable")]
+fn judging_fails_unavailable(world: &mut SpecWorld) {
+    assert!(
+        matches!(
+            world.judge_error(),
+            DecisionError::Unavailable(_) | DecisionError::Timeout { .. }
+        ),
+        "{:?}",
+        world.judge_error()
+    );
+}
+
+#[then("judging fails because the reply was malformed")]
+fn judging_fails_malformed(world: &mut SpecWorld) {
+    assert!(
+        matches!(world.judge_error(), DecisionError::Malformed(_)),
+        "{:?}",
+        world.judge_error()
+    );
+}
+
+#[then("judging fails because the answers did not match the questions")]
+fn judging_fails_unexpected_answers(world: &mut SpecWorld) {
+    let error = world.judge_error();
+    assert!(
+        matches!(error, DecisionError::UnexpectedAnswers { .. }),
+        "{error:?}"
+    );
+    let sentence = error.to_string();
+    assert!(sentence.contains("measurable"), "{sentence}");
+    assert!(sentence.contains("urgency"), "{sentence}");
+}
+
+#[then("judging fails because the model cannot make decisions")]
+fn judging_fails_not_a_decision_model(world: &mut SpecWorld) {
+    assert!(
+        matches!(world.judge_error(), DecisionError::NotADecisionModel { .. }),
+        "{:?}",
+        world.judge_error()
+    );
+}
+
+#[then("the failure names the decision capability")]
+fn failure_names_decision_capability(world: &mut SpecWorld) {
+    let sentence = world.judge_error().to_string();
+    assert!(sentence.contains("decision"), "{sentence}");
+    assert!(sentence.contains("spec judge models"), "{sentence}");
+}
+
+#[then(regex = r#"^judging fails naming "([^"]+)"$"#)]
+fn judging_fails_naming(world: &mut SpecWorld, fragment: String) {
+    let sentence = world.judge_error().to_string();
+    assert!(sentence.contains(&fragment), "{sentence}");
+}
+
+#[then("no verdict is reported")]
+fn no_verdict_is_reported(world: &mut SpecWorld) {
+    assert!(
+        world.judgment.is_none(),
+        "a failed request produced a verdict: {:?}",
+        world.judgment
+    );
+}
+
+#[when("the session model is resolved with nothing configured")]
+fn the_session_model_is_resolved(world: &mut SpecWorld) {
+    world.session_model = Some(world.model_service().session_model(None));
+}
+
+#[then(regex = r#"^the resolved generative model is "([^"]+)"$"#)]
+fn the_resolved_generative_model_is(world: &mut SpecWorld, expected: String) {
+    let session = world.session_model.as_ref().expect("a session model");
+    match session {
+        SessionModel::Ready { model, .. } => assert_eq!(model, &expected),
+        other => panic!("expected a ready model, got {other:?}"),
+    }
+}
+
+#[then(regex = r#"^the decision model list is "([^"]*)"$"#)]
+fn the_decision_model_list_is(world: &mut SpecWorld, expected: String) {
+    let listed = world.decision_list.clone().expect("the list was taken");
+    assert_eq!(listed.join(", "), expected);
 }
 
 fn main() {

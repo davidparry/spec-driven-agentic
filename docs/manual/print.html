@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "searchindex-a00b6607.js";
+            window.path_to_searchindex_js = "searchindex-a361ab77.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-72ae98bc.js"></script>
+        <script src="toc-2ab172c3.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -238,6 +238,13 @@ model this harness is developed and run against is
 <code>qwen3.8-flash-next:125b-mlx</code> — see <a href="#getting-started">Getting started</a>
 and <a href="#spec-model"><code>spec model</code></a>. Your mileage will vary with
 other models, especially those not trained for development work.</p>
+<p>Optionally, a second and quite different local model can be configured:
+a <em>decision model</em>, which writes nothing and instead answers one bounded
+question about evidence with a typed value and a probability. The
+harness uses one to judge whether an acceptance criterion is measurable,
+which the deterministic wording rules cannot decide. It is off until you
+configure it, and what it is allowed to do is deliberately narrow — see
+<a href="#spec-judge"><code>spec judge</code></a>.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="getting-started"><a class="header" href="#getting-started">Getting started</a></h1>
 <h2 id="install"><a class="header" href="#install">Install</a></h2>
@@ -265,6 +272,23 @@ general knowledge, or work other than development will typically
 produce weaker specs, step definitions, tests, and production code.
 Without a reachable model the harness still runs — generation falls back
 to deterministic templates.</p>
+<h2 id="optional-a-decision-model"><a class="header" href="#optional-a-decision-model">Optional: a decision model</a></h2>
+<p>Separate from the model above, and entirely optional. A <em>decision model</em>
+does not write; it answers one bounded question about evidence you give
+it and returns a typed value with a probability. The harness can use one
+to judge whether an acceptance criterion is actually measurable — a
+question the deterministic wording rules cannot answer.</p>
+<p>Needs Ollama 0.35 or newer:</p>
+<pre><code class="language-bash">ollama pull nimble
+spec judge models          # confirm Ollama reports it as decision-capable
+spec judge use nimble
+spec judge criterion --text "Given the refactored module, when the suite runs, then code quality is improved by at least 20%"
+</code></pre>
+<p>This adds a second model; it does not replace the one above. Nothing
+asks a judgment until <code>spec judge use</code> names one, and a judgment is
+advice about wording: it never changes a test result, a requirement’s
+status, or the deterministic review it sits beside. See
+<a href="#spec-judge"><code>spec judge</code></a>.</p>
 <h2 id="your-first-session"><a class="header" href="#your-first-session">Your first session</a></h2>
 <p>Run bare <code>spec</code> in a terminal. You get the help, the banner with the
 version, the model status, and an interactive prompt:</p>
@@ -369,8 +393,26 @@ full story):</p>
 <ol>
 <li><code>--model</code> flag — this invocation only.</li>
 <li><code>model</code> in <code>.spec/config.toml</code> — the persisted project choice.</li>
-<li>Discovery — the first installed Ollama model, session-only.</li>
+<li>Discovery — the first installed Ollama model that can do generative
+work, session-only.</li>
 </ol>
+<h2 id="--decision-model-model"><a class="header" href="#--decision-model-model"><code>--decision-model &lt;MODEL&gt;</code></a></h2>
+<p>Override the <a href="#spec-judge">decision model</a> for this invocation
+only. Separate from <code>--model</code>, because the two roles are two different
+models: one writes, the other answers bounded questions about evidence.</p>
+<pre><code class="language-bash">spec --decision-model nimble:latest judge criterion REQ-003
+</code></pre>
+<p>Resolution order:</p>
+<ol>
+<li><code>--decision-model</code> flag — this invocation only.</li>
+<li><code>model</code> under <code>[decision]</code> in <code>.spec/config.toml</code>, written by
+<code>spec judge use</code>.</li>
+<li>Nothing. With no decision model named, no judgment is asked for and
+every command behaves as it did before the decision plane existed.</li>
+</ol>
+<p>The flag names a model; it does not change <code>decision.mode</code>, so passing
+it to a project configured as <code>advisory</code> does not start enforcing
+anything.</p>
 <h2 id="--debug"><a class="header" href="#--debug"><code>--debug</code></a></h2>
 <p>Verbose diagnostic logging: the full prompts sent to the model and its
 responses, cache hits and misses, resolved configuration, MCP tool
@@ -550,8 +592,12 @@ or your editor.</li>
 <li><a href="#spec-validate"><code>spec validate</code></a> until the
 structure is valid.</li>
 <li><a href="#spec-refine"><code>spec refine &lt;id&gt;</code></a> until
-there are no wording findings.</li>
-<li>A human approves the wording. This is the first human gate.</li>
+there are no wording findings. With a
+<a href="#spec-judge">decision model</a> configured, this step also
+reports a judgment on whether each criterion is measurable — advice
+that sits beside the findings and changes none of them.</li>
+<li>A human approves the wording. This is the first human gate.
+A judgment never stands in for this approval.</li>
 </ol>
 <h2 id="the-two-altitudes"><a class="header" href="#the-two-altitudes">The two altitudes</a></h2>
 <ul>
@@ -1542,6 +1588,27 @@ outcomes, happy-path-only criteria.</p>
 </code></pre>
 <p>Refine until <code>"clean": true</code>, then have the developer approve the
 wording — that approval is the first human gate of the workflow.</p>
+<p>The review is a fixed set of rules: the same wording always produces the
+same findings, and no model is involved. That is also its limit. One
+rule asks whether the outcome clause looks concrete — a number, a quoted
+literal, a named error — which any number anywhere satisfies. So “then
+code quality is improved by at least 20%” earns no finding, despite
+nobody having measured code quality.</p>
+<p>With a <a href="#spec-judge">decision model</a> configured, the reply carries
+<code>judgments</code> as well — a local model’s opinion on whether each criterion
+is measurable, with the probability it gave. <code>clean</code> and <code>findings</code> stay
+deterministic either way, and a judgment is advice about wording rather
+than a verdict:</p>
+<pre><code class="language-json">{
+  "id": "REQ-004",
+  "clean": false,
+  "findings": ["..."],
+  "judgments": [ { "verdict": "FAILS", "answer": { "type": "noul", "noul": 0.014 } } ],
+  "judgmentAdvisories": ["judgment (measurable/v1): criterion \"...\": the outcome may not be measurable - nimble:latest says probability of true 0.014"],
+  "judgmentAction": "CONTINUE"
+}
+</code></pre>
+<p>Those keys are absent entirely until a decision model is configured.</p>
 <hr>
 <h2 id="spec-reword"><a class="header" href="#spec-reword">spec reword</a></h2>
 <p>Reword an existing backlog item (staged). Interactive wizard is the
@@ -2920,6 +2987,10 @@ spec test                         # honest RED
 the model only to <em>polish</em> deterministic templates in the generation
 commands. Everything works without a model; generation just stays at
 template quality.</p>
+<p>This page is about the <strong>generative</strong> model: the one that writes. A
+<em>decision</em> model is a separate choice with its own key and its own
+command — see <a href="#spec-judge"><code>spec judge</code></a>. Setting one never changes the
+other, and a model that can only answer decisions is refused here.</p>
 <p>The model this harness is developed and run against is
 <code>qwen3.8-flash-next:125b-mlx</code>. Pull it with
 <code>ollama pull qwen3.8-flash-next:125b-mlx</code>, then persist the choice with
@@ -2940,11 +3011,17 @@ Commands: list, current, use
 <li><strong><code>--model</code> flag</strong> — this invocation only, never persisted.</li>
 <li><strong>Configuration</strong> — the <code>model</code> key in <code>.spec/config.toml</code> under the
 project root, written by <code>spec model use</code>.</li>
-<li><strong>Discovery</strong> — the first model installed in Ollama, as a
-session-only default. Nothing is written to disk.</li>
+<li><strong>Discovery</strong> — the first model installed in Ollama <em>that can do
+generative work</em>, as a session-only default. Nothing is written to
+disk.</li>
 </ol>
 <p>If Ollama is unreachable or has no models, LLM-backed generation falls
 back to deterministic templates.</p>
+<p>Discovery skips a model only when Ollama positively reports that it
+answers decisions and cannot complete text — so a machine with
+<a href="#spec-judge">a decision model</a> installed does not end up using it to write
+code. A model whose capabilities Ollama cannot report keeps the
+behaviour it always had and stays a candidate.</p>
 <hr>
 <h2 id="spec-model-list"><a class="header" href="#spec-model-list">spec model list</a></h2>
 <p>List the models installed in Ollama, marking the one that would
@@ -2983,7 +3060,10 @@ session default and the output tells you it is not saved:</p>
 Written to /Users/you/code/calculator/.spec/config.toml
 </code></pre>
 <p>The choice is validated against Ollama’s installed models — a name
-Ollama does not have is rejected rather than silently saved.</p>
+Ollama does not have is rejected rather than silently saved. So is a
+model that can only answer decisions:</p>
+<pre><code class="language-text">'nimble:latest' is a decision model and cannot do generative work - set it as the decision model instead: spec judge use nimble:latest
+</code></pre>
 <h2 id="the-llm-configuration-block"><a class="header" href="#the-llm-configuration-block">The [llm] configuration block</a></h2>
 <p>Everything model-related lives under <code>[llm]</code> in <code>.spec/config.toml</code>:</p>
 <pre><code class="language-toml">[llm]
@@ -3015,10 +3095,353 @@ it explicitly (<code>no reply within 300s ... set timeout_seconds under [llm]</c
 </div>
 <h2 id="see-also-14"><a class="header" href="#see-also-14">See also</a></h2>
 <ul>
+<li><a href="#spec-judge"><code>spec judge</code></a> — the <strong>decision</strong> model, a separate choice
+under <code>[decision]</code>.</li>
 <li><a href="#global-flags">Global flags</a> — the <code>--model</code> override.</li>
 <li><a href="#spec-config"><code>spec config</code></a> — dump every key and where it came from.</li>
 <li><a href="#source-template-or-llm"><code>spec steps generate</code></a> — how LLM
 output is validated before it can stage.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="spec-judge"><a class="header" href="#spec-judge">spec judge</a></h1>
+<p>Decision model selection, and bounded judgments you can inspect.</p>
+<p>A <strong>decision model</strong> is a second local model with a different job from
+the one <a href="#spec-model"><code>spec model</code></a> configures. The generative model writes
+prose and code. A decision model does not write at all: it is asked one
+bounded question about evidence you supply and answers with a typed
+value and a probability. Ollama serves these at <code>/v1/systemone</code> from
+version 0.35.</p>
+<p>The harness uses it for exactly one question today: <strong>can this
+acceptance criterion be checked by a test with a single unambiguous
+result?</strong> That is a gap the deterministic
+<a href="#spec-refine">requirement refiner</a> cannot close.</p>
+<p>The refiner’s rules ask whether the outcome clause <em>looks</em> concrete —
+does it contain a number, a quoted literal, a named error type, a known
+sentinel? That is satisfied by a number appearing anywhere in the
+clause, so</p>
+<blockquote>
+<p>Given the refactored module, when the suite runs, then code quality is
+improved by at least 20%</p>
+</blockquote>
+<p>earns no finding at all, while being unmeasurable: nobody measured code
+quality. The rule asks whether a number is <em>present</em>. The judgment asks
+whether the number <em>is</em> the assertion. Against <code>nimble:latest</code> that
+criterion comes back at p = 0.038 — not measurable.</p>
+<pre><code class="language-text">Usage: spec judge [OPTIONS] &lt;COMMAND&gt;
+
+Commands: models, current, use, criterion
+</code></pre>
+<h2 id="nothing-is-on-until-you-turn-it-on"><a class="header" href="#nothing-is-on-until-you-turn-it-on">Nothing is on until you turn it on</a></h2>
+<p>With no decision model configured — the state after <code>spec init</code> — the
+harness asks nothing, and every command behaves exactly as it did
+before this feature existed. There is no default model, no automatic
+pull, and no model chosen for you.</p>
+<h2 id="what-a-judgment-is-allowed-to-do"><a class="header" href="#what-a-judgment-is-allowed-to-do">What a judgment is allowed to do</a></h2>
+<p>A judgment is <strong>advice about wording</strong>. By default it cannot do anything
+else. Specifically, a decision model in this harness can never:</p>
+<ul>
+<li>turn a red test bar green, or change a test result in any way</li>
+<li>mark a requirement implemented, or certify any implementation</li>
+<li>bypass the <a href="#staged-changes">staging area</a> or a commit</li>
+<li>waive a human checkpoint</li>
+<li>change <code>clean</code> or <code>findings</code> on a wording review</li>
+</ul>
+<p>Those are all decided by deterministic code or by you. A judgment
+travels <em>beside</em> that verdict, labelled, and the deterministic answer is
+whatever it always was. <code>mode = "enforce"</code> can make a command exit
+nonzero (see <a href="#decisionmode">below</a>), but even then it only ever stops
+work — it never approves any.</p>
+<p>A request that failed is not an answer and is never read as approval. An
+unreachable model in advisory mode leaves a note saying no judgment was
+taken; in enforcing mode it is an error.</p>
+<hr>
+<h2 id="spec-judge-models"><a class="header" href="#spec-judge-models">spec judge models</a></h2>
+<p>List the installed models that can answer decisions.</p>
+<pre><code class="language-bash">spec judge models
+</code></pre>
+<pre><code class="language-text">nimble:latest
+</code></pre>
+<p>The list comes from asking Ollama which of its models report the
+<code>decision</code> capability. No model name is hardcoded, and nothing is
+inferred from a name: a model is offered for this role only because the
+provider says it can do the job.</p>
+<p>With none installed, the command says so and suggests one:</p>
+<pre><code class="language-text">No decision models installed - pull one first (e.g. `ollama pull nimble`), then: spec judge use nimble
+</code></pre>
+<hr>
+<h2 id="spec-judge-current"><a class="header" href="#spec-judge-current">spec judge current</a></h2>
+<p>Show the resolved decision model, where it came from, and the policy its
+answers are read against.</p>
+<pre><code class="language-bash">spec judge current
+</code></pre>
+<pre><code class="language-text">nimble:latest (from configuration)
+endpoint	http://localhost:11434
+timeout_seconds	60
+mode	advisory
+min_confidence	0.8
+</code></pre>
+<p>With nothing configured:</p>
+<pre><code class="language-text">No decision model configured - judgments are off. Pick one with: spec judge models, then spec judge use &lt;model-name&gt;
+</code></pre>
+<p><code>--json</code> prints the same values as a stable object, including the
+question version:</p>
+<pre><code class="language-bash">spec judge current --json
+</code></pre>
+<pre><code class="language-json">{
+  "endpoint": "http://localhost:11434",
+  "minConfidence": 0.8,
+  "mode": "advisory",
+  "model": "nimble:latest",
+  "question": "measurable/v1",
+  "source": "configuration",
+  "timeoutSeconds": 60
+}
+</code></pre>
+<p><code>mode</code> reads back in lower case because that is what you write in
+<code>.spec/config.toml</code>. <code>verdict</code> and <code>action</code> are upper case because they
+name states in the workflow rather than settings.</p>
+<p><a href="#spec-config"><code>spec config</code></a> reports the same five keys alongside every
+other setting, with the source of each.</p>
+<hr>
+<h2 id="spec-judge-use"><a class="header" href="#spec-judge-use">spec judge use</a></h2>
+<p>Persist the decision model choice.</p>
+<pre><code class="language-bash">spec judge use nimble:latest
+</code></pre>
+<pre><code class="language-text">Configured decision model: nimble:latest
+Written to: /Users/you/code/calculator/.spec/config.toml ([decision] model)
+The generative model is unchanged - see llm.model in spec config.
+</code></pre>
+<p>This writes <code>[decision] model</code> and touches nothing else. It is a
+separate key from <code>llm.model</code> on purpose: the two roles are two models,
+and configuring one must never replace the other. The name is checked
+against the models that report the <code>decision</code> capability, so a chat
+model is refused here rather than failing later.</p>
+<p>The reverse is also refused. <code>spec model use nimble:latest</code> reports:</p>
+<pre><code class="language-text">'nimble:latest' is a decision model and cannot do generative work - set it as the decision model instead: spec judge use nimble:latest
+</code></pre>
+<p>Model discovery has the same separation. With only a decision model
+installed, the session default does not silently become it:</p>
+<pre><code class="language-text">Ollama has nimble:latest installed, which answers decisions rather than chat - generation will use deterministic templates. Pull a coding model too, e.g.: ollama pull qwen3.8-flash-next:125b-mlx (the decision model stays available to spec judge)
+</code></pre>
+<hr>
+<h2 id="spec-judge-criterion"><a class="header" href="#spec-judge-criterion">spec judge criterion</a></h2>
+<p>Run a real judgment and show the whole typed result. This is the command
+to use to check that the setup works and to see what a judgment actually
+is.</p>
+<pre><code class="language-text">Usage: spec judge criterion [OPTIONS] [REQ_ID]
+
+Arguments: [REQ_ID]   a requirement whose criteria are judged
+Options:   --text &lt;TEXT&gt;   judge this wording instead
+           --json
+</code></pre>
+<p>Judge a piece of wording directly:</p>
+<pre><code class="language-bash">spec judge criterion --text "Given the refactored module, when the suite runs, then code quality is improved by at least 20%"
+</code></pre>
+<pre><code class="language-text">model	nimble:latest
+question	measurable/v1
+mode	advisory
+min_confidence	0.8
+
+criterion	Given the refactored module, when the suite runs, then code quality is improved by at least 20%
+answer	probability of true 0.038
+verdict	FAILS
+action	CONTINUE
+input	--text
+state	sha256:048965344f62409e5399403357ce83c4e7b3cce836b14673c0745b6f7ff7237d
+tokens	in 385 out 1
+
+judgment (measurable/v1): criterion "Given the refactored module, when the suite runs, then code quality is improved by at least 20%": the outcome may not be measurable - nimble:latest says probability of true 0.038
+
+A judgment is advice about wording. It does not change the spec, the test bar, or whether a requirement is implemented.
+</code></pre>
+<p>Or every criterion of a requirement:</p>
+<pre><code class="language-bash">spec judge criterion REQ-003
+</code></pre>
+<p><code>--json</code> gives the machine-readable form, which is the same shape the
+<a href="#spec-mcp"><code>refine_requirement</code> MCP tool</a> attaches:</p>
+<pre><code class="language-json">{
+  "judgments": [
+    {
+      "gate": "CRITERION_MEASURABLE",
+      "question": "measurable/v1",
+      "model": "nimble:latest",
+      "verdict": "HOLDS",
+      "action": "CONTINUE",
+      "mode": "advisory",
+      "threshold": 0.8,
+      "answer": { "type": "noul", "noul": 0.99804933586542 },
+      "provenance": {
+        "input": "REQ-003",
+        "state": "sha256:0506f1b9d220bf6b7a2f2192534480abad3d25e297a324ff954a0ea9fdda6994",
+        "state_bytes": 92
+      },
+      "usage": { "input_tokens": 382, "output_tokens": 1 }
+    }
+  ],
+  "action": "CONTINUE",
+  "advisories": []
+}
+</code></pre>
+<h3 id="reading-the-record"><a class="header" href="#reading-the-record">Reading the record</a></h3>
+<p>Every judgment records enough to be argued with later:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>What it is</th></tr>
+</thead>
+<tbody>
+<tr><td><code>gate</code></td><td>Which question was being decided</td></tr>
+<tr><td><code>question</code></td><td>The question’s version — <code>measurable/v1</code>. A threshold calibrated against one phrasing is not evidence about another, so a change to the wording is a new version</td></tr>
+<tr><td><code>model</code></td><td>The model that answered</td></tr>
+<tr><td><code>answer</code></td><td>The typed answer exactly as returned</td></tr>
+<tr><td><code>verdict</code></td><td><code>HOLDS</code>, <code>FAILS</code>, or <code>INCONCLUSIVE</code> after the threshold is applied</td></tr>
+<tr><td><code>action</code></td><td>What the harness did: <code>CONTINUE</code>, <code>REWORK</code>, <code>ESCALATE</code>, or <code>STOP</code>. The model never picks this</td></tr>
+<tr><td><code>mode</code></td><td>The policy in force</td></tr>
+<tr><td><code>provenance.input</code></td><td>What was summarized into the question</td></tr>
+<tr><td><code>provenance.state</code></td><td>A SHA-256 of the exact brief sent, so a judgment can be tied to the evidence it saw</td></tr>
+<tr><td><code>usage</code></td><td>Tokens in and out</td></tr>
+</tbody>
+</table>
+</div>
+<p>The brief is deliberately minimal: the criterion and nothing else. The
+question is about that sentence’s own wording, so the story, the
+project, and the rest of the spec are not evidence for it. The state
+field is data, never instructions.</p>
+<hr>
+<h2 id="judgments-on-a-wording-review"><a class="header" href="#judgments-on-a-wording-review">Judgments on a wording review</a></h2>
+<p>With a decision model configured, <a href="#spec-refine"><code>spec refine</code></a>
+and the <code>refine_requirement</code> MCP tool attach judgments to their reply.
+<code>clean</code> and <code>findings</code> are untouched:</p>
+<pre><code class="language-json">{
+  "id": "REQ-007",
+  "clean": true,
+  "findings": [],
+  "judgments": [ { "...": "as above" } ],
+  "judgmentAdvisories": [
+    "judgment (measurable/v1): criterion \"...\": the outcome may not be measurable - nimble:latest says probability of true 0.014"
+  ],
+  "judgmentAction": "CONTINUE"
+}
+</code></pre>
+<p>With no decision model configured, none of those four keys appears at
+all, so a tool or script reading this reply today sees no change until
+someone opts in.</p>
+<p>The MCP reply always reports and never gates, even in a project
+configured to enforce. An exit code is a thing a human watches; a tool
+reply an agent reads is not the place to stop a workflow.</p>
+<hr>
+<h2 id="the-decision-configuration-block"><a class="header" href="#the-decision-configuration-block">The [decision] configuration block</a></h2>
+<pre><code class="language-toml">[decision]
+model = "nimble:latest"               # persisted by spec judge use
+endpoint = "http://localhost:11434"   # defaults to the [llm] endpoint
+timeout_seconds = 60
+mode = "advisory"                     # off | advisory | enforce
+min_confidence = 0.8
+</code></pre>
+<p><code>endpoint</code> defaults to whatever <code>[llm] endpoint</code> is set to, so one
+Ollama host is stated once. Set it only when the decision model lives
+somewhere else.</p>
+<h3 id="decisionmode"><a class="header" href="#decisionmode"><code>decision.mode</code></a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Mode</th><th>What a judgment does</th></tr>
+</thead>
+<tbody>
+<tr><td><code>off</code></td><td>Nothing is asked. <code>spec judge</code> still works, because a human typed it</td></tr>
+<tr><td><code>advisory</code></td><td><strong>The default.</strong> The answer is reported beside the deterministic result and changes nothing</td></tr>
+<tr><td><code>enforce</code></td><td>A <code>FAILS</code> verdict exits nonzero asking for <code>REWORK</code>; an <code>INCONCLUSIVE</code> one asks to <code>ESCALATE</code> to a human. A failed request is an error, never an approval</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="decisionmin_confidence"><a class="header" href="#decisionmin_confidence"><code>decision.min_confidence</code></a></h3>
+<p>A dead band, not a quality bar. For the boolean question the harness
+asks, a probability at or above this reads as <code>HOLDS</code>, at or below
+<code>1 - threshold</code> reads as <code>FAILS</code>, and anything between is
+<code>INCONCLUSIVE</code> and used for nothing.</p>
+<p>Ollama’s own <code>confidence</code> figure — returned for the <code>choice</code> and <code>score</code>
+question types, though not for the boolean one — is defined as how
+concentrated the probability distribution is, which its documentation is
+explicit is <em>not</em> calibrated correctness. Treat the threshold as a width
+of “do not act on this”, and nothing more.</p>
+<hr>
+<h2 id="how-well-does-it-work"><a class="header" href="#how-well-does-it-work">How well does it work?</a></h2>
+<p>Not a question to answer from a vendor benchmark. Ollama publishes
+aggregate scores for its decision models on its own evaluation suite;
+those say nothing about whether this harness’s question works on
+acceptance criteria written by workshop students.</p>
+<p>So there is a labeled evaluation in the repository:
+<code>harness/tests/decision_live.rs</code> holds 32 acceptance criteria in five
+groups — clearly measurable, clearly not, genuinely ambiguous, a group
+written to <em>look</em> finished, and four lifted from this repository’s own
+spec — each labeled with a note saying why. Run it against your own
+model:</p>
+<pre><code class="language-bash">cd harness
+cargo test --test decision_live -- --ignored --nocapture
+</code></pre>
+<p>It prints the answer for every criterion, a confusion matrix, and a
+threshold sweep, so you can see where the model and the labels disagree
+and judge for yourself.</p>
+<h3 id="what-it-scores"><a class="header" href="#what-it-scores">What it scores</a></h3>
+<p>Against <code>nimble:latest</code> at the shipped threshold, nothing vague is
+judged measurable — including all eight criteria written to look
+finished, one of which is a direct prompt-injection attempt.</p>
+<p>It produces one false alarm, and that one is worth knowing because the
+shape is ordinary:</p>
+<blockquote>
+<p>Given a requirement, when coverage is requested, then the verdict is <code>"covered"</code></p>
+</blockquote>
+<p>That assertion is an exact quoted string, so it is measurable. The model
+reads the quoted word as a judgement and scores it 0.09. Two longer
+criteria of the same shape score 0.27 and 0.30, which the dead band
+swallows — the band hiding a wrong answer, not the question getting it
+right. <strong>If your criteria assert quoted status words, expect to overrule
+the judgment.</strong> That is what advisory mode is for, and it is the clearest
+argument against turning <code>enforce</code> on without measuring your own wording
+first.</p>
+<h3 id="why-the-question-is-worded-the-way-it-is"><a class="header" href="#why-the-question-is-worded-the-way-it-is">Why the question is worded the way it is</a></h3>
+<p>An earlier phrasing asked the open question — “could a test check this
+criterion?” — and scored well on plain vagueness while reading <strong>every</strong>
+adversarial criterion as measurable at p &gt; 0.9, including “the system
+achieves 99.9% correctness across all code paths” and a criterion that
+simply asserted it was measurable. Pointing the question at the clause
+after <code>then</code>, and naming the specific dodges that clause uses, took that
+from 8 misses to none.</p>
+<p>The lesson is about the question, not the model: an open question
+invites a judgment of the sentence’s <em>style</em>, and style is exactly what
+convincing-looking wording gets right.</p>
+<p>The threshold came out of the same loop. At 0.70 the run produces three
+confident false alarms rather than one and leaves none of the six
+ambiguous criteria unsure. The two directions do not cost the same: a
+false alarm teaches people to ignore judgments, while silence costs
+nothing, because the deterministic rules are doing their job either way.
+So the wider band ships, and 0.70 is still a reasonable choice for a
+project that would rather see every flag.</p>
+<hr>
+<h2 id="troubleshooting"><a class="header" href="#troubleshooting">Troubleshooting</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Message</th><th>What to do</th></tr>
+</thead>
+<tbody>
+<tr><td><code>No decision model configured</code></td><td><code>spec judge models</code>, then <code>spec judge use &lt;name&gt;</code></td></tr>
+<tr><td><code>decision model 'X' is not installed</code></td><td><code>ollama pull X</code></td></tr>
+<tr><td><code>'X' cannot answer decisions</code></td><td>The model has no <code>decision</code> capability. <code>spec judge models</code> lists the ones that do</td></tr>
+<tr><td><code>... has no /v1/systemone route</code></td><td>Ollama is older than 0.35. Upgrade it</td></tr>
+<tr><td><code>no decision within 60s</code></td><td>Raise <code>timeout_seconds</code> under <code>[decision]</code></td></tr>
+<tr><td><code>the decision brief is too large</code></td><td>The question’s brief is capped at 64 KiB by the server, which does not truncate</td></tr>
+<tr><td><code>the decision reply did not match the questions asked</code></td><td>The model answered something that was not asked. Reported rather than read as a verdict</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="see-also-15"><a class="header" href="#see-also-15">See also</a></h2>
+<ul>
+<li><a href="#spec-model"><code>spec model</code></a> — the <strong>generative</strong> model, a separate choice.</li>
+<li><a href="#spec-config"><code>spec config</code></a> — every key and where it came from.</li>
+<li><a href="#spec-refine"><code>spec refine</code></a> — the deterministic wording review
+a judgment sits beside.</li>
+<li><a href="#global-flags">Global flags</a> — the <code>--decision-model</code> override.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="spec-config"><a class="header" href="#spec-config">spec config</a></h1>
@@ -3068,9 +3491,20 @@ tools.call_timeout_seconds	300	(default)
 tools.cache_ttl_seconds	86400	(default)
 tools.mcp_config	(unset)	(default)
 refactor.attempts	10	(default)
+decision.model	(unset)	(default)
+decision.endpoint	http://localhost:11434	/Users/you/code/calculator/.spec/config.toml
+decision.timeout_seconds	60	(default)
+decision.mode	advisory	(default)
+decision.min_confidence	0.8	(default)
 tools.profiles.spec-draft	list_requirements, get_requirement, validate_spec, refine_requirement	(default)
 tools.profiles.implement	get_requirement, feature_read, …	(default)
 </code></pre>
+<p>The five <code>decision.*</code> rows describe the
+<a href="#spec-judge">decision model</a> — a second, separate model from <code>llm.model</code>
+above. <code>decision.model</code> is <code>(unset)</code> until <code>spec judge use</code> names one,
+and while it is unset nothing asks a judgment. <code>decision.endpoint</code> is
+attributed to the file when either it or <code>[llm] endpoint</code> supplied the
+host, since the decision plane defaults to wherever Ollama already is.</p>
 <p><code>refactor.attempts</code> is how many write-then-test rounds
 <a href="#spec-refactor"><code>spec refactor</code></a> may spend before it restores the code it
 started from. Each round costs a model call and a full test run, so it is
@@ -3089,12 +3523,15 @@ rows appear only when those tables are set.</p>
 <p>Optional keys with nothing to show print <code>(unset)</code> with source
 <code>(default)</code>: <code>tools.mcp_config</code>, and <code>llm.model</code> when Ollama is down
 or has no models pulled.</p>
-<h2 id="see-also-15"><a class="header" href="#see-also-15">See also</a></h2>
+<h2 id="see-also-16"><a class="header" href="#see-also-16">See also</a></h2>
 <ul>
 <li><a href="#spec-model"><code>spec model</code></a> — persist <code>llm.model</code>.</li>
+<li><a href="#spec-judge"><code>spec judge</code></a> — persist <code>decision.model</code>, and what the
+other four <code>decision.*</code> keys do.</li>
 <li><a href="#spec-tools"><code>spec tools</code></a> — per-command profiles and <code>mcp.json</code> tools.</li>
-<li><a href="#global-flags">Global flags</a> — <code>--model</code>, <code>--retry</code>, <code>--tools</code>
-override a value for one run and are not written to the file.</li>
+<li><a href="#global-flags">Global flags</a> — <code>--model</code>, <code>--decision-model</code>,
+<code>--retry</code>, <code>--tools</code> override a value for one run and are not written
+to the file.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="spec-mcp"><a class="header" href="#spec-mcp">spec mcp</a></h1>
@@ -3190,7 +3627,7 @@ is <strong>template-only</strong> (<code>source: "template"</code>).</p>
 <tr><td><code>list_requirements</code></td><td><a href="#spec-list"><code>spec list</code></a></td></tr>
 <tr><td><code>get_requirement</code></td><td><a href="#spec-show"><code>spec show</code></a></td></tr>
 <tr><td><code>validate_spec</code></td><td><a href="#spec-validate"><code>spec validate</code></a></td></tr>
-<tr><td><code>refine_requirement</code></td><td><a href="#spec-refine"><code>spec refine</code></a></td></tr>
+<tr><td><code>refine_requirement</code></td><td><a href="#spec-refine"><code>spec refine</code></a> (gains additive <code>judgments</code> keys when a <a href="#spec-judge">decision model</a> is configured; absent otherwise)</td></tr>
 <tr><td><code>run_tests</code></td><td><a href="#spec-test"><code>spec test</code></a></td></tr>
 <tr><td><code>get_tdd_state</code></td><td><a href="#spec-state"><code>spec state</code></a></td></tr>
 <tr><td><code>start_refactor</code></td><td><a href="#spec-refactor"><code>spec refactor</code></a></td></tr>

@@ -78,6 +78,27 @@ impl OllamaCatalog {
 }
 
 impl ModelCatalog for OllamaCatalog {
+    fn capabilities(&self, model: &str) -> Option<Vec<String>> {
+        let url = format!("{}/api/show", self.endpoint.trim_end_matches('/'));
+        let body = self
+            .client
+            .post(&url)
+            .json(&serde_json::json!({ "model": model }))
+            .send()
+            .and_then(reqwest::blocking::Response::error_for_status)
+            .and_then(|response| response.text())
+            .map_err(|e| {
+                // Not a failure worth surfacing: every caller treats an
+                // unreadable capability list as "unknown" and keeps the
+                // behaviour it would have had anyway.
+                debug!(model, error = %describe(&e, self.timeout), "capabilities unavailable");
+            })
+            .ok()?;
+        let capabilities = parse_capabilities(&body)?;
+        debug!(model, ?capabilities, "Ollama model capabilities");
+        Some(capabilities)
+    }
+
     fn models(&self) -> Result<Vec<ModelInfo>, LlmError> {
         let url = format!("{}/api/tags", self.endpoint.trim_end_matches('/'));
         debug!(endpoint = %self.endpoint, "listing Ollama models");
@@ -115,6 +136,25 @@ struct Tag {
     size: Option<u64>,
     #[serde(default)]
     modified_at: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ShowResponse {
+    #[serde(default)]
+    capabilities: Option<Vec<String>>,
+}
+
+/// The `capabilities` list from `/api/show`, when the provider reports
+/// one.
+///
+/// `None` rather than an empty list when the key is absent: "this
+/// provider does not tell me" and "this model can do nothing" lead to
+/// opposite decisions about whether to leave a model in the generative
+/// candidate set.
+pub fn parse_capabilities(body: &str) -> Option<Vec<String>> {
+    serde_json::from_str::<ShowResponse>(body)
+        .ok()?
+        .capabilities
 }
 
 /// Translates Ollama's `/api/tags` JSON into the port's model list.
@@ -229,5 +269,65 @@ mod tests {
     #[test]
     fn the_default_generation_timeout_allows_long_completions() {
         assert_eq!(DEFAULT_GENERATION_TIMEOUT, Duration::from_secs(300));
+    }
+
+    #[test]
+    fn a_shown_capability_list_is_read_off_the_reply() {
+        assert_eq!(
+            parse_capabilities(r#"{"capabilities":["decision"]}"#),
+            Some(vec!["decision".to_string()])
+        );
+        assert_eq!(
+            parse_capabilities(r#"{"capabilities":["completion","tools"]}"#),
+            Some(vec!["completion".to_string(), "tools".to_string()])
+        );
+    }
+
+    /// "The provider did not say" and "this model can do nothing" have
+    /// to stay distinguishable: only the second would justify dropping a
+    /// model from the generative candidates.
+    #[test]
+    fn a_reply_without_capabilities_is_unknown_rather_than_empty() {
+        assert_eq!(parse_capabilities(r#"{"details":{}}"#), None);
+        assert_eq!(parse_capabilities("not json"), None);
+        assert_eq!(
+            parse_capabilities(r#"{"capabilities":[]}"#),
+            Some(Vec::new())
+        );
+    }
+
+    #[test]
+    fn capabilities_come_back_from_a_reachable_provider() {
+        use std::io::{Read as _, Write as _};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0u8; 1024];
+            let read = stream.read(&mut request).unwrap_or(0);
+            let body = r#"{"capabilities":["decision"]}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\n\
+                 content-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+            String::from_utf8_lossy(&request[..read]).to_string()
+        });
+        let catalog = OllamaCatalog::new(format!("http://127.0.0.1:{port}"));
+        let capabilities = catalog.capabilities("nimble:latest");
+        let sent = server.join().unwrap();
+        assert_eq!(capabilities, Some(vec!["decision".to_string()]));
+        assert!(sent.starts_with("POST /api/show "), "got: {sent}");
+        assert!(sent.contains("nimble:latest"));
+    }
+
+    #[test]
+    fn an_unreachable_provider_reports_unknown_capabilities_rather_than_failing() {
+        let catalog =
+            OllamaCatalog::with_timeout("http://127.0.0.1:9".into(), Duration::from_millis(200));
+        assert_eq!(catalog.capabilities("anything"), None);
     }
 }

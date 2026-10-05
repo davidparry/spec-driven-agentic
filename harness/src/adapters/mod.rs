@@ -20,6 +20,7 @@ pub mod mcp_config;
 pub mod noop_llm;
 pub mod ollama;
 pub mod ollama_chat;
+pub mod ollama_decision;
 pub mod overlay;
 pub mod process_exec;
 pub mod process_runtime;

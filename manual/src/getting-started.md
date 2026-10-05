@@ -35,6 +35,29 @@ produce weaker specs, step definitions, tests, and production code.
 Without a reachable model the harness still runs — generation falls back
 to deterministic templates.
 
+## Optional: a decision model
+
+Separate from the model above, and entirely optional. A *decision model*
+does not write; it answers one bounded question about evidence you give
+it and returns a typed value with a probability. The harness can use one
+to judge whether an acceptance criterion is actually measurable — a
+question the deterministic wording rules cannot answer.
+
+Needs Ollama 0.35 or newer:
+
+```bash
+ollama pull nimble
+spec judge models          # confirm Ollama reports it as decision-capable
+spec judge use nimble
+spec judge criterion --text "Given the refactored module, when the suite runs, then code quality is improved by at least 20%"
+```
+
+This adds a second model; it does not replace the one above. Nothing
+asks a judgment until `spec judge use` names one, and a judgment is
+advice about wording: it never changes a test result, a requirement's
+status, or the deterministic review it sits beside. See
+[`spec judge`](commands/judge.md).
+
 ## Your first session
 
 Run bare `spec` in a terminal. You get the help, the banner with the

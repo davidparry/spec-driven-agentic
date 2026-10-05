@@ -41,7 +41,17 @@ pub struct ValidationReport {
     pub next_step: String,
 }
 
-#[derive(Debug, Serialize, PartialEq, Eq)]
+/// `clean`, `findings`, `source`, and `nextStep` are the deterministic
+/// verdict and are produced without a model.
+///
+/// The `judgment*` fields carry what a configured decision model said
+/// about the same wording. They travel *beside* the deterministic
+/// verdict rather than inside it: every one of them is omitted from the
+/// JSON when no decision model is configured, so the reply shape every
+/// existing consumer pattern-matches on is byte-for-byte what it was.
+/// `clean` means exactly what it always meant — the deterministic rules
+/// found nothing — and no probability is ever folded into it.
+#[derive(Debug, Serialize, PartialEq)]
 pub struct RefinementReport {
     pub id: String,
     pub clean: bool,
@@ -53,6 +63,23 @@ pub struct RefinementReport {
     pub source: &'static str,
     #[serde(rename = "nextStep")]
     pub next_step: String,
+    /// The full audit record for each criterion that was judged.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub judgments: Vec<crate::domain::decision::Judgment>,
+    /// The human-readable advisory line for each criterion the model
+    /// read as unmeasurable.
+    #[serde(rename = "judgmentAdvisories", skip_serializing_if = "Vec::is_empty")]
+    pub judgment_advisories: Vec<String>,
+    /// What the harness does about the judgments. `CONTINUE` in
+    /// advisory mode, whatever the answers were.
+    #[serde(rename = "judgmentAction", skip_serializing_if = "Option::is_none")]
+    pub judgment_action: Option<crate::domain::decision::Transition>,
+    /// Why there is no judgment, when one was wanted and did not
+    /// arrive. Present instead of the judgments, never alongside them —
+    /// and never silently absent, which would leave a reader unable to
+    /// tell "nothing to report" from "nobody asked".
+    #[serde(rename = "judgmentNote", skip_serializing_if = "Option::is_none")]
+    pub judgment_note: Option<String>,
 }
 
 /// `source` of a reply that reviewed an uncommitted edit.
@@ -291,6 +318,10 @@ impl<R: SpecRepository, F: FeatureFiles, C: ChangeStore> SpecService<R, F, C> {
             findings,
             source,
             next_step: next_step.to_string(),
+            judgments: Vec::new(),
+            judgment_advisories: Vec::new(),
+            judgment_action: None,
+            judgment_note: None,
         })
     }
 

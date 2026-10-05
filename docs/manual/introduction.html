@@ -35,10 +35,10 @@
             const path_to_root = "";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "searchindex-a00b6607.js";
+            window.path_to_searchindex_js = "searchindex-a361ab77.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-72ae98bc.js"></script>
+        <script src="toc-2ab172c3.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -240,6 +240,13 @@ model this harness is developed and run against is
 <code>qwen3.8-flash-next:125b-mlx</code> — see <a href="getting-started.html">Getting started</a>
 and <a href="commands/model.html"><code>spec model</code></a>. Your mileage will vary with
 other models, especially those not trained for development work.</p>
+<p>Optionally, a second and quite different local model can be configured:
+a <em>decision model</em>, which writes nothing and instead answers one bounded
+question about evidence with a typed value and a probability. The
+harness uses one to judge whether an acceptance criterion is measurable,
+which the deterministic wording rules cannot decide. It is off until you
+configure it, and what it is allowed to do is deliberately narrow — see
+<a href="commands/judge.html"><code>spec judge</code></a>.</p>
 
                     </main>
 

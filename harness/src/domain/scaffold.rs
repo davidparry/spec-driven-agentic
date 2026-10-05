@@ -3,15 +3,16 @@
 //! harness configuration. Pure text; writing is the adapter's job.
 
 use crate::domain::config_report::{
-    DEFAULT_LLM_CACHE_TTL_SECONDS, DEFAULT_LLM_ENDPOINT, DEFAULT_LLM_RETRY,
-    DEFAULT_LLM_TIMEOUT_SECONDS, DEFAULT_TOOLS_CACHE_TTL_SECONDS,
-    DEFAULT_TOOLS_CALL_TIMEOUT_SECONDS, DEFAULT_TOOLS_CONFIRM,
+    DEFAULT_DECISION_MODE, DEFAULT_DECISION_TIMEOUT_SECONDS, DEFAULT_LLM_CACHE_TTL_SECONDS,
+    DEFAULT_LLM_ENDPOINT, DEFAULT_LLM_RETRY, DEFAULT_LLM_TIMEOUT_SECONDS,
+    DEFAULT_TOOLS_CACHE_TTL_SECONDS, DEFAULT_TOOLS_CALL_TIMEOUT_SECONDS, DEFAULT_TOOLS_CONFIRM,
     DEFAULT_TOOLS_DISCOVERY_TIMEOUT_SECONDS, DEFAULT_TOOLS_MAX_ROUNDS,
 };
+use crate::domain::decision::DEFAULT_MIN_CONFIDENCE;
 use crate::domain::language::Language;
 use crate::domain::tool_profile::{Caller, default_profile};
 use crate::domain::tools::BUILTIN_ORIGIN;
-use crate::domain::{CONFIG_FILE, RECOMMENDED_MODEL, spec_rel};
+use crate::domain::{CONFIG_FILE, RECOMMENDED_DECISION_MODEL, RECOMMENDED_MODEL, spec_rel};
 
 /// One file the scaffold wants on disk.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -111,8 +112,36 @@ endpoint = \"{endpoint}\"
 # Tools removed from the default or profiles list.
 # [tools.disabled]
 # implement = [\"command_run\"]
+
+# A local decision model, used only to judge bounded questions about
+# evidence the deterministic rules cannot measure. It is a second,
+# separate model from [llm] above: that one writes, this one answers.
+# Nothing here is on until `model` names an installed decision model
+# (`spec judge models` lists them, `spec judge use <name>` writes it).
+[decision]
+# Persisted by `spec judge use`. Flag `--decision-model` wins for one run.
+# model = \"{decision_model}\"
+# Defaults to the [llm] endpoint above; set it only if the decision
+# model lives somewhere else.
+# endpoint = \"{endpoint}\"
+# timeout_seconds = {decision_timeout}
+# What a judgment is allowed to do:
+#   off      - do not ask
+#   advisory - report the answer beside the deterministic result and
+#              change nothing (the default)
+#   enforce  - a failing or unsure answer makes the command exit
+#              nonzero and ask for rework or a human
+# mode = \"{decision_mode}\"
+# Answers less concentrated than this are reported \"unsure\" rather than
+# used. Ollama's confidence is distribution concentration, not
+# calibrated correctness, so treat it as a dead band and nothing more.
+# min_confidence = {decision_confidence}
 ",
         model = RECOMMENDED_MODEL,
+        decision_model = RECOMMENDED_DECISION_MODEL,
+        decision_timeout = DEFAULT_DECISION_TIMEOUT_SECONDS,
+        decision_mode = DEFAULT_DECISION_MODE,
+        decision_confidence = DEFAULT_MIN_CONFIDENCE,
         endpoint = DEFAULT_LLM_ENDPOINT,
         timeout = DEFAULT_LLM_TIMEOUT_SECONDS,
         llm_cache = DEFAULT_LLM_CACHE_TTL_SECONDS,

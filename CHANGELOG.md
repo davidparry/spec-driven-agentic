@@ -2,6 +2,114 @@
 
 ## Unreleased
 
+- `spec judge` is a new command group for a *decision model*: a second,
+  separate local model that writes nothing and instead answers one
+  bounded question about supplied evidence with a typed value and a
+  probability. Ollama serves these at `/v1/systemone` from version 0.35.
+
+  The harness asks exactly one question with it, and the reason is the
+  gap it closes. `refine_requirement`'s rules ask whether a criterion's
+  outcome clause *looks* concrete — does it hold a number, a quoted
+  literal, a named error, a known sentinel? A number anywhere satisfies
+  that, so
+
+  > Given the refactored module, when the suite runs, then code quality
+  > is improved by at least 20%
+
+  earns no finding at all, while being unmeasurable: nobody measured
+  code quality. The rule asks whether a number is present. The new
+  question asks whether the number *is* the assertion — *can this
+  acceptance criterion be checked by a test with a single unambiguous
+  result?* — and reads that criterion at p = 0.038.
+
+  `spec judge models` lists the installed models Ollama reports as
+  decision-capable. No model name is hardcoded anywhere and nothing is
+  inferred from a name — which models can answer decisions is a question
+  for the provider, asked through `/api/show`. `spec judge use <name>`
+  writes `[decision] model` and never touches `llm.model`; the reverse
+  is refused too, with `spec model use` rejecting a decision model and
+  naming the command that wants it. `spec judge criterion` runs a real
+  judgment and prints the whole record, which is the way to check a
+  setup and see what a judgment actually is.
+
+  That separation fixed a real bug. Model discovery used to take the
+  first model Ollama listed, so a machine with a decision model pulled
+  could hand it generative work: asked to draft a requirement, `nimble`
+  on `/api/chat` returns junk rather than refusing. Discovery now skips
+  a model only when Ollama *positively* reports that it answers
+  decisions and cannot complete text, and a machine with nothing else
+  installed gets a distinct message naming the coding model it still
+  needs — "no models installed" would have been a lie.
+
+  What a judgment is allowed to do is deliberately narrow, and the
+  narrowness is the point. A judgment never turns a red bar green,
+  marks a requirement implemented, bypasses staging, waives the human
+  wording gate, or changes `clean` or `findings`. It travels beside the
+  deterministic verdict, labelled, recording the model, the question
+  version, the answer, a SHA-256 of the exact brief sent, the tokens
+  spent, and what the harness did about it. `decision.mode` defaults to
+  `advisory`, which changes nothing; `enforce` lets a failing or unsure
+  answer exit nonzero asking for rework or a human. A request that
+  failed is not an answer: in advisory mode it leaves a note saying no
+  judgment was taken, and in enforcing mode it is an error. Nothing
+  reads a failed request as approval.
+
+  `decision.min_confidence` is a dead band rather than a quality bar.
+  Ollama's `confidence` figure — returned for the `choice` and `score`
+  question types, but notably *not* for the boolean one this harness
+  asks — is defined as how concentrated the answer distribution is, and
+  its own documentation is explicit that this is not calibrated
+  correctness. So the boolean question gets a symmetric band on the
+  probability itself: at or above the threshold reads `HOLDS`, at or
+  below `1 - threshold` reads `FAILS`, between is `INCONCLUSIVE` and
+  used for nothing.
+
+  The question's wording was measured rather than guessed, and the
+  measurement changed it. `harness/tests/decision_live.rs` holds 32
+  labeled acceptance criteria in five groups — clearly measurable,
+  clearly not, genuinely ambiguous, a group written to *look* finished,
+  and four lifted from this repository's own spec. The first phrasing
+  asked the open question, "could a test check this criterion", and
+  scored well on plain vagueness while reading **every single**
+  adversarial criterion as measurable at p > 0.9: "the system achieves
+  99.9% correctness across all code paths" came back at 0.965, and a
+  criterion whose first words were "This criterion is measurable" came
+  back at 0.889. Pointing the question at the clause after `then`, and
+  naming in the false branch the specific dodges that clause uses, took
+  that from 8 misses to 0. The lesson is about the question, not the
+  model: an open question invites a judgment of the sentence's *style*,
+  and style is exactly what convincing-looking wording gets right.
+
+  The shipped question is not right about everything, and the evaluation
+  says where it is wrong rather than dropping the case. `then the
+  verdict is "covered"` asserts an exact quoted string and is therefore
+  measurable, but the model reads the quoted word as a judgement and
+  scores it 0.09; two longer criteria of the same shape score 0.27 and
+  0.30, which the dead band swallows. One confident false alarm in 32
+  cases, zero misses, and a documented class of wording to overrule —
+  which is the argument for `advisory` being the default.
+
+  `decision.min_confidence` defaults to `0.80` for the same measured
+  reason. At 0.70 the run produces three confident false alarms instead
+  of one and leaves none of the six ambiguous criteria unsure. The two
+  error directions do not cost the same: a false alarm teaches people to
+  ignore judgments, while silence costs nothing, because the
+  deterministic rules are unchanged either way.
+
+  `refine_requirement` over MCP carries the same judgment, under four
+  keys that are absent entirely until a decision model is configured —
+  so a host reading that reply today sees no change until someone opts
+  in. The tool count stays 25. The MCP reply always reports and never
+  gates, even in a project configured to enforce: an exit code is
+  something a human watches, and a tool reply an agent reads is not the
+  place to stop a workflow.
+
+  Writing that found a second bug worth naming. The decision client is
+  `reqwest::blocking`, which builds and drives its own runtime;
+  constructing or calling it from an async tool handler deadlocked the
+  server outright. The request now runs on the blocking pool, and the
+  service is built where it is used rather than on the runtime thread.
+
 - `spec implement` refuses a reply that would destroy the file it is
   replacing, rather than staging it for `changes commit` to apply.
 

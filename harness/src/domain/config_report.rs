@@ -6,10 +6,22 @@ use std::fmt;
 
 use serde::Serialize;
 
+use crate::domain::decision::DEFAULT_MIN_CONFIDENCE;
 use crate::domain::tool_profile::{Caller, default_profile};
+
+/// The decision mode a project gets without asking for one. Advisory,
+/// because a probability is not a gate until somebody has measured it
+/// against their own data. Kept in step with
+/// [`Mode::default`](crate::domain::decision::Mode::default) by a test.
+pub const DEFAULT_DECISION_MODE: &str = "advisory";
 
 pub const DEFAULT_LLM_ENDPOINT: &str = "http://localhost:11434";
 pub const DEFAULT_LLM_TIMEOUT_SECONDS: u64 = 300;
+/// A decision is one forward pass with no reasoning step, so the budget
+/// only has to cover loading the weights the first time. Far below the
+/// generative timeout on purpose: a decision that takes minutes is a
+/// broken setup, not a long answer.
+pub const DEFAULT_DECISION_TIMEOUT_SECONDS: u64 = 60;
 pub const DEFAULT_LLM_CACHE_TTL_SECONDS: u64 = 600;
 pub const DEFAULT_LLM_RETRY: u64 = 3;
 pub const DEFAULT_TOOLS_MAX_ROUNDS: u32 = 12;
@@ -25,6 +37,12 @@ pub const DEFAULT_REFACTOR_ATTEMPTS: u32 = 10;
 
 /// The key whose value the provider resolves when the file is silent.
 pub const LLM_MODEL_KEY: &str = "llm.model";
+
+/// The decision model, kept deliberately separate from
+/// [`LLM_MODEL_KEY`]. Unlike the generative model this one is never
+/// filled in by discovery: judgments stay inert until somebody names a
+/// model on purpose.
+pub const DECISION_MODEL_KEY: &str = "decision.model";
 
 const UNSET: &str = "(unset)";
 const NONE: &str = "(none)";
@@ -141,7 +159,10 @@ impl fmt::Display for ConfigReport {
 }
 
 /// Keys that were actually present and valid in the TOML file.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+///
+/// `PartialEq` only: `decision.min_confidence` is a float, and a
+/// threshold is a value to compare, not one to key a map on.
+#[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct PresentValues {
     pub model: Option<String>,
     pub endpoint: Option<String>,
@@ -155,6 +176,11 @@ pub(crate) struct PresentValues {
     pub tools_cache_ttl_seconds: Option<u64>,
     pub refactor_attempts: Option<u32>,
     pub mcp_config: Option<String>,
+    pub decision_model: Option<String>,
+    pub decision_endpoint: Option<String>,
+    pub decision_timeout_seconds: Option<u64>,
+    pub decision_mode: Option<String>,
+    pub decision_min_confidence: Option<f64>,
     pub profiles: BTreeMap<String, Vec<String>>,
     pub enabled: BTreeMap<String, Vec<String>>,
     pub disabled: BTreeMap<String, Vec<String>>,
@@ -164,6 +190,8 @@ pub(crate) struct PresentValues {
 /// `[tools.profiles]` command replaces that caller's default set.
 pub(crate) fn build_report(file: ConfigFileStatus, present: PresentValues) -> ConfigReport {
     let mut settings = Vec::new();
+    // Kept for the decision endpoint, which inherits it below.
+    let llm_endpoint = present.endpoint.clone();
     let (value, set) = optional_or(present.model, UNSET);
     push(&mut settings, &file, LLM_MODEL_KEY, value, set);
     let (value, set) = optional_or(present.endpoint, DEFAULT_LLM_ENDPOINT);
@@ -212,6 +240,31 @@ pub(crate) fn build_report(file: ConfigFileStatus, present: PresentValues) -> Co
     push(&mut settings, &file, "tools.mcp_config", value, set);
     let (value, set) = number_or(present.refactor_attempts, DEFAULT_REFACTOR_ATTEMPTS);
     push(&mut settings, &file, "refactor.attempts", value, set);
+    let (value, set) = optional_or(present.decision_model, UNSET);
+    push(&mut settings, &file, DECISION_MODEL_KEY, value, set);
+    // The decision endpoint inherits the generative one, because they
+    // are the same Ollama in every setup anyone actually runs. The
+    // source still names the file when either key supplied the value -
+    // reporting an inherited file value as `(default)` would send
+    // someone looking for a setting that is not there.
+    let (value, set) = match (present.decision_endpoint, llm_endpoint) {
+        (Some(endpoint), _) => (endpoint, true),
+        (None, Some(inherited)) => (inherited, true),
+        (None, None) => (DEFAULT_LLM_ENDPOINT.to_string(), false),
+    };
+    push(&mut settings, &file, "decision.endpoint", value, set);
+    let (value, set) = number_or(
+        present.decision_timeout_seconds,
+        DEFAULT_DECISION_TIMEOUT_SECONDS,
+    );
+    push(&mut settings, &file, "decision.timeout_seconds", value, set);
+    let (value, set) = optional_or(present.decision_mode, DEFAULT_DECISION_MODE);
+    push(&mut settings, &file, "decision.mode", value, set);
+    let (value, set) = match present.decision_min_confidence {
+        Some(threshold) => (format!("{threshold}"), true),
+        None => (format!("{DEFAULT_MIN_CONFIDENCE}"), false),
+    };
+    push(&mut settings, &file, "decision.min_confidence", value, set);
     for caller in Caller::ALL {
         let key = format!("tools.profiles.{}", caller.key());
         match present.profiles.get(caller.key()) {

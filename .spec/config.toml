@@ -79,3 +79,27 @@ ask = ["project_root", "list_requirements", "get_requirement", "validate_spec", 
 # Tools removed from the default or profiles list.
 # [tools.disabled]
 # implement = ["command_run"]
+
+# A local decision model, used only to judge bounded questions about
+# evidence the deterministic rules cannot measure. It is a second,
+# separate model from [llm] above: that one writes, this one answers.
+# Nothing here is on until `model` names an installed decision model
+# (`spec judge models` lists them, `spec judge use <name>` writes it).
+[decision]
+# Persisted by `spec judge use`. Flag `--decision-model` wins for one run.
+# model = "nimble"
+# Defaults to the [llm] endpoint above; set it only if the decision
+# model lives somewhere else.
+# endpoint = "http://localhost:11434"
+# timeout_seconds = 60
+# What a judgment is allowed to do:
+#   off      - do not ask
+#   advisory - report the answer beside the deterministic result and
+#              change nothing (the default)
+#   enforce  - a failing or unsure answer makes the command exit
+#              nonzero and ask for rework or a human
+# mode = "advisory"
+# Answers less concentrated than this are reported "unsure" rather than
+# used. Ollama's confidence is distribution concentration, not
+# calibrated correctness, so treat it as a dead band and nothing more.
+# min_confidence = 0.8

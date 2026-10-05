@@ -117,7 +117,7 @@ is **template-only** (`source: "template"`).
 | `list_requirements` | [`spec list`](spec.md#spec-list) |
 | `get_requirement` | [`spec show`](spec.md#spec-show) |
 | `validate_spec` | [`spec validate`](spec.md#spec-validate) |
-| `refine_requirement` | [`spec refine`](spec.md#spec-refine) |
+| `refine_requirement` | [`spec refine`](spec.md#spec-refine) (gains additive `judgments` keys when a [decision model](judge.md) is configured; absent otherwise) |
 | `run_tests` | [`spec test`](test.md) |
 | `get_tdd_state` | [`spec state`](state.md) |
 | `start_refactor` | [`spec refactor`](refactor.md) |

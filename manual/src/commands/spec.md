@@ -281,6 +281,32 @@ spec refine REQ-004
 Refine until `"clean": true`, then have the developer approve the
 wording — that approval is the first human gate of the workflow.
 
+The review is a fixed set of rules: the same wording always produces the
+same findings, and no model is involved. That is also its limit. One
+rule asks whether the outcome clause looks concrete — a number, a quoted
+literal, a named error — which any number anywhere satisfies. So "then
+code quality is improved by at least 20%" earns no finding, despite
+nobody having measured code quality.
+
+With a [decision model](judge.md) configured, the reply carries
+`judgments` as well — a local model's opinion on whether each criterion
+is measurable, with the probability it gave. `clean` and `findings` stay
+deterministic either way, and a judgment is advice about wording rather
+than a verdict:
+
+```json
+{
+  "id": "REQ-004",
+  "clean": false,
+  "findings": ["..."],
+  "judgments": [ { "verdict": "FAILS", "answer": { "type": "noul", "noul": 0.014 } } ],
+  "judgmentAdvisories": ["judgment (measurable/v1): criterion \"...\": the outcome may not be measurable - nimble:latest says probability of true 0.014"],
+  "judgmentAction": "CONTINUE"
+}
+```
+
+Those keys are absent entirely until a decision model is configured.
+
 ---
 
 ## spec reword

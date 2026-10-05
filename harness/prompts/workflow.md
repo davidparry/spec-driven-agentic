@@ -81,6 +81,32 @@ COMMANDS
   requirements landed; exits nonzero when the plan is unfinished. Asks
   nothing - it refuses up front instead when there is no project, no
   requirement and no description, or no model to break words down.
+- spec judge models | current | use <name> | criterion [REQ-XXX |
+  --text "<wording>"]: the decision model, when one is configured.
+
+JUDGMENTS
+
+A decision model is optional and separate from the model that writes.
+When one is configured, spec refine and refine_requirement carry
+"judgments" alongside "findings": a local model's answer to one bounded
+question - can this acceptance criterion be checked by a test with a
+single unambiguous result - with the probability it gave.
+
+How to read one:
+- "findings" and "clean" are the deterministic review and are unchanged
+  by any judgment. Fix findings first; they are not opinions.
+- A judgment is advice about WORDING. Treat a FAILS verdict as a reason
+  to reword the criterion so the clause after "then" names an exact
+  value, status, or error. Then refine again.
+- A verdict of INCONCLUSIVE means the answer landed in the dead band.
+  It is not a yes and not a no. Do not act on it; say so and move on.
+- "judgmentNote" means no judgment was taken at all (the model was
+  unreachable, missing, or answered something that was not asked). That
+  is not approval of anything. Carry on with the deterministic verdict
+  and do not claim the wording was judged.
+- A judgment is never evidence that code works, that tests pass, that a
+  requirement is implemented, or that a human has approved the wording.
+  Those come from spec test, spec mark-implemented, and the human.
 
 INVARIANTS
 
@@ -92,3 +118,6 @@ INVARIANTS
   anything else.
 - The loop for a requirement closes only when it is marked implemented,
   validated, and committed.
+- A judgment from the decision model never substitutes for a test run,
+  a human approval, or a deterministic check, and a judgment that could
+  not be taken is never read as agreement.

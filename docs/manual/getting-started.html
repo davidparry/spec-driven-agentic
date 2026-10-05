@@ -35,10 +35,10 @@
             const path_to_root = "";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "searchindex-a00b6607.js";
+            window.path_to_searchindex_js = "searchindex-a361ab77.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-72ae98bc.js"></script>
+        <script src="toc-2ab172c3.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -206,6 +206,23 @@ general knowledge, or work other than development will typically
 produce weaker specs, step definitions, tests, and production code.
 Without a reachable model the harness still runs — generation falls back
 to deterministic templates.</p>
+<h2 id="optional-a-decision-model"><a class="header" href="#optional-a-decision-model">Optional: a decision model</a></h2>
+<p>Separate from the model above, and entirely optional. A <em>decision model</em>
+does not write; it answers one bounded question about evidence you give
+it and returns a typed value with a probability. The harness can use one
+to judge whether an acceptance criterion is actually measurable — a
+question the deterministic wording rules cannot answer.</p>
+<p>Needs Ollama 0.35 or newer:</p>
+<pre><code class="language-bash">ollama pull nimble
+spec judge models          # confirm Ollama reports it as decision-capable
+spec judge use nimble
+spec judge criterion --text "Given the refactored module, when the suite runs, then code quality is improved by at least 20%"
+</code></pre>
+<p>This adds a second model; it does not replace the one above. Nothing
+asks a judgment until <code>spec judge use</code> names one, and a judgment is
+advice about wording: it never changes a test result, a requirement’s
+status, or the deterministic review it sits beside. See
+<a href="commands/judge.html"><code>spec judge</code></a>.</p>
 <h2 id="your-first-session"><a class="header" href="#your-first-session">Your first session</a></h2>
 <p>Run bare <code>spec</code> in a terminal. You get the help, the banner with the
 version, the model status, and an interactive prompt:</p>

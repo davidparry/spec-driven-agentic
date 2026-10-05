@@ -17,8 +17,12 @@ The iteration loop for the spec itself:
 2. [`spec validate`](commands/spec.md#spec-validate) until the
    structure is valid.
 3. [`spec refine <id>`](commands/spec.md#spec-refine) until
-   there are no wording findings.
+   there are no wording findings. With a
+   [decision model](commands/judge.md) configured, this step also
+   reports a judgment on whether each criterion is measurable — advice
+   that sits beside the findings and changes none of them.
 4. A human approves the wording. This is the first human gate.
+   A judgment never stands in for this approval.
 
 ## The two altitudes
 

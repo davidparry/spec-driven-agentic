@@ -27,7 +27,7 @@ Every project file the harness owns sits in `.spec/` under the project root (the
 
 ```text
 .spec/
-  config.toml    tracked — [llm] and [tools] (spec model use, spec config)
+  config.toml    tracked — [llm], [tools], [decision] (spec model use, spec judge use, spec config)
   state.json     TDD phase log, including implement attemptLog
   memory.json    discovered language, libraries, and layout
   history        interactive-shell history, reloaded on the next session
@@ -216,11 +216,23 @@ architecture and full test coverage throughout:
   a session-only default (nothing is written until you run
   `spec model use <name>`), and reports `llm_unavailable` when Ollama is
   down or empty — never installs anything.
-- `spec config` — every LLM and tools key, marked `(default)` or with the
-  path of the `.spec/config.toml` it was read from (`--json` for the same as an
-  object). With no configured `llm.model`, it shows the model discovery
-  would use, marked `(discovered)`. The file is read from `--root`
-  (default `.`) only.
+- `spec judge models | current | use | criterion` — the **decision**
+  model: a second, separate local model that writes nothing and instead
+  answers one bounded question about evidence with a typed value and a
+  probability (Ollama 0.35+, `/v1/systemone`). `models` lists only the
+  models Ollama reports as decision-capable — no name is hardcoded and
+  nothing is inferred from a name. `use` writes `[decision] model` and
+  never touches `llm.model`. `criterion` runs a real judgment and prints
+  the whole record (`--json` for the same as an object) so the setup can
+  be verified and the result inspected. Nothing is asked until a model
+  is named, and a judgment is advice about wording: it cannot change a
+  test result, a requirement's status, or a deterministic finding. See
+  [the manual](../manual/src/commands/judge.md).
+- `spec config` — every LLM, tools, and decision key, marked
+  `(default)` or with the path of the `.spec/config.toml` it was read
+  from (`--json` for the same as an object). With no configured
+  `llm.model`, it shows the model discovery would use, marked
+  `(discovered)`. The file is read from `--root` (default `.`) only.
 - `spec inspect` — detects the project's ecosystems from marker files and
   probes each runtime. A missing runtime disables test execution with a
   structured `runtime_missing` note — authoring and validation keep
@@ -245,7 +257,120 @@ may draft, generate, and implement better; a model trained for chat,
 general knowledge, or work other than development will typically
 produce weaker specs, step definitions, tests, and production code.
 The harness will use whatever Ollama has installed (or fall back to
-templates if none).
+templates if none) — except a model Ollama reports as decision-only,
+which is kept out of generative work rather than used to write code.
+
+## Decision model (optional)
+
+A different kind of model, for a different job. The model above writes;
+a decision model answers. Ollama serves them at `/v1/systemone` from
+version 0.35: you send a bounded question and a brief, and get back a
+typed value with a probability rather than prose.
+
+```bash
+ollama pull nimble
+spec judge models          # whatever Ollama reports as decision-capable
+spec judge use nimble
+spec judge criterion --text "Given the refactored module, when the suite runs, then code quality is improved by at least 20%"
+```
+
+```text
+model	nimble:latest
+question	measurable/v1
+mode	advisory
+min_confidence	0.8
+
+criterion	Given the refactored module, when the suite runs, then code quality is improved by at least 20%
+answer	probability of true 0.038
+verdict	FAILS
+action	CONTINUE
+input	--text
+state	sha256:048965344f62409e5399403357ce83c4e7b3cce836b14673c0745b6f7ff7237d
+tokens	in 385 out 1
+```
+
+The harness asks exactly one question with it: **can this acceptance
+criterion be checked by a test with a single unambiguous result?** The
+deterministic refiner cannot answer that. Its rules ask whether the
+outcome clause *looks* concrete — a number, a quoted literal, a named
+error — and a number anywhere satisfies that. So the criterion above
+earns no deterministic finding at all, while being unmeasurable: nobody
+measured code quality. The rule asks whether a number is present; the
+judgment asks whether the number *is* the assertion.
+
+What it is allowed to do is deliberately narrow. A judgment never turns
+a red bar green, marks a requirement implemented, bypasses staging,
+waives the human wording gate, or changes `clean` or `findings` on a
+wording review. It travels beside the deterministic verdict, labelled,
+recording the model, the question version, the answer, a digest of the
+exact brief, and what the harness did about it. A request that failed is
+not an answer and is never read as approval.
+
+`[decision]` in `.spec/config.toml`:
+
+```toml
+[decision]
+model = "nimble"                      # written by spec judge use
+endpoint = "http://localhost:11434"   # defaults to the [llm] endpoint
+timeout_seconds = 60
+mode = "advisory"                     # off | advisory | enforce
+min_confidence = 0.8
+```
+
+`advisory` is the default and changes nothing. `enforce` lets a failing
+or unsure answer exit nonzero asking for rework or a human — it can stop
+work, never approve it.
+
+`min_confidence` is a dead band, not a quality bar: at or above it reads
+as `HOLDS`, at or below `1 - threshold` as `FAILS`, between as
+`INCONCLUSIVE` and used for nothing. Ollama's own confidence figure is
+distribution concentration, which its documentation is explicit is *not*
+calibrated correctness.
+
+### Does the question work?
+
+A vendor benchmark cannot answer that for this repository's question, so
+there is a labeled evaluation: 32 acceptance criteria in five groups —
+clearly measurable, clearly not, genuinely ambiguous, a group written to
+*look* finished, and four taken from this repository's own spec — each
+with a note saying why it is labeled that way.
+
+```bash
+cargo test --test decision_live -- --ignored --nocapture
+```
+
+It prints every answer, a confusion matrix, and a threshold sweep.
+Against `nimble:latest` at the shipped threshold the question misses
+nothing: no vague criterion is judged measurable, including all eight
+written to look finished. It does produce **one false alarm**, and that
+one is worth knowing about, because the pattern is common here:
+
+> Given a requirement, when coverage is requested, then the verdict is `"covered"`
+
+The assertion is an exact quoted string, so this is measurable. The
+model reads the quoted word as a judgement and scores it 0.09. Two
+longer criteria of the same shape score 0.27 and 0.30, which the dead
+band swallows — that is the band doing its job, not the question getting
+them right. If your criteria assert quoted status words, expect to
+overrule the judgment, which is what advisory mode is for.
+
+The phrasing of the question is itself an evaluation result. An earlier,
+open phrasing — "could a test check this criterion?" — scored well on
+plain vagueness while reading **every** adversarial criterion as
+measurable at p > 0.9, including "the system achieves 99.9% correctness
+across all code paths" and a criterion that simply asserted it was
+measurable. Pointing the question at the clause after `then` took that
+from 8 misses to none. The lesson is about the question, not the model:
+an open question invites a judgment of the sentence's style, and style
+is what convincing-looking wording gets right.
+
+The threshold is an evaluation result too. At 0.70 the same run produces
+three confident false alarms instead of one and leaves none of the six
+ambiguous criteria unsure; 0.80 keeps 14 of the 15 vague criteria
+flagged and moves the near-misses into the band. Flagging good wording
+teaches people to ignore judgments, while staying quiet costs nothing —
+the deterministic rules are unchanged either way — so the wider band
+wins.
 
 ### Response caching
 
