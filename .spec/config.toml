@@ -95,10 +95,14 @@ ask = ["project_root", "list_requirements", "get_requirement", "validate_spec", 
 # What a judgment is allowed to do:
 #   off      - do not ask
 #   advisory - report the answer beside the deterministic result and
-#              change nothing (the default)
-#   enforce  - a failing or unsure answer makes the command exit
-#              nonzero and ask for rework or a human
-# mode = "advisory"
+#              change nothing
+#   enforce  - a failing or unsure answer becomes a finding, makes the
+#              reply unclean, and exits nonzero asking for rework or a
+#              human (the default)
+# The default gates because the question reaches wording no regex does;
+# a judgment that cannot refuse leaves that gap unenforced. Set this to
+# "advisory" while you measure the question against your own criteria.
+# mode = "enforce"
 # Answers less concentrated than this are reported "unsure" rather than
 # used. Ollama's confidence is distribution concentration, not
 # calibrated correctness, so treat it as a dead band and nothing more.

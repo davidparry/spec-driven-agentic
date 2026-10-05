@@ -122,9 +122,9 @@ impl DecisionReadiness {
 
     /// The same steps worded for a session announcing its state rather
     /// than a command refusing to run. Startup blocks on none of this -
-    /// a judgment is advice about wording, so a session with nothing to
-    /// ask still returns every deterministic answer - and "to continue"
-    /// would describe a halt that is not happening.
+    /// a session with nothing to ask still returns every deterministic
+    /// answer - and "to continue" would describe a halt that is not
+    /// happening.
     pub fn announcement(&self) -> Option<String> {
         self.steps("to turn judgments on")
     }

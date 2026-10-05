@@ -58,8 +58,12 @@ model is installed, because Ollama is asked which of its models can
 answer. `spec judge use` only pins the choice so it stops depending on
 what else you pull later.
 
-A judgment is advice about wording: it never changes a test result, a
-requirement's status, or the deterministic review it sits beside. See
+A judgment is a gate on wording and nothing else. By default a verdict
+against a criterion becomes a finding on the wording review and exits
+nonzero, so `spec refine` keeps asking until the criterion is
+measurable; it never changes a test result or a requirement's status,
+and it can never approve anything. Set `[decision] mode = "advisory"`
+to have it report without gating. See
 [`spec judge`](commands/judge.md).
 
 ## Your first session

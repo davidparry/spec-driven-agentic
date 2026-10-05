@@ -54,7 +54,7 @@ refactor.attempts	10	(default)
 decision.model	(unset)	(default)
 decision.endpoint	http://localhost:11434	/Users/you/code/calculator/.spec/config.toml
 decision.timeout_seconds	60	(default)
-decision.mode	advisory	(default)
+decision.mode	enforce	(default)
 decision.min_confidence	0.8	(default)
 tools.profiles.spec-draft	list_requirements, get_requirement, validate_spec, refine_requirement	(default)
 tools.profiles.implement	get_requirement, feature_read, …	(default)

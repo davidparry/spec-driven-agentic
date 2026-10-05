@@ -68,8 +68,9 @@ ollama pull nimble
 spec judge use nimble:latest
 ```
 
-The judgment is advice about wording and never changes `clean` or
-`findings` — see
+The judgment gates on wording only: by default a verdict against a
+criterion becomes a finding on the wording review and exits nonzero,
+and it can never approve anything or touch a test result — see
 [Decision model](../harness/README.md#decision-model-optional).
 
 ## Step A — pi as it ships

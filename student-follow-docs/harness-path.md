@@ -471,16 +471,21 @@ while nobody measured code quality.
 model = "nimble:latest"
 endpoint = "http://localhost:11434"   # defaults to the [llm] endpoint
 timeout_seconds = 60
-mode = "advisory"                     # off | advisory | enforce
+mode = "enforce"                      # off | advisory | enforce
 min_confidence = 0.8
 ```
 
-What a judgment may do, in full: be reported. It never changes `clean`,
-`findings`, a test result, a requirement's status, the staging area, or
-the human wording gate. `enforce` lets a failing or unsure answer exit
-nonzero asking for rework or a human — it can stop work, never approve
-it. A request that failed leaves `judgmentNote` saying no judgment was
-taken, and is never read as approval.
+What a judgment may do, in full: refuse a wording review. It can never
+approve one, change a test result, change a requirement's status,
+bypass the staging area, waive the human wording gate, or edit a
+deterministic finding. `enforce` is the default — a failing or unsure
+answer appends its own labelled line to `findings`, makes `clean`
+false, and exits nonzero, so the loop iterates on it exactly as it does
+on a deterministic finding. That is the point of having it: the
+question is aimed at wording the regex rules cannot reach, so a
+judgment that cannot refuse leaves the gap unenforced. `advisory`
+reports without gating. A request that failed leaves `judgmentNote`
+saying no judgment was taken, and is never read as approval.
 
 `min_confidence` is a dead band: at or above reads `HOLDS`, at or below
 `1 - threshold` reads `FAILS`, between is `INCONCLUSIVE` and used for

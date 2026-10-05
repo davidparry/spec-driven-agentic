@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "searchindex-5a43e19b.js";
+            window.path_to_searchindex_js = "searchindex-bb14de4e.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-2ab172c3.js"></script>
@@ -246,9 +246,10 @@ models: one writes, the other answers bounded questions about evidence.</p>
 <li>Nothing. With no decision model named, no judgment is asked for and
 every command behaves as it did before the decision plane existed.</li>
 </ol>
-<p>The flag names a model; it does not change <code>decision.mode</code>, so passing
-it to a project configured as <code>advisory</code> does not start enforcing
-anything.</p>
+<p>The flag names a model; it does not change <code>decision.mode</code>. Passing it
+to a project configured as <code>advisory</code> does not start enforcing
+anything — and passing it to one that left the mode at its default does
+mean the judgment gates, because that default is <code>enforce</code>.</p>
 <h2 id="--debug"><a class="header" href="#--debug"><code>--debug</code></a></h2>
 <p>Verbose diagnostic logging: the full prompts sent to the model and its
 responses, cache hits and misses, resolved configuration, MCP tool

@@ -313,33 +313,43 @@ literal, a named error — which any number anywhere satisfies. So "then
 code quality is improved by at least 20%" earns no finding, despite
 nobody having measured code quality.
 
-With a [decision model](judge.md) configured, the reply carries
-`judgments` as well — a local model's opinion on whether each criterion
-is measurable, with the probability it gave. `clean` and `findings` stay
-deterministic either way, and a judgment is advice about wording rather
-than a verdict:
+Closing that gap is what the [decision model](judge.md) is for, so with
+one configured the reply carries `judgments` as well — a local model's
+opinion on whether each criterion is measurable, with the probability it
+gave. In the default `enforce` mode a verdict against a criterion
+appends its line to `findings`, makes `clean` false, and exits nonzero,
+so the loop above iterates on it exactly as it does on a deterministic
+finding:
 
 ```json
 {
   "id": "REQ-004",
   "clean": false,
-  "findings": ["..."],
+  "findings": [
+    "...",
+    "judgment (measurable/v1): criterion \"...\": the outcome may not be measurable - nimble:latest says probability of true 0.014"
+  ],
   "judgments": [ { "verdict": "FAILS", "answer": { "type": "noul", "noul": 0.014 } } ],
   "judgmentAdvisories": ["judgment (measurable/v1): criterion \"...\": the outcome may not be measurable - nimble:latest says probability of true 0.014"],
-  "judgmentAction": "CONTINUE"
+  "judgmentAction": "REWORK"
 }
 ```
 
-Those keys are absent entirely until a decision model is configured.
+The judgment lines are prefixed so you can always tell which rules found
+what, and the deterministic findings keep their place above them — a
+judgment adds to that list, it never edits or drops an entry. Under
+`mode = "advisory"` nothing is merged and `clean` stays deterministic.
+Those keys are absent entirely until a decision model can answer.
 
 The question is `measurable/v1`: could a test check this criterion with
 one unambiguous result? The probability is read against a decision band
 of **0.80** — at or above reads `HOLDS`, at or below `0.20` reads
-`FAILS`, and anything between is `INCONCLUSIVE` and used for nothing.
-That band is a dead zone, not an accuracy score. The **measured
-accuracy**, against the 32-criterion labelled set in
-`tests/decision_live.rs`, is 0 misses, 1 false alarm and 3 left unsure.
-Both numbers, and why they are different in kind, are in
+`FAILS`, and anything between is `INCONCLUSIVE`, which also gates, with
+a finding asking you to reword the clause after `then`. That band is a
+dead zone, not an accuracy score. The **measured accuracy**, against the
+32-criterion labelled set in `tests/decision_live.rs`, is 0 misses, 1
+false alarm and 3 left unsure. Both numbers, why they are different in
+kind, and what enforcing them costs are in
 [`spec judge`](judge.md#how-well-does-it-work).
 
 To keep a decision model configured for `spec judge` while this command

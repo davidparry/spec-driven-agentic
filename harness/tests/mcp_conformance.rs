@@ -613,10 +613,17 @@ async fn refine_requirement_judges_with_no_decision_model_configured_at_all() {
     client.cancel().await.unwrap();
 }
 
-/// A configured decision model adds a judgment beside the deterministic
-/// verdict and changes neither `clean` nor `findings`.
+/// The gate, over the real transport. This tool used to weaken an
+/// enforcing project to advisory on the grounds that an exit code is
+/// what a human watches — but this is the surface the agent loop
+/// actually drives, so that put the gate out of reach exactly where it
+/// was needed.
+///
+/// The verdict has to land in `findings` and `clean`, because those are
+/// the two fields the agent is already told to iterate on. A new key
+/// would be a gate the loop has to be taught about.
 #[tokio::test]
-async fn refine_requirement_reports_a_judgment_without_touching_the_deterministic_verdict() {
+async fn refine_requirement_gates_on_a_judgment_when_the_project_enforces() {
     let dir = tempfile::tempdir().unwrap();
     write_project(dir.path());
     let endpoint = serve_one_decision(
@@ -625,9 +632,69 @@ async fn refine_requirement_reports_a_judgment_without_touching_the_deterministi
             "answers":{"measurable":{"type":"noul","noul":0.04}},
             "usage":{"input_tokens":151,"output_tokens":1}}"#,
     );
-    // Enforcing on purpose: an MCP reply must report rather than gate,
-    // whatever the project configured.
     write_decision_config(dir.path(), &endpoint, "enforce");
+    let client = connect_default(dir.path()).await;
+
+    let body = call_json(&client, "refine_requirement", json!({"id": "REQ-001"})).await;
+    assert_eq!(
+        body["clean"], false,
+        "a gating judgment is not a clean reply: {body}"
+    );
+    let findings = body["findings"].as_array().expect("findings");
+    assert_eq!(findings.len(), 1, "{body}");
+    assert!(
+        findings[0]
+            .as_str()
+            .unwrap()
+            .starts_with("judgment (measurable/v1):"),
+        "a probabilistic finding has to be labelled as one: {body}"
+    );
+    assert!(
+        body["nextStep"]
+            .as_str()
+            .unwrap()
+            .contains("requirement_reword"),
+        "the advice has to name the fix: {body}"
+    );
+
+    let judgments = body["judgments"].as_array().expect("judgments");
+    assert_eq!(judgments.len(), 1, "{body}");
+    let judgment = &judgments[0];
+    assert_eq!(judgment["question"], "measurable/v1");
+    assert_eq!(judgment["model"], "nimble:test");
+    assert_eq!(judgment["verdict"], "FAILS");
+    assert_eq!(judgment["action"], "REWORK", "{body}");
+    assert_eq!(judgment["mode"], "enforce", "{body}");
+    assert!(
+        judgment["provenance"]["state"]
+            .as_str()
+            .unwrap()
+            .starts_with("sha256:")
+    );
+    assert_eq!(body["judgmentAction"], "REWORK", "{body}");
+    assert_eq!(
+        body["judgmentAdvisories"], body["findings"],
+        "the same lines, reported in both places: {body}"
+    );
+
+    client.cancel().await.unwrap();
+}
+
+/// `advisory` is the opt-out, and this is what opting out buys: the
+/// judgment is reported beside the deterministic verdict and neither
+/// `clean` nor `findings` moves. Kept so the gating test above is the
+/// mode talking rather than something that now always happens.
+#[tokio::test]
+async fn refine_requirement_reports_without_gating_when_the_project_is_advisory() {
+    let dir = tempfile::tempdir().unwrap();
+    write_project(dir.path());
+    let endpoint = serve_one_decision(
+        200,
+        r#"{"model":"nimble:test",
+            "answers":{"measurable":{"type":"noul","noul":0.04}},
+            "usage":{"input_tokens":151,"output_tokens":1}}"#,
+    );
+    write_decision_config(dir.path(), &endpoint, "advisory");
     let client = connect_default(dir.path()).await;
 
     let body = call_json(&client, "refine_requirement", json!({"id": "REQ-001"})).await;
@@ -636,29 +703,34 @@ async fn refine_requirement_reports_a_judgment_without_touching_the_deterministi
         "the deterministic verdict stands: {body}"
     );
     assert_eq!(body["findings"], json!([]), "{body}");
-
-    let judgments = body["judgments"].as_array().expect("judgments");
-    assert_eq!(judgments.len(), 1, "{body}");
-    let judgment = &judgments[0];
-    assert_eq!(judgment["question"], "measurable/v1");
-    assert_eq!(judgment["model"], "nimble:test");
-    assert_eq!(judgment["verdict"], "FAILS");
-    assert_eq!(
-        judgment["action"], "CONTINUE",
-        "an MCP reply never gates, even configured to enforce: {body}"
-    );
-    assert_eq!(judgment["mode"], "advisory", "{body}");
-    assert!(
-        judgment["provenance"]["state"]
-            .as_str()
-            .unwrap()
-            .starts_with("sha256:")
-    );
+    assert_eq!(body["judgments"][0]["verdict"], "FAILS", "{body}");
     assert_eq!(body["judgmentAction"], "CONTINUE", "{body}");
     assert_eq!(
         body["judgmentAdvisories"].as_array().unwrap().len(),
         1,
-        "{body}"
+        "the line is still reported, just not acted on: {body}"
+    );
+
+    client.cancel().await.unwrap();
+}
+
+/// A question that was wanted and never answered is not wording an
+/// agent can reword, so an enforcing project gets a tool error rather
+/// than a finding the loop would retry forever. Never an approval
+/// either way.
+#[tokio::test]
+async fn refine_requirement_refuses_rather_than_approving_when_an_enforced_judgment_cannot_be_taken()
+ {
+    let dir = tempfile::tempdir().unwrap();
+    write_project(dir.path());
+    write_decision_config(dir.path(), &closed_endpoint(), "enforce");
+    let client = connect_default(dir.path()).await;
+
+    let (is_error, text) = call(&client, "refine_requirement", json!({"id": "REQ-001"})).await;
+    assert_eq!(is_error, Some(true), "{text}");
+    assert!(
+        text.contains("decision gate refused to pass without an answer"),
+        "{text}"
     );
 
     client.cancel().await.unwrap();

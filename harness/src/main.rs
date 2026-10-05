@@ -97,10 +97,11 @@ fn judge_criterion_help() -> String {
     format!(
         "Judge one acceptance criterion and show the typed answer.\n\n\
          {DECISION_PLANE_HELP}\n\n\
-         This command runs whatever `[decision] mode` says, including \
+         This command answers whatever `[decision] mode` says, including \
          `off`: that setting suppresses the automatic judgments inside \
-         `spec refine`, not one a human typed. It reports and never gates — \
-         the exit code is about whether the question could be put at all."
+         `spec refine`, not one a human typed. It gates on the same terms \
+         as `spec refine` does, so an action other than CONTINUE exits \
+         nonzero. Under `off` the action is always CONTINUE."
     )
 }
 
@@ -1037,8 +1038,8 @@ fn announce_session_model(root: &Path, flag: Option<&str>) -> bool {
 /// know is the one just starting.
 ///
 /// Announcing is all this does. Nothing is gated on the result: a
-/// judgment is advice about wording, so a session with nothing to ask
-/// returns the deterministic answer it always did.
+/// session with nothing to ask returns the deterministic answer it
+/// always did.
 fn announce_decision_model(root: &Path, flag: Option<&str>) {
     match wiring::session_decision(root, flag) {
         SessionDecision::Ready { model, source } => match source {
@@ -1575,6 +1576,12 @@ fn run_spec(
         }
         SpecCommand::Refine { req_id } => {
             let mut report = service.refine_requirement(req_id)?;
+            // Judged before the advice is worded, not after: a gating
+            // judgment adds its findings and clears `clean`, and advice
+            // written from the deterministic verdict alone would tell
+            // the reader there is nothing to fix directly above the
+            // finding that has to be fixed.
+            let gated = judge_refinement(root, decision_model, &mut report)?;
             // Same advice as the service gives the agent, naming commands
             // instead of tools.
             report.next_step = match (report.clean, report.source) {
@@ -1590,15 +1597,10 @@ fn run_spec(
                     .into(),
                 (true, _) => report.next_step,
             };
-            // The deterministic verdict is already decided and printed
-            // below whatever happens next. A configured decision model
-            // adds a bounded judgment beside it; an unreachable one
-            // adds a note and nothing else.
-            let gated = judge_refinement(root, decision_model, &mut report)?;
             print_json(&report)?;
             if gated {
-                // Enforcing mode asked for rework or a human. The reply
-                // is already on stdout; the exit code is the gate.
+                // The judgment asked for rework or a human. The reply is
+                // already on stdout; the exit code is the gate.
                 return Err(NonzeroExit.into());
             }
             Ok(())
@@ -1758,8 +1760,11 @@ fn cached_chat(root: &Path, model_flag: Option<&str>) -> Option<(String, CachedC
 /// Attaches the decision model's judgment to a refinement reply.
 ///
 /// Returns whether the harness is gating on it, which only an enforcing
-/// mode can cause. With no decision model configured this does nothing
-/// at all and the reply is byte-for-byte what it has always been.
+/// mode can cause. A gating judgment has already folded its lines into
+/// `findings` and cleared `clean` by the time this returns, so the
+/// caller words its advice from the merged verdict. With no decision
+/// model configured this does nothing at all and the reply is
+/// byte-for-byte what it has always been.
 fn judge_refinement(
     root: &Path,
     flag: Option<&str>,
@@ -1897,8 +1902,19 @@ fn run_judge(root: &Path, flag: Option<&str>, command: &JudgeCommand) -> anyhow:
             let review = service
                 .review_criteria(&input, &criteria)
                 .map_err(|error| anyhow::anyhow!("{error}"))?;
+            // The same gate the workflow applies, so scripting this
+            // command and scripting `spec refine` agree about the same
+            // wording. `off` reaches here - a human typed it - but its
+            // transition is always CONTINUE, so `off` still gates
+            // nothing.
+            let gated = review.action != Transition::Continue;
             if *json {
-                return print_json(&review);
+                print_json(&review)?;
+                return if gated {
+                    Err(NonzeroExit.into())
+                } else {
+                    Ok(())
+                };
             }
             println!("model\t{}", service.model());
             println!(
@@ -1928,9 +1944,13 @@ fn run_judge(root: &Path, flag: Option<&str>, command: &JudgeCommand) -> anyhow:
             }
             println!();
             println!(
-                "A judgment is advice about wording. It does not change the spec, the \
-                 test bar, or whether a requirement is implemented."
+                "A judgment gates on wording only. It becomes a finding and exits \
+                 nonzero, the same as a deterministic one, and it does not change \
+                 the test bar or whether a requirement is implemented."
             );
+            if gated {
+                return Err(NonzeroExit.into());
+            }
             Ok(())
         }
     }

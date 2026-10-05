@@ -42,17 +42,47 @@
   needs — "no models installed" would have been a lie.
 
   What a judgment is allowed to do is deliberately narrow, and the
-  narrowness is the point. A judgment never turns a red bar green,
-  marks a requirement implemented, bypasses staging, waives the human
-  wording gate, or changes `clean` or `findings`. It travels beside the
-  deterministic verdict, labelled, recording the model, the question
-  version, the answer, a SHA-256 of the exact brief sent, the tokens
-  spent, and what the harness did about it. `decision.mode` defaults to
-  `advisory`, which changes nothing; `enforce` lets a failing or unsure
-  answer exit nonzero asking for rework or a human. A request that
-  failed is not an answer: in advisory mode it leaves a note saying no
-  judgment was taken, and in enforcing mode it is an error. Nothing
-  reads a failed request as approval.
+  narrowness is the point: it can refuse work, and it can never approve
+  any. A judgment never turns a red bar green, marks a requirement
+  implemented, bypasses staging, waives the human wording gate, or
+  edits a deterministic finding. Every one records the model, the
+  question version, the answer, a SHA-256 of the exact brief sent, the
+  tokens spent, and what the harness did about it.
+
+  `decision.mode` defaults to `enforce`, and that default is the whole
+  argument for the feature. The question exists because the regex rules
+  cannot reach this wording; a judgment that cannot refuse leaves that
+  gap unenforced, and "0 misses" stops meaning anything the moment
+  nobody is required to read them. So a `FAILS` verdict asks for
+  `REWORK` and an `INCONCLUSIVE` one asks to `ESCALATE`, and either
+  appends its own labelled line to `findings`, makes `clean` false, and
+  exits nonzero. That is deliberately the same three signals a
+  deterministic finding produces: the agent loop is already told to
+  iterate until there are no findings, so the gate needs no new field
+  and no caller has to be taught about it. The deterministic findings
+  keep their place at the front of the list and are never edited or
+  dropped — `findings` gains entries, it does not change meaning — and
+  every judgment line is prefixed `judgment (measurable/v1):` so a
+  reader can still tell which rules found what. `advisory` reports
+  without gating, and `off` asks nothing automatically.
+
+  This holds on every surface that judges, which it did not at first.
+  The `refine_requirement` MCP tool used to weaken an enforcing project
+  to advisory, on the reasoning that an exit code is a thing a human
+  watches and a tool reply is not the place to stop a workflow. That
+  had it backwards: a tool reply an agent reads is exactly where the
+  loop lives, so the gate was unreachable precisely where it mattered.
+  It now honours the project's mode, with `clean` and `findings`
+  carrying the gate in place of an exit code. `spec judge criterion`
+  exits nonzero on a gating action too, so scripting it and scripting
+  `spec refine` agree about the same wording.
+
+  A request that failed is not an answer: in advisory mode it leaves a
+  note saying no judgment was taken, and in enforcing mode it is an
+  error — a tool error over MCP rather than a finding, because an
+  unreachable model is not something a reword fixes and a finding would
+  only make the loop retry it forever. Nothing reads a failed request
+  as approval.
 
   `decision.min_confidence` is a dead band rather than a quality bar.
   Ollama's `confidence` figure — returned for the `choice` and `score`
@@ -61,8 +91,11 @@
   its own documentation is explicit that this is not calibrated
   correctness. So the boolean question gets a symmetric band on the
   probability itself: at or above the threshold reads `HOLDS`, at or
-  below `1 - threshold` reads `FAILS`, between is `INCONCLUSIVE` and
-  used for nothing.
+  below `1 - threshold` reads `FAILS`, between is `INCONCLUSIVE`. Both
+  of the latter two gate, so widening the band changes which finding
+  you get rather than whether you get one — an inconclusive answer
+  carries a line asking you to reword the clause after `then` so a test
+  could assert it, instead of asserting the outcome is unmeasurable.
 
   The question's wording was measured rather than guessed, and the
   measurement changed it. `harness/tests/decision_live.rs` holds 32
@@ -86,15 +119,27 @@
   measurable, but the model reads the quoted word as a judgement and
   scores it 0.09; two longer criteria of the same shape score 0.27 and
   0.30, which the dead band swallows. One confident false alarm in 32
-  cases, zero misses, and a documented class of wording to overrule —
-  which is the argument for `advisory` being the default.
+  cases, zero misses, and a documented class of wording to overrule.
+
+  Enforcing by default means owning that number. Over those 32
+  criteria the shipped default blocks on 4 the labels call fine: the
+  one false alarm, plus the 3 the band leaves `INCONCLUSIVE`. Roughly
+  one criterion in eight stopping a loop that should have carried on.
+  It ships that way because the directions do not cost the same — a
+  false alarm costs a reword, while a miss ships wording no
+  deterministic rule would have caught. For a project that disagrees,
+  the escape hatches are in order of preference: reword the criterion,
+  widen `min_confidence` so confident wrong answers become requests for
+  clarity, set `mode = "advisory"` while measuring the question against
+  your own criteria with `cargo test --test decision_live`, or set
+  `mode = "off"`.
 
   `decision.min_confidence` defaults to `0.80` for the same measured
   reason. At 0.70 the run produces three confident false alarms instead
   of one and leaves none of the six ambiguous criteria unsure. The two
-  error directions do not cost the same: a false alarm teaches people to
-  ignore judgments, while silence costs nothing, because the
-  deterministic rules are unchanged either way.
+  error directions do not cost the same: a confident false alarm
+  asserts wording is unmeasurable when it is not, while an inconclusive
+  one asks for clarity and is right to ask.
 
   Because those numbers belong to one exact phrasing, the phrasing is
   kept where it can be reviewed. The question moved out of a Rust

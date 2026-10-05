@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-5a43e19b.js";
+            window.path_to_searchindex_js = "../searchindex-bb14de4e.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-2ab172c3.js"></script>
@@ -328,22 +328,30 @@ until someone opts in.</p>
 <tr><th></th><th>Value</th><th>What it is</th></tr>
 </thead>
 <tbody>
-<tr><td>Decision band</td><td><strong>0.80</strong></td><td>The probability needed before an answer counts as a verdict. At or above reads <code>HOLDS</code>, at or below <code>0.20</code> reads <code>FAILS</code>, between is <code>INCONCLUSIVE</code> and used for nothing. Not an accuracy figure</td></tr>
+<tr><td>Decision band</td><td><strong>0.80</strong></td><td>The probability needed before an answer counts as a verdict. At or above reads <code>HOLDS</code>, at or below <code>0.20</code> reads <code>FAILS</code>, between is <code>INCONCLUSIVE</code>. Not an accuracy figure</td></tr>
 <tr><td>Measured accuracy</td><td><strong>0 misses, 1 false alarm, 3 unsure</strong></td><td>The result over a 32-criterion labelled set at that band — see <a href="judge.html#how-well-does-it-work"><code>spec judge</code></a></td></tr>
 </tbody>
 </table>
 </div>
 <p>Two rules hold whatever the project configured:</p>
 <ul>
-<li><strong>It reports and never gates.</strong> Even where <code>[decision] mode = "enforce"</code> would make the CLI exit nonzero, this tool stays advisory.
-An exit code is something a human watches; a tool reply an agent reads
-is not the place to stop a workflow.</li>
+<li><strong>It gates on the same terms as the CLI.</strong> In the default <code>[decision] mode = "enforce"</code>, a <code>FAILS</code> or <code>INCONCLUSIVE</code> verdict appends its
+line to <code>findings</code> and makes <code>clean</code> false. There is no exit code
+over MCP, and no new field to obey: the instruction to iterate until
+there are no findings already covers it. The deterministic findings
+keep their place and are never edited or dropped, and the judgment
+lines are prefixed <code>judgment (measurable/v1):</code> so you can tell which
+rules found what. Set <code>mode = "advisory"</code> to report without gating.</li>
 <li><strong><code>mode = "off"</code> stops it asking.</strong> The model stays configured for
 <code>spec judge</code>, which a human types, while automatic judgments —
 including this tool’s — go quiet.</li>
 </ul>
-<p><code>clean</code> and <code>findings</code> come from the deterministic rules either way. A
-judgment is advice about wording, never a verdict on the code.</p>
+<p>A judgment is a gate on wording and never a verdict on the code: it
+cannot approve anything, change a test result, or mark a requirement
+implemented. A judgment that was wanted and never arrived is the one
+case that returns a tool error instead of a report — an unreachable
+model is not something a reword fixes, so making it a finding would
+only make the loop retry it forever.</p>
 <h2 id="command_run-the-guarded-command-line"><a class="header" href="#command_run-the-guarded-command-line">command_run: the guarded command line</a></h2>
 <p><code>command_run</code> lets an agent run one dev-tool command during the
 implementation phase — building, compiling, or installing what the

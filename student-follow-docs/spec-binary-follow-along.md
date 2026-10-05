@@ -1871,20 +1871,20 @@ spec judge criterion --text "Given the refactored module, when the suite runs, t
 ```text
 model	nimble:latest
 question	measurable/v1
-mode	advisory
+mode	enforce
 min_confidence	0.8
 
 criterion	Given the refactored module, when the suite runs, then code quality is improved by at least 20%
 answer	probability of true 0.038
 verdict	FAILS
-action	CONTINUE
+action	REWORK
 input	--text
 state	sha256:048965344f62409e5399403357ce83c4e7b3cce836b14673c0745b6f7ff7237d
 tokens	in 385 out 1
 
 judgment (measurable/v1): criterion "...": the outcome may not be measurable - nimble:latest says probability of true 0.038
 
-A judgment is advice about wording. It does not change the spec, the test bar, or whether a requirement is implemented.
+A judgment gates on wording only. It becomes a finding and exits nonzero, the same as a deterministic one, and it does not change the test bar or whether a requirement is implemented.
 ```
 
 Read the record, because the record is the real lesson:
@@ -1895,8 +1895,10 @@ Read the record, because the record is the real lesson:
 - `answer` is the raw number the model returned. Not a grade, not a
   score out of ten: the probability it assigned to "yes".
 - `verdict` is that number after the threshold. `action` is what the
-  harness **did** — `CONTINUE`, i.e. nothing. The model does not get to
-  pick that column.
+  harness **did** — `REWORK`, so the command exited nonzero and, on a
+  wording review, that line would be sitting in `findings`. The model
+  does not get to pick that column; the harness reads it off the
+  verdict and the configured mode.
 - `state` is a SHA-256 of the exact brief that was sent. Months later you
   can prove which words were judged.
 - `input` says what was summarized. Here, the text you typed.
@@ -1910,14 +1912,21 @@ spec judge criterion --text "Given a production-grade request payload, when the 
 ```text
 answer	probability of true 0.499
 verdict	INCONCLUSIVE
-action	CONTINUE
+action	ESCALATE
 ```
 
 That is the best thing in this exercise. 0.499 is inside the dead band
-around `min_confidence`, so the harness reports `INCONCLUSIVE` and uses
-it for **nothing**. It is not a yes and not a no, and it does not get
-rounded into one. A judgment plane that always has an opinion is worse
-than one that admits when it does not.
+around `min_confidence`, so the harness says `INCONCLUSIVE`: not a yes
+and not a no, and never rounded into one. A judgment plane that always
+has an opinion is worse than one that admits when it does not.
+
+What it does *not* do is shrug. `action` is `ESCALATE`, so this gates
+as well — the finding asks you to reword the clause after `then` so a
+test could assert it. The reasoning is that "the model cannot tell
+whether this is testable" is itself worth acting on, and the
+alternative is wording slipping through on a coin flip. If that is too
+strict for your project, `[decision] mode = "advisory"` reports every
+one of these and acts on none.
 
 **Do this** — see it get one wrong:
 
@@ -1935,23 +1944,41 @@ two engineers would write the same assert. The model reads the quoted
 word as a judgement and says no, confidently.
 
 This is a known false alarm, not a surprise: it is in the repository's
-own labeled evaluation, with a note explaining the shape. Which is the
-point of the whole optional extra. The judgment is advice from something
-that is wrong sometimes and sounds equally sure either way, so it is
-reported beside the deterministic findings and never allowed to replace
-them. You overrule it; it does not overrule you.
+own labeled evaluation, with a note explaining the shape. Hold on to
+it, because the next step is where it bites.
 
 **Do this** — see the judgment attached to the real wording review:
 
 ```bash
 spec refine REQ-007
+echo "exit: $?"
 ```
 
-The reply now carries `judgments`, `judgmentAdvisories`, and
-`judgmentAction` **alongside** `findings` and `clean`. Compare them:
-`clean` and `findings` are exactly what they were before you pulled a
-second model. A judgment never edits them. It sits beside them,
-labelled, and you decide what to do.
+The reply carries `judgments`, `judgmentAdvisories`, and
+`judgmentAction`. If any criterion did not hold, it also carries
+something more pointed: its line is in `findings`, `clean` is `false`,
+and the exit code is 1.
+
+That is the design, not an accident. The whole reason for the decision
+model is the gap at the top of this section — wording the regex rules
+cannot reach — and a judgment reported quietly beside `clean` is one
+your loop never acts on. So it lands where the loop already looks. The
+lines are prefixed `judgment (measurable/v1):`, the deterministic
+findings keep their place above them, and nothing is ever edited or
+dropped: `findings` gains entries, it does not change meaning.
+
+And a judgment still cannot approve anything. It has exactly one
+power — refusing a wording review — and none at all over the test bar,
+a requirement's status, or the staging area.
+
+Now the false alarm matters. A criterion like `then the verdict is
+"covered"` would block this command, and you would be right and the
+model wrong. Three answers, in order: reword it, widen
+`min_confidence`, or set `[decision] mode = "advisory"` so judgments
+are reported and acted on by nobody but you. The repository's own
+evaluation puts the cost at 4 blocked criteria in 32 — one false
+alarm and three in the dead band — which is worth knowing before you
+leave the gate on.
 
 **Do this** — break it on purpose, which is the last thing worth seeing:
 

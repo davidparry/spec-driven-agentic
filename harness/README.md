@@ -227,9 +227,12 @@ architecture and full test coverage throughout:
   be verified and the result inspected. Judgments are on wherever a
   decision model is installed — with `[decision] model` unset the first
   decision-capable model is borrowed for the run, so `use` pins a choice
-  rather than switching the feature on. A judgment is advice about
-  wording: it cannot change a test result, a requirement's status, or a
-  deterministic finding. See [the manual](../manual/src/commands/judge.md).
+  rather than switching the feature on. A judgment is a gate on wording
+  and nothing else: by default a verdict against a criterion becomes a
+  finding on the wording review and exits nonzero, and it can never
+  approve anything, change a test result, mark a requirement
+  implemented, or edit a deterministic finding. See
+  [the manual](../manual/src/commands/judge.md).
 - `spec config` — every LLM, tools, and decision key, marked
   `(default)` or with the path of the `.spec/config.toml` it was read
   from (`--json` for the same as an object). With no configured
@@ -283,13 +286,13 @@ spec judge criterion --text "Given the refactored module, when the suite runs, t
 ```text
 model	nimble:latest
 question	measurable/v1
-mode	advisory
+mode	enforce
 min_confidence	0.8
 
 criterion	Given the refactored module, when the suite runs, then code quality is improved by at least 20%
 answer	probability of true 0.038
 verdict	FAILS
-action	CONTINUE
+action	REWORK
 input	--text
 state	sha256:048965344f62409e5399403357ce83c4e7b3cce836b14673c0745b6f7ff7237d
 tokens	in 385 out 1
@@ -304,13 +307,17 @@ earns no deterministic finding at all, while being unmeasurable: nobody
 measured code quality. The rule asks whether a number is present; the
 judgment asks whether the number *is* the assertion.
 
-What it is allowed to do is deliberately narrow. A judgment never turns
-a red bar green, marks a requirement implemented, bypasses staging,
-waives the human wording gate, or changes `clean` or `findings` on a
-wording review. It travels beside the deterministic verdict, labelled,
-recording the model, the question version, the answer, a digest of the
-exact brief, and what the harness did about it. A request that failed is
-not an answer and is never read as approval.
+What it is allowed to do is deliberately narrow: it can refuse work,
+and it can never approve any. A judgment never turns a red bar green,
+marks a requirement implemented, bypasses staging, waives the human
+wording gate, or edits a deterministic finding. What it does do, by
+default, is append its own labelled finding to a wording review, make
+`clean` false, and exit nonzero — the same three signals a
+deterministic finding produces, so the loop iterates on it without
+being taught anything new. Every judgment records the model, the
+question version, the answer, a digest of the exact brief, and what the
+harness did about it. A request that failed is not an answer and is
+never read as approval.
 
 `[decision]` in `.spec/config.toml`:
 
@@ -319,19 +326,21 @@ not an answer and is never read as approval.
 model = "nimble"                      # written by spec judge use
 endpoint = "http://localhost:11434"   # defaults to the [llm] endpoint
 timeout_seconds = 60
-mode = "advisory"                     # off | advisory | enforce
+mode = "enforce"                      # off | advisory | enforce
 min_confidence = 0.8
 ```
 
-`advisory` is the default and changes nothing. `enforce` lets a failing
-or unsure answer exit nonzero asking for rework or a human — it can stop
-work, never approve it.
+`enforce` is the default, because the question is aimed at exactly the
+wording the regex rules cannot reach — a judgment that cannot refuse
+leaves that gap unenforced. `advisory` reports the answer and changes
+nothing; `off` asks nothing automatically.
 
 `min_confidence` is a dead band, not a quality bar: at or above it reads
 as `HOLDS`, at or below `1 - threshold` as `FAILS`, between as
-`INCONCLUSIVE` and used for nothing. Ollama's own confidence figure is
-distribution concentration, which its documentation is explicit is *not*
-calibrated correctness.
+`INCONCLUSIVE`. Both `FAILS` and `INCONCLUSIVE` gate; widening the band
+changes which finding you get, not whether you get one. Ollama's own
+confidence figure is distribution concentration, which its
+documentation is explicit is *not* calibrated correctness.
 
 ### Does the question work?
 
@@ -357,8 +366,16 @@ The assertion is an exact quoted string, so this is measurable. The
 model reads the quoted word as a judgement and scores it 0.09. Two
 longer criteria of the same shape score 0.27 and 0.30, which the dead
 band swallows — that is the band doing its job, not the question getting
-them right. If your criteria assert quoted status words, expect to
-overrule the judgment, which is what advisory mode is for.
+them right.
+
+Enforcing by default means being honest about that number. Over the 32
+labelled criteria, the default blocks on 4 the labels call fine: the
+one false alarm, plus the 3 the band leaves `INCONCLUSIVE`. Roughly one
+in eight. It is still the default because a miss is the costlier
+direction — a false alarm costs a reword, while a miss ships wording no
+deterministic rule would have caught. Reword it, widen
+`min_confidence`, or set `mode = "advisory"` while you measure the
+question against your own criteria.
 
 The phrasing of the question is itself an evaluation result. An earlier,
 open phrasing — "could a test check this criterion?" — scored well on
@@ -495,8 +512,8 @@ borrowed for this session only (nothing is written until you run
 model is installed, with no name compiled in and nothing pulled for you.
 Resolving it at startup is what makes a model named in `[decision]` but
 never pulled surface at the prompt rather than at the first judgment.
-Nothing is gated on it: a judgment is advice about wording, so a session
-with nothing to ask still returns every deterministic answer. See
+Startup is gated on none of it: a session with nothing to ask still
+returns every deterministic answer. See
 [`spec judge`](../manual/src/commands/judge.md).
 
 On a brand-new project the shell notices and offers the loop directly:

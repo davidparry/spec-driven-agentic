@@ -4610,10 +4610,11 @@ fn the_requirement_is_refined_with_judgment(world: &mut SpecWorld, id: String) {
 ///
 /// It cannot call `judge_refinement` the way the CLI does: the report is
 /// borrowed on the async side while the blocking decision client runs on
-/// another thread, so the tool weakens the service, takes it only if the
-/// policy asks, and reviews the criteria itself. Reproduced here rather
-/// than booting a server, because it is that sequence - not the
-/// transport - that once let `off` through.
+/// another thread, so the tool takes the service only if the policy
+/// asks and reviews the criteria itself. Reproduced here rather than
+/// booting a server, because it is that sequence - not the transport -
+/// that once let `off` through, and that used to weaken an enforcing
+/// project to advisory.
 #[when(regex = r#"^the requirement "([^"]+)" is refined by the MCP tool$"#)]
 fn the_requirement_is_refined_by_the_mcp_tool(world: &mut SpecWorld, id: String) {
     let mut report = world
@@ -4629,7 +4630,7 @@ fn the_requirement_is_refined_by_the_mcp_tool(world: &mut SpecWorld, id: String)
         .expect("requirement exists")
         .acceptance_criteria
         .clone();
-    if let Some(service) = world.decision_service().into_advisory().when_asking() {
+    if let Some(service) = world.decision_service().when_asking() {
         let review = service.review_criteria(&id, &criteria);
         if let Err(error) = apply_review(service.policy(), &mut report, review) {
             world.judge_error = Some(error);
@@ -4893,6 +4894,68 @@ fn findings_unchanged_by_judgment(world: &mut SpecWorld) {
         world.refinement().findings,
         before,
         "a judgment rewrote the deterministic findings"
+    );
+}
+
+/// The shape of the merge: `findings` gains the judgment's line and
+/// keeps every deterministic one, in place and unedited. Gaining an
+/// entry is what the loop acts on; losing or rewriting one would make
+/// the field mean something new.
+#[then("the deterministic findings are kept and the judgment is appended")]
+fn deterministic_findings_kept_and_judgment_appended(world: &mut SpecWorld) {
+    let before = world
+        .findings_before_judgment
+        .clone()
+        .expect("the refinement ran");
+    let after = &world.refinement().findings;
+    assert_eq!(
+        after[..before.len()],
+        before[..],
+        "a judgment rewrote or dropped a deterministic finding"
+    );
+    let appended = &after[before.len()..];
+    assert!(!appended.is_empty(), "the judgment added no finding");
+    assert!(
+        appended
+            .iter()
+            .all(|line| line.starts_with("judgment (measurable/v1):")),
+        "a probabilistic finding has to be labelled as one: {appended:?}"
+    );
+    assert_eq!(
+        appended,
+        world.refinement().judgment_advisories,
+        "the same lines, reported in both places"
+    );
+}
+
+#[then("the refinement is not clean")]
+fn the_refinement_is_not_clean(world: &mut SpecWorld) {
+    assert!(
+        !world.refinement().clean,
+        "a gating judgment left the report reading clean"
+    );
+}
+
+#[then("the refinement next step names the reword")]
+fn the_refinement_next_step_names_the_reword(world: &mut SpecWorld) {
+    let next_step = &world.refinement().next_step;
+    assert!(
+        next_step.contains("requirement_reword"),
+        "advice written before the judgment would still say the wording is clean: {next_step}"
+    );
+}
+
+/// An inconclusive answer gates, so its line has to name the change to
+/// make rather than only report that the model was unsure.
+#[then("the refinement finding names the reword for an unclear outcome")]
+fn the_refinement_finding_names_the_unclear_reword(world: &mut SpecWorld) {
+    let findings = &world.refinement().findings;
+    assert!(
+        findings
+            .iter()
+            .any(|line| line.contains("too unclear to judge either way")
+                && line.contains("after \"then\"")),
+        "{findings:?}"
     );
 }
 

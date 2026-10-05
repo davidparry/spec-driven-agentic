@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-5a43e19b.js";
+            window.path_to_searchindex_js = "../searchindex-bb14de4e.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-2ab172c3.js"></script>
@@ -228,24 +228,35 @@ Decision model set for this session: nimble (not saved - keep it with: spec judg
 </code></pre>
 <p>Resolving it at startup is what turns a model named in <code>[decision]</code> but
 never pulled into something you find out about at the prompt rather than
-at the first judgment. Nothing is gated on it either way: a judgment is
-advice about wording, so a session with nothing to ask still returns
-every deterministic answer it always did.</p>
+at the first judgment. A session with nothing to ask still returns every
+deterministic answer it always did.</p>
 <h2 id="what-a-judgment-is-allowed-to-do"><a class="header" href="#what-a-judgment-is-allowed-to-do">What a judgment is allowed to do</a></h2>
-<p>A judgment is <strong>advice about wording</strong>. By default it cannot do anything
-else. Specifically, a decision model in this harness can never:</p>
+<p>A judgment is <strong>a gate on wording, and nothing else</strong>. It can refuse
+work; it can never approve any. Specifically, a decision model in this
+harness can never:</p>
 <ul>
 <li>turn a red test bar green, or change a test result in any way</li>
 <li>mark a requirement implemented, or certify any implementation</li>
 <li>bypass the <a href="../staged-changes.html">staging area</a> or a commit</li>
 <li>waive a human checkpoint</li>
-<li>change <code>clean</code> or <code>findings</code> on a wording review</li>
+<li>make a wording review <code>clean</code> that the deterministic rules did not</li>
+<li>edit or drop a deterministic finding</li>
 </ul>
-<p>Those are all decided by deterministic code or by you. A judgment
-travels <em>beside</em> that verdict, labelled, and the deterministic answer is
-whatever it always was. <code>mode = "enforce"</code> can make a command exit
-nonzero (see <a href="#decisionmode">below</a>), but even then it only ever stops
-work — it never approves any.</p>
+<p>Those are all decided by deterministic code or by you.</p>
+<p>What it <em>can</em> do, in the default <code>mode = "enforce"</code>, is stop a
+requirement moving on. A verdict against a criterion appends its line to
+<code>findings</code>, makes <code>clean</code> false, and exits nonzero — the same three
+signals a deterministic finding produces, so the loop you already run
+iterates on it without being taught anything new. The lines are prefixed
+<code>judgment (measurable/v1):</code> so you can always tell which rules found
+what, and the deterministic findings keep their place above them.</p>
+<p>That is the default because of what the question is for. It is aimed at
+wording the regex rules cannot reach — “then code quality is improved by
+at least 20%” earns no deterministic finding at all, because a number is
+present. If the judgment cannot refuse, nothing enforces that gap. Set
+<code>mode = "advisory"</code> to report without gating while you measure the
+question against your own criteria; see
+<a href="#how-well-does-it-work">How well does it work?</a> for what that costs.</p>
 <p>A request that failed is not an answer and is never read as approval. An
 unreachable model in advisory mode leaves a note saying no judgment was
 taken; in enforcing mode it is an error.</p>
@@ -275,7 +286,7 @@ answers are read against.</p>
 <pre><code class="language-text">nimble:latest (from configuration)
 endpoint	http://localhost:11434
 timeout_seconds	60
-mode	advisory
+mode	enforce
 min_confidence	0.8
 </code></pre>
 <p>The model shown is the one that will actually answer, so with nothing
@@ -295,7 +306,7 @@ question version:</p>
 <pre><code class="language-json">{
   "endpoint": "http://localhost:11434",
   "minConfidence": 0.8,
-  "mode": "advisory",
+  "mode": "enforce",
   "model": "nimble:latest",
   "question": "measurable/v1",
   "source": "configuration",
@@ -354,21 +365,25 @@ installed: nimble:latest
 </code></pre>
 <pre><code class="language-text">model	nimble:latest
 question	measurable/v1
-mode	advisory
+mode	enforce
 min_confidence	0.8
 
 criterion	Given the refactored module, when the suite runs, then code quality is improved by at least 20%
 answer	probability of true 0.038
 verdict	FAILS
-action	CONTINUE
+action	REWORK
 input	--text
 state	sha256:048965344f62409e5399403357ce83c4e7b3cce836b14673c0745b6f7ff7237d
 tokens	in 385 out 1
 
 judgment (measurable/v1): criterion "Given the refactored module, when the suite runs, then code quality is improved by at least 20%": the outcome may not be measurable - nimble:latest says probability of true 0.038
 
-A judgment is advice about wording. It does not change the spec, the test bar, or whether a requirement is implemented.
+A judgment gates on wording only. It becomes a finding and exits nonzero, the same as a deterministic one, and it does not change the test bar or whether a requirement is implemented.
 </code></pre>
+<p>This command exits nonzero on any action other than <code>CONTINUE</code>, so it
+works as a gate in a script on the same terms as <code>spec refine</code>. Under
+<code>mode = "off"</code> the action is always <code>CONTINUE</code> and it always exits
+zero — a judgment you typed still answers, it just does not gate.</p>
 <p>Or every criterion of a requirement:</p>
 <pre><code class="language-bash">spec judge criterion REQ-003
 </code></pre>
@@ -382,7 +397,7 @@ A judgment is advice about wording. It does not change the spec, the test bar, o
       "model": "nimble:latest",
       "verdict": "HOLDS",
       "action": "CONTINUE",
-      "mode": "advisory",
+      "mode": "enforce",
       "threshold": 0.8,
       "answer": { "type": "noul", "noul": 0.99804933586542 },
       "provenance": {
@@ -426,35 +441,54 @@ field is data, never instructions.</p>
 <h2 id="judgments-on-a-wording-review"><a class="header" href="#judgments-on-a-wording-review">Judgments on a wording review</a></h2>
 <p>With a decision model configured, <a href="spec.html#spec-refine"><code>spec refine</code></a>
 and the <code>refine_requirement</code> MCP tool attach judgments to their reply.
-<code>clean</code> and <code>findings</code> are untouched:</p>
+In the default <code>enforce</code> mode a verdict against a criterion lands in
+<code>findings</code> and <code>clean</code>:</p>
 <pre><code class="language-json">{
   "id": "REQ-007",
-  "clean": true,
-  "findings": [],
+  "clean": false,
+  "findings": [
+    "judgment (measurable/v1): criterion \"...\": the outcome may not be measurable - nimble:latest says probability of true 0.014"
+  ],
+  "nextStep": "Call requirement_reword to address each finding ... Iterate until there are no findings.",
   "judgments": [ { "...": "as above" } ],
   "judgmentAdvisories": [
     "judgment (measurable/v1): criterion \"...\": the outcome may not be measurable - nimble:latest says probability of true 0.014"
   ],
-  "judgmentAction": "CONTINUE"
+  "judgmentAction": "REWORK"
 }
 </code></pre>
-<p>With no decision model configured, none of those four keys appears at
-all, so a tool or script reading this reply today sees no change until
-someone opts in.</p>
-<p>The MCP reply always reports and never gates, even in a project
-configured to enforce. An exit code is a thing a human watches; a tool
-reply an agent reads is not the place to stop a workflow.</p>
-<p><code>mode = "off"</code> does reach this tool, though. It judges on its own
-initiative rather than because anyone typed a command, so it is one of
-the surfaces that goes quiet — the reply carries the deterministic
-findings and no judgment keys, exactly as if no model were configured.</p>
+<p>The line appears twice on purpose. In <code>findings</code> it reaches the loop,
+which is already told to iterate until that list is empty, so no caller
+needs teaching about a new field. In <code>judgmentAdvisories</code> it stays
+available on its own, for a reader who wants the probabilistic findings
+apart from the deterministic ones. Deterministic findings keep their
+place at the front of <code>findings</code> and are never edited or dropped.</p>
+<p>Under <code>mode = "advisory"</code> nothing is merged: <code>clean</code> stays <code>true</code>,
+<code>findings</code> stays empty, <code>judgmentAction</code> is <code>CONTINUE</code>, and the
+advisories are reported on their own.</p>
+<p>With no decision model that can answer, none of those four keys appears
+at all, so a tool or script reading this reply sees no change.</p>
+<p>The MCP tool gates on the same terms as the CLI. It used to weaken an
+enforcing project to advisory, on the grounds that an exit code is a
+thing a human watches — but a tool reply an agent reads is exactly
+where the loop lives, so that put the gate out of reach precisely where
+it was needed. There is no exit code over MCP; the gate is <code>clean</code> and
+<code>findings</code>, which is what the agent iterates on anyway.</p>
+<p>A judgment that was wanted and never arrived is the one case that
+replaces the reply with a tool error. That is not wording an agent can
+reword, so turning it into a finding would only make the loop retry it
+forever.</p>
+<p><code>mode = "off"</code> reaches this tool too. It judges on its own initiative
+rather than because anyone typed a command, so it is one of the
+surfaces that goes quiet — the reply carries the deterministic findings
+and no judgment keys, exactly as if no model could answer.</p>
 <hr>
 <h2 id="the-decision-configuration-block"><a class="header" href="#the-decision-configuration-block">The [decision] configuration block</a></h2>
 <pre><code class="language-toml">[decision]
 model = "nimble:latest"               # persisted by spec judge use
 endpoint = "http://localhost:11434"   # defaults to the [llm] endpoint
 timeout_seconds = 60
-mode = "advisory"                     # off | advisory | enforce
+mode = "enforce"                      # off | advisory | enforce
 min_confidence = 0.8
 </code></pre>
 <p><code>endpoint</code> defaults to whatever <code>[llm] endpoint</code> is set to, so one
@@ -467,17 +501,25 @@ somewhere else.</p>
 <tr><th>Mode</th><th>What a judgment does</th></tr>
 </thead>
 <tbody>
-<tr><td><code>off</code></td><td>Nothing is asked automatically — not by <code>spec refine</code>, and not by the <code>refine_requirement</code> MCP tool. <code>spec judge</code> still answers, because a human typed it</td></tr>
-<tr><td><code>advisory</code></td><td><strong>The default.</strong> The answer is reported beside the deterministic result and changes nothing</td></tr>
-<tr><td><code>enforce</code></td><td>A <code>FAILS</code> verdict exits nonzero asking for <code>REWORK</code>; an <code>INCONCLUSIVE</code> one asks to <code>ESCALATE</code> to a human. A failed request is an error, never an approval</td></tr>
+<tr><td><code>off</code></td><td>Nothing is asked automatically — not by <code>spec refine</code>, and not by the <code>refine_requirement</code> MCP tool. <code>spec judge</code> still answers, because a human typed it, but it gates nothing</td></tr>
+<tr><td><code>advisory</code></td><td>The answer is reported beside the deterministic result and changes nothing</td></tr>
+<tr><td><code>enforce</code></td><td><strong>The default.</strong> A <code>FAILS</code> verdict asks for <code>REWORK</code>; an <code>INCONCLUSIVE</code> one asks to <code>ESCALATE</code>. Either appends its line to <code>findings</code>, makes <code>clean</code> false, and exits nonzero. A failed request is an error, never an approval</td></tr>
 </tbody>
 </table>
 </div>
+<p>A misspelled mode is no mode, so it takes the default — which means a
+typo keeps gating rather than silently stopping. That is the direction
+a typo in a gate should fail in.</p>
 <h3 id="decisionmin_confidence"><a class="header" href="#decisionmin_confidence"><code>decision.min_confidence</code></a></h3>
 <p>A dead band, not a quality bar. For the boolean question the harness
 asks, a probability at or above this reads as <code>HOLDS</code>, at or below
 <code>1 - threshold</code> reads as <code>FAILS</code>, and anything between is
-<code>INCONCLUSIVE</code> and used for nothing.</p>
+<code>INCONCLUSIVE</code>.</p>
+<p>Widening the band moves answers out of <code>FAILS</code> and into <code>INCONCLUSIVE</code>,
+which does not quiet them: both gate under <code>enforce</code>. What changes is
+the finding they carry — <code>INCONCLUSIVE</code> asks you to reword the clause
+after <code>then</code> so a test could assert it, rather than asserting the
+outcome is unmeasurable.</p>
 <p>Ollama’s own <code>confidence</code> figure — returned for the <code>choice</code> and <code>score</code>
 question types, though not for the boolean one — is defined as how
 concentrated the probability distribution is, which its documentation is
@@ -530,9 +572,33 @@ reads the quoted word as a judgement and scores it 0.09. Two longer
 criteria of the same shape score 0.27 and 0.30, which the dead band
 swallows — the band hiding a wrong answer, not the question getting it
 right. <strong>If your criteria assert quoted status words, expect to overrule
-the judgment.</strong> That is what advisory mode is for, and it is the clearest
-argument against turning <code>enforce</code> on without measuring your own wording
-first.</p>
+the judgment.</strong></p>
+<h3 id="what-the-default-costs-you"><a class="header" href="#what-the-default-costs-you">What the default costs you</a></h3>
+<p>Be clear about the trade the default makes. Over those 32 labelled
+criteria, enforcing blocks on 4 of them that the labels call fine: the
+1 false alarm above, plus the 3 the dead band leaves <code>INCONCLUSIVE</code>,
+which gate as <code>ESCALATE</code>. That is roughly one criterion in eight
+stopping a loop that should have carried on.</p>
+<p>It is still the default, because the alternative is worse in a way that
+does not show up in that count. The question is aimed at exactly the
+wording no deterministic rule reaches — “then code quality is improved
+by at least 20%” earns no finding from the regex rules, because a
+number is present. A judgment that cannot refuse leaves that gap
+unenforced entirely, and the 0 misses above stop meaning anything the
+moment nobody is required to read them. A false alarm costs a reword;
+a miss ships vague wording into a test suite.</p>
+<p>Your options, in the order worth trying:</p>
+<ul>
+<li>Reword the criterion. The false-alarm shape above is narrow, and the
+reword that satisfies the model usually reads better anyway.</li>
+<li>Widen <code>min_confidence</code>, which moves confident wrong answers into
+<code>INCONCLUSIVE</code>. They still gate, but with a finding that asks for
+clarity rather than asserting unmeasurability.</li>
+<li>Set <code>mode = "advisory"</code> while you measure the question against your
+own criteria with <code>cargo test --test decision_live</code>, then turn it
+back on.</li>
+<li>Set <code>mode = "off"</code> if the question does not fit your project at all.</li>
+</ul>
 <h3 id="why-the-question-is-worded-the-way-it-is"><a class="header" href="#why-the-question-is-worded-the-way-it-is">Why the question is worded the way it is</a></h3>
 <p>An earlier phrasing asked the open question — “could a test check this
 criterion?” — and scored well on plain vagueness while reading <strong>every</strong>
@@ -554,10 +620,11 @@ against one phrasing and are not evidence about another.</p>
 <p>The threshold came out of the same loop. At 0.70 the run produces three
 confident false alarms rather than one and leaves none of the six
 ambiguous criteria unsure. The two directions do not cost the same: a
-false alarm teaches people to ignore judgments, while silence costs
-nothing, because the deterministic rules are doing their job either way.
+confident false alarm asserts the wording is unmeasurable when it is
+not, while an inconclusive one asks for clarity and is right to ask.
 So the wider band ships, and 0.70 is still a reasonable choice for a
-project that would rather see every flag.</p>
+project that would rather be told plainly which criteria the model
+dislikes.</p>
 <hr>
 <h2 id="troubleshooting"><a class="header" href="#troubleshooting">Troubleshooting</a></h2>
 <div class="table-wrapper">
@@ -574,6 +641,8 @@ project that would rather see every flag.</p>
 <tr><td><code>no decision within 60s</code></td><td>Raise <code>timeout_seconds</code> under <code>[decision]</code></td></tr>
 <tr><td><code>the decision brief is too large</code></td><td>The question’s brief is capped at 64 KiB by the server, which does not truncate</td></tr>
 <tr><td><code>the decision reply did not match the questions asked</code></td><td>The model answered something that was not asked. Reported rather than read as a verdict</td></tr>
+<tr><td><code>decision gate refused to pass without an answer</code></td><td>A judgment was wanted and never arrived while enforcing. Fix the cause above, or set <code>mode = "advisory"</code> to carry on with the deterministic verdict</td></tr>
+<tr><td>A criterion you believe is fine keeps failing</td><td>See <a href="#what-the-default-costs-you">What the default costs you</a></td></tr>
 </tbody>
 </table>
 </div>

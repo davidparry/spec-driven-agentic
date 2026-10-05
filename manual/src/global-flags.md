@@ -85,9 +85,10 @@ Resolution order:
 3. Nothing. With no decision model named, no judgment is asked for and
    every command behaves as it did before the decision plane existed.
 
-The flag names a model; it does not change `decision.mode`, so passing
-it to a project configured as `advisory` does not start enforcing
-anything.
+The flag names a model; it does not change `decision.mode`. Passing it
+to a project configured as `advisory` does not start enforcing
+anything — and passing it to one that left the mode at its default does
+mean the judgment gates, because that default is `enforce`.
 
 ## `--debug`
 

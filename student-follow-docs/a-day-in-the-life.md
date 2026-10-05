@@ -301,18 +301,38 @@ assertion is a quoted string, but the quoted word (`"covered"`) reads
 like a judgement and the model weighs the word over the quotes. The
 repository records it rather than hiding it —
 `cargo test --test decision_live -- --ignored --nocapture` prints it as a
-false alarm — and it is one reason the default mode is advisory.
+false alarm.
 
-So read `INCONCLUSIVE` as exactly what it says: the answer landed in the
-dead band and **the harness used it for nothing**. Not a yes, not a no,
-not rounded into either, and not a reason to touch wording you have
-already reasoned about. Then read `action`: `CONTINUE`. The model
-answered a question; the harness decided what to do about it, which was
-nothing.
+Now notice what the default does with that. `mode` defaults to
+`enforce`, so `INCONCLUSIVE` is not used for nothing: it asks to
+`ESCALATE`, which means all three land in `findings`, `clean` goes
+false, and the command exits nonzero. Three of four criteria you have
+already reasoned about, blocking.
+
+That is the trade, and it is worth sitting with rather than explaining
+away. The default gates because the question reaches wording the regex
+rules cannot — the `code quality is improved by at least 20%` case
+above earns *no* deterministic finding, so a judgment that cannot
+refuse leaves that gap unenforced entirely. The cost of that is runs
+like this one.
+
+What you do about it, in order:
+
+- **Read the finding first.** An `INCONCLUSIVE` line asks you to reword
+  the clause after `then` so a test could assert it. Sometimes it is
+  right and the reword is an improvement.
+- **Widen `min_confidence`** if your criteria keep landing in the dead
+  band for the same reason. It does not silence them — both `FAILS`
+  and `INCONCLUSIVE` gate — but it changes which complaint you get.
+- **Set `[decision] mode = "advisory"`** while you measure the question
+  against your own wording. It then reports exactly as described above
+  and the harness uses it for nothing, which is the behaviour this
+  section originally assumed.
 
 The three places this morning asks for *your* judgment are still exactly
-three. A judgment is not one of them, and this run is a decent argument
-for why not.
+three, and a decision model is not one of them: it can stop work, and it
+can never approve any. This run is a decent argument for measuring the
+question against your own criteria before you leave the gate on.
 
 ## 9:30 — turn the criteria into tests
 

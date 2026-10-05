@@ -9,11 +9,12 @@ use serde::Serialize;
 use crate::domain::decision::DEFAULT_MIN_CONFIDENCE;
 use crate::domain::tool_profile::{Caller, default_profile};
 
-/// The decision mode a project gets without asking for one. Advisory,
-/// because a probability is not a gate until somebody has measured it
-/// against their own data. Kept in step with
-/// [`Mode::default`](crate::domain::decision::Mode::default) by a test.
-pub const DEFAULT_DECISION_MODE: &str = "advisory";
+/// The decision mode a project gets without asking for one. Enforcing,
+/// because the question reaches wording no deterministic rule does, and
+/// a judgment that cannot refuse leaves that gap unenforced. Kept in
+/// step with [`Mode::default`](crate::domain::decision::Mode::default)
+/// by a test.
+pub const DEFAULT_DECISION_MODE: &str = "enforce";
 
 pub const DEFAULT_LLM_ENDPOINT: &str = "http://localhost:11434";
 pub const DEFAULT_LLM_TIMEOUT_SECONDS: u64 = 300;

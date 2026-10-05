@@ -4,7 +4,8 @@
 Feature: Local decision model judgments
   As a developer agreeing a spec with an agent
   I want a bounded judgment on wording the regex rules cannot measure
-  So that vagueness is caught without a model deciding what happens next
+  So that vagueness is caught and fed back into the loop without a model
+  deciding what happens next
 
   Scenario: A criterion naming an exact value is judged measurable
     Given a decision model "nimble:test" is configured
@@ -28,12 +29,58 @@ Feature: Local decision model judgments
 
   Scenario: A probability inside the dead band is inconclusive rather than a verdict
     Given a decision model "nimble:test" is configured
+    And the decision mode is "advisory"
     And the decision model answers "measurable" with the probability 0.55
     When the criterion "Given a calculator, when I add, then the result is valid" is judged
     Then the judgment verdict is "inconclusive"
     And the judgment action is "CONTINUE"
 
-  Scenario: An advisory judgment adds a finding and changes no deterministic finding
+  # The point of the gate. The deterministic rules pass this criterion -
+  # see the scenario above about code quality - so a judgment reported
+  # only beside them is one the loop never acts on. It has to land in
+  # `findings`, which is the list the loop is already told to empty.
+  Scenario: An enforced judgment becomes a finding the loop iterates on
+    Given a decision model "nimble:test" is configured
+    And the decision mode is "enforce"
+    And the decision model answers "measurable" with the probability 0.04
+    And a requirement "REQ-007" with story "As a user, I want fast replies so that the page feels alive."
+    And the requirement has criterion "Given a request, when it is served, then the response completes before the user notices"
+    When the requirement "REQ-007" is refined with judgment
+    Then the judgment action is "REWORK"
+    And the refinement is not clean
+    And the deterministic findings are kept and the judgment is appended
+    And the refinement next step names the reword
+
+  # An answer in the dead band gates too, so it cannot arrive saying only
+  # that the model was unsure: the loop would have nothing to change.
+  Scenario: An enforced inconclusive answer escalates with a finding naming the reword
+    Given a decision model "nimble:test" is configured
+    And the decision mode is "enforce"
+    And the decision model answers "measurable" with the probability 0.55
+    And a requirement "REQ-007" with story "As a user, I want totals so that sums come from one input."
+    And the requirement has criterion "Given a calculator, when I add, then the result is valid"
+    When the requirement "REQ-007" is refined with judgment
+    Then the judgment action is "ESCALATE"
+    And the refinement is not clean
+    And the refinement finding names the reword for an unclear outcome
+
+  # A judgment that holds gates nothing, so an enforcing project still
+  # gets the reply it would have had with no decision model at all.
+  Scenario: An enforced judgment that holds leaves the deterministic reply alone
+    Given a decision model "nimble:test" is configured
+    And the decision mode is "enforce"
+    And the decision model answers "measurable" with the probability 0.97
+    And a requirement "REQ-007" with story "As a user, I want sums so that totals come from one input."
+    And the requirement has criterion "Given the input "1,2", when add is called, then the result is 3"
+    When the requirement "REQ-007" is refined with judgment
+    Then the judgment action is "CONTINUE"
+    And the refinement findings are unchanged by the judgment
+    And the refinement carries a judgment for 1 criterion
+
+  # `advisory` is the opt-out, and this is what opting out buys. Kept as
+  # a scenario of its own so the gating above is the mode talking rather
+  # than something that now happens unconditionally.
+  Scenario: An advisory judgment is reported beside the deterministic finding and changes nothing
     Given a decision model "nimble:test" is configured
     And the decision mode is "advisory"
     And the decision model answers "measurable" with the probability 0.04
@@ -72,6 +119,22 @@ Feature: Local decision model judgments
     Then the refinement findings are unchanged by the judgment
     And the refinement carries a judgment for 1 criterion
     And the judgment action is "CONTINUE"
+
+  # The MCP tool used to weaken an enforcing project to advisory, on the
+  # grounds that an exit code is what a human watches. But this is the
+  # surface the agent loop actually drives, so that made the gate
+  # unreachable exactly where it was needed.
+  Scenario: The MCP refinement tool gates when the project enforces
+    Given a decision model "nimble:test" is configured
+    And the decision mode is "enforce"
+    And the decision model answers "measurable" with the probability 0.04
+    And a requirement "REQ-007" with story "As a user, I want fast replies so that the page feels alive."
+    And the requirement has criterion "Given a request, when it is served, then the response completes before the user notices"
+    When the requirement "REQ-007" is refined by the MCP tool
+    Then the judgment action is "REWORK"
+    And the refinement is not clean
+    And the deterministic findings are kept and the judgment is appended
+    And the refinement next step names the reword
 
   Scenario: An unreachable decision model leaves the refiner's verdict exactly as it was
     Given the decision model is unreachable
@@ -248,7 +311,7 @@ Feature: Local decision model judgments
       """
     When the configuration is listed
     Then the config value "decision.model" is "nimble:test" from the config file
-    And the config value "decision.mode" is "advisory" from default
+    And the config value "decision.mode" is "enforce" from default
     And the config value "decision.min_confidence" is "0.8" from default
 
   # The decision endpoint defaults to wherever Ollama already is, rather

@@ -81,25 +81,41 @@ Each acceptance criterion is put to the model as the question \
 `measurable/v1`: could a test check this with one unambiguous result? \
 The reply is a probability read against a decision band of 0.80 - at or \
 above reads HOLDS, at or below 0.20 reads FAILS, and anything between \
-is INCONCLUSIVE and used for nothing.
+is INCONCLUSIVE.
 
 That band is a dead zone, not an accuracy score. Measured accuracy, \
 against the 32-criterion labelled set in tests/decision_live.rs: 0 \
 misses, 1 false alarm, 3 left unsure.
 
-A judgment is advice about wording. It never changes `findings`, \
-`clean`, a test result, or whether a requirement is implemented.";
+In the default `enforce` mode a judgment is a gate. FAILS asks for \
+REWORK and INCONCLUSIVE asks to ESCALATE; either one appends its line \
+to `findings`, makes `clean` false, and exits nonzero, so the loop \
+iterates on it exactly as it does on a deterministic finding. The \
+deterministic findings are never edited or dropped, and a judgment \
+still cannot approve anything: it never changes a test result or \
+whether a requirement is implemented. Set `[decision] mode` to \
+`advisory` to report without gating, or `off` to ask nothing.";
 
 /// Whether judgments run at all, and whether they may refuse work.
 ///
-/// `Advisory` is the default because a probability is not a gate until
-/// somebody has measured it on their own data. `Enforce` exists so a
-/// project that *has* measured can act on the answer, and its failure
-/// behaviour is spelled out in [`Policy::judge`]: a request that did not
-/// produce an answer refuses, it never approves.
+/// `Enforce` is the default because the question is pointed at wording
+/// no deterministic rule reaches. A judgment that cannot refuse leaves
+/// that gap unenforced: the regex rules pass, the command exits zero,
+/// and the only thing standing between vague wording and the rest of
+/// the workflow is a human reading a line they were not required to
+/// read. A gate the loop can ignore is not a gate.
+///
+/// The failure behaviour is spelled out in [`Policy::judge`] and
+/// [`crate::application::decision_service::apply_review`]: a request
+/// that did not produce an answer refuses, it never approves.
+///
+/// `Advisory` remains for a project that has not measured the question
+/// against its own wording yet, and `Off` for one that wants nothing
+/// asked. Both are opt-in now, because the safe direction for a gate is
+/// to fail closed.
 ///
 /// Serialized lower case, unlike [`Verdict`] and [`Transition`] beside
-/// it: a mode is a setting that round-trips with the `mode = "advisory"`
+/// it: a mode is a setting that round-trips with the `mode = "enforce"`
 /// line in `.spec/config.toml`, while those two name states in the
 /// workflow.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
@@ -109,9 +125,9 @@ pub enum Mode {
     Off,
     /// Questions are asked and the answer is reported, and it changes no
     /// deterministic finding and blocks nothing.
-    #[default]
     Advisory,
     /// The answer may refuse work. Still cannot approve it.
+    #[default]
     Enforce,
 }
 
@@ -686,16 +702,34 @@ pub fn measurable_state(criterion: &str) -> serde_json::Value {
     serde_json::json!({ "acceptance_criterion": criterion })
 }
 
-/// The finding wording for a criterion a judgment reads as unmeasurable.
-/// Prefixed so a reader can always tell a probabilistic finding from the
-/// deterministic ones beside it.
-pub fn measurable_finding(criterion: &str, judgment: &Judgment) -> String {
-    format!(
-        "judgment ({}): criterion {criterion:?}: the outcome may not be measurable - {} says {}",
+/// The finding wording for a criterion a judgment did not read as
+/// measurable. Prefixed so a reader can always tell a probabilistic
+/// finding from the deterministic ones beside it — they share a list
+/// once the judgment gates.
+///
+/// [`Verdict::Inconclusive`] earns a line of its own rather than
+/// borrowing the failure's. It gates in `enforce` mode, and a gate that
+/// says only "the model was unsure" leaves the loop nothing to act on;
+/// the remedy is the same reword either way, so the line names it.
+///
+/// Returns `None` for [`Verdict::Holds`]: there is nothing to report
+/// about a criterion the question was satisfied by.
+pub fn measurable_finding(criterion: &str, judgment: &Judgment) -> Option<String> {
+    let (complaint, remedy) = match judgment.verdict {
+        Verdict::Holds => return None,
+        Verdict::Fails => ("the outcome may not be measurable", ""),
+        Verdict::Inconclusive => (
+            "the outcome is too unclear to judge either way",
+            "; reword it so the clause after \"then\" names the literal value a \
+             test would assert",
+        ),
+    };
+    Some(format!(
+        "judgment ({}): criterion {criterion:?}: {complaint} - {} says {}{remedy}",
         judgment.question,
         judgment.model,
         judgment.answer.summary()
-    )
+    ))
 }
 
 #[cfg(test)]
@@ -729,7 +763,11 @@ mod tests {
         }
         assert_eq!(Mode::parse("  ENFORCE "), Some(Mode::Enforce));
         assert_eq!(Mode::parse("sometimes"), None);
-        assert_eq!(Mode::default(), Mode::Advisory);
+        assert_eq!(
+            Mode::default(),
+            Mode::Enforce,
+            "a gate fails closed: the question reaches wording no rule does"
+        );
         assert_eq!(Mode::Advisory.to_string(), "advisory");
     }
 
@@ -1117,11 +1155,42 @@ mod tests {
             provenance(),
             Usage::default(),
         );
-        let finding = measurable_finding("Given a, when b, then it works", &judgment);
+        let finding =
+            measurable_finding("Given a, when b, then it works", &judgment).expect("a failure");
         assert!(finding.starts_with("judgment (measurable/v1):"));
         assert!(finding.contains("Given a, when b, then it works"));
         assert!(finding.contains("nimble:latest"));
         assert!(finding.contains("probability of true 0.040"));
+        assert!(finding.contains("may not be measurable"));
+    }
+
+    /// An inconclusive answer gates in `enforce`, so it needs a line of
+    /// its own that names the reword rather than only reporting that the
+    /// model was unsure.
+    #[test]
+    fn an_inconclusive_finding_names_the_reword_and_a_holding_one_says_nothing() {
+        let policy = Policy::new(Mode::Enforce, 0.70);
+        let judge = |probability| {
+            policy.judge(
+                CRITERION_MEASURABLE,
+                measurable_version(),
+                "nimble:latest",
+                noul(probability),
+                provenance(),
+                Usage::default(),
+            )
+        };
+        let unsure = measurable_finding("Given a, when b, then it is valid", &judge(0.55))
+            .expect("an inconclusive answer gates, so it has to say something");
+        assert!(unsure.starts_with("judgment (measurable/v1):"));
+        assert!(unsure.contains("too unclear to judge either way"));
+        assert!(unsure.contains("after \"then\""));
+        assert!(unsure.contains("probability of true 0.550"));
+        assert_eq!(
+            measurable_finding("Given a, when b, then the result is 3", &judge(0.97)),
+            None,
+            "nothing to report about a criterion the question was satisfied by"
+        );
     }
 
     #[test]

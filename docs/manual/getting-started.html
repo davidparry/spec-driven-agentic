@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "searchindex-5a43e19b.js";
+            window.path_to_searchindex_js = "searchindex-bb14de4e.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-2ab172c3.js"></script>
@@ -223,8 +223,12 @@ the part that matters — judgments work as soon as a decision-capable
 model is installed, because Ollama is asked which of its models can
 answer. <code>spec judge use</code> only pins the choice so it stops depending on
 what else you pull later.</p>
-<p>A judgment is advice about wording: it never changes a test result, a
-requirement’s status, or the deterministic review it sits beside. See
+<p>A judgment is a gate on wording and nothing else. By default a verdict
+against a criterion becomes a finding on the wording review and exits
+nonzero, so <code>spec refine</code> keeps asking until the criterion is
+measurable; it never changes a test result or a requirement’s status,
+and it can never approve anything. Set <code>[decision] mode = "advisory"</code>
+to have it report without gating. See
 <a href="commands/judge.html"><code>spec judge</code></a>.</p>
 <h2 id="your-first-session"><a class="header" href="#your-first-session">Your first session</a></h2>
 <p>Run bare <code>spec</code> in a terminal. You get the help, the banner with the

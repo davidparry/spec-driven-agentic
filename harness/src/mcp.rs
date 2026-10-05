@@ -34,7 +34,6 @@ use crate::application::generation_service::{GenerationService, ResolvedLlm};
 use crate::application::inspect_service::InspectService;
 use crate::application::spec_mutation_service::SpecMutationService;
 use crate::application::tdd_service::{TddError, TddService};
-use crate::domain::decision::{DEFAULT_MIN_CONFIDENCE, Mode, Policy};
 use crate::domain::tools::{ToolDefinition, ToolOrigin};
 use crate::ports::{FeatureCatalog as _, SpecRepository as _, TestFilter, TestRunner};
 use crate::wiring;
@@ -297,20 +296,30 @@ impl WorkflowServer {
     /// Adds the decision model's judgment to a refinement reply, when one
     /// is configured.
     ///
-    /// Deliberately infallible: an MCP host asking about wording gets the
-    /// deterministic findings whatever the decision model does, and a
-    /// judgment that could not be taken says so in `judgmentNote` instead
-    /// of failing the call. The enforcing mode lives on the CLI, where a
-    /// human is watching an exit code — a tool reply that an agent reads
-    /// is not the place to gate a workflow.
+    /// Honours the project's mode rather than weakening it. This is the
+    /// surface the agent loop actually drives, and the question is
+    /// pointed at wording no deterministic rule reaches — a judgment
+    /// that cannot gate here is one the loop never acts on. A gating
+    /// verdict is folded into `findings` and `clean` by
+    /// [`apply_review`], which is what makes it loopable: the agent is
+    /// already told to iterate until there are no findings, so the
+    /// reply needs no new field for it to obey.
+    ///
+    /// Returns a reply of its own only for a judgment that was wanted
+    /// and never arrived while enforcing. That is not wording an agent
+    /// can reword, so it is a tool error naming the failure rather than
+    /// a finding the loop would retry forever.
     async fn attach_judgment(
         &self,
         id: &str,
         report: &mut crate::application::spec_service::RefinementReport,
-    ) {
-        let Ok(requirement) = self.spec_service().get_requirement(id) else {
-            return;
-        };
+    ) -> Option<CallToolResult> {
+        let requirement = self.spec_service().get_requirement(id).ok()?;
+        // A config read and nothing else, so it is safe on the runtime
+        // thread. Held for the panicked-task arm below, which has to
+        // refuse on the mode the project configured rather than on a
+        // guess.
+        let configured = wiring::resolved_decision(&self.root, None).policy;
 
         // Everything from here goes to the blocking pool, including
         // working out which model answers: resolving it asks the
@@ -327,9 +336,7 @@ impl WorkflowServer {
             // `when_asking` is what makes `off` mean off here. This tool
             // judges on its own initiative, so it is one of the surfaces
             // that stays quiet when a project turned judgment off.
-            let service = wiring::decision_service(&root, None)?
-                .into_advisory()
-                .when_asking()?;
+            let service = wiring::decision_service(&root, None)?.when_asking()?;
             let review = service.review_criteria(&req_id, &criteria);
             Some((service.policy(), review))
         })
@@ -341,21 +348,23 @@ impl WorkflowServer {
             // answer. Both mean no judgment was asked for, which is not
             // a failure to get one: the reply carries the deterministic
             // findings and no note.
-            Ok(None) => return,
+            Ok(None) => return None,
             // The blocking task panicked or was cancelled. Not an
-            // answer, so it is reported as a failure to get one.
+            // answer, so it is reported as a failure to get one, read
+            // against the project's own mode: an enforcing gate must
+            // not pass on a question that never ran.
             Err(error) => (
-                Policy::new(Mode::Advisory, DEFAULT_MIN_CONFIDENCE),
+                configured,
                 Err(crate::ports::DecisionError::Unavailable(format!(
                     "the judgment task did not finish - {error}"
                 ))),
             ),
         };
-        // The policy came back from `into_advisory`, so this cannot
-        // refuse — but a warning beats an `unwrap` if that ever changes.
-        if let Err(error) = apply_review(policy, report, review) {
-            tracing::warn!(%error, "unreachable: advisory judgment failed");
-        }
+        apply_review(policy, report, review).err().map(|error| {
+            error_result(format!(
+                "decision gate refused to pass without an answer - {error}"
+            ))
+        })
     }
 
     fn scenario_service(
@@ -472,12 +481,15 @@ impl WorkflowServer {
         is put to the model as the question `measurable/v1`: could a test check this with \
         one unambiguous result? The answer is a probability read against a decision band of \
         0.80 - at or above reads HOLDS, at or below 0.20 reads FAILS, between is \
-        INCONCLUSIVE and used for nothing. That band is a dead zone, not an accuracy score; \
-        measured accuracy against a 32-criterion labelled set is 0 misses, 1 false alarm and \
-        3 left unsure. Judgments are advice about wording and never a verdict on the code: \
-        findings and clean come from the deterministic rules either way, this tool always \
-        reports and never gates even where the project configured enforcement, and \
-        `[decision] mode = \"off\"` stops it asking at all."
+        INCONCLUSIVE. That band is a dead zone, not an accuracy score; measured accuracy \
+        against a 32-criterion labelled set is 0 misses, 1 false alarm and 3 left unsure. \
+        In the default `enforce` mode a judgment is a gate on wording: FAILS and \
+        INCONCLUSIVE each append their line to findings and make clean false, so iterating \
+        until there are no findings already covers them - no separate field to obey. The \
+        deterministic findings are never edited or dropped, and a judgment is still never a \
+        verdict on the code: it cannot approve anything, change a test result, or mark a \
+        requirement implemented. `[decision] mode = \"advisory\"` reports without gating \
+        and `\"off\"` stops it asking at all."
     )]
     async fn refine_requirement(
         &self,
@@ -493,7 +505,12 @@ impl WorkflowServer {
                 Err(e) => return Ok(error_result(e)),
             }
         };
-        self.attach_judgment(&params.id, &mut report).await;
+        // A gating verdict is already inside `report` by now; only a
+        // question that was wanted and never answered replaces the
+        // reply, because that is not something a reword can fix.
+        if let Some(refusal) = self.attach_judgment(&params.id, &mut report).await {
+            return Ok(refusal);
+        }
         let _span = tool_call("refine_requirement");
         Ok(json_result(&report))
     }

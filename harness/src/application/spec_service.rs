@@ -87,6 +87,39 @@ pub const STAGED: &str = "staged";
 /// `source` of a reply that reviewed the committed spec on disk.
 pub const WORKING_TREE: &str = "working tree";
 
+/// What to do about a refinement, given its verdict and which copy of
+/// the wording earned it.
+///
+/// Its own function because a judgment can turn a clean report unclean
+/// after this service has already worded the advice - see
+/// [`crate::application::decision_service::apply_review`]. Two copies
+/// of this wording would let the reply tell a reader there is nothing
+/// to fix directly above the finding that has to be fixed.
+pub fn refinement_next_step(clean: bool, source: &'static str) -> &'static str {
+    match (clean, source) {
+        (true, STAGED) => {
+            "The staged wording reads clean. Confirm it with the developer, apply it \
+             with changes_commit, then write the Gherkin scenario from the \
+             acceptance criteria."
+        }
+        (true, _) => {
+            "The wording reads clean. Confirm it with the developer, then write the \
+             Gherkin scenario from the acceptance criteria."
+        }
+        (false, STAGED) => {
+            "Call requirement_reword to address each finding - never edit the \
+             requirements file by hand - then call refine_requirement again. It \
+             reviews your staged edit, so there is no need to commit between passes. \
+             Iterate until there are no findings."
+        }
+        (false, _) => {
+            "Call requirement_reword to address each finding - never edit the \
+             requirements file by hand - then run validate_spec and call \
+             refine_requirement again. Iterate until there are no findings."
+        }
+    }
+}
+
 /// A catalog-relative spec path as the project sees it. Catalog paths are
 /// relative to the directory holding the root document, so replies have
 /// to re-root them or they name a file the caller cannot open.
@@ -290,34 +323,12 @@ impl<R: SpecRepository, F: FeatureFiles, C: ChangeStore> SpecService<R, F, C> {
         };
         let findings = RequirementRefiner.review(requirement);
         let clean = findings.is_empty();
-        let next_step = match (clean, source) {
-            (true, STAGED) => {
-                "The staged wording reads clean. Confirm it with the developer, apply it \
-                 with changes_commit, then write the Gherkin scenario from the \
-                 acceptance criteria."
-            }
-            (true, _) => {
-                "The wording reads clean. Confirm it with the developer, then write the \
-                 Gherkin scenario from the acceptance criteria."
-            }
-            (false, STAGED) => {
-                "Call requirement_reword to address each finding - never edit the \
-                 requirements file by hand - then call refine_requirement again. It \
-                 reviews your staged edit, so there is no need to commit between passes. \
-                 Iterate until there are no findings."
-            }
-            (false, _) => {
-                "Call requirement_reword to address each finding - never edit the \
-                 requirements file by hand - then run validate_spec and call \
-                 refine_requirement again. Iterate until there are no findings."
-            }
-        };
         Ok(RefinementReport {
             id: id.to_string(),
             clean,
             findings,
             source,
-            next_step: next_step.to_string(),
+            next_step: refinement_next_step(clean, source).to_string(),
             judgments: Vec::new(),
             judgment_advisories: Vec::new(),
             judgment_action: None,

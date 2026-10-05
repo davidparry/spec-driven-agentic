@@ -159,21 +159,29 @@ until someone opts in.
 
 | | Value | What it is |
 | --- | --- | --- |
-| Decision band | **0.80** | The probability needed before an answer counts as a verdict. At or above reads `HOLDS`, at or below `0.20` reads `FAILS`, between is `INCONCLUSIVE` and used for nothing. Not an accuracy figure |
+| Decision band | **0.80** | The probability needed before an answer counts as a verdict. At or above reads `HOLDS`, at or below `0.20` reads `FAILS`, between is `INCONCLUSIVE`. Not an accuracy figure |
 | Measured accuracy | **0 misses, 1 false alarm, 3 unsure** | The result over a 32-criterion labelled set at that band — see [`spec judge`](judge.md#how-well-does-it-work) |
 
 Two rules hold whatever the project configured:
 
-- **It reports and never gates.** Even where `[decision] mode =
-  "enforce"` would make the CLI exit nonzero, this tool stays advisory.
-  An exit code is something a human watches; a tool reply an agent reads
-  is not the place to stop a workflow.
+- **It gates on the same terms as the CLI.** In the default `[decision]
+  mode = "enforce"`, a `FAILS` or `INCONCLUSIVE` verdict appends its
+  line to `findings` and makes `clean` false. There is no exit code
+  over MCP, and no new field to obey: the instruction to iterate until
+  there are no findings already covers it. The deterministic findings
+  keep their place and are never edited or dropped, and the judgment
+  lines are prefixed `judgment (measurable/v1):` so you can tell which
+  rules found what. Set `mode = "advisory"` to report without gating.
 - **`mode = "off"` stops it asking.** The model stays configured for
   `spec judge`, which a human types, while automatic judgments —
   including this tool's — go quiet.
 
-`clean` and `findings` come from the deterministic rules either way. A
-judgment is advice about wording, never a verdict on the code.
+A judgment is a gate on wording and never a verdict on the code: it
+cannot approve anything, change a test result, or mark a requirement
+implemented. A judgment that was wanted and never arrived is the one
+case that returns a tool error instead of a report — an unreachable
+model is not something a reword fixes, so making it a finding would
+only make the loop retry it forever.
 
 ## command_run: the guarded command line
 

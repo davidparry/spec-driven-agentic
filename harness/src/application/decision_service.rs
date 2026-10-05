@@ -10,9 +10,9 @@
 
 use serde::Serialize;
 
-use crate::application::spec_service::RefinementReport;
+use crate::application::spec_service::{RefinementReport, refinement_next_step};
 use crate::domain::decision::{
-    CRITERION_MEASURABLE, Judgment, MEASURABLE_ANSWER, Mode, Policy, Request, Transition, Verdict,
+    CRITERION_MEASURABLE, Judgment, MEASURABLE_ANSWER, Mode, Policy, Request, Transition,
     measurable_finding, measurable_question, measurable_state, measurable_version,
 };
 use crate::ports::{DecisionError, DecisionModel};
@@ -39,9 +39,10 @@ pub struct CriteriaReview {
     /// The strongest transition any one judgment asked for. Always
     /// `CONTINUE` in advisory mode.
     pub action: Transition,
-    /// The advisory lines a human reads, one per criterion the model
-    /// read as unmeasurable. Deliberately not merged into the
-    /// refinement's own findings — see [`DecisionService::review_criteria`].
+    /// One line per criterion the model did not read as measurable,
+    /// whether it failed or landed in the dead band. Reported on their
+    /// own in advisory mode; folded into the refinement's findings when
+    /// the action gates — see [`apply_review`].
     pub advisories: Vec<String>,
 }
 
@@ -60,23 +61,6 @@ impl<D: DecisionModel> DecisionService<D> {
 
     pub fn policy(&self) -> Policy {
         self.policy
-    }
-
-    /// The same service with its mode weakened to advisory.
-    ///
-    /// For surfaces that report a judgment but must never gate on one,
-    /// whatever the project configured. Weakening only: a mode of `off`
-    /// stays off, because a project that turned judgment off did not ask
-    /// for it anywhere.
-    pub fn into_advisory(self) -> Self {
-        let mode = match self.policy.mode {
-            Mode::Off => Mode::Off,
-            Mode::Advisory | Mode::Enforce => Mode::Advisory,
-        };
-        Self {
-            policy: Policy::new(mode, self.policy.threshold),
-            ..self
-        }
     }
 
     /// The service, but only on the surfaces that judge automatically.
@@ -147,12 +131,14 @@ impl<D: DecisionModel> DecisionService<D> {
 
     /// Every criterion of one requirement, judged.
     ///
-    /// The findings this produces are kept out of the refinement's own
-    /// `findings` list on purpose. `clean` is a deterministic verdict on
-    /// deterministic rules, and quietly folding a probability into it
-    /// would make the one field a reader trusts mean something new
-    /// without saying so. The judgments travel beside it, labelled, and
-    /// the deterministic answer is still whatever it was.
+    /// Produces the lines but decides nothing about them: whether they
+    /// reach the refinement's own `findings` is [`apply_review`]'s
+    /// call, and it turns on whether the policy gates rather than on
+    /// what any one answer was.
+    ///
+    /// Every criterion the question was not satisfied by earns a line,
+    /// including the inconclusive ones. They gate in `enforce`, and a
+    /// gate with nothing to read is a loop with nothing to fix.
     pub fn review_criteria(
         &self,
         id: &str,
@@ -170,9 +156,7 @@ impl<D: DecisionModel> DecisionService<D> {
                 format!("{id} acceptance criterion {}", index + 1)
             };
             let judgment = self.judge_criterion(&input, criterion)?;
-            if judgment.verdict == Verdict::Fails {
-                advisories.push(measurable_finding(criterion, &judgment));
-            }
+            advisories.extend(measurable_finding(criterion, &judgment));
             action = stronger(action, judgment.action);
             judgments.push(judgment);
         }
@@ -212,18 +196,40 @@ impl<D: DecisionModel> DecisionService<D> {
 /// decision model plays no part: a caller that did the asking on another
 /// thread has a review and a policy but no client. There is exactly one
 /// place that decides what an unanswered question does, and it is here.
+///
+/// A gating action folds its lines into `findings` and makes `clean`
+/// false. This is the point of the gate: the loop already iterates on
+/// those two fields, and the question is aimed at wording no
+/// deterministic rule reaches, so a judgment reported only beside them
+/// is one the loop never acts on. The lines keep their
+/// `judgment (measurable/v1):` prefix and are appended after the
+/// deterministic ones, which are never edited or dropped — `findings`
+/// gains entries, it does not change meaning. They stay in
+/// `judgmentAdvisories` too, so a reader wanting only the
+/// probabilistic ones still has them apart.
+///
+/// Advisory mode never gates, so nothing is merged and every
+/// deterministic field is exactly as it was found.
 pub fn apply_review(
     policy: Policy,
     report: &mut RefinementReport,
     review: Result<CriteriaReview, DecisionError>,
 ) -> Result<Transition, DecisionError> {
-    let before = report.findings.clone();
+    let deterministic = report.findings.clone();
     match review {
         Ok(review) => {
-            report.judgment_advisories = review.advisories;
+            report.judgment_advisories = review.advisories.clone();
             report.judgments = review.judgments;
             report.judgment_action = Some(review.action);
-            debug_assert_eq!(before, report.findings, "a judgment never edits a finding");
+            if review.action != Transition::Continue {
+                report.findings.extend(review.advisories);
+                report.clean = false;
+                report.next_step = refinement_next_step(false, report.source).to_string();
+            }
+            debug_assert!(
+                report.findings.starts_with(&deterministic),
+                "a judgment appends to the findings; it never edits one"
+            );
             Ok(review.action)
         }
         Err(error) if policy.mode == Mode::Enforce => Err(error),
@@ -257,7 +263,7 @@ fn stronger(left: Transition, right: Transition) -> Transition {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::decision::{Answer, Outcome, Usage};
+    use crate::domain::decision::{Answer, Outcome, Usage, Verdict};
     use std::cell::RefCell;
     use std::collections::BTreeMap;
 
@@ -392,24 +398,45 @@ mod tests {
         assert_eq!(judgment.verdict, Verdict::Inconclusive);
     }
 
+    /// Every criterion the question was not satisfied by earns a line,
+    /// including the inconclusive one: it gates under `enforce`, and a
+    /// gate the loop cannot read is a gate it cannot act on. Only the
+    /// criterion that held is silent.
     #[test]
-    fn every_criterion_of_a_requirement_is_judged_and_the_failures_are_advised() {
-        let service = service(ScriptedDecision::answering(&[0.97, 0.03]), Mode::Advisory);
+    fn every_criterion_the_question_was_not_satisfied_by_is_advised() {
+        let service = service(
+            ScriptedDecision::answering(&[0.97, 0.03, 0.5]),
+            Mode::Advisory,
+        );
         let review = service
             .review_criteria(
                 "REQ-007",
                 &[
                     "Given \"1,2\", when add is called, then the result is 3".into(),
                     "Given a request, when it is served, then the response completes before the user notices".into(),
+                    "Given a calculator, when I add, then the result is valid".into(),
                 ],
             )
             .unwrap();
-        assert_eq!(review.judgments.len(), 2);
+        assert_eq!(review.judgments.len(), 3);
         assert_eq!(review.judgments[0].verdict, Verdict::Holds);
         assert_eq!(review.judgments[1].verdict, Verdict::Fails);
-        assert_eq!(review.advisories.len(), 1, "only the failure is advised");
+        assert_eq!(review.judgments[2].verdict, Verdict::Inconclusive);
+        assert_eq!(
+            review.advisories.len(),
+            2,
+            "the criterion that held is silent"
+        );
         assert!(review.advisories[0].contains("completes before the user notices"));
-        assert!(review.advisories[0].starts_with("judgment (measurable/v1):"));
+        assert!(review.advisories[0].contains("may not be measurable"));
+        assert!(review.advisories[1].contains("then the result is valid"));
+        assert!(review.advisories[1].contains("too unclear to judge either way"));
+        assert!(
+            review
+                .advisories
+                .iter()
+                .all(|line| line.starts_with("judgment (measurable/v1):"))
+        );
         assert_eq!(review.action, Transition::Continue);
         assert_eq!(
             review.judgments[1].provenance.input, "REQ-007 acceptance criterion 2",
@@ -447,10 +474,11 @@ mod tests {
         assert_eq!(report.judgment_note, None);
     }
 
-    /// A clean deterministic verdict stays clean. The judgment is
-    /// reported next to it, and `clean` does not quietly change meaning.
+    /// Advisory mode is the opt-out, and this is what opting out buys:
+    /// a clean deterministic verdict stays clean and the judgment is
+    /// reported next to it.
     #[test]
-    fn a_failing_judgment_does_not_make_a_clean_requirement_unclean() {
+    fn a_failing_judgment_in_advisory_mode_does_not_make_a_clean_requirement_unclean() {
         let service = service(ScriptedDecision::answering(&[0.01]), Mode::Advisory);
         let mut report = report();
         service
@@ -459,6 +487,66 @@ mod tests {
         assert!(report.clean, "the deterministic verdict is untouched");
         assert!(report.findings.is_empty());
         assert_eq!(report.judgments[0].verdict, Verdict::Fails);
+    }
+
+    /// The whole point of the gate. The question reaches wording no
+    /// deterministic rule does, so a verdict against it has to land
+    /// where the loop already looks: in `findings`, with `clean` false
+    /// and a next step naming the reword.
+    #[test]
+    fn an_enforced_failure_becomes_a_finding_the_loop_iterates_on() {
+        let service = service(ScriptedDecision::answering(&[0.02]), Mode::Enforce);
+        let mut report = report();
+        let action = service
+            .judge_refinement(&mut report, &["then it works".into()])
+            .unwrap();
+        assert_eq!(action, Transition::Rework);
+        assert!(!report.clean, "a gating judgment is not a clean report");
+        assert_eq!(report.findings.len(), 1);
+        assert!(report.findings[0].starts_with("judgment (measurable/v1):"));
+        assert_eq!(
+            report.findings, report.judgment_advisories,
+            "the same line, reported in both places"
+        );
+        assert!(
+            report.next_step.contains("requirement_reword"),
+            "got: {}",
+            report.next_step
+        );
+        assert_eq!(report.judgment_note, None);
+    }
+
+    /// The deterministic findings keep their place and their wording.
+    /// `findings` gains entries when a judgment gates; it never loses
+    /// one or has one rewritten.
+    #[test]
+    fn a_gating_judgment_appends_to_the_deterministic_findings() {
+        let service = service(ScriptedDecision::answering(&[0.02]), Mode::Enforce);
+        let mut report = report();
+        report.findings = vec!["criteria: only happy paths".into()];
+        report.clean = false;
+        service
+            .judge_refinement(&mut report, &["then it works".into()])
+            .unwrap();
+        assert_eq!(report.findings.len(), 2);
+        assert_eq!(report.findings[0], "criteria: only happy paths");
+        assert!(report.findings[1].starts_with("judgment (measurable/v1):"));
+    }
+
+    /// A judgment that holds gates nothing, so the deterministic reply
+    /// is untouched even under enforcement.
+    #[test]
+    fn an_enforced_judgment_that_holds_leaves_the_reply_alone() {
+        let service = service(ScriptedDecision::answering(&[0.97]), Mode::Enforce);
+        let mut report = report();
+        let action = service
+            .judge_refinement(&mut report, &["then the result is 3".into()])
+            .unwrap();
+        assert_eq!(action, Transition::Continue);
+        assert!(report.clean);
+        assert!(report.findings.is_empty());
+        assert!(report.judgment_advisories.is_empty());
+        assert_eq!(report.next_step, "unchanged");
     }
 
     #[test]
@@ -522,20 +610,23 @@ mod tests {
             .unwrap();
         assert_eq!(action, Transition::Rework);
         assert_eq!(report.judgment_action, Some(Transition::Rework));
-        assert!(
-            report.clean,
-            "even enforcing, the gate is not the clean flag"
-        );
     }
 
+    /// An answer in the dead band gates too, so it has to arrive with
+    /// something to act on rather than only a report that the model was
+    /// unsure.
     #[test]
-    fn enforce_mode_escalates_an_inconclusive_answer_to_a_human() {
+    fn enforce_mode_escalates_an_inconclusive_answer_with_a_finding_to_act_on() {
         let service = service(ScriptedDecision::answering(&[0.5]), Mode::Enforce);
         let mut report = report();
         let action = service
             .judge_refinement(&mut report, &["then it is valid".into()])
             .unwrap();
         assert_eq!(action, Transition::Escalate);
+        assert!(!report.clean);
+        assert_eq!(report.findings.len(), 1);
+        assert!(report.findings[0].contains("too unclear to judge either way"));
+        assert!(report.findings[0].contains("after \"then\""));
     }
 
     /// Several criteria, several answers: the most interrupting
@@ -614,23 +705,6 @@ mod tests {
         assert_eq!(service.model(), "nimble:test");
         assert_eq!(service.policy().mode, Mode::Enforce);
         assert_eq!(service.policy().threshold, 0.70);
-    }
-
-    /// The MCP surface reports judgments but must never gate on one, so
-    /// it weakens an enforcing project to advisory. Weakening only: a
-    /// project that turned judgment off asked for it nowhere.
-    #[test]
-    fn weakening_to_advisory_lowers_enforce_and_leaves_off_alone() {
-        for (configured, expected) in [
-            (Mode::Enforce, Mode::Advisory),
-            (Mode::Advisory, Mode::Advisory),
-            (Mode::Off, Mode::Off),
-        ] {
-            let weakened = service(ScriptedDecision::answering(&[]), configured).into_advisory();
-            assert_eq!(weakened.policy().mode, expected, "from {configured}");
-            assert_eq!(weakened.policy().threshold, 0.70, "the threshold is kept");
-            assert_eq!(weakened.model(), "nimble:test");
-        }
     }
 
     /// `off` has to reach every surface that judges on its own

@@ -113,8 +113,10 @@ fn present_from_table(table: &toml::Table) -> PresentValues {
         present.decision_model = toml_string(decision, "model");
         present.decision_endpoint = toml_string(decision, "endpoint");
         present.decision_timeout_seconds = toml_u64(decision, "timeout_seconds");
-        // An unspellable mode is no mode: a typo falling through to
-        // `enforce` would be a config error that starts refusing work.
+        // An unspellable mode is no mode, so a typo takes the default -
+        // which is `enforce`. That is the safe direction: a misspelled
+        // `advisory` refuses work until it is noticed, where the old
+        // behaviour would have quietly stopped gating.
         present.decision_mode = toml_string(decision, "mode")
             .filter(|raw| crate::domain::decision::Mode::parse(raw).is_some());
         present.decision_min_confidence =
@@ -1030,10 +1032,7 @@ mod tests {
         let settings = decision_settings(&dir.path().join(CONFIG_FILE));
         assert_eq!(settings.model, None);
         assert_eq!(settings.endpoint, DEFAULT_LLM_ENDPOINT);
-        assert_eq!(
-            settings.policy.mode,
-            crate::domain::decision::Mode::Advisory
-        );
+        assert_eq!(settings.policy.mode, crate::domain::decision::Mode::Enforce);
         assert_eq!(settings.policy.threshold, DEFAULT_MIN_CONFIDENCE);
     }
 
@@ -1065,9 +1064,9 @@ mod tests {
         );
     }
 
-    /// A mode nobody can spell is no mode at all. The alternative — a
-    /// typo falling through to `enforce` — would start refusing work
-    /// because of a misspelling.
+    /// A mode nobody can spell is no mode at all, so it takes the
+    /// default. That means a misspelled `advisory` keeps gating rather
+    /// than quietly stopping — the direction a typo should fail in.
     #[test]
     fn an_unspellable_mode_and_an_out_of_range_threshold_fall_back_to_defaults() {
         let dir = tempfile::tempdir().unwrap();
@@ -1075,14 +1074,11 @@ mod tests {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(
             &path,
-            "[decision]\nmode = \"enfroce\"\nmin_confidence = 4.2\n",
+            "[decision]\nmode = \"advsiory\"\nmin_confidence = 4.2\n",
         )
         .unwrap();
         let settings = decision_settings(&path);
-        assert_eq!(
-            settings.policy.mode,
-            crate::domain::decision::Mode::Advisory
-        );
+        assert_eq!(settings.policy.mode, crate::domain::decision::Mode::Enforce);
         assert_eq!(settings.policy.threshold, DEFAULT_MIN_CONFIDENCE);
     }
 
