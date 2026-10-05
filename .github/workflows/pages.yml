@@ -15,12 +15,18 @@ concurrency:
   group: pages
   cancel-in-progress: false
 
+# Build and deploy are separate jobs on purpose. Deploying from the same
+# job raced the artifact API: the upload reported "successfully uploaded"
+# and `deploy-pages`, querying 400ms later, was told there were none, so
+# the deploy failed with nothing wrong with the site. The job boundary
+# puts a runner handover between the write and the read.
+#
+# It also makes "re-run failed jobs" the right move when a deploy does
+# fail. Re-running a single combined job uploads a *second* artifact of
+# the same name, and `deploy-pages` refuses to choose between them.
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -44,6 +50,13 @@ jobs:
         with:
           path: _site
 
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
