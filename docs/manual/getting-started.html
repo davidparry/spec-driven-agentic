@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "searchindex-f5fc82f3.js";
+            window.path_to_searchindex_js = "searchindex-5a43e19b.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-2ab172c3.js"></script>
@@ -218,10 +218,13 @@ spec judge models          # confirm Ollama reports it as decision-capable
 spec judge use nimble
 spec judge criterion --text "Given the refactored module, when the suite runs, then code quality is improved by at least 20%"
 </code></pre>
-<p>This adds a second model; it does not replace the one above. Nothing
-asks a judgment until <code>spec judge use</code> names one, and a judgment is
-advice about wording: it never changes a test result, a requirement’s
-status, or the deterministic review it sits beside. See
+<p>This adds a second model; it does not replace the one above. The pull is
+the part that matters — judgments work as soon as a decision-capable
+model is installed, because Ollama is asked which of its models can
+answer. <code>spec judge use</code> only pins the choice so it stops depending on
+what else you pull later.</p>
+<p>A judgment is advice about wording: it never changes a test result, a
+requirement’s status, or the deterministic review it sits beside. See
 <a href="commands/judge.html"><code>spec judge</code></a>.</p>
 <h2 id="your-first-session"><a class="header" href="#your-first-session">Your first session</a></h2>
 <p>Run bare <code>spec</code> in a terminal. You get the help, the banner with the
@@ -235,10 +238,16 @@ version, the model status, and an interactive prompt:</p>
   ▲                                  │
   ╰──────────────────────────────────╯
 
-Model set for this session: qwen3.8-flash-next:125b-mlx (not saved - keep it with: spec model use qwen3.8-flash-next:125b-mlx).
+Inference model set for this session: qwen3.8-flash-next:125b-mlx (not saved - keep it with: spec model use qwen3.8-flash-next:125b-mlx).
+Decision model set for this session: nimble:latest (not saved - keep it with: spec judge use nimble:latest).
 Interactive shell - type commands without the spec prefix (e.g. list).
 spec&gt;
 </code></pre>
+<p>One line per model role: the inference model that writes, and the
+decision model that judges. Neither was configured here — both were
+borrowed from what Ollama had installed, for this session only. With no
+decision-capable model pulled, that second line says so instead, and
+every other command works the same.</p>
 <h2 id="two-ways-to-begin-a-project"><a class="header" href="#two-ways-to-begin-a-project">Two ways to begin a project</a></h2>
 <p><strong>Guided, from zero</strong> — one command runs the whole loop with exactly
 two human gates (approving the spec wording and approving generated

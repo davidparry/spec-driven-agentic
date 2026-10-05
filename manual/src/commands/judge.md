@@ -33,12 +33,36 @@ Usage: spec judge [OPTIONS] <COMMAND>
 Commands: models, current, use, criterion
 ```
 
-## Nothing is on until you turn it on
+## On wherever a decision model is installed
 
-With no decision model configured — the state after `spec init` — the
-harness asks nothing, and every command behaves exactly as it did
-before this feature existed. There is no default model, no automatic
-pull, and no model chosen for you.
+Pull a decision model and judgments work. There is nothing else to
+configure: with `[decision] model` unset, Ollama is asked which of its
+models can answer, and the first is used for the session.
+
+Nothing is *assumed*, though. No model name is compiled in, none is
+pulled for you, and the borrowed choice is never written to your
+configuration — `spec judge use` is still the only thing that makes one
+stick. On a machine with no decision-capable model, every command
+behaves exactly as it did before this feature existed.
+
+Two ways to turn it off: `mode = "off"` stops the automatic judgments
+while leaving `spec judge` answering, and a machine with no decision
+model pulled asks nothing because there is nothing to ask.
+
+The [interactive shell](../interactive-shell.md#the-decision-line) says
+which state you are in before its first prompt, on a line beside the
+inference model's:
+
+```text
+Inference model set: qwen3.8-flash-next:125b-mlx (from configuration).
+Decision model set for this session: nimble (not saved - keep it with: spec judge use nimble).
+```
+
+Resolving it at startup is what turns a model named in `[decision]` but
+never pulled into something you find out about at the prompt rather than
+at the first judgment. Nothing is gated on it either way: a judgment is
+advice about wording, so a session with nothing to ask still returns
+every deterministic answer it always did.
 
 ## What a judgment is allowed to do
 
@@ -108,10 +132,20 @@ mode	advisory
 min_confidence	0.8
 ```
 
-With nothing configured:
+The model shown is the one that will actually answer, so with nothing
+configured it is the one discovery borrowed, and the source says so
+rather than claiming the file named it:
 
 ```text
-No decision model configured - judgments are off. Pick one with: spec judge models, then spec judge use <model-name>
+nimble:latest (from the only installed decision model)
+```
+
+With nothing configured and nothing installed that can decide:
+
+```text
+No decision model is installed - install one to turn judgments on:
+    ollama pull nimble
+    spec judge use nimble
 ```
 
 `--json` prints the same values as a stable object, including the
@@ -449,8 +483,8 @@ project that would rather see every flag.
 
 | Message | What to do |
 | --- | --- |
-| `No decision model is installed` | `ollama pull nimble`, then `spec judge use nimble` |
-| `No decision model configured` | `spec judge use <name>` — the message lists the installed names to choose from |
+| `No decision model is installed` | `ollama pull nimble` — judgments start working as soon as one is pulled, with or without `spec judge use` |
+| `No decision model configured and none could be discovered` | Ollama could not be reached to ask what is installed. Start it, or name a model with `spec judge use <name>` |
 | `decision model 'X' is not installed` | `ollama pull X` |
 | `'X' cannot answer decisions here` | The model has no `decision` capability. The message lists the ones that do |
 | `... has no /v1/systemone route` | Ollama is older than 0.35. Upgrade it |

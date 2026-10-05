@@ -224,10 +224,12 @@ architecture and full test coverage throughout:
   nothing is inferred from a name. `use` writes `[decision] model` and
   never touches `llm.model`. `criterion` runs a real judgment and prints
   the whole record (`--json` for the same as an object) so the setup can
-  be verified and the result inspected. Nothing is asked until a model
-  is named, and a judgment is advice about wording: it cannot change a
-  test result, a requirement's status, or a deterministic finding. See
-  [the manual](../manual/src/commands/judge.md).
+  be verified and the result inspected. Judgments are on wherever a
+  decision model is installed — with `[decision] model` unset the first
+  decision-capable model is borrowed for the run, so `use` pins a choice
+  rather than switching the feature on. A judgment is advice about
+  wording: it cannot change a test result, a requirement's status, or a
+  deterministic finding. See [the manual](../manual/src/commands/judge.md).
 - `spec config` — every LLM, tools, and decision key, marked
   `(default)` or with the path of the `.spec/config.toml` it was read
   from (`--json` for the same as an object). With no configured
@@ -460,7 +462,8 @@ $ spec
   ▲                                  │
   ╰──────────────────────────────────╯
 
-Model set for this session: qwen3.8-flash-next:125b-mlx (not saved - keep it with: spec model use qwen3.8-flash-next:125b-mlx).
+Inference model set for this session: qwen3.8-flash-next:125b-mlx (not saved - keep it with: spec model use qwen3.8-flash-next:125b-mlx).
+Decision model set for this session: nimble (not saved - keep it with: spec judge use nimble).
 spec> list
 spec> test
 spec> state
@@ -471,15 +474,30 @@ Session over - 3 commands run.
 The banner is the harness mark in ASCII — the red→green cycle looping
 around the prompt — with the compiled-in version.
 
-The shell announces the model status on startup: the configured model
-if one is set; otherwise the first installed Ollama model, borrowed for
-this session only (nothing is written until you run
-`spec model use <name>`). When Ollama is unreachable it says to install
-it from [ollama.com](https://ollama.com), and when no models are pulled
-it gives the exact command (`ollama pull qwen3.8-flash-next:125b-mlx`) —
+The shell announces both model roles on startup, one line each and each
+naming which role it is, because they are two different models doing
+different work.
+
+The **inference** line is the model that writes: the configured one if
+set; otherwise the first installed Ollama model, borrowed for this
+session only (nothing is written until you run `spec model use <name>`).
+When Ollama is unreachable it says to install it from
+[ollama.com](https://ollama.com), and when no models are pulled it gives
+the exact command (`ollama pull qwen3.8-flash-next:125b-mlx`) —
 generation falls back to deterministic templates either way. See
 [Ollama model](#ollama-model) for why that name, and why another model
 will change the quality of generated work.
+
+The **decision** line is the model that judges: the configured one if
+set; otherwise the first model Ollama reports as decision-capable,
+borrowed for this session only (nothing is written until you run
+`spec judge use <name>`). Judgments are therefore on wherever a decision
+model is installed, with no name compiled in and nothing pulled for you.
+Resolving it at startup is what makes a model named in `[decision]` but
+never pulled surface at the prompt rather than at the first judgment.
+Nothing is gated on it: a judgment is advice about wording, so a session
+with nothing to ask still returns every deterministic answer. See
+[`spec judge`](../manual/src/commands/judge.md).
 
 On a brand-new project the shell notices and offers the loop directly:
 when this is the first session in the root (no `.spec/history` yet), a

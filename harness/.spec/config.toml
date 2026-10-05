@@ -1,6 +1,6 @@
 # spec harness configuration for the harness's own spec.
 #
-# The talk drives HARNESS-013 from this root, so the model and the
+# The talk drafts its requirement into this root, so the model and the
 # timeout are pinned here rather than inherited. Without this file the
 # demo picks up whatever model happens to be installed, which is how a
 # rehearsal ends up on a different model than the slides advertise.

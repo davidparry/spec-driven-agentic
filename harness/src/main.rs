@@ -39,7 +39,7 @@ use spec_harness::application::init_service::InitService;
 use spec_harness::application::inspect_service::InspectService;
 use spec_harness::application::memory_service::MemoryAwareConversation;
 use spec_harness::application::model_service::{
-    DecisionReadiness, ModelResolution, ModelService, ModelSource, SessionModel,
+    DecisionReadiness, ModelResolution, ModelService, ModelSource, SessionDecision, SessionModel,
 };
 use spec_harness::application::refactor_service::{RefactorReport, RefactorService};
 use spec_harness::application::spec_mutation_service::SpecMutationService;
@@ -66,7 +66,9 @@ use spec_harness::ports::{
 };
 use spec_harness::repl::{Ending, is_greenfield_start, offer_greenfield, run_shell};
 use spec_harness::wiring::{self, DynLlm};
-use spec_harness::workspace::{SPEC_PATH, detect_project_layout, project_layout};
+use spec_harness::workspace::{
+    SPEC_PATH, detect_project_layout, discover_project_root, project_layout,
+};
 
 /// `spec refine --help`.
 ///
@@ -118,9 +120,11 @@ struct Cli {
     #[arg(long, global = true, value_name = "MODEL")]
     decision_model: Option<String>,
 
-    /// Project root (where requirements/ and .spec/config.toml live)
-    #[arg(long, global = true, default_value = ".")]
-    root: PathBuf,
+    /// Project root (where requirements/ and .spec/config.toml live).
+    /// Defaults to the nearest enclosing project, searching upward from
+    /// the working directory.
+    #[arg(long, global = true)]
+    root: Option<PathBuf>,
 
     /// Verbose diagnostic logging on stderr (prompts, responses, cache, MCP)
     #[arg(long, global = true)]
@@ -563,10 +567,16 @@ impl std::error::Error for NonzeroExit {}
 /// A concrete `--root` wins. An empty value, or an unexpanded template
 /// such as `${CLAUDE_PROJECT_DIR:-.}` (Claude Code stores that string
 /// as-is; it does not apply bash defaults), is not a directory. In that
-/// case `SPEC_PROJECT_DIR` is used when it names a real path. Otherwise
-/// the process keeps the directory it was launched in.
-fn resolve_project_root(flag: PathBuf, spec_project_dir: Option<&str>) -> PathBuf {
-    if usable_root(&flag) {
+/// case `SPEC_PROJECT_DIR` is used when it names a real path. With
+/// neither, `discovered` carries the project found by walking up from
+/// the working directory, and failing that the process keeps the
+/// directory it was launched in.
+fn resolve_project_root(
+    flag: Option<PathBuf>,
+    spec_project_dir: Option<&str>,
+    discovered: Option<PathBuf>,
+) -> PathBuf {
+    if let Some(flag) = flag.filter(|path| usable_root(path)) {
         return flag;
     }
     if let Some(from_env) = spec_project_dir
@@ -578,7 +588,7 @@ fn resolve_project_root(flag: PathBuf, spec_project_dir: Option<&str>) -> PathBu
             return path;
         }
     }
-    PathBuf::from(".")
+    discovered.unwrap_or_else(|| PathBuf::from("."))
 }
 
 fn usable_root(path: &Path) -> bool {
@@ -594,17 +604,21 @@ fn is_unexpanded_template(value: &str) -> bool {
 }
 
 fn main() -> anyhow::Result<()> {
-    let mut cli = Cli::parse();
+    let cli = Cli::parse();
     let from_env = std::env::var("SPEC_PROJECT_DIR").ok();
-    cli.root = resolve_project_root(cli.root, from_env.as_deref());
-    ensure_spec_home(&cli.root)?;
+    let discovered = std::env::current_dir()
+        .ok()
+        .as_deref()
+        .and_then(discover_project_root);
+    let root = resolve_project_root(cli.root.clone(), from_env.as_deref(), discovered);
+    ensure_spec_home(&root)?;
     // Held until exit so the logging worker thread drains its queue.
-    let log_guard = init_logging(cli.debug, &cli.root);
+    let log_guard = init_logging(cli.debug, &root);
     match cli.command {
         Some(ref command) => {
             let resumes = resumes_the_shell(command);
             match execute(
-                &cli.root,
+                &root,
                 cli.model.as_deref(),
                 cli.decision_model.as_deref(),
                 cli.retry,
@@ -617,13 +631,21 @@ fn main() -> anyhow::Result<()> {
                     drop(log_guard);
                     std::process::exit(1)
                 }
-                Ok(()) if resumes => {
-                    resume_shell_after_orchestrator(&cli.root, cli.model.as_deref(), cli.retry)
-                }
+                Ok(()) if resumes => resume_shell_after_orchestrator(
+                    &root,
+                    cli.model.as_deref(),
+                    cli.decision_model.as_deref(),
+                    cli.retry,
+                ),
                 other => other,
             }
         }
-        None => run_shell_mode(&cli.root, cli.model.as_deref(), cli.retry),
+        None => run_shell_mode(
+            &root,
+            cli.model.as_deref(),
+            cli.decision_model.as_deref(),
+            cli.retry,
+        ),
     }
 }
 
@@ -939,6 +961,7 @@ fn execute(
 fn print_banner() {
     const R: &str = "\x1b[31m"; // the red arc
     const G: &str = "\x1b[32m"; // the green arc
+    const Y: &str = "\x1b[38;5;179m"; // muted yellow - the refactor step
     const B: &str = "\x1b[1m"; // bold
     const D: &str = "\x1b[2m"; // dim
     const X: &str = "\x1b[0m"; // reset
@@ -953,25 +976,32 @@ fn print_banner() {
     println!("  {R}╭{top}╮{X}");
     println!("  {R}│{X}{gap}{R}▼{X}");
     println!("  {R}│{X}    {B}> spec{X}  {D}v{version}{X}{title_pad}{G}│{X}");
-    println!("  {R}│{X}    {D}spec →{X} {R}RED{X} {D}→{X} {G}GREEN{X} {D}→ REFACTOR{X} {G}│{X}");
+    println!(
+        "  {R}│{X}    {D}spec →{X} {R}RED{X} {D}→{X} {G}GREEN{X} {D}→{X} {Y}REFACTOR{X} {G}│{X}"
+    );
     println!("  {G}▲{X}{gap}{G}│{X}");
     println!("  {G}╰{top}╯{X}");
     println!();
 }
 
-/// The startup model line: what this session will use, or exactly what
-/// to install to make generation work. Discovery is session-only - the
-/// configuration is never touched until the user runs `spec model use`.
-/// Returns whether a model is ready, which gates the greenfield nudge.
+/// The startup inference line: what this session will generate with, or
+/// exactly what to install to make generation work. Discovery is
+/// session-only - the configuration is never touched until the user
+/// runs `spec model use`. Returns whether a model is ready, which gates
+/// the greenfield nudge.
+///
+/// "Inference" rather than plain "model" because a session announces
+/// two of them. The roles are different models doing different work,
+/// and a line that named neither would leave the pair ambiguous.
 fn announce_session_model(root: &Path, flag: Option<&str>) -> bool {
     let session = model_service(root).session_model(flag);
     let ready = matches!(session, SessionModel::Ready { .. });
     match session {
         SessionModel::Ready { model, source } => match source {
-            ModelSource::Flag => println!("Model set: {model} (from the --model flag)."),
-            ModelSource::Config => println!("Model set: {model} (from configuration)."),
+            ModelSource::Flag => println!("Inference model set: {model} (from the --model flag)."),
+            ModelSource::Config => println!("Inference model set: {model} (from configuration)."),
             ModelSource::OnlyInstalled | ModelSource::FirstInstalled => println!(
-                "Model set for this session: {model} (not saved - keep it with: \
+                "Inference model set for this session: {model} (not saved - keep it with: \
                  spec model use {model})."
             ),
         },
@@ -998,7 +1028,39 @@ fn announce_session_model(root: &Path, flag: Option<&str>) -> bool {
     ready
 }
 
-fn run_shell_mode(root: &Path, model: Option<&str>, retry: Option<u32>) -> anyhow::Result<()> {
+/// The startup decision line, printed beside the inference one so a
+/// session states both roles before its first prompt.
+///
+/// Resolved here rather than left to the first `spec judge`: a decision
+/// model named in configuration but never pulled used to go unnoticed
+/// until a judgment was asked for, and the session that most wants to
+/// know is the one just starting.
+///
+/// Announcing is all this does. Nothing is gated on the result: a
+/// judgment is advice about wording, so a session with nothing to ask
+/// returns the deterministic answer it always did.
+fn announce_decision_model(root: &Path, flag: Option<&str>) {
+    match wiring::session_decision(root, flag) {
+        SessionDecision::Ready { model, source } => match source {
+            ModelSource::Flag => {
+                println!("Decision model set: {model} (from the --decision-model flag).");
+            }
+            ModelSource::Config => println!("Decision model set: {model} (from configuration)."),
+            ModelSource::OnlyInstalled | ModelSource::FirstInstalled => println!(
+                "Decision model set for this session: {model} (not saved - keep it \
+                 with: spec judge use {model})."
+            ),
+        },
+        SessionDecision::Off { remedy } => println!("{remedy}"),
+    }
+}
+
+fn run_shell_mode(
+    root: &Path,
+    model: Option<&str>,
+    decision_model: Option<&str>,
+    retry: Option<u32>,
+) -> anyhow::Result<()> {
     use clap::CommandFactory as _;
     use std::io::IsTerminal as _;
     Cli::command().print_help()?;
@@ -1007,6 +1069,7 @@ fn run_shell_mode(root: &Path, model: Option<&str>, retry: Option<u32>) -> anyho
     }
     print_banner();
     let model_ready = announce_session_model(root, model);
+    announce_decision_model(root, decision_model);
     // Session start is where the layout question belongs: a human is
     // attached, and the answer is recorded for every later command.
     let llm =
@@ -1025,7 +1088,7 @@ fn run_shell_mode(root: &Path, model: Option<&str>, retry: Option<u32>) -> anyho
          history lives in {}.",
         spec_rel(HISTORY_FILE)
     );
-    interactive_shell_loop(root, model, retry, true, model_ready)
+    interactive_shell_loop(root, model, decision_model, retry, true, model_ready)
 }
 
 /// After a one-shot orchestrator run (`spec greenfield`, `spec deliver`)
@@ -1035,6 +1098,7 @@ fn run_shell_mode(root: &Path, model: Option<&str>, retry: Option<u32>) -> anyho
 fn resume_shell_after_orchestrator(
     root: &Path,
     model: Option<&str>,
+    decision_model: Option<&str>,
     retry: Option<u32>,
 ) -> anyhow::Result<()> {
     use std::io::IsTerminal as _;
@@ -1045,12 +1109,13 @@ fn resume_shell_after_orchestrator(
         "Interactive shell - type commands without the spec prefix \
          (e.g. list, deliver, greenfield). exit, quit, or Ctrl+C leaves."
     );
-    interactive_shell_loop(root, model, retry, false, false)
+    interactive_shell_loop(root, model, decision_model, retry, false, false)
 }
 
 fn interactive_shell_loop(
     root: &Path,
     model: Option<&str>,
+    decision_model: Option<&str>,
     retry: Option<u32>,
     offer: bool,
     model_ready: bool,
@@ -1060,9 +1125,6 @@ fn interactive_shell_loop(
     let first_session = !history.exists();
     let mut shell = ReadlineShell::open(history).map_err(|error| anyhow::anyhow!(error.0))?;
     let mut dispatch = |tokens: Vec<String>| {
-        let explicit_root = tokens
-            .iter()
-            .any(|t| t == "--root" || t.starts_with("--root="));
         let argv = std::iter::once("spec".to_string()).chain(tokens);
         match Cli::try_parse_from(argv) {
             Err(error) => {
@@ -1073,13 +1135,14 @@ fn interactive_shell_loop(
                     let _ = Cli::command().print_help();
                 }
                 Some(command) => {
-                    let line_root = if explicit_root { &cli.root } else { root };
+                    let line_root = cli.root.as_deref().unwrap_or(root);
                     let line_model = cli.model.as_deref().or(model);
+                    let line_decision = cli.decision_model.as_deref().or(decision_model);
                     let line_retry = cli.retry.or(retry);
                     match execute(
                         line_root,
                         line_model,
-                        cli.decision_model.as_deref(),
+                        line_decision,
                         line_retry,
                         cli.tools.as_deref(),
                         cli.max_rounds,
@@ -1740,16 +1803,26 @@ fn run_judge(root: &Path, flag: Option<&str>, command: &JudgeCommand) -> anyhow:
         }
         JudgeCommand::Current { json } => {
             let settings = wiring::resolved_decision(root, flag);
-            let source = if flag.is_some() {
-                "--decision-model flag"
-            } else if settings.model.is_some() {
-                "configuration"
-            } else {
-                "(unset)"
+            // The resolved model, which is the configured one or the
+            // one discovery borrowed. Reporting only what the file says
+            // would leave `current` disagreeing with the model that
+            // actually answers.
+            let resolved = wiring::session_decision(root, flag);
+            let source = match &resolved {
+                SessionDecision::Ready { source, .. } => match source {
+                    ModelSource::Flag => "--decision-model flag",
+                    ModelSource::Config => "configuration",
+                    ModelSource::OnlyInstalled => "the only installed decision model",
+                    ModelSource::FirstInstalled => {
+                        "the first installed decision model, this session only - \
+                         persist it with: spec judge use <model-name>"
+                    }
+                },
+                SessionDecision::Off { .. } => "(unset)",
             };
             if *json {
                 return print_json(&serde_json::json!({
-                    "model": settings.model,
+                    "model": resolved.model(),
                     "source": source,
                     "endpoint": settings.endpoint,
                     "timeoutSeconds": settings.timeout.as_secs(),
@@ -1758,12 +1831,9 @@ fn run_judge(root: &Path, flag: Option<&str>, command: &JudgeCommand) -> anyhow:
                     "question": spec_harness::domain::decision::measurable_version(),
                 }));
             }
-            match &settings.model {
-                Some(model) => println!("{model} (from {source})"),
-                None => println!(
-                    "No decision model configured - judgments are off. Pick one with: \
-                     spec judge models, then spec judge use <model-name>"
-                ),
+            match &resolved {
+                SessionDecision::Ready { model, .. } => println!("{model} (from {source})"),
+                SessionDecision::Off { remedy } => println!("{remedy}"),
             }
             println!("endpoint\t{}", settings.endpoint);
             println!("timeout_seconds\t{}", settings.timeout.as_secs());
@@ -1791,20 +1861,22 @@ fn run_judge(root: &Path, flag: Option<&str>, command: &JudgeCommand) -> anyhow:
             Ok(())
         }
         JudgeCommand::Criterion { req_id, text, json } => {
-            // A judgment needs a model that can answer one. Checked here
-            // rather than left to the round trip so the reply names the
-            // command that fixes it, and checked only on this path: the
-            // automatic judgments inside `refine` stay opt-in.
-            let configured = wiring::resolved_decision(root, flag).model;
+            // A judgment needs a model that can answer one. Checked
+            // against the resolved model - the configured name or the
+            // one discovery borrowed - rather than the round trip, so
+            // the reply names the command that fixes it. Worded as a
+            // refusal because this command is blocked without one,
+            // unlike the startup line that merely reports.
+            let resolved = wiring::session_decision(root, flag);
             if let Some(remedy) = model_service(root)
-                .decision_readiness(configured.as_deref())
+                .decision_readiness(resolved.model())
                 .remedy()
             {
                 anyhow::bail!("{remedy}");
             }
             let Some(service) = wiring::decision_service(root, flag) else {
                 anyhow::bail!(
-                    "No decision model configured - pick one with spec judge models, \
+                    "No decision model could be reached - pick one with spec judge models, \
                      then spec judge use <model-name> (or pass --decision-model)"
                 );
             };
@@ -1961,8 +2033,6 @@ fn run_deliver(
     attempts: u32,
     args: &DeliverArgs,
 ) -> anyhow::Result<()> {
-    let target = parse_target(Some(args.target.join(" ").as_str()))
-        .map_err(|message| anyhow::anyhow!(message))?;
     let options = DeliverOptions {
         attempts: args.attempts.unwrap_or(DEFAULT_ATTEMPTS).max(1),
         fail_fast: args.fail_fast,
@@ -1971,12 +2041,16 @@ fn run_deliver(
     };
     let llm = cached_chat(root, model_flag)
         .map(|(model, chat)| (model, std::sync::Arc::new(chat) as DynLlm));
+    let deliver = Deliver::new(root.to_path_buf(), llm, options).with_llm_attempts(attempts);
+    // The argument is read against the ids the catalog holds, so a spec
+    // numbering HARNESS-014 is as deliverable as one numbering REQ-003.
+    let target = parse_target(Some(args.target.join(" ").as_str()), &deliver.known_ids())
+        .map_err(|message| anyhow::anyhow!(message))?;
     // The auto-answering prompter is wrapped here, at the one place that
     // decides who answers the questions, so nothing further down has to
     // know that nobody is attached.
     let mut prompter = deliver_prompter();
-    let report = Deliver::new(root.to_path_buf(), llm, options)
-        .with_llm_attempts(attempts)
+    let report = deliver
         .run(prompter.as_mut(), &target)
         .map_err(|message| anyhow::anyhow!(message))?;
     drop(prompter);
@@ -2714,24 +2788,47 @@ mod tests {
 
     #[test]
     fn an_unexpanded_root_uses_spec_project_dir_or_the_launch_directory() {
-        let placeholder = PathBuf::from("${CLAUDE_PROJECT_DIR:-.}");
+        let placeholder = Some(PathBuf::from("${CLAUDE_PROJECT_DIR:-.}"));
         assert_eq!(
-            resolve_project_root(placeholder.clone(), Some("/work/kata")),
+            resolve_project_root(placeholder.clone(), Some("/work/kata"), None),
             PathBuf::from("/work/kata")
         );
-        assert_eq!(resolve_project_root(placeholder, None), PathBuf::from("."));
         assert_eq!(
-            resolve_project_root(PathBuf::from("${SPEC_PROJECT_DIR}"), Some("  ")),
+            resolve_project_root(placeholder, None, None),
             PathBuf::from(".")
         );
         assert_eq!(
-            resolve_project_root(PathBuf::from("."), Some("/work/kata")),
+            resolve_project_root(Some(PathBuf::from("${SPEC_PROJECT_DIR}")), Some("  "), None),
             PathBuf::from(".")
         );
         assert_eq!(
-            resolve_project_root(PathBuf::from("/explicit"), Some("/work/kata")),
+            resolve_project_root(Some(PathBuf::from(".")), Some("/work/kata"), None),
+            PathBuf::from(".")
+        );
+        assert_eq!(
+            resolve_project_root(Some(PathBuf::from("/explicit")), Some("/work/kata"), None),
             PathBuf::from("/explicit")
         );
+    }
+
+    /// An explicit `--root` is the whole answer, so a discovered
+    /// enclosing project never overrides what was typed.
+    #[test]
+    fn what_was_typed_outranks_what_was_discovered() {
+        let discovered = Some(PathBuf::from("/work/kata"));
+        assert_eq!(
+            resolve_project_root(Some(PathBuf::from("/explicit")), None, discovered.clone()),
+            PathBuf::from("/explicit")
+        );
+        assert_eq!(
+            resolve_project_root(None, Some("/from/env"), discovered.clone()),
+            PathBuf::from("/from/env")
+        );
+        assert_eq!(
+            resolve_project_root(None, None, discovered),
+            PathBuf::from("/work/kata")
+        );
+        assert_eq!(resolve_project_root(None, None, None), PathBuf::from("."));
     }
 
     #[test]

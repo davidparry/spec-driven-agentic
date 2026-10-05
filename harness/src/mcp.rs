@@ -308,19 +308,17 @@ impl WorkflowServer {
         id: &str,
         report: &mut crate::application::spec_service::RefinementReport,
     ) {
-        // Nothing but a config read happens on the runtime thread.
-        if wiring::resolved_decision(&self.root, None).model.is_none() {
-            return;
-        }
         let Ok(requirement) = self.spec_service().get_requirement(id) else {
             return;
         };
 
-        // Everything else goes to the blocking pool. The decision client
-        // is `reqwest::blocking`, which builds and drives its own
-        // runtime: constructing or calling it on a runtime thread both
-        // stalls the host and risks a nested-runtime panic. The service
-        // is therefore built where it is used.
+        // Everything from here goes to the blocking pool, including
+        // working out which model answers: resolving it asks the
+        // provider what is installed when the project names nothing.
+        // The decision client is `reqwest::blocking`, which builds and
+        // drives its own runtime, so constructing or calling it on a
+        // runtime thread both stalls the host and risks a nested-runtime
+        // panic. The service is therefore built where it is used.
         let root = self.root.clone();
         let req_id = report.id.clone();
         let criteria = requirement.acceptance_criteria;
@@ -339,10 +337,10 @@ impl WorkflowServer {
 
         let (policy, review) = match asked {
             Ok(Some(pair)) => pair,
-            // Either the mode is `off`, or the model stopped being
-            // configured between the two reads. Both mean no judgment
-            // was asked for, which is not a failure to get one: the
-            // reply carries the deterministic findings and no note.
+            // Either the mode is `off`, or nothing on this machine can
+            // answer. Both mean no judgment was asked for, which is not
+            // a failure to get one: the reply carries the deterministic
+            // findings and no note.
             Ok(None) => return,
             // The blocking task panicked or was cancelled. Not an
             // answer, so it is reported as a failure to get one.

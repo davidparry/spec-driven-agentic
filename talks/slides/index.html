@@ -296,7 +296,7 @@
             <td><code>harness/requirements/requirements.json</code></td></tr>
         <tr><td><strong>BDD</strong> <span class="muted">behavior-driven</span></td>
             <td>one behavior</td><td>what would the business sign?</td>
-            <td><code>@HARNESS-013</code> in <code>tests/features/</code></td></tr>
+            <td><code>@HARNESS-018</code> in <code>tests/features/</code></td></tr>
         <tr><td><strong>TDD</strong> <span class="muted">test-driven</span></td>
             <td>one unit</td><td>does it work, right now?</td>
             <td>the failing test, then <code>cargo test</code></td></tr>
@@ -455,50 +455,119 @@ requirements/
 
     <!-- ============ 24-52 min: THE MORNING, LIVE ============ -->
     <section data-track="tdd">
-      <h2>9:00 — the ticket lands</h2>
+      <h2>9:00 — nothing is waiting</h2>
       <pre><code class="language-bash" data-trim>
-spec --root harness status
-spec --root harness show HARNESS-013
+cd harness
+spec status      # 16 implemented · 0 pending · nextId: HARNESS-018
       </code></pre>
-      <blockquote class="small">HARNESS-013 — "Criteria coverage" — status: pending</blockquote>
+      <p class="small">No ticket. No spec. An empty backlog and a sentence I am about to say out loud:</p>
+      <blockquote>"for one requirement, show me which acceptance criteria no test proves"</blockquote>
       <ul class="small">
-        <li>The <strong>catalog</strong> names the next piece of work. Not the chat history, not whatever was open in the editor</li>
-        <li>Thirteen requirements say <code>implemented</code>. Each of those has a tagged scenario, and a test proves it — <code>tests/spec_completeness.rs</code> fails the build otherwise</li>
+        <li>Sixteen requirements say <code>implemented</code>. Each has a tagged scenario, and a test proves it — <code>tests/spec_completeness.rs</code> fails the build otherwise</li>
         <li>Today we build <strong>a new MCP tool</strong>: given a requirement, which acceptance criteria have an asserting test, and which do not</li>
+        <li>But first the sentence has to become something a machine can work from</li>
       </ul>
     </section>
 
     <section data-track="tdd">
-      <h2>9:10 — valid is not the same as usable</h2>
+      <h2>9:00 — one sentence becomes a requirement</h2>
+      <pre><code class="language-bash" data-trim>
+spec draft       # the sentence goes in; a title, a story and criteria come out
+
+list_requirements()        ← it reads the catalog before it writes
+get_requirement(HARNESS-008)
+
+The model reply was invalid (… cover only happy paths — add at least one
+edge case to each) — asking again (2 of 3)        ← the harness rejects its own model
+      </code></pre>
+      <ul class="small">
+        <li>The wording review fires <strong>before anything is staged</strong>. The deterministic gate is not at the end of the pipeline, it is inside the draft</li>
+        <li><strong>Nobody typed <code>HARNESS</code>.</strong> The highest id here is <code>HARNESS-017</code>, so the next is <code>HARNESS-018</code> — prefix read off the neighbours, number <code>max + 1</code> across the merged catalog</li>
+        <li>The same binary at the repo root would have said <code>REQ-007</code>; in the Java module, <code>CLI-010</code>. Nothing configured, nothing guessed</li>
+      </ul>
+    </section>
+
+    <section data-track="tdd">
+      <h2>The first human gate is one keystroke</h2>
+      <pre><code class="language-text" data-trim>
+The description holds 5 requirement(s):
+  1. Unproven acceptance criteria of one requirement are listed
+  2. A fully proven requirement reports the verdict all criteria proven
+  3. A scenario with an undefined step proves nothing
+  4. Only scenarios tagged with the requirement id count as proof
+  5. The proof report refuses an unknown requirement id
+
+Accept [Enter for all, or comma-separated numbers]: 1
+      </code></pre>
+      <ul class="small">
+        <li>One sentence became a <strong>backlog</strong>. The model split it until every requirement was atomic — one capability each</li>
+        <li>Typing <code>1</code> is a real decision: everything else is discarded, unbuilt. <strong>You</strong> set the scope, not the machine</li>
+        <li>What stages is <code>HARNESS-018</code>, and nothing has touched the working tree yet</li>
+      </ul>
+    </section>
+
+    <section data-track="tdd">
+      <h2>…and no flag said where the project was</h2>
+      <pre><code class="language-bash" data-trim>
+cd harness/src/domain
+spec status      # same catalog, found by walking up
+      </code></pre>
+      <ul class="small">
+        <li><code>--root</code> is gone from every command in this talk. <code>spec</code> walks up from the working directory to the nearest enclosing project</li>
+        <li>Inside a split catalog, an undirected draft lands in the spec file whose directory <strong>covers where you are standing</strong> — deepest match wins, root as the fallback</li>
+        <li>Explicit <code>--root</code> and <code>SPEC_PROJECT_DIR</code> still win. Discovery is what happens when you say nothing</li>
+      </ul>
+      <blockquote class="small">The tool reads its context instead of being told it — the same argument the spec itself makes.</blockquote>
+    </section>
+
+    <section data-track="tdd">
+      <h2>9:10 — it is clean, and that is the problem</h2>
       <div class="two-col">
         <div>
           <h3><code>validate_spec</code> → <span class="badge green">valid</span></h3>
-          <p class="small">The shape is right: ids, statuses, every criterion phrased Given/When/Then.</p>
-          <blockquote class="small">"the harness should handle coverage properly so gaps are found easily"</blockquote>
+          <h3><code>refine_requirement</code> → <span class="badge green">clean</span></h3>
+          <p class="small">No findings. The wording review already ran — you watched it reject the model at 9:00.</p>
         </div>
         <div>
-          <h3><code>refine_requirement</code> → <span class="badge red">10 findings</span></h3>
-          <ul class="small">
-            <li><code>story: missing the actor</code></li>
-            <li><code>'should' is ambiguous</code> · <code>'handle'</code> · <code>'properly'</code> · <code>'easily'</code></li>
-            <li><code>the outcome is not concrete — state the exact expected value after 'then'</code></li>
-            <li><code>criteria: only happy paths — add at least one edge case</code></li>
-          </ul>
+          <p class="small">So read what it actually wrote:</p>
+          <blockquote class="small">… <strong>when the coverage of REQ-001 is reported</strong>, then the report lists criteria 2 and 3 verbatim as uncovered</blockquote>
+          <p class="small">Concrete outcome. Real edge cases. Testable by anyone. And it asks for a <strong>function</strong> — nothing here asked for a tool.</p>
         </div>
       </div>
-      <blockquote>A structurally valid requirement nobody could write a test from. <strong>This one is yours.</strong></blockquote>
+      <blockquote>A rule set can check that an outcome is concrete. It cannot check that you asked for the right thing. <strong>This one is yours.</strong></blockquote>
+    </section>
+
+    <section data-track="tdd">
+      <h2>The edit that does not move the review</h2>
+      <div class="two-col">
+        <div>
+          <h3>The model wrote</h3>
+          <blockquote class="small">when <strong>the coverage of REQ-001 is reported</strong>, then …</blockquote>
+          <p class="small"><code>refine</code> → <span class="badge green">clean</span></p>
+        </div>
+        <div>
+          <h3>The human wrote</h3>
+          <blockquote class="small">when <strong>the <code>criteria_coverage</code> MCP tool is called with its id</strong>, then …</blockquote>
+          <p class="small"><code>refine</code> → <span class="badge green">clean</span></p>
+        </div>
+      </div>
+      <ul class="small">
+        <li>Same verdict, both sides. The deterministic review <strong>cannot tell these apart</strong> — and they build different software</li>
+        <li>Measured, not asserted: implementing the left-hand version returns <code>requirement_coverage()</code>, a function, green on every criterion and useless at 10:50</li>
+        <li>The criteria are the contract. If a new MCP tool is what you want, the criteria have to say so</li>
+      </ul>
     </section>
 
     <section data-track="tdd">
       <h2>9:30 — the criteria become the tests</h2>
       <pre><code class="language-bash" data-trim>
-spec --root harness scenario generate HARNESS-013 --feature tests/features/tool_coverage.feature
-spec --root harness unittest generate HARNESS-013
-spec --root harness changes show     # ← yours: read it before it lands
-spec --root harness changes commit
+spec scenario generate HARNESS-018 --feature tests/features/tool_coverage.feature
+spec unittest generate HARNESS-018
+spec changes show     # ← yours: read it before it lands
+spec changes commit
       </code></pre>
       <ul class="small">
-        <li>The scenario is written <strong>from the acceptance criteria</strong> and tagged <code>@HARNESS-013</code> — nobody re-typed the requirement into a test</li>
+        <li>The scenario is written <strong>from the acceptance criteria</strong> and tagged <code>@HARNESS-018</code> — nobody re-typed the requirement into a test</li>
         <li>Both edits are <strong>staged</strong>. The working tree has not changed yet</li>
       </ul>
       <p class="small muted">This is the step the abstract promises: requirements driving executable tests. It is also the step where a human reads a diff.</p>
@@ -507,8 +576,8 @@ spec --root harness changes commit
     <section data-track="tdd">
       <h2>10:00 — red, and a refactor that gets refused</h2>
       <pre><code class="language-bash" data-trim>
-spec --root harness test        # RED — 1 failing
-spec --root harness refactor --note "tidy the coverage module"
+spec test        # RED — 1 failing
+spec refactor --note "tidy the coverage module"
       </code></pre>
       <blockquote>Refused: <code>Never refactor on a red bar</code></blockquote>
       <ul class="small">
@@ -520,10 +589,10 @@ spec --root harness refactor --note "tidy the coverage module"
     <section data-track="tdd">
       <h2>10:15 — the developer agent writes the code</h2>
       <pre><code class="language-bash" data-trim>
-spec --root harness implement HARNESS-013
-spec --root harness changes show     # ← yours: the third and last moment
-spec --root harness changes commit
-spec --root harness test             # GREEN
+spec implement HARNESS-018
+spec changes show     # ← yours: the third and last moment
+spec changes commit
+spec test             # GREEN
       </code></pre>
       <ul class="small">
         <li>Seven tools for this step. No shell. No free-hand write. The attempt arrives as a <strong>reviewable diff</strong> or it does not arrive</li>
@@ -551,18 +620,72 @@ mvn -f smoke-test/pom.xml test -Dspec.binary=$(which spec)
     </section>
 
     <section data-track="tdd">
-      <h2>11:15 — the morning grades itself</h2>
+      <h2>11:05 — close it out</h2>
       <pre><code class="language-bash" data-trim>
-spec --root harness mark-implemented HARNESS-013   # gated: GREEN + a tagged scenario
-spec --root harness mcp call criteria_coverage --arg id=HARNESS-013
+spec mark-implemented HARNESS-018   # gated: GREEN + a tagged scenario
+spec mcp call criteria_coverage --arg id=HARNESS-018
       </code></pre>
       <p class="small">Run the tool you built at 10:15 against the requirement you wrote at 9:10:</p>
-      <blockquote>Every acceptance criterion of HARNESS-013 has an asserting test. <span class="badge green">covered</span></blockquote>
+      <blockquote>Every acceptance criterion of HARNESS-018 has an asserting test. <span class="badge green">covered</span></blockquote>
       <ul class="small">
         <li>The requirement cannot say <code>implemented</code> without a green bar <em>and</em> a scenario carrying its tag</li>
-        <li>And now the drift gate covers 14 requirements instead of 13 — including this one's wording</li>
+        <li>And now the drift gate covers 17 requirements instead of 16 — including this one's wording</li>
         <li>Note the command: <code>mcp call</code>. There is no <code>spec coverage</code> yet — and that is deliberate</li>
       </ul>
+    </section>
+
+    <!-- ============ 52-56 min: THE SAME MORNING, AUTONOMOUS ============ -->
+    <section data-track="tdd">
+      <h2>11:10 — every command you just watched, on its own</h2>
+      <p class="small">Nine stages. You ran all of them by hand this morning; <code>spec deliver</code> runs the identical sequence.</p>
+      <table class="small">
+        <tr><th>You typed</th><th><code>deliver</code>'s stage</th></tr>
+        <tr><td><code>spec draft</code> + <code>changes commit</code></td><td><code>draft_plan</code> — drafts, commits, reads back what reached the catalog</td></tr>
+        <tr><td><code>feature create</code> + <code>scenario generate</code></td><td><code>author_scenarios</code> — <em>deterministic</em>: one <code>add_scenario</code> per criterion, no model call</td></tr>
+        <tr><td><code>steps missing</code> + <code>steps generate</code></td><td><code>author_steps</code> — and it <strong>re-checks</strong>, looping until nothing is undefined</td></tr>
+        <tr><td><code>unittest generate</code></td><td><code>author_unit_test</code></td></tr>
+        <tr><td><code>spec test</code> → RED</td><td><code>try_run</code> — stops honestly if the runtime is missing</td></tr>
+        <tr><td><code>implement</code>, review, <code>test</code> → GREEN</td><td><code>drive_to_green</code> — the same loop, exit condition <code>--attempts</code> instead of you</td></tr>
+        <tr><td><code>refactor</code> on green</td><td><code>refactor</code> — GREEN only, same state machine</td></tr>
+        <tr><td><code>mark-implemented</code></td><td><code>mark_implemented</code> — same two gates</td></tr>
+      </table>
+      <blockquote class="small">One real divergence, said out loud: the factory derives scenarios deterministically. No model, no judgement, nothing to get wrong.</blockquote>
+    </section>
+
+    <section data-track="tdd">
+      <h2>Manual override, or the factory</h2>
+      <pre><code class="language-bash" data-trim>
+spec changes show                  # must be empty — it will not start on staged work
+spec deliver "every requirement should report which of its criteria no test proves"
+
+spec deliver                       # or: the entire pending backlog
+spec deliver --attempts 5          # RED-to-GREEN tries before it gives up
+spec deliver --fail-fast           # stop at the first one that falls short
+      </code></pre>
+      <table class="small">
+        <tr><th>The moment</th><th>Manual</th><th><code>spec deliver</code></th></tr>
+        <tr><td>The wording</td><td>You rewrote it</td><td>The model's draft stands</td></tr>
+        <tr><td>The staged diff</td><td>You read it</td><td>Committed unread</td></tr>
+        <tr><td>The implementation</td><td>You reviewed it</td><td>Committed on a green bar alone</td></tr>
+      </table>
+      <p class="small">Every gate it gives up is <strong>a human judgement</strong>. Every gate it keeps is <strong>a state machine</strong>: no refactor on red, no <code>implemented</code> without a green bar and a tagged scenario, no start while anything is staged. <code>AutoPrompter</code> answers each prompt with <code>(spec deliver never stops to ask)</code>.</p>
+      <blockquote>The gates are not there to slow the human down. They are what makes it safe to remove the human.</blockquote>
+    </section>
+
+    <section data-track="tdd">
+      <h2>…from everything except one decision</h2>
+      <p class="small">Run <em>this morning's sentence</em> through the factory instead of driving it yourself, and here is what you get:</p>
+      <table class="small">
+        <tr><th>Gate</th><th>Verdict</th></tr>
+        <tr><td><code>validate_spec</code></td><td><span class="badge green">valid</span></td></tr>
+        <tr><td><code>refine_requirement</code></td><td><span class="badge green">clean</span></td></tr>
+        <tr><td>Tagged scenario exists</td><td><span class="badge green">yes</span></td></tr>
+        <tr><td>RED, then GREEN</td><td><span class="badge green">green</span></td></tr>
+        <tr><td>Java smoke test at 10:50</td><td><span class="badge green">green — no new MCP tool to be unplanned</span></td></tr>
+        <tr><td>What got built</td><td><span class="badge red"><code>requirement_coverage()</code> — a function, not a tool</span></td></tr>
+      </table>
+      <p class="small">Every gate passed. Every gate was about <strong>correctness</strong>. Not one of them asked whether this was the right thing to build — that question has no state machine.</p>
+      <blockquote>Which is why, of the three moments, the wording is the one you can never hand over.</blockquote>
     </section>
 
     <section data-track="tdd">
@@ -575,12 +698,12 @@ spec --root harness mcp call criteria_coverage --arg id=HARNESS-013
         <tr><td><code>spec mcp call criteria_coverage --arg id=…</code> works today</td>
             <td><strong>No prompt names it.</strong> <code>[tool_rules]</code> in <code>prompts/prompts.toml</code>, step 8 of <code>prompts/workflow.md</code>, and <code>[advice]</code>'s list of next commands</td></tr>
         <tr><td>The Java smoke test plans for it, so CI stays honest</td>
-            <td><strong>No <code>spec coverage HARNESS-013</code>.</strong> That is a new arm on <code>Command</code> in <code>main.rs</code> plus a service</td></tr>
+            <td><strong>No <code>spec coverage HARNESS-018</code>.</strong> That is a new arm on <code>Command</code> in <code>main.rs</code> plus a service</td></tr>
       </table>
       <p class="small">The cheapest of the three is one command — no recompile, it persists in <code>.spec/config.toml</code>:</p>
       <pre><code class="language-bash" data-trim>
-spec --root harness tools enable criteria_coverage --for status
-spec --root harness tools list --for status      # it is in the profile now
+spec tools enable criteria_coverage --for status
+spec tools list --for status      # it is in the profile now
       </code></pre>
       <blockquote>A registered tool that no profile offers and no prompt mentions is a tool nobody calls.</blockquote>
     </section>

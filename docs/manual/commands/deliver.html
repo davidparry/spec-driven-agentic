@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-f5fc82f3.js";
+            window.path_to_searchindex_js = "../searchindex-5a43e19b.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-2ab172c3.js"></script>
@@ -193,16 +193,21 @@ there.</p>
 <tr><th>Flag</th><th>Description</th></tr>
 </thead>
 <tbody>
-<tr><td><code>--root &lt;ROOT&gt;</code></td><td>Project root. Defaults to <code>.</code>.</td></tr>
+<tr><td><code>--root &lt;ROOT&gt;</code></td><td>Project root. Defaults to the nearest enclosing project, <a href="../global-flags.html#discovery-what-happens-when-you-say-nothing">searching upward</a> from the working directory.</td></tr>
 <tr><td><code>--model &lt;MODEL&gt;</code></td><td>LLM model for the generation steps, this run only.</td></tr>
 <tr><td><code>--retry &lt;N&gt;</code></td><td>Max attempts when a model reply fails validation. Default 3.</td></tr>
 <tr><td><code>--attempts &lt;N&gt;</code></td><td>RED-to-GREEN rounds per requirement. Default 3.</td></tr>
 <tr><td><code>--fail-fast</code></td><td>Stop at the first requirement that falls short instead of carrying on.</td></tr>
 <tr><td><code>--no-refactor</code></td><td>Skip the refactor step even on a green bar.</td></tr>
-<tr><td><code>--file &lt;FILE&gt;</code></td><td>Draft new requirements into this included spec file instead of the root catalog.</td></tr>
+<tr><td><code>--file &lt;FILE&gt;</code></td><td>Draft new requirements into this included spec file. Omitted, the drafted requirement lands in the catalog document covering the working directory — see <a href="spec.html#spec-draft"><code>spec draft</code></a>.</td></tr>
 </tbody>
 </table>
 </div>
+<p>Requirements drafted from a description are numbered the way
+<a href="spec.html#how-the-id-is-chosen"><code>spec draft</code></a> numbers anything: the
+prefix is read off the catalog being drafted into, so delivering a
+description against a <code>HARNESS-</code> catalog plans <code>HARNESS-</code> ids and never
+<code>REQ-</code>.</p>
 <h2 id="what-the-argument-means"><a class="header" href="#what-the-argument-means">What the argument means</a></h2>
 <p>The argument decides where the run starts. There are three entries, and
 the command tells them apart by looking at what you typed:</p>
@@ -218,19 +223,31 @@ the command tells them apart by looking at what you typed:</p>
 </tbody>
 </table>
 </div>
-<p>An argument shaped like <code>REQ-</code> followed by digits is a requirement id
-(case-insensitively, so <code>req-3</code> works). Several words are a description;
-the words do not need quoting, since everything after the flags is joined
-into one.</p>
+<p>An argument that <strong>names a requirement in the catalog</strong> is that
+requirement, matched case-insensitively — so <code>req-3</code> and <code>harness-018</code>
+both work, and the prefix can be whatever the catalog uses. There is no
+hard-coded <code>REQ</code>: the command looks the argument up rather than matching
+a shape it was built with. An argument that merely <em>looks</em> like an id —
+an uppercase prefix, a dash, digits — is also taken as one, so a typo in
+the number is reported by name:</p>
+<pre><code class="language-text">$ spec deliver REQ-999
+Error: No requirement with id REQ-999. Run spec list to see valid ids, or
+describe a new one with spec deliver "&lt;what to build&gt;".
+</code></pre>
+<p>Several words are a description; the words do not need quoting, since
+everything after the flags is joined into one.</p>
 <p>A single word that was reaching for an id and missed is refused rather
-than drafted, because handing <code>R-003</code> to the model as prose invents a
-requirement nobody asked for:</p>
-<pre><code class="language-text">$ spec deliver R-003
-Error: R-003 is not a requirement id, and it is one word rather than a
+than drafted, because handing <code>req7</code> to the model as prose invents a
+requirement nobody asked for. A lone word counts as a miss when it holds
+a digit, or opens with a prefix the catalog actually uses:</p>
+<pre><code class="language-text">$ spec deliver req7
+Error: req7 is not a requirement id, and it is one word rather than a
 requirement to break down, so nothing here can be delivered. Ids look
 like REQ-003 - run spec list to see them. To describe new work instead,
 use plain words: spec deliver "a custom delimiter on the first line".
 </code></pre>
+<p>The example id in that message is taken from the catalog too, so a
+project numbering <code>HARNESS</code> is told <code>Ids look like HARNESS-001</code>.</p>
 <p>A description needs a model to break it down. Without one the run hands
 the work back rather than walking you through wording it — that is what
 <a href="spec.html"><code>spec draft</code></a> and <a href="greenfield.html"><code>spec greenfield</code></a> are for.</p>
@@ -287,7 +304,7 @@ up front, with the reason and the command that settles it:</p>
 <tr><td>Scaffold a project (no build markers)</td><td>Run <a href="init.html"><code>spec init --language</code></a>, or <a href="greenfield.html"><code>spec greenfield</code></a> to be walked through it</td></tr>
 <tr><td>Work from an empty catalog with nothing described</td><td>Describe it: <code>spec deliver "&lt;what to build&gt;"</code>, or <a href="greenfield.html"><code>spec greenfield</code></a></td></tr>
 <tr><td>Break a description down with no model</td><td>Point one at the project with <a href="model.html"><code>spec model use</code></a>, or word it with <a href="spec.html"><code>spec draft</code></a></td></tr>
-<tr><td>Guess what <code>R-003</code> meant</td><td>Ids look like <code>REQ-003</code> — <a href="spec.html"><code>spec list</code></a> shows them</td></tr>
+<tr><td>Guess what <code>req7</code> meant</td><td>Ids look like <code>REQ-003</code> — <a href="spec.html"><code>spec list</code></a> shows them</td></tr>
 </tbody>
 </table>
 </div>

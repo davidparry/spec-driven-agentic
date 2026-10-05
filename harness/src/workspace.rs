@@ -14,6 +14,41 @@ use crate::domain::steps::source_extension;
 /// Where the requirements spec lives, relative to the project root.
 pub const SPEC_PATH: &str = "requirements/requirements.json";
 
+/// The nearest enclosing spec project, walking up from `start`.
+///
+/// Nearest wins, so running inside `harness/src` works on the harness's
+/// own spec rather than the repository's. A directory is a project when
+/// it holds the spec catalog, or failing that the [`SPEC_DIR`] home —
+/// the catalog is the stronger signal, but a project configured and not
+/// yet drafted into is still a project.
+///
+/// `None` when `start` is itself the match, so the common case keeps the
+/// relative `.` every path in a reply is already built from.
+pub fn discover_project_root(start: &Path) -> Option<PathBuf> {
+    let is_project = |dir: &Path| dir.join(SPEC_PATH).is_file() || dir.join(SPEC_DIR).is_dir();
+    let found = start.ancestors().find(|dir| is_project(dir))?;
+    (found != start).then(|| found.to_path_buf())
+}
+
+/// Where the command is being run, as a `/`-separated path relative to
+/// the project root — empty at the root itself.
+///
+/// `None` when the working directory is outside the project, or when
+/// either path will not canonicalize, so a caller that cannot tell where
+/// it is falls back rather than guessing.
+pub fn working_dir_in(root: &Path) -> Option<String> {
+    let root = fs::canonicalize(root).ok()?;
+    let cwd = fs::canonicalize(std::env::current_dir().ok()?).ok()?;
+    let relative = cwd.strip_prefix(&root).ok()?;
+    Some(
+        relative
+            .components()
+            .map(|part| part.as_os_str().to_string_lossy())
+            .collect::<Vec<_>>()
+            .join("/"),
+    )
+}
+
 /// Directories that never contain authored sources.
 const SKIPPED_DIRS: [&str; 7] = [
     "target",
@@ -386,5 +421,58 @@ mod tests {
         let empty = tempfile::tempdir().unwrap();
         let error = primary_language(empty.path()).unwrap_err();
         assert!(error.contains("spec inspect"), "{error}");
+    }
+
+    /// The point of walking up: a command run inside the source tree
+    /// works on the project that encloses it, not on the directory it
+    /// happened to be typed in.
+    #[test]
+    fn the_nearest_enclosing_project_is_found_from_a_subdirectory() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join("requirements")).unwrap();
+        fs::write(root.join(SPEC_PATH), "{}").unwrap();
+        let deep = root.join("src").join("domain");
+        fs::create_dir_all(&deep).unwrap();
+
+        assert_eq!(discover_project_root(&deep), Some(root.to_path_buf()));
+        // Already at the root: nothing to report, so the caller keeps
+        // the relative "." every reply path is built from.
+        assert_eq!(discover_project_root(root), None);
+    }
+
+    /// A project configured but not yet drafted into is still a project.
+    #[test]
+    fn a_spec_home_marks_a_project_when_no_catalog_exists_yet() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(SPEC_DIR)).unwrap();
+        let deep = root.join("src");
+        fs::create_dir_all(&deep).unwrap();
+
+        assert_eq!(discover_project_root(&deep), Some(root.to_path_buf()));
+    }
+
+    /// Nearest wins: running inside `harness/` works on the harness's
+    /// own spec rather than the repository's.
+    #[test]
+    fn the_inner_project_wins_over_the_one_enclosing_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let outer = dir.path();
+        fs::create_dir_all(outer.join("requirements")).unwrap();
+        fs::write(outer.join(SPEC_PATH), "{}").unwrap();
+        let inner = outer.join("harness");
+        fs::create_dir_all(inner.join("requirements")).unwrap();
+        fs::write(inner.join(SPEC_PATH), "{}").unwrap();
+        let deep = inner.join("src");
+        fs::create_dir_all(&deep).unwrap();
+
+        assert_eq!(discover_project_root(&deep), Some(inner));
+    }
+
+    #[test]
+    fn a_directory_inside_no_project_discovers_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(discover_project_root(dir.path()), None);
     }
 }

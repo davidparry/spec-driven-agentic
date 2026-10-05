@@ -54,6 +54,7 @@ use crate::bootstrap::{
 };
 use crate::domain::language::Language;
 use crate::domain::model::{Requirement, Spec};
+use crate::domain::requirement_id::{DEFAULT_PREFIX, is_id_shape, split_id};
 use crate::domain::scaffold::slug;
 use crate::domain::steps::criterion_to_steps;
 use crate::domain::tdd::ImplementAttempt;
@@ -87,23 +88,40 @@ pub enum Target {
     Backlog,
 }
 
-/// Read the command's argument.
+/// Read the command's argument against the ids the catalog actually
+/// holds.
 ///
-/// An argument shaped like a requirement id is one, prose is a
-/// description, and nothing at all is the backlog. A single word that was
-/// reaching for an id and missed is refused rather than drafted: handing
-/// `R-003` to the model as prose invents a requirement nobody asked for.
-pub fn parse_target(raw: Option<&str>) -> Result<Target, String> {
+/// An argument naming a requirement is one, prose is a description, and
+/// nothing at all is the backlog. A single word that was reaching for an
+/// id and missed is refused rather than drafted: handing `R-003` to the
+/// model as prose invents a requirement nobody asked for.
+///
+/// `known` is why this reads the catalog instead of matching a prefix:
+/// ids are `REQ-003` in the kata and `HARNESS-014` in this crate's own
+/// spec, and a command that only recognised one of those could not
+/// deliver the other.
+pub fn parse_target(raw: Option<&str>, known: &[String]) -> Result<Target, String> {
     let Some(text) = raw.map(str::trim).filter(|text| !text.is_empty()) else {
         return Ok(Target::Backlog);
     };
-    if is_requirement_id(text) {
-        return Ok(Target::Requirement(text.to_ascii_uppercase()));
+    if let Some(id) = known.iter().find(|id| id.eq_ignore_ascii_case(text)) {
+        return Ok(Target::Requirement(id.clone()));
     }
-    if is_misspelled_id(text) {
+    // Shaped like an id but naming nothing: the plan reports it by name,
+    // which is a better answer than a lecture on the shape.
+    let upper = text.to_ascii_uppercase();
+    if is_id_shape(&upper) {
+        return Ok(Target::Requirement(upper));
+    }
+    if is_misspelled_id(text, known) {
+        let example = known
+            .iter()
+            .find(|id| is_id_shape(id))
+            .cloned()
+            .unwrap_or_else(|| format!("{DEFAULT_PREFIX}-003"));
         return Err(format!(
             "{text} is not a requirement id, and it is one word rather than a requirement \
-             to break down, so nothing here can be delivered. Ids look like REQ-003 - run \
+             to break down, so nothing here can be delivered. Ids look like {example} - run \
              spec list to see them. To describe new work instead, use plain words: spec \
              deliver \"a custom delimiter on the first line\"."
         ));
@@ -111,29 +129,25 @@ pub fn parse_target(raw: Option<&str>) -> Result<Target, String> {
     Ok(Target::Description(text.to_string()))
 }
 
-/// `REQ-` followed by at least one digit, and nothing else. Matched
-/// case-insensitively so `req-3` on the command line still means the
-/// requirement rather than a one-word description of a feature.
-fn is_requirement_id(text: &str) -> bool {
-    let Some(digits) = text
-        .get(..4)
-        .filter(|head| head.eq_ignore_ascii_case("REQ-"))
-        .map(|_| &text[4..])
-    else {
+/// A single word that was aiming at an id and missed: it carries a
+/// digit, or it opens with a prefix the catalog already uses. Prose is
+/// several words, so `the REQ-003 one` still reads as a description and
+/// a real description is never refused.
+fn is_misspelled_id(text: &str, known: &[String]) -> bool {
+    if text.contains(char::is_whitespace) {
         return false;
+    }
+    let opens_with_a_known_prefix = || {
+        known
+            .iter()
+            .filter_map(|id| split_id(id).map(|(prefix, _)| prefix))
+            .chain(std::iter::once(DEFAULT_PREFIX))
+            .any(|prefix| {
+                text.get(..prefix.len())
+                    .is_some_and(|head| head.eq_ignore_ascii_case(prefix))
+            })
     };
-    !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit())
-}
-
-/// A single word that was aiming at an id: it carries a digit, or it
-/// starts with `req`. Prose is several words, so `the REQ-003 one` still
-/// reads as a description and a real description is never refused.
-fn is_misspelled_id(text: &str) -> bool {
-    !text.contains(char::is_whitespace)
-        && (text.chars().any(|c| c.is_ascii_digit())
-            || text
-                .get(..3)
-                .is_some_and(|head| head.eq_ignore_ascii_case("req")))
+    text.chars().any(|c| c.is_ascii_digit()) || opens_with_a_known_prefix()
 }
 
 /// How hard the run tries, and when it gives up on the plan. What it may
@@ -233,6 +247,15 @@ impl Deliver {
     pub fn with_llm_attempts(mut self, attempts: u32) -> Self {
         self.llm_attempts = attempts.max(1);
         self
+    }
+
+    /// The ids the catalog holds, for [`parse_target`] to read the
+    /// command's argument against. Empty when there is no readable spec
+    /// yet — the description path that drafts the first requirement.
+    pub fn known_ids(&self) -> Vec<String> {
+        self.spec()
+            .map(|spec| spec.requirements.into_iter().map(|r| r.id).collect())
+            .unwrap_or_default()
     }
 
     pub fn run(
@@ -1197,26 +1220,61 @@ mod tests {
     use crate::workspace::SPEC_PATH;
     use std::path::Path;
 
+    fn known(ids: &[&str]) -> Vec<String> {
+        ids.iter().map(|id| id.to_string()).collect()
+    }
+
     #[test]
     fn an_argument_shaped_like_an_id_is_one() {
+        let catalog = known(&["REQ-003", "REQ-3", "REQ-0042"]);
         assert_eq!(
-            parse_target(Some("REQ-003")),
+            parse_target(Some("REQ-003"), &catalog),
             Ok(Target::Requirement("REQ-003".into()))
         );
         assert_eq!(
-            parse_target(Some("req-3")),
+            parse_target(Some("req-3"), &catalog),
             Ok(Target::Requirement("REQ-3".into()))
         );
         assert_eq!(
-            parse_target(Some("  REQ-0042  ")),
+            parse_target(Some("  REQ-0042  "), &catalog),
             Ok(Target::Requirement("REQ-0042".into()))
+        );
+    }
+
+    /// The prefix is the catalog's, not the tool's: this crate's own
+    /// spec numbers `HARNESS-014`, and `spec deliver` has to reach it.
+    #[test]
+    fn an_id_carrying_the_catalogs_own_prefix_is_one() {
+        let catalog = known(&["HARNESS-001", "HARNESS-014"]);
+        assert_eq!(
+            parse_target(Some("HARNESS-014"), &catalog),
+            Ok(Target::Requirement("HARNESS-014".into()))
+        );
+        assert_eq!(
+            parse_target(Some("harness-014"), &catalog),
+            Ok(Target::Requirement("HARNESS-014".into()))
+        );
+    }
+
+    /// Shaped like an id and naming nothing: the plan reports it by
+    /// name, so it must survive parsing rather than be refused here.
+    #[test]
+    fn a_well_shaped_id_the_catalog_does_not_hold_is_still_a_requirement() {
+        assert_eq!(
+            parse_target(Some("REQ-404"), &known(&["REQ-001"])),
+            Ok(Target::Requirement("REQ-404".into()))
+        );
+        assert_eq!(
+            parse_target(Some("HARNESS-404"), &known(&["HARNESS-001"])),
+            Ok(Target::Requirement("HARNESS-404".into()))
         );
     }
 
     #[test]
     fn prose_is_a_description() {
+        let catalog = known(&["REQ-001"]);
         assert_eq!(
-            parse_target(Some("a custom delimiter on the first line")),
+            parse_target(Some("a custom delimiter on the first line"), &catalog),
             Ok(Target::Description(
                 "a custom delimiter on the first line".into()
             ))
@@ -1225,47 +1283,62 @@ mod tests {
         // real description is never mistaken for a typo.
         for prose in ["the REQ-003 one", "sum 2 numbers", "REQ- and REQ-2"] {
             assert!(
-                matches!(parse_target(Some(prose)), Ok(Target::Description(_))),
+                matches!(
+                    parse_target(Some(prose), &catalog),
+                    Ok(Target::Description(_))
+                ),
                 "{prose} should read as a description"
             );
         }
     }
 
-    /// The failure this refuses: `R-003` is one word reaching for an id,
-    /// and drafting from it asks the model to invent a requirement out of
-    /// the typo. Every one of these has to be refused with the ids named.
+    /// The failure this refuses: `req7` is one word reaching for an id,
+    /// and drafting from it asks the model to invent a requirement out
+    /// of the typo. Each is refused with a real id named as the shape.
     #[test]
     fn a_single_word_reaching_for_an_id_is_refused_not_drafted() {
-        for typo in ["R-003", "REQ-1a", "REQ", "REQ-", "REQUIRE-1", "003", "req7"] {
-            let error = parse_target(Some(typo))
+        let catalog = known(&["HARNESS-001"]);
+        for typo in [
+            "REQ-1a", "REQ", "REQ-", "003", "req7", "HARNESS", "harness-",
+        ] {
+            let error = parse_target(Some(typo), &catalog)
                 .expect_err(&format!("{typo} should be refused, not drafted"));
             assert!(error.contains(typo), "{error}");
-            assert!(error.contains("REQ-003"), "{error}");
+            assert!(error.contains("HARNESS-001"), "{error}");
             assert!(error.contains("spec list"), "{error}");
         }
     }
 
+    /// With nothing to read a prefix off, the refusal still has to name
+    /// a shape rather than trail off.
+    #[test]
+    fn an_empty_catalog_still_names_a_shape_when_it_refuses() {
+        let error = parse_target(Some("req7"), &[]).expect_err("req7 should be refused");
+        assert!(error.contains("REQ-003"), "{error}");
+    }
+
     #[test]
     fn nothing_named_is_the_backlog() {
-        assert_eq!(parse_target(None), Ok(Target::Backlog));
-        assert_eq!(parse_target(Some("")), Ok(Target::Backlog));
-        assert_eq!(parse_target(Some("   ")), Ok(Target::Backlog));
+        assert_eq!(parse_target(None, &[]), Ok(Target::Backlog));
+        assert_eq!(parse_target(Some(""), &[]), Ok(Target::Backlog));
+        assert_eq!(parse_target(Some("   "), &[]), Ok(Target::Backlog));
     }
 
     /// A multi-byte first character used to panic the `get(..4)` slice,
     /// and the one-word check slices too.
     #[test]
     fn a_non_ascii_argument_is_a_description_not_a_panic() {
+        let catalog = known(&["REQ-001"]);
         assert!(matches!(
-            parse_target(Some("données de test")),
+            parse_target(Some("données de test"), &catalog),
             Ok(Target::Description(_))
         ));
         assert!(matches!(
-            parse_target(Some("é")),
+            parse_target(Some("é"), &catalog),
             Ok(Target::Description(_))
         ));
         assert!(matches!(
-            parse_target(Some("aaé")),
+            parse_target(Some("aaé"), &catalog),
             Ok(Target::Description(_))
         ));
     }

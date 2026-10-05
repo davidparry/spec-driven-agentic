@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "searchindex-f5fc82f3.js";
+            window.path_to_searchindex_js = "searchindex-5a43e19b.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-2ab172c3.js"></script>
@@ -284,10 +284,13 @@ spec judge models          # confirm Ollama reports it as decision-capable
 spec judge use nimble
 spec judge criterion --text "Given the refactored module, when the suite runs, then code quality is improved by at least 20%"
 </code></pre>
-<p>This adds a second model; it does not replace the one above. Nothing
-asks a judgment until <code>spec judge use</code> names one, and a judgment is
-advice about wording: it never changes a test result, a requirement’s
-status, or the deterministic review it sits beside. See
+<p>This adds a second model; it does not replace the one above. The pull is
+the part that matters — judgments work as soon as a decision-capable
+model is installed, because Ollama is asked which of its models can
+answer. <code>spec judge use</code> only pins the choice so it stops depending on
+what else you pull later.</p>
+<p>A judgment is advice about wording: it never changes a test result, a
+requirement’s status, or the deterministic review it sits beside. See
 <a href="#spec-judge"><code>spec judge</code></a>.</p>
 <h2 id="your-first-session"><a class="header" href="#your-first-session">Your first session</a></h2>
 <p>Run bare <code>spec</code> in a terminal. You get the help, the banner with the
@@ -301,10 +304,16 @@ version, the model status, and an interactive prompt:</p>
   ▲                                  │
   ╰──────────────────────────────────╯
 
-Model set for this session: qwen3.8-flash-next:125b-mlx (not saved - keep it with: spec model use qwen3.8-flash-next:125b-mlx).
+Inference model set for this session: qwen3.8-flash-next:125b-mlx (not saved - keep it with: spec model use qwen3.8-flash-next:125b-mlx).
+Decision model set for this session: nimble:latest (not saved - keep it with: spec judge use nimble:latest).
 Interactive shell - type commands without the spec prefix (e.g. list).
 spec&gt;
 </code></pre>
+<p>One line per model role: the inference model that writes, and the
+decision model that judges. Neither was configured here — both were
+borrowed from what Ollama had installed, for this session only. With no
+decision-capable model pulled, that second line says so instead, and
+every other command works the same.</p>
 <h2 id="two-ways-to-begin-a-project"><a class="header" href="#two-ways-to-begin-a-project">Two ways to begin a project</a></h2>
 <p><strong>Guided, from zero</strong> — one command runs the whole loop with exactly
 two human gates (approving the spec wording and approving generated
@@ -373,12 +382,29 @@ harness keeps its own files under <code>.spec/</code> (see
 for every relative path the harness reads or writes.
 A concrete path wins. An empty <code>--root</code>, or an unexpanded <code>${...}</code>
 template, is ignored. <code>SPEC_PROJECT_DIR</code> is used when it names a real
-path. Otherwise the process stays in the directory it was launched in.
-MCP clients that cannot see argv can
-call <code>project_root</code> to read the same directory as an absolute path.</p>
+path. MCP clients that cannot see argv can call <code>project_root</code> to read
+the resolved directory as an absolute path.</p>
 <pre><code class="language-bash">spec --root ~/code/calculator list
 spec list --root ~/code/calculator   # same thing
 </code></pre>
+<h3 id="discovery-what-happens-when-you-say-nothing"><a class="header" href="#discovery-what-happens-when-you-say-nothing">Discovery: what happens when you say nothing</a></h3>
+<p>Omit <code>--root</code> and <code>spec</code> walks <strong>up</strong> from the working directory to the
+nearest ancestor that looks like a project — one holding
+<code>requirements/requirements.json</code>, or failing that a <code>.spec/</code> directory.
+The first match wins, so a project nested inside another is found before
+its parent. If no ancestor qualifies, the process stays in the directory
+it was launched in, exactly as before.</p>
+<pre><code class="language-bash">cd ~/code/calculator/src/domain
+spec list        # finds ~/code/calculator — no flag needed
+</code></pre>
+<p>This is why a repository holding more than one spec needs no <code>--root</code> on
+every line: standing in the module is how you select its catalog. If
+ids come back with a prefix you did not expect, you are standing in a
+different project than you meant to — <code>spec config</code> reports the root it
+resolved and where that came from.</p>
+<p>Precedence is unchanged by discovery: an explicit <code>--root</code> wins, then
+<code>SPEC_PROJECT_DIR</code>, then the discovered ancestor, then the working
+directory.</p>
 <p>In the <a href="#the-interactive-shell">interactive shell</a>, commands inherit the
 shell’s <code>--root</code> unless a line supplies its own.</p>
 <h2 id="--model-model"><a class="header" href="#--model-model"><code>--model &lt;MODEL&gt;</code></a></h2>
@@ -517,25 +543,64 @@ run <code>list</code>, <code>greenfield</code>, or anything else without relaunc
 commands and <kbd>Ctrl</kbd>+<kbd>R</kbd> for reverse search. If the
 history cannot be saved, the shell says so and exits normally.</p>
 <h2 id="model-announcement-at-startup"><a class="header" href="#model-announcement-at-startup">Model announcement at startup</a></h2>
-<p>The first prompt is preceded by one line describing the session’s
-model. This harness is developed and run against
-<code>qwen3.8-flash-next:125b-mlx</code>; your mileage will vary with a different
-model, especially one trained for work other than development. See
-<a href="#local-llm-ollama">Getting started</a> and
-<a href="#spec-model"><code>spec model</code></a>.</p>
+<p>The first prompt is preceded by one line per model role: the
+<strong>inference</strong> model that writes scenarios, tests, and code, and the
+<strong>decision</strong> model that answers judgments. They are two different models
+doing different work — see <a href="#spec-model"><code>spec model</code></a> and
+<a href="#spec-judge"><code>spec judge</code></a> — so a session names both before you
+type anything, and names which is which.</p>
+<pre><code class="language-text">Inference model set: qwen3.8-flash-next:125b-mlx (from configuration).
+Decision model set: nimble (from configuration).
+</code></pre>
+<h3 id="the-inference-line"><a class="header" href="#the-inference-line">The inference line</a></h3>
+<p>This harness is developed and run against <code>qwen3.8-flash-next:125b-mlx</code>;
+your mileage will vary with a different model, especially one trained
+for work other than development. See
+<a href="#local-llm-ollama">Getting started</a>.</p>
 <div class="table-wrapper">
 <table>
 <thead>
 <tr><th>Situation</th><th>Announcement</th></tr>
 </thead>
 <tbody>
-<tr><td>Configured in <code>.spec/config.toml</code></td><td><code>Model set: qwen3.8-flash-next:125b-mlx (from configuration).</code></td></tr>
-<tr><td>No config, models installed</td><td><code>Model set for this session: qwen3.8-flash-next:125b-mlx (not saved - keep it with: spec model use qwen3.8-flash-next:125b-mlx).</code></td></tr>
+<tr><td>Configured in <code>.spec/config.toml</code></td><td><code>Inference model set: qwen3.8-flash-next:125b-mlx (from configuration).</code></td></tr>
+<tr><td><code>--model</code> passed</td><td><code>Inference model set: qwen3.8-flash-next:125b-mlx (from the --model flag).</code></td></tr>
+<tr><td>No config, models installed</td><td><code>Inference model set for this session: qwen3.8-flash-next:125b-mlx (not saved - keep it with: spec model use qwen3.8-flash-next:125b-mlx).</code></td></tr>
 <tr><td>Ollama up, no models</td><td><code>Ollama is running but has no models - generation will use deterministic templates. For optimal results pull a coding model, e.g.: ollama pull qwen3.8-flash-next:125b-mlx (mileage varies with models not trained for development)</code></td></tr>
 <tr><td>Ollama unreachable</td><td><code>Ollama is not reachable - generation will use deterministic templates. Install it from https://ollama.com, start it, and pull a coding model, e.g.: ollama pull qwen3.8-flash-next:125b-mlx (mileage varies with models not trained for development)</code></td></tr>
 </tbody>
 </table>
 </div>
+<h3 id="the-decision-line"><a class="header" href="#the-decision-line">The decision line</a></h3>
+<p>Resolving the decision model at startup is what turns a model named in
+<code>.spec/config.toml</code> but never pulled into something you find out about
+at the prompt rather than at the first judgment.</p>
+<p>With nothing configured, the line reports the model discovery borrowed
+— judgments are on wherever a decision-capable model is installed. The
+borrow is for the session only; <code>spec judge use</code> is what writes it down.
+Nothing is gated on the answer either way: a judgment is advice about
+wording, so a session with nothing to ask still returns every
+deterministic answer it always did.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Situation</th><th>Announcement</th></tr>
+</thead>
+<tbody>
+<tr><td>Configured in <code>.spec/config.toml</code></td><td><code>Decision model set: nimble (from configuration).</code></td></tr>
+<tr><td><code>--decision-model</code> passed</td><td><code>Decision model set: nimble (from the --decision-model flag).</code></td></tr>
+<tr><td>None configured, one installed</td><td><code>Decision model set for this session: nimble (not saved - keep it with: spec judge use nimble).</code></td></tr>
+<tr><td>None configured, several installed</td><td>The same line, naming the first the provider lists</td></tr>
+<tr><td>Configured, never pulled</td><td><code>Decision model 'nimble' cannot answer decisions here - install it to turn judgments on:</code> then <code>ollama pull nimble</code>, and the decision models that are installed</td></tr>
+<tr><td>None installed</td><td><code>No decision model is installed - install one to turn judgments on:</code> then <code>ollama pull nimble</code> and <code>spec judge use nimble</code></td></tr>
+<tr><td>Ollama unreachable, none configured</td><td><code>No decision model configured and none could be discovered - judgments are off this session.</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>When Ollama cannot be reached, a <em>configured</em> decision model is still
+announced as configured. A capability probe that could not run is not
+evidence the model is missing, and the first judgment reports the real
+failure against the endpoint rather than blaming the model.</p>
 <h2 id="the-greenfield-nudge"><a class="header" href="#the-greenfield-nudge">The greenfield nudge</a></h2>
 <p>When all three signs of a brand-new project line up —</p>
 <ol>
@@ -981,16 +1046,21 @@ there.</p>
 <tr><th>Flag</th><th>Description</th></tr>
 </thead>
 <tbody>
-<tr><td><code>--root &lt;ROOT&gt;</code></td><td>Project root. Defaults to <code>.</code>.</td></tr>
+<tr><td><code>--root &lt;ROOT&gt;</code></td><td>Project root. Defaults to the nearest enclosing project, <a href="#discovery-what-happens-when-you-say-nothing">searching upward</a> from the working directory.</td></tr>
 <tr><td><code>--model &lt;MODEL&gt;</code></td><td>LLM model for the generation steps, this run only.</td></tr>
 <tr><td><code>--retry &lt;N&gt;</code></td><td>Max attempts when a model reply fails validation. Default 3.</td></tr>
 <tr><td><code>--attempts &lt;N&gt;</code></td><td>RED-to-GREEN rounds per requirement. Default 3.</td></tr>
 <tr><td><code>--fail-fast</code></td><td>Stop at the first requirement that falls short instead of carrying on.</td></tr>
 <tr><td><code>--no-refactor</code></td><td>Skip the refactor step even on a green bar.</td></tr>
-<tr><td><code>--file &lt;FILE&gt;</code></td><td>Draft new requirements into this included spec file instead of the root catalog.</td></tr>
+<tr><td><code>--file &lt;FILE&gt;</code></td><td>Draft new requirements into this included spec file. Omitted, the drafted requirement lands in the catalog document covering the working directory — see <a href="#spec-draft"><code>spec draft</code></a>.</td></tr>
 </tbody>
 </table>
 </div>
+<p>Requirements drafted from a description are numbered the way
+<a href="#how-the-id-is-chosen"><code>spec draft</code></a> numbers anything: the
+prefix is read off the catalog being drafted into, so delivering a
+description against a <code>HARNESS-</code> catalog plans <code>HARNESS-</code> ids and never
+<code>REQ-</code>.</p>
 <h2 id="what-the-argument-means"><a class="header" href="#what-the-argument-means">What the argument means</a></h2>
 <p>The argument decides where the run starts. There are three entries, and
 the command tells them apart by looking at what you typed:</p>
@@ -1006,19 +1076,31 @@ the command tells them apart by looking at what you typed:</p>
 </tbody>
 </table>
 </div>
-<p>An argument shaped like <code>REQ-</code> followed by digits is a requirement id
-(case-insensitively, so <code>req-3</code> works). Several words are a description;
-the words do not need quoting, since everything after the flags is joined
-into one.</p>
+<p>An argument that <strong>names a requirement in the catalog</strong> is that
+requirement, matched case-insensitively — so <code>req-3</code> and <code>harness-018</code>
+both work, and the prefix can be whatever the catalog uses. There is no
+hard-coded <code>REQ</code>: the command looks the argument up rather than matching
+a shape it was built with. An argument that merely <em>looks</em> like an id —
+an uppercase prefix, a dash, digits — is also taken as one, so a typo in
+the number is reported by name:</p>
+<pre><code class="language-text">$ spec deliver REQ-999
+Error: No requirement with id REQ-999. Run spec list to see valid ids, or
+describe a new one with spec deliver "&lt;what to build&gt;".
+</code></pre>
+<p>Several words are a description; the words do not need quoting, since
+everything after the flags is joined into one.</p>
 <p>A single word that was reaching for an id and missed is refused rather
-than drafted, because handing <code>R-003</code> to the model as prose invents a
-requirement nobody asked for:</p>
-<pre><code class="language-text">$ spec deliver R-003
-Error: R-003 is not a requirement id, and it is one word rather than a
+than drafted, because handing <code>req7</code> to the model as prose invents a
+requirement nobody asked for. A lone word counts as a miss when it holds
+a digit, or opens with a prefix the catalog actually uses:</p>
+<pre><code class="language-text">$ spec deliver req7
+Error: req7 is not a requirement id, and it is one word rather than a
 requirement to break down, so nothing here can be delivered. Ids look
 like REQ-003 - run spec list to see them. To describe new work instead,
 use plain words: spec deliver "a custom delimiter on the first line".
 </code></pre>
+<p>The example id in that message is taken from the catalog too, so a
+project numbering <code>HARNESS</code> is told <code>Ids look like HARNESS-001</code>.</p>
 <p>A description needs a model to break it down. Without one the run hands
 the work back rather than walking you through wording it — that is what
 <a href="#the-requirements-spec"><code>spec draft</code></a> and <a href="#spec-greenfield"><code>spec greenfield</code></a> are for.</p>
@@ -1075,7 +1157,7 @@ up front, with the reason and the command that settles it:</p>
 <tr><td>Scaffold a project (no build markers)</td><td>Run <a href="#spec-init"><code>spec init --language</code></a>, or <a href="#spec-greenfield"><code>spec greenfield</code></a> to be walked through it</td></tr>
 <tr><td>Work from an empty catalog with nothing described</td><td>Describe it: <code>spec deliver "&lt;what to build&gt;"</code>, or <a href="#spec-greenfield"><code>spec greenfield</code></a></td></tr>
 <tr><td>Break a description down with no model</td><td>Point one at the project with <a href="#spec-model"><code>spec model use</code></a>, or word it with <a href="#the-requirements-spec"><code>spec draft</code></a></td></tr>
-<tr><td>Guess what <code>R-003</code> meant</td><td>Ids look like <code>REQ-003</code> — <a href="#the-requirements-spec"><code>spec list</code></a> shows them</td></tr>
+<tr><td>Guess what <code>req7</code> meant</td><td>Ids look like <code>REQ-003</code> — <a href="#the-requirements-spec"><code>spec list</code></a> shows them</td></tr>
 </tbody>
 </table>
 </div>
@@ -1457,14 +1539,42 @@ together. Structural validate must pass; refine findings are reported
 in <code>nextStep</code> (<code>spec reword &lt;id&gt;</code> to address them). A title or
 criterion that collides with an existing requirement warns but still
 stages.</p>
-<p>By default the draft lands in the root <code>requirements.json</code>. To draft
-into an included spec file instead, name it with <code>--file</code> (it must
+<p>To draft into a particular spec file, name it with <code>--file</code> (it must
 already be part of the catalog — see
 <a href="#spec-include"><code>spec include</code></a>):</p>
 <pre><code class="language-bash">spec draft --file requirements/core/arithmetic.json
 </code></pre>
-<p>Ids are allocated across the whole catalog, so a requirement drafted
-into a child file still gets the next free <code>REQ-nnn</code>.</p>
+<p>When <code>--file</code> is omitted, the draft lands in the catalog document whose
+directory <strong>covers the working directory</strong>, deepest match first, falling
+back to the root <code>requirements.json</code>. Running in <code>core/</code> with
+<code>requirements/core/arithmetic.json</code> in the catalog drafts there; running
+in <code>src/domain</code>, which no included file covers, drafts into the root.</p>
+<h3 id="how-the-id-is-chosen"><a class="header" href="#how-the-id-is-chosen">How the id is chosen</a></h3>
+<p>Ids are <strong>derived from the catalog</strong>, never assumed. The prefix is the
+one the requirements already in the target file use; if that file is
+empty, the prefix of its nearest ancestor in the include tree, then the
+catalog root, and only then <code>REQ</code>. The number is the highest existing
+number <em>for that prefix</em> across the whole merged catalog, plus one — so
+two included files can never allocate the same id. Zero-padding matches
+the widest numeric part already in use, with a minimum of three digits.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>The catalog’s ids</th><th>Next drafted id</th></tr>
+</thead>
+<tbody>
+<tr><td><code>REQ-001</code> … <code>REQ-006</code></td><td><code>REQ-007</code></td></tr>
+<tr><td><code>HARNESS-001</code> … <code>HARNESS-017</code></td><td><code>HARNESS-018</code></td></tr>
+<tr><td><code>REQ-0007</code></td><td><code>REQ-0008</code></td></tr>
+<tr><td>none at all</td><td><code>REQ-001</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>The consequence worth knowing: one binary serves every spec with no
+per-project configuration, and nothing has to be told how a project
+numbers its work. Agents should <strong>read</strong> the next id rather than guess
+it — <a href="#spec-status"><code>spec status</code></a> reports it as <code>nextId</code>, and the same
+value reaches MCP callers through <code>list_requirements</code>.</p>
 <p>The prompts, first pass (interactive wizard, flags omitted):</p>
 <pre><code class="language-text">REQ-004 title:
 REQ-004 story:
@@ -3052,14 +3162,16 @@ says the provider is unreachable.</p>
 <p>Show the resolved model and where it came from.</p>
 <pre><code class="language-bash">spec model current
 </code></pre>
-<pre><code class="language-text">Configured model: qwen3.8-flash-next:125b-mlx
+<pre><code class="language-text">qwen3.8-flash-next:125b-mlx (from configuration)
 </code></pre>
 <p>With nothing configured but models installed, the first one is the
 session default and the output tells you it is not saved:</p>
-<pre><code class="language-text">Model set for this session: qwen3.8-flash-next:125b-mlx (not saved - keep it with: spec model use qwen3.8-flash-next:125b-mlx).
+<pre><code class="language-text">qwen3.8-flash-next:125b-mlx (from the first installed model, this session only - persist it with: spec model use &lt;model-name&gt;)
 </code></pre>
-<p>The same announcement appears when the
-<a href="#the-interactive-shell">interactive shell</a> starts.</p>
+<p>This is the inference model — the one that writes scenarios, tests, and
+code. The decision model that answers judgments is a separate choice
+with its own command, <a href="#spec-judge"><code>spec judge current</code></a>. The
+<a href="#the-interactive-shell">interactive shell</a> announces both at startup.</p>
 <hr>
 <h2 id="spec-model-use"><a class="header" href="#spec-model-use">spec model use</a></h2>
 <p>Persist a model choice in the project’s configuration.</p>
@@ -3142,11 +3254,29 @@ criterion comes back at p = 0.038 — not measurable.</p>
 
 Commands: models, current, use, criterion
 </code></pre>
-<h2 id="nothing-is-on-until-you-turn-it-on"><a class="header" href="#nothing-is-on-until-you-turn-it-on">Nothing is on until you turn it on</a></h2>
-<p>With no decision model configured — the state after <code>spec init</code> — the
-harness asks nothing, and every command behaves exactly as it did
-before this feature existed. There is no default model, no automatic
-pull, and no model chosen for you.</p>
+<h2 id="on-wherever-a-decision-model-is-installed"><a class="header" href="#on-wherever-a-decision-model-is-installed">On wherever a decision model is installed</a></h2>
+<p>Pull a decision model and judgments work. There is nothing else to
+configure: with <code>[decision] model</code> unset, Ollama is asked which of its
+models can answer, and the first is used for the session.</p>
+<p>Nothing is <em>assumed</em>, though. No model name is compiled in, none is
+pulled for you, and the borrowed choice is never written to your
+configuration — <code>spec judge use</code> is still the only thing that makes one
+stick. On a machine with no decision-capable model, every command
+behaves exactly as it did before this feature existed.</p>
+<p>Two ways to turn it off: <code>mode = "off"</code> stops the automatic judgments
+while leaving <code>spec judge</code> answering, and a machine with no decision
+model pulled asks nothing because there is nothing to ask.</p>
+<p>The <a href="#the-decision-line">interactive shell</a> says
+which state you are in before its first prompt, on a line beside the
+inference model’s:</p>
+<pre><code class="language-text">Inference model set: qwen3.8-flash-next:125b-mlx (from configuration).
+Decision model set for this session: nimble (not saved - keep it with: spec judge use nimble).
+</code></pre>
+<p>Resolving it at startup is what turns a model named in <code>[decision]</code> but
+never pulled into something you find out about at the prompt rather than
+at the first judgment. Nothing is gated on it either way: a judgment is
+advice about wording, so a session with nothing to ask still returns
+every deterministic answer it always did.</p>
 <h2 id="what-a-judgment-is-allowed-to-do"><a class="header" href="#what-a-judgment-is-allowed-to-do">What a judgment is allowed to do</a></h2>
 <p>A judgment is <strong>advice about wording</strong>. By default it cannot do anything
 else. Specifically, a decision model in this harness can never:</p>
@@ -3194,8 +3324,15 @@ timeout_seconds	60
 mode	advisory
 min_confidence	0.8
 </code></pre>
-<p>With nothing configured:</p>
-<pre><code class="language-text">No decision model configured - judgments are off. Pick one with: spec judge models, then spec judge use &lt;model-name&gt;
+<p>The model shown is the one that will actually answer, so with nothing
+configured it is the one discovery borrowed, and the source says so
+rather than claiming the file named it:</p>
+<pre><code class="language-text">nimble:latest (from the only installed decision model)
+</code></pre>
+<p>With nothing configured and nothing installed that can decide:</p>
+<pre><code class="language-text">No decision model is installed - install one to turn judgments on:
+    ollama pull nimble
+    spec judge use nimble
 </code></pre>
 <p><code>--json</code> prints the same values as a stable object, including the
 question version:</p>
@@ -3475,8 +3612,8 @@ project that would rather see every flag.</p>
 <tr><th>Message</th><th>What to do</th></tr>
 </thead>
 <tbody>
-<tr><td><code>No decision model is installed</code></td><td><code>ollama pull nimble</code>, then <code>spec judge use nimble</code></td></tr>
-<tr><td><code>No decision model configured</code></td><td><code>spec judge use &lt;name&gt;</code> — the message lists the installed names to choose from</td></tr>
+<tr><td><code>No decision model is installed</code></td><td><code>ollama pull nimble</code> — judgments start working as soon as one is pulled, with or without <code>spec judge use</code></td></tr>
+<tr><td><code>No decision model configured and none could be discovered</code></td><td>Ollama could not be reached to ask what is installed. Start it, or name a model with <code>spec judge use &lt;name&gt;</code></td></tr>
 <tr><td><code>decision model 'X' is not installed</code></td><td><code>ollama pull X</code></td></tr>
 <tr><td><code>'X' cannot answer decisions here</code></td><td>The model has no <code>decision</code> capability. The message lists the ones that do</td></tr>
 <tr><td><code>... has no /v1/systemone route</code></td><td>Ollama is older than 0.35. Upgrade it</td></tr>
@@ -3552,8 +3689,12 @@ tools.profiles.implement	get_requirement, feature_read, …	(default)
 </code></pre>
 <p>The five <code>decision.*</code> rows describe the
 <a href="#spec-judge">decision model</a> — a second, separate model from <code>llm.model</code>
-above. <code>decision.model</code> is <code>(unset)</code> until <code>spec judge use</code> names one,
-and while it is unset nothing asks a judgment. <code>decision.endpoint</code> is
+above. <code>decision.model</code> is <code>(unset)</code> until <code>spec judge use</code> names one.
+Unset does not mean judgments are off: this command reports what the
+file says, and with no model named the first decision-capable model
+installed is used for the run. <a href="#spec-judge"><code>spec judge current</code></a> is the
+one that resolves it and names the model that will actually answer.
+<code>decision.endpoint</code> is
 attributed to the file when either it or <code>[llm] endpoint</code> supplied the
 host, since the decision plane defaults to wherever Ollama already is.</p>
 <p><code>refactor.attempts</code> is how many write-then-test rounds

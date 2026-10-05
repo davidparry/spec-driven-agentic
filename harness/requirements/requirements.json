@@ -158,16 +158,6 @@
       "featureFile": "tests/features/spec_includes.feature"
     },
     {
-      "id": "HARNESS-013",
-      "title": "Criteria coverage",
-      "status": "pending",
-      "story": "the harness should handle coverage properly so gaps are found easily",
-      "acceptanceCriteria": [
-        "Given a requirement, when coverage is requested, then the uncovered criteria are reported properly",
-        "Given a requirement with tests, when coverage is requested, then it works"
-      ]
-    },
-    {
       "id": "HARNESS-014",
       "title": "A test run narrows to the target that owns the feature",
       "status": "implemented",
@@ -178,6 +168,47 @@
         "Given a crate whose tests directory is missing any target that matches, when the tests are run for that feature, then the run carries no \"--test\" flag"
       ],
       "featureFile": "tests/features/test_runners.feature"
+    },
+    {
+      "id": "HARNESS-015",
+      "title": "A drafted requirement carries the prefix its catalog already uses",
+      "status": "implemented",
+      "story": "As a developer drafting into a spec that already numbers its requirements, I want the new id to carry the prefix the catalog uses so that one binary serves every spec without being told how each one numbers.",
+      "acceptanceCriteria": [
+        "Given a catalog whose highest id is \"HARNESS-014\", when a requirement is drafted, then the staged id is \"HARNESS-015\"",
+        "Given an empty catalog holding 0 requirements, when a requirement is drafted, then the staged id is \"REQ-001\"",
+        "Given a catalog whose highest id is \"REQ-0007\", when a requirement is drafted, then the staged id is \"REQ-0008\"",
+        "Given a catalog numbering \"HARNESS-001\" that also includes a file numbering \"CLI-099\", when a requirement is drafted, then the staged id is \"HARNESS-002\"",
+        "Given a catalog whose highest id is \"HARNESS-014\", when the status is reported, then the next id is \"HARNESS-015\"",
+        "Given a catalog holding \"HARNESS-014\", when the delivery target \"harness-014\" is read, then the target is requirement \"HARNESS-014\""
+      ],
+      "featureFile": "tests/features/requirement_ids.feature"
+    },
+    {
+      "id": "HARNESS-016",
+      "title": "The project is found by walking up from the working directory",
+      "status": "implemented",
+      "story": "As a developer running spec from inside a repository, I want the nearest enclosing project used when none is named so that the command works on what I am looking at without a flag.",
+      "acceptanceCriteria": [
+        "Given a project whose catalog sits at its root, when the root is discovered from \"src/domain\" inside it, then the reported root is the directory holding \"requirements/requirements.json\"",
+        "Given a project nested inside another project, when the root is discovered from \"harness/src\", then the reported root is \"harness\"",
+        "Given a directory holding \".spec\" and no catalog, when the root is discovered from \"src\" inside it, then the reported root is the directory holding \".spec\"",
+        "Given a directory that is itself the project root, when the root is discovered from it, then 0 roots are reported",
+        "Given a directory whose every ancestor is missing both markers, when the root is discovered from it, then 0 roots are reported"
+      ],
+      "featureFile": "tests/features/project_discovery.feature"
+    },
+    {
+      "id": "HARNESS-017",
+      "title": "An undirected draft lands in the catalog file covering the working directory",
+      "status": "implemented",
+      "story": "As a developer drafting in a catalog split across files, I want a requirement to land in the spec file covering the directory I am in so that the backlog stays organised without my naming a file every time.",
+      "acceptanceCriteria": [
+        "Given a catalog including \"core/math.json\" and a command run in \"core\", when a requirement is drafted with no file named, then \"requirements/core/math.json\" holds 2 requirements",
+        "Given a command run in \"src/domain\", for which a covering spec file is missing, when a requirement is drafted with no file named, then \"requirements/requirements.json\" holds 2 requirements",
+        "Given a catalog including \"core/math.json\" and a command run in \"core\", when a requirement is drafted naming \"requirements/requirements.json\", then the staged id is \"REQ-002\""
+      ],
+      "featureFile": "tests/features/project_discovery.feature"
     }
   ]
 }

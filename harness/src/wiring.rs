@@ -9,7 +9,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::adapters::config::{DecisionSettings, config_path, decision_settings};
+use crate::adapters::config::{DecisionSettings, TomlModelStore, config_path, decision_settings};
 use crate::adapters::fs_memory::{FsMemoryStore, FsProjectInventory};
 use crate::adapters::fs_project::FsProjectFiles;
 use crate::adapters::fs_sources::FsSourceFiles;
@@ -17,6 +17,7 @@ use crate::adapters::fs_spec::{FsFeatureFiles, FsSpecRepository};
 use crate::adapters::fs_staging::FsChangeStore;
 use crate::adapters::fs_state::FsStateStore;
 use crate::adapters::gherkin_features::GherkinFeatureCatalog;
+use crate::adapters::ollama::OllamaCatalog;
 use crate::adapters::ollama_decision::OllamaDecision;
 use crate::adapters::overlay::{OverlayCatalog, OverlaySources};
 use crate::application::change_service::ChangeService;
@@ -24,6 +25,7 @@ use crate::application::decision_service::DecisionService;
 use crate::application::generation_service::{GenerationService, ResolvedLlm};
 use crate::application::implement_service::ImplementService;
 use crate::application::memory_service::{MemoryAwareConversation, MemoryService};
+use crate::application::model_service::{ModelService, ModelSource, SessionDecision};
 use crate::application::refactor_service::RefactorService;
 use crate::application::scenario_service::ScenarioService;
 use crate::application::spec_mutation_service::SpecMutationService;
@@ -52,6 +54,9 @@ pub fn spec_repository(root: &Path) -> FsSpecRepository {
 }
 
 /// The `[decision]` block with a one-run `--decision-model` applied.
+///
+/// A config read and nothing else. [`session_decision`] is what turns
+/// an absent `model` into the one this run will actually use.
 pub fn resolved_decision(root: &Path, flag: Option<&str>) -> DecisionSettings {
     let mut settings = decision_settings(&config_path(root));
     if let Some(model) = flag {
@@ -60,12 +65,48 @@ pub fn resolved_decision(root: &Path, flag: Option<&str>) -> DecisionSettings {
     settings
 }
 
-/// The judgment service, when a decision model has been named.
+/// The decision role resolved for this run: the configured name, or the
+/// first decision-capable model the provider has installed.
 ///
-/// `None` is the shipped state and is not an error: with no
-/// `[decision] model` set, nothing asks a question and every command
-/// behaves exactly as it did before the decision plane existed. The
-/// mode is deliberately *not* consulted here — `spec judge` runs
+/// One place, so the model a session announces at startup and the model
+/// it then judges with cannot drift apart.
+///
+/// The catalog is pointed at the decision endpoint rather than the
+/// generative one. They are the same host unless `[decision] endpoint`
+/// says otherwise, and when it does, the models worth discovering are
+/// the ones on the host that will be asked.
+///
+/// Reaches the provider, so it must not be called on an async runtime
+/// thread - see the note in `mcp::attach_judgment`.
+pub fn session_decision(root: &Path, flag: Option<&str>) -> SessionDecision {
+    let settings = resolved_decision(root, flag);
+    let source = if flag.is_some() {
+        ModelSource::Flag
+    } else {
+        ModelSource::Config
+    };
+    ModelService::new(
+        OllamaCatalog::new(settings.endpoint),
+        TomlModelStore::new(config_path(root)),
+    )
+    .session_decision(settings.model.as_deref(), source)
+}
+
+/// The judgment service, when some model can answer.
+///
+/// A configured model is taken as given; with none configured, the
+/// first decision-capable model installed is used for this run. `None`
+/// means discovery had nothing to offer - no decision-capable model is
+/// installed, or the provider could not be reached to ask. Not an
+/// error: nothing is asked, and every command returns the deterministic
+/// answer it always did.
+///
+/// Deliberately *not* gated on [`session_decision`]'s readiness. A
+/// project that named a model and then lost it gets the real failure
+/// against the endpoint, rather than judgments quietly switching
+/// themselves off.
+///
+/// The mode is deliberately *not* consulted here — `spec judge` runs
 /// because a human typed it, while `off` suppresses the automatic
 /// judgments inside the workflow.
 pub fn decision_service(
@@ -73,7 +114,11 @@ pub fn decision_service(
     flag: Option<&str>,
 ) -> Option<DecisionService<OllamaDecision>> {
     let settings = resolved_decision(root, flag);
-    let model = settings.model?;
+    let model = ModelService::new(
+        OllamaCatalog::new(settings.endpoint.clone()),
+        TomlModelStore::new(config_path(root)),
+    )
+    .decision_model(settings.model.as_deref())?;
     Some(DecisionService::new(
         model,
         OllamaDecision::with_timeout(settings.endpoint, settings.timeout),
@@ -140,6 +185,7 @@ pub fn mutation_service(
         tdd_store(root),
         SPEC_PATH.into(),
     )
+    .with_working_dir(crate::workspace::working_dir_in(root))
     .with_llm_attempts(attempts)
 }
 
@@ -282,14 +328,41 @@ mod tests {
         assert_eq!(turn.content, "m:s:p");
     }
 
-    /// No decision model named is the shipped state, and it is not an
-    /// error: nothing asks a question and every command behaves exactly
-    /// as it did before the decision plane existed.
+    /// A project that names no decision model still judges, by
+    /// borrowing whichever decision-capable model the provider has.
+    /// With nothing to ask, there is nothing to borrow and no service -
+    /// which is not an error: judgments are advice, so every command
+    /// returns the deterministic answer it always did.
+    ///
+    /// The closed port is what makes this deterministic. Pointed at a
+    /// live Ollama it would depend on what the developer happened to
+    /// have pulled, which is the machine's state and not this crate's.
     #[test]
-    fn no_decision_model_named_means_no_judgment_service_at_all() {
+    fn with_nothing_named_and_nothing_to_discover_there_is_no_judgment_service() {
         let dir = tempfile::tempdir().unwrap();
+        let path = config_path(dir.path());
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "[decision]\nendpoint = \"http://127.0.0.1:1\"\n").unwrap();
         assert!(decision_service(dir.path(), None).is_none());
         assert_eq!(resolved_decision(dir.path(), None).model, None);
+    }
+
+    /// A named model is taken as given rather than probed. The endpoint
+    /// here is a closed port, so a service that asked permission first
+    /// could not have got it - and judgments that silently switched
+    /// themselves off would be worse than the failure the call reports.
+    #[test]
+    fn a_named_decision_model_builds_a_service_without_asking_the_provider() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = config_path(dir.path());
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            "[decision]\nmodel = \"nimble:test\"\nendpoint = \"http://127.0.0.1:1\"\n",
+        )
+        .unwrap();
+        let service = decision_service(dir.path(), None).expect("a named model is honoured");
+        assert_eq!(service.model(), "nimble:test");
     }
 
     #[test]

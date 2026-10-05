@@ -1,12 +1,20 @@
 # A Day in the Life of a TDD Agentic Developer — presenter notes
 
 Stage script for the 60-minute talk. The demo builds the harness a new
-MCP tool of its own, `criteria_coverage`, from a requirement that starts vague.
-Everything below is the presenter's copy; the attendee version is
-[a-day-in-the-life.md](../student-follow-docs/a-day-in-the-life.md).
+MCP tool of its own, `criteria_coverage`, starting from **one sentence
+typed live** — there is no requirement waiting in the catalog when you
+walk on. Everything below is the presenter's copy; the attendee version
+is [a-day-in-the-life.md](../student-follow-docs/a-day-in-the-life.md).
 
 The clock times are the story, not the wall clock. The whole demo is
 about 28 minutes.
+
+Every command below is run from **inside `harness/`**. There is no
+`--root` flag anywhere in this script, and that is deliberate: `spec`
+walks up from the working directory to the nearest enclosing project.
+`cd harness` once at the start and the tool finds the catalog from
+anywhere beneath it, `src/domain` included. If you find yourself typing
+`--root`, you are in the wrong directory.
 
 ## Before you walk on
 
@@ -15,20 +23,32 @@ cd <repo>
 git switch trunk && git pull
 git switch -c talk-$(date +%Y%m%d)         # never demo on trunk
 scripts/preflight.sh                       # model, binary, toolchains
-spec --root harness validate               # must be valid: true
-spec --root harness refine HARNESS-013     # must report 10 findings
-spec --root harness list                   # HARNESS-013 is the only pending one
-cargo test --manifest-path harness/Cargo.toml --test spec_completeness
-mvn -f smoke-test/pom.xml test -Dspec.binary=$(which spec)
+cd harness                                 # everything after this runs from here
+spec validate                              # must be valid: true
+spec list                                  # 16 requirements, 0 pending
+spec status                                # nextId: HARNESS-018
+cargo test --manifest-path Cargo.toml --test spec_completeness
+mvn -f ../smoke-test/pom.xml test -Dspec.binary=$(which spec)
 ```
 
 **Make the branch before anything else.** Every mutation of the next 28
-minutes — the reworded catalog, the new feature file, the generated
+minutes — the drafted requirement, the new feature file, the generated
 test, the implementation, the Java-side bump — lands in the working
 tree. On a branch, giving the talk again is one `git branch -D`. On
-`trunk` it is an archaeology exercise, and the thing you will miss is
-the catalog, which leaves `refine HARNESS-013` clean on the first pass
-and kills the 9:10 beat.
+`trunk` it is an archaeology exercise.
+
+**The starting catalog has nothing pending.** That is the point of the
+new opening: the first thing the room sees is an empty backlog and a
+human saying a sentence out loud. If `spec list` shows a pending
+requirement, a previous talk was not reset — see the reset section.
+
+**`spec status` tells you the id before you draft it.** Read `nextId`
+during preflight and use that number in your patter. It is derived from
+the catalog, so if the room sees `HARNESS-018` appear, it is because
+`HARNESS-017` is the highest id in the file, not because you typed it.
+If preflight says something other than `HARNESS-018`, the catalog has
+moved on since these notes were written — use what it says, the beat is
+identical.
 
 **The `-Dspec.binary` flag is not optional.** `LiveSpecServerTest` is
 annotated `@EnabledIfSystemProperty(named = "spec.binary", ...)`. Without
@@ -37,10 +57,10 @@ server grows a tool the plan does not name, and the best beat in the
 talk does not fire. Verified: the planned set green, one tool past it
 `BUILD FAILURE`.
 
-The starting state is: 13 implemented requirements, one vague pending
-draft, exactly the planned tools served, every bar green. If `spec_completeness` is red
-before you start, the catalog and the feature tags have drifted — fix
-that, do not demo around it.
+The starting state is: 16 implemented requirements, nothing pending,
+exactly the planned tools served, every bar green. If `spec_completeness`
+is red before you start, the catalog and the feature tags have drifted —
+fix that, do not demo around it.
 
 **Optional, and off unless you turn it on: the decision model.** If you
 mean to show the 9:10 aside below, do this before you walk on, because
@@ -51,7 +71,6 @@ nothing else in the talk does:
 ollama --version                                    # 0.35 or newer, or skip the aside
 ollama pull nimble
 spec judge models                                   # nimble:latest must be listed
-spec --root harness --decision-model nimble:latest judge criterion HARNESS-013
 spec config | grep -E "llm.model|decision.model"    # llm.model unchanged, decision.model unset
 ```
 
@@ -64,38 +83,139 @@ If `ollama --version` is older than 0.35 there is no `/v1/systemone` and
 the aside cannot run. Cut it. Nothing later in the talk refers back to
 it.
 
-## 9:00 — the ticket lands
+## 9:00 — one sentence
+
+Nothing is waiting. Show the empty backlog first:
 
 ```bash
-spec --root harness status
-spec --root harness show HARNESS-013
+spec status
 ```
 
-Point out that the catalog, not the chat history, is what names the next
-piece of work. HARNESS-013 is titled "Criteria coverage" and says almost
-nothing.
-
-## 9:10 — it is vague, and the tool says so
+Then say the sentence out loud and type it into the wizard:
 
 ```bash
-spec --root harness validate      # valid: true
-spec --root harness refine HARNESS-013
+spec draft
 ```
 
-The beat to land: **the spec is structurally valid and still unusable.**
-Validation says the shape is right. The wording review returns 10
-findings — six on the story, three on the criteria, one on coverage.
-Read two of them out loud:
+```
+for one requirement, show me which acceptance criteria no test proves
+```
 
-- `story: 'properly' is ambiguous - describe the observable behavior instead`
-- `criteria: only happy paths - add at least one edge case (empty, invalid, or error input)`
+Three things happen while it runs, and all three are worth narrating.
 
-Nobody would generate a test from this. That is the point.
+**It reads the catalog before it writes.** The model calls
+`list_requirements`, then `get_requirement` on a couple of existing
+ones, to match the house style before proposing anything. You will see
+those calls scroll past. Say what they are: the draft is informed by the
+spec that is already there, not by a template.
+
+**The harness rejects its own model, out loud.** Expect at least one:
+
+```text
+The model reply was invalid (requirements "..." cover only happy paths -
+add at least one edge case to each) - asking again (2 of 3)
+```
+
+That is the wording review firing *before anything is staged*. Do not
+skip past it — it is the single best unplanned moment in the run, and it
+sets up 9:10.
+
+**Then it proposes.** The description is broken into atomic
+requirements, one capability each.
+
+> **Do not promise a number.** The same sentence gave five proposals on
+> one rehearsal and one on the next. Say "it proposes a handful" and
+> read whatever is on screen. If you want a predictable slide, the
+> count is the one thing here you cannot pin.
+
+### This beat is yours — the first human gate
+
+```text
+Accept [Enter for all, or comma-separated numbers]: 1
+```
+
+Type `1`. One keystroke, and it is a real decision: the model offered a
+backlog and you took one requirement. Everything else it proposed is
+discarded, unbuilt, and that is you deciding scope rather than the
+machine deciding it for you. Say that out loud — it is the first of the
+morning's human moments and the cheapest to miss.
+
+What stages is `HARNESS-018`.
+
+**Stop on the id.** Nobody typed `HARNESS`. The catalog's highest id is
+`HARNESS-017`, so the next one is `HARNESS-018` — the prefix is read off
+the neighbours, the number is `max + 1` across the merged catalog, and
+the padding matches what is already there. Point out that the same
+binary drafting into `requirements/` at the repo root would have said
+`REQ-007`, because that catalog numbers `REQ`. One tool, no per-project
+configuration, and nothing for an agent to guess: `spec status` reports
+`nextId` precisely so an agent reads the shape instead of inventing one.
+
+Worth ten seconds: you are standing in `harness/` and never said where
+the project is. Run one command from deeper in to make it concrete:
+
+```bash
+cd src/domain && spec status && cd ../..
+```
+
+Same catalog, found by walking up. This is the first instance of the
+argument the whole talk makes — the tool reads its context rather than
+being told it.
+
+> **Deliver parity.** `spec deliver "the harness should handle coverage
+> properly so gaps are found easily"` runs exactly this as its *draft*
+> stage, via `draft_plan`. It drafts, commits, reads back what actually
+> reached the catalog, and plans those ids.
+
+## 9:10 — it is clean, and that is the problem
+
+```bash
+spec validate            # valid: true
+spec refine HARNESS-018  # clean: true
+```
+
+**This is not the beat the old version of this talk had, and it is a
+better one.** Do not apologise for the green result — walk toward it.
+
+The wording review comes back clean because it *already ran*. You
+watched it run at 9:00, inside the draft loop, rejecting the model's
+first answer for covering only happy paths. The deterministic gate did
+its job thirty seconds ago. Nothing is left for it to find.
+
+So read the criteria the model actually wrote:
+
+```text
+Given requirement REQ-001 with 3 acceptance criteria and a feature file holding
+1 scenario tagged @REQ-001 proving the first criterion, when the coverage of
+REQ-001 is reported, then the report lists criteria 2 and 3 verbatim as uncovered
+```
+
+Concrete outcome. Real edge cases. Testable by anyone. **And it is the
+wrong requirement.** "When the coverage of REQ-001 is reported" asks for
+a *function*. Implement against this and what comes back is
+`requirement_coverage()` sitting in a module, which is correct, passes,
+and is useless — because the morning is supposed to end with a new tool
+answering over MCP, and nothing here asked for a tool.
+
+That is the line to land:
+
+> A rule set can check that an outcome is concrete. It cannot check that
+> you asked for the right thing.
+
+The three human moments are unchanged in number and sharper in kind.
+This one is not "the machine wrote mush and I tidied it". It is "the
+machine wrote something clean, testable, and not what we are building",
+and no amount of deterministic review was ever going to catch it.
+
+**If `refine` does return a finding or two**, which happens, read them
+and fix them — but do not let that become the beat. The argument above
+survives either way, and it is the one worth the room's attention.
 
 ### This beat is yours
 
-The human rewrites. Paste this — it is verified refine-clean, so the
-second pass comes back `clean: true` with no findings:
+The human rewrites so that every criterion **names the tool**. Paste
+this — it is verified refine-clean, so the pass afterwards comes back
+`clean: true` with no findings:
 
 **Title**
 
@@ -118,20 +238,31 @@ Given a requirement id that is absent from the spec, when the criteria_coverage 
 Given a requirement carrying 0 acceptance criteria, when the criteria_coverage MCP tool is called with its id, then the verdict is "uncovered"
 ```
 
-Every criterion names the tool on purpose, and it is worth a sentence on
-stage. An earlier draft said "when coverage is requested" and the
-implementation that came back was a plain `requirement_coverage()`
-function — correct against those criteria, and useless to the 10:50
-beat, because nothing had asked for a tool. The criteria are the
-contract. If a new MCP tool is what you want to show, the criteria have
-to say so.
+Four criteria, and every one of them names `criteria_coverage`. That is
+the whole edit: the behaviour barely moved, the *contract* did. This is
+measured, not asserted — an earlier rehearsal implemented the
+model's own wording and got back a plain `requirement_coverage()`
+function, green on every criterion and no use at all to the 10:50 beat.
 
 ```bash
-spec --root harness reword HARNESS-013
-spec --root harness changes show       # read the diff out loud
-spec --root harness changes commit
-spec --root harness refine HARNESS-013 # clean: true
+spec reword HARNESS-018
+spec changes show       # read the diff out loud
+spec changes commit
+spec refine HARNESS-018 # clean: true, same as before the edit
 ```
+
+Point at that last line. `refine` said `clean` before the reword and
+says `clean` after it. The deterministic review could not tell the
+difference between the two requirements, and they build different
+software.
+
+> **Deliver parity, and the sharpest one in the talk.** `deliver` has no
+> equivalent of this beat: its draft stage runs the same validate/refine
+> loop, gets the same `clean`, and proceeds. Run autonomously from this
+> sentence, the factory would have built the function — correctly,
+> quickly, with a green bar and a tagged scenario, and it would have
+> been the wrong thing. Hold that thought until 11:10; it is what the
+> autonomous segment is actually about.
 
 ### Optional aside, 90 seconds: a model that judges instead of writing
 
@@ -160,7 +291,7 @@ assertion.
 Then turn it on the wording the room just approved:
 
 ```bash
-spec --root harness --decision-model nimble:latest judge criterion HARNESS-013
+spec --decision-model nimble:latest judge criterion HARNESS-018
 ```
 
 **Know this result before you show it.** One of the four comes back
@@ -186,9 +317,9 @@ approval — but only if you say it on purpose rather than discovering it.
 ## 9:30 — the criteria become an executable scenario
 
 ```bash
-spec --root harness feature create --path tests/features/tool_coverage.feature --name "Criteria coverage"
-spec --root harness scenario generate HARNESS-013 --feature tests/features/tool_coverage.feature
-spec --root harness changes show
+spec feature create --path tests/features/tool_coverage.feature --name "Criteria coverage"
+spec scenario generate HARNESS-018 --feature tests/features/tool_coverage.feature
+spec changes show
 ```
 
 `generate`, not `add`. `add` appends one scenario you have already
@@ -203,24 +334,35 @@ model call. Have something to say while it runs: this is the natural
 place for the "who wrote the test" argument.
 
 Four scenarios come back, written **from the acceptance criteria** and
-tagged `@HARNESS-013` — one per criterion. Nobody re-typed the
+tagged `@HARNESS-018` — one per criterion. Nobody re-typed the
 requirement into a test.
+
+> **Deliver parity, and a real divergence.** This is `deliver`'s
+> `author_scenarios` stage, but the factory does it **deterministically**:
+> `create_feature` plus one `add_scenario` per criterion through
+> `criterion_to_steps`, with no model call at all. Say this out loud
+> rather than papering over it. The model-driven `generate` is the
+> better stage moment — it is the one that shows a machine reading
+> intent — but the autonomous path trades that for something it can do
+> in milliseconds and never get wrong. It also skips the stage entirely
+> when a tagged scenario already exists, which is why delivering a
+> requirement whose Gherkin you wrote by hand is not an error.
 
 ### This beat is yours
 
 Read the staged diff before it lands. Then:
 
 ```bash
-spec --root harness changes commit
+spec changes commit
 ```
 
 ## 9:50 — the unit test
 
 ```bash
-spec --root harness unittest generate HARNESS-013
-spec --root harness changes show
-spec --root harness changes commit
-spec --root harness steps missing
+spec unittest generate HARNESS-018
+spec changes show
+spec changes commit
+spec steps missing
 ```
 
 **Check the count, do not assume it.** Whether any steps come back
@@ -229,9 +371,9 @@ definitions the suite already has and report none, or invent new
 phrasings and report a dozen. Both happen. If the list is not empty:
 
 ```bash
-spec --root harness steps generate
-spec --root harness changes commit
-spec --root harness steps missing       # 0
+spec steps generate
+spec changes commit
+spec steps missing       # 0
 ```
 
 One more model call, about a minute. The stubs bind the project's own
@@ -239,29 +381,48 @@ One more model call, about a minute. The stubs bind the project's own
 out loud if anyone has been bitten by a generator that emitted the
 `World` *trait* and would not compile.
 
+> **Deliver parity.** Two stages, in this order: `author_steps` runs
+> `steps missing` then `steps generate`, and **re-checks**, looping up to
+> `VERIFY_ROUNDS` times while anything is still undefined — the "check
+> the count, do not assume it" instruction above, written into the
+> machine. If steps are still missing after the last round it stops and
+> says how many. Then `author_unit_test` runs `unittest generate`. The
+> commits between are automatic.
+
 ## 10:00 — RED
 
 ```bash
-spec --root harness test
-spec --root harness state      # phase: RED
+spec test
+spec state      # phase: RED
 ```
 
 A red bar is not a failure, it is proof the test can fail. Say it.
 
+> **Deliver parity.** `try_run`, and it is the one stage with an
+> escape hatch: if the language runtime is missing, `deliver` stops with
+> "authoring is complete but the tests never ran" rather than pretending.
+> The authoring stands on its own either way.
+
 ## 10:05 — ask for a cleanup and get told no
 
 ```bash
-spec --root harness refactor --note "tidy the coverage module"
+spec refactor --note "tidy the coverage module"
 ```
 
 Refused: `Never refactor on a red bar`. This is a state machine in
 `harness/src/domain/tdd.rs`, not a line in a prompt. An agent cannot
 talk its way past it.
 
+> **Deliver parity.** The factory is bound by the identical gate. Its
+> refactor stage runs only on GREEN, and `deliver_one` refuses to start
+> at all while anything is staged. The autonomy is inside the rails, not
+> around them — this is the single most important thing to say in the
+> whole autonomous segment.
+
 ## 10:15 — the developer agent writes the code
 
 ```bash
-spec --root harness implement HARNESS-013
+spec implement HARNESS-018
 ```
 
 What it is allowed to touch: no shell, no free-hand write. The
@@ -273,7 +434,7 @@ requirement's own When/Then steps to the step definitions that bind
 them, follows those one hop into their helpers, and takes the production
 file those name through the most distinct symbols. Worth ten seconds on
 stage — it is the same "evidence, not configuration" argument the talk
-makes about the spec.
+makes about the spec, and the same one the id prefix made at 9:00.
 
 **If it refuses here, that is still the argument.** When every step the
 scenarios bind to is a pending `todo!()`, nothing names any production
@@ -283,7 +444,7 @@ cannot decide it. Recover by naming the file yourself and carry on —
 the refusal is a better story than a lucky guess:
 
 ```bash
-spec --root harness implement HARNESS-013 --into src/mcp.rs
+spec implement HARNESS-018 --into src/mcp.rs
 ```
 
 ### Do not run this live without a rehearsed result in the cache
@@ -324,18 +485,25 @@ over the protocol and nothing more — no `spec coverage` subcommand, no
 profile offering it to an agent, no prompt naming it. The homework slide
 after the close covers all three.
 
+> **Deliver parity.** This is `drive_to_green`, and it is the loop you
+> just ran by hand: implement, run the tests, and if the bar is still
+> red, implement again — up to `--attempts` times, 3 by default. Your
+> manual version is the same loop with you as the exit condition. The
+> factory's exit condition is a counter, and when the counter runs out
+> it stops and tells you where it got to.
+
 ### This beat is yours
 
 ```bash
-spec --root harness changes show       # review it properly, out loud
-spec --root harness changes commit
+spec changes show       # review it properly, out loud
+spec changes commit
 ```
 
 ## 10:40 — GREEN
 
 ```bash
-spec --root harness test
-spec --root harness state      # phase: GREEN
+spec test
+spec state      # phase: GREEN
 ```
 
 ## 10:50 — CI catches what you forgot
@@ -344,7 +512,7 @@ This is the moment the room should enjoy. The server now answers with one
 more tool than the plan names. Nobody told the Java smoke test.
 
 ```bash
-mvn -f smoke-test/pom.xml test -Dspec.binary=$(which spec)
+mvn -f ../smoke-test/pom.xml test -Dspec.binary=$(which spec)
 ```
 
 `LiveSpecServerTest` fails: *the live spec binary serves exactly the
@@ -358,28 +526,126 @@ Fix it in front of them: add `criteria_coverage` to `ToolPlan`, bump the
 count in `ToolPlanTest` and in `CLI-009`'s criteria and its tagged
 scenario, rerun, green.
 
+Worth noting as you edit `CLI-009`: you are in the Java module's
+catalog now, and its requirements are numbered `CLI`. Same binary, same
+commands, a different prefix — read, not configured.
+
 ## 11:05 — close it out
 
 ```bash
-spec --root harness mark-implemented HARNESS-013
+spec mark-implemented HARNESS-018
 ```
 
 Gated twice: GREEN, plus a scenario carrying the tag. Then:
 
 ```bash
-spec --root harness changes commit
-cargo test --manifest-path harness/Cargo.toml --test spec_completeness
+spec changes commit
+cargo test --manifest-path Cargo.toml --test spec_completeness
 ```
 
-The drift gate now covers 14 requirements, and HARNESS-013's wording is
+The drift gate now covers 17 requirements, and HARNESS-018's wording is
 checked because it is implemented.
+
+> **Deliver parity.** `mark_implemented`, the last stage, behind the
+> same two gates. The factory cannot mark work done that has no green
+> bar and no tagged scenario any more than you can.
+
+## 11:10 — the same morning, with nobody watching
+
+Everything so far was a human driving one stage at a time. Now run the
+whole thing as a factory.
+
+**Commit first, or it will not start.** `deliver_one` stops immediately
+if anything is staged — staged work from an earlier session would ride
+along on its first commit, and that is the author's to settle, not the
+machine's. Check before you start:
+
+```bash
+spec changes show       # must be empty
+```
+
+Then, from one sentence to an implemented requirement, with no human in
+the loop:
+
+```bash
+spec deliver "every requirement should report which of its criteria no test proves"
+```
+
+Narrate the stages as they scroll, because the room has now seen every
+one of them by hand:
+
+```mermaid
+flowchart TD
+    Plan["plan — spec list, or draft_plan from your sentence"] --> Draft["draft — spec draft + changes commit"]
+    Draft --> Scenario["author_scenarios — feature create + scenario add per criterion"]
+    Scenario --> Steps["author_steps — steps missing + steps generate, re-checked"]
+    Steps --> Unit["author_unit_test — unittest generate"]
+    Unit --> Red["try_run — RED"]
+    Red --> Impl["drive_to_green — implement, up to --attempts"]
+    Impl --> Green["drive_to_green — GREEN"]
+    Green --> Refactor["refactor — GREEN only, skip with --no-refactor"]
+    Refactor --> Mark["mark_implemented — GREEN plus a tagged scenario"]
+```
+
+Three flags are worth naming on the slide:
+
+```bash
+spec deliver                      # every pending requirement in the catalog
+spec deliver --attempts 5         # how many RED-to-GREEN tries before it gives up
+spec deliver --fail-fast          # stop at the first one that falls short
+```
+
+`spec deliver` with no target takes **the whole backlog**. That is the
+factory: fill the catalog with sentences, walk away, come back to
+branches of implemented requirements and a report of the ones that fell
+short.
+
+### The honest cost
+
+Say this plainly, and do not soften it. `deliver` answers every prompt
+through `AutoPrompter`, which echoes `(spec deliver never stops to ask)`
+at each gate. That is the precise inverse of the three moments that were
+yours this morning:
+
+| The moment | Manual | `spec deliver` |
+| --- | --- | --- |
+| The wording the test is generated from | You rewrote it | The model's draft stands |
+| The scenarios | You read the diff | Derived, committed unread |
+| The implementation | You reviewed it | Committed on a green bar alone |
+
+What it does **not** give up is every gate that is a state machine
+rather than a prompt: no refactor on red, no mark-implemented without a
+green bar and a tagged scenario, no start while work is staged. The
+autonomy is bounded by the same rails you spent the morning
+demonstrating, and that is the only reason it is safe to leave running.
+
+### Close the loop you opened at 9:10
+
+Now cash in the thought you parked. Had you run `spec deliver` on this
+morning's sentence instead of driving it yourself, it would have reached
+a green bar, a tagged scenario, and an implemented requirement — and it
+would have built `requirement_coverage()`, a function, because nothing
+in the model's clean, testable, edge-case-covering criteria ever asked
+for a tool. Every gate would have passed. The 10:50 smoke test would
+have stayed green, because no new MCP tool existed to be unplanned.
+
+That is the honest shape of the trade, and it is worth saying slowly:
+
+> Autonomy is bounded by the gates, and the gates are all about
+> *correctness*. Not one of them asks whether you are building the right
+> thing. That question has no state machine, and it is why the wording
+> is still yours.
+
+The line that lands: *the gates are not there to slow the human down.
+They are what makes it safe to remove the human from everything except
+the one decision no machine is checking.*
 
 ## 11:15 — the close
 
 Run the tool you just built, on the requirement you just wrote:
 
 ```bash
-spec --root harness mcp call criteria_coverage --arg id=HARNESS-013
+spec mcp call criteria_coverage --arg id=HARNESS-018
 ```
 
 Every acceptance criterion written at 9:10 has an asserting test. The
@@ -391,8 +657,8 @@ One slide, and it is a confession: we shipped the tool, not the adoption.
 Point at the three gaps and say which one you would do first.
 
 ```bash
-spec --root harness tools enable criteria_coverage --for status
-spec --root harness tools list --for status
+spec tools enable criteria_coverage --for status
+spec tools list --for status
 ```
 
 That is the cheap one — no recompile, it persists in `.spec/config.toml`,
@@ -408,12 +674,37 @@ prompt mentions is a tool nobody calls.*
 
 ## If it goes wrong
 
+- **The draft at 9:00 comes back with a different id.** Fine — the
+  catalog moved. Use what it says for the rest of the morning; nothing
+  depends on the number being 018.
+- **The draft proposes a different number of requirements.** Expected.
+  Measured at five on one rehearsal and one on the next, from the
+  identical sentence. You type `1` either way and the morning is
+  unchanged. Never put the count on a slide.
+- **The draft takes longer than you remember.** Measured at 3m36s on the
+  pinned 125B model, and that is before `scenario generate`. Budget
+  nine minutes of model time between the sentence and the first red
+  bar, and have the "who wrote the test" argument ready to fill it.
+- **`spec draft` cannot reach a model.** The wizard falls back to asking
+  you for the title, story and criteria yourself. You have the clean
+  wording below at 9:10 — paste it and carry on. Say what happened: the
+  tool degraded to asking a human rather than inventing something.
+- **`refine` at 9:10 returns findings instead of `clean`.** Also fine.
+  Read them, fix them, and then make the argument anyway — the point is
+  that a clean review and a correct requirement are different things,
+  and that holds whether this particular draft was clean or not.
 - **The model stalls on `implement`.** Write the code by hand and keep
   talking. The point of the segment is the gates, not the generation.
-- **`refine` comes back clean on the first pass.** A previous run's
-  reword survived. You branched from a dirty `trunk`, or you never reset
-  the last talk. `git checkout trunk -- harness/requirements/` fixes it
-  on the spot.
+- **`refine` comes back clean on the first pass.** The model drafted
+  something unusually good from your sentence. Reword it anyway — the
+  beat is a human improving a machine's wording, and it survives a
+  smaller diff.
+- **`spec deliver` refuses to start.** Something is staged. `spec changes
+  show`, then commit or discard. This is in the script on purpose; if it
+  fires, read the message out loud, because it is the argument.
+- **A command cannot find the project.** You are above `harness/`, so it
+  found the repo-root catalog instead — ids will read `REQ-`. `cd
+  harness` and run it again.
 - **`spec test` is slow.** The scoped filter should keep it to the one
   test binary. If it is running the whole suite, pass the filter
   explicitly rather than waiting.
@@ -447,7 +738,7 @@ cargo install --path harness --force
 ```
 
 Because the demo ran on its own branch, step 1 is the whole of the git
-side: the reworded catalog, the new feature file, the generated test,
+side: the drafted requirement, the new feature file, the generated test,
 the implementation, and the Java-side plan update all go with the branch.
 `git clean` is safe here precisely *because* you are back on `trunk`
 with nothing of your own in the working tree — which is the other reason
@@ -462,13 +753,17 @@ previous talk, and the 10:50 beat would never fire.
 Confirm you are back at the starting state:
 
 ```bash
-git status --short                        # clean
-spec mcp tools | wc -l                    # the planned count, not one more
-spec --root harness refine HARNESS-013    # clean: false, 10 findings
-spec --root harness list                  # HARNESS-013 pending, 13 implemented
-mvn -f smoke-test/pom.xml test -Dspec.binary=$(which spec)   # green
+git status --short                   # clean
+cd harness
+spec mcp tools | wc -l               # the planned count, not one more
+spec list                            # 16 requirements, 0 pending
+spec status                          # nextId: HARNESS-018
+mvn -f ../smoke-test/pom.xml test -Dspec.binary=$(which spec)   # green
 ```
 
-If `refine` comes back clean, the catalog survived the reset and the
-9:10 beat is dead — you are still on the talk branch, or you gave the
-talk on `trunk`.
+The check that matters is **`0 pending` and `nextId: HARNESS-018`**. If
+anything is pending, the drafted requirement survived the reset and the
+9:00 beat is dead — you are still on the talk branch, or you gave the
+talk on `trunk`. If `nextId` has moved past 018, a previous run's
+requirement was committed; `git checkout trunk -- harness/requirements/`
+puts it back.

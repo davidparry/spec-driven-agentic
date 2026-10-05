@@ -62,8 +62,12 @@ tools.profiles.implement	get_requirement, feature_read, …	(default)
 
 The five `decision.*` rows describe the
 [decision model](judge.md) — a second, separate model from `llm.model`
-above. `decision.model` is `(unset)` until `spec judge use` names one,
-and while it is unset nothing asks a judgment. `decision.endpoint` is
+above. `decision.model` is `(unset)` until `spec judge use` names one.
+Unset does not mean judgments are off: this command reports what the
+file says, and with no model named the first decision-capable model
+installed is used for the run. [`spec judge current`](judge.md) is the
+one that resolves it and names the model that will actually answer.
+`decision.endpoint` is
 attributed to the file when either it or `[llm] endpoint` supplied the
 host, since the decision plane defaults to wherever Ollama already is.
 

@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-f5fc82f3.js";
+            window.path_to_searchindex_js = "../searchindex-5a43e19b.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-2ab172c3.js"></script>
@@ -208,11 +208,29 @@ criterion comes back at p = 0.038 — not measurable.</p>
 
 Commands: models, current, use, criterion
 </code></pre>
-<h2 id="nothing-is-on-until-you-turn-it-on"><a class="header" href="#nothing-is-on-until-you-turn-it-on">Nothing is on until you turn it on</a></h2>
-<p>With no decision model configured — the state after <code>spec init</code> — the
-harness asks nothing, and every command behaves exactly as it did
-before this feature existed. There is no default model, no automatic
-pull, and no model chosen for you.</p>
+<h2 id="on-wherever-a-decision-model-is-installed"><a class="header" href="#on-wherever-a-decision-model-is-installed">On wherever a decision model is installed</a></h2>
+<p>Pull a decision model and judgments work. There is nothing else to
+configure: with <code>[decision] model</code> unset, Ollama is asked which of its
+models can answer, and the first is used for the session.</p>
+<p>Nothing is <em>assumed</em>, though. No model name is compiled in, none is
+pulled for you, and the borrowed choice is never written to your
+configuration — <code>spec judge use</code> is still the only thing that makes one
+stick. On a machine with no decision-capable model, every command
+behaves exactly as it did before this feature existed.</p>
+<p>Two ways to turn it off: <code>mode = "off"</code> stops the automatic judgments
+while leaving <code>spec judge</code> answering, and a machine with no decision
+model pulled asks nothing because there is nothing to ask.</p>
+<p>The <a href="../interactive-shell.html#the-decision-line">interactive shell</a> says
+which state you are in before its first prompt, on a line beside the
+inference model’s:</p>
+<pre><code class="language-text">Inference model set: qwen3.8-flash-next:125b-mlx (from configuration).
+Decision model set for this session: nimble (not saved - keep it with: spec judge use nimble).
+</code></pre>
+<p>Resolving it at startup is what turns a model named in <code>[decision]</code> but
+never pulled into something you find out about at the prompt rather than
+at the first judgment. Nothing is gated on it either way: a judgment is
+advice about wording, so a session with nothing to ask still returns
+every deterministic answer it always did.</p>
 <h2 id="what-a-judgment-is-allowed-to-do"><a class="header" href="#what-a-judgment-is-allowed-to-do">What a judgment is allowed to do</a></h2>
 <p>A judgment is <strong>advice about wording</strong>. By default it cannot do anything
 else. Specifically, a decision model in this harness can never:</p>
@@ -260,8 +278,15 @@ timeout_seconds	60
 mode	advisory
 min_confidence	0.8
 </code></pre>
-<p>With nothing configured:</p>
-<pre><code class="language-text">No decision model configured - judgments are off. Pick one with: spec judge models, then spec judge use &lt;model-name&gt;
+<p>The model shown is the one that will actually answer, so with nothing
+configured it is the one discovery borrowed, and the source says so
+rather than claiming the file named it:</p>
+<pre><code class="language-text">nimble:latest (from the only installed decision model)
+</code></pre>
+<p>With nothing configured and nothing installed that can decide:</p>
+<pre><code class="language-text">No decision model is installed - install one to turn judgments on:
+    ollama pull nimble
+    spec judge use nimble
 </code></pre>
 <p><code>--json</code> prints the same values as a stable object, including the
 question version:</p>
@@ -541,8 +566,8 @@ project that would rather see every flag.</p>
 <tr><th>Message</th><th>What to do</th></tr>
 </thead>
 <tbody>
-<tr><td><code>No decision model is installed</code></td><td><code>ollama pull nimble</code>, then <code>spec judge use nimble</code></td></tr>
-<tr><td><code>No decision model configured</code></td><td><code>spec judge use &lt;name&gt;</code> — the message lists the installed names to choose from</td></tr>
+<tr><td><code>No decision model is installed</code></td><td><code>ollama pull nimble</code> — judgments start working as soon as one is pulled, with or without <code>spec judge use</code></td></tr>
+<tr><td><code>No decision model configured and none could be discovered</code></td><td>Ollama could not be reached to ask what is installed. Start it, or name a model with <code>spec judge use &lt;name&gt;</code></td></tr>
 <tr><td><code>decision model 'X' is not installed</code></td><td><code>ollama pull X</code></td></tr>
 <tr><td><code>'X' cannot answer decisions here</code></td><td>The model has no <code>decision</code> capability. The message lists the ones that do</td></tr>
 <tr><td><code>... has no /v1/systemone route</code></td><td>Ollama is older than 0.35. Upgrade it</td></tr>

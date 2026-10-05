@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "searchindex-f5fc82f3.js";
+            window.path_to_searchindex_js = "searchindex-5a43e19b.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-2ab172c3.js"></script>
@@ -192,12 +192,29 @@ harness keeps its own files under <code>.spec/</code> (see
 for every relative path the harness reads or writes.
 A concrete path wins. An empty <code>--root</code>, or an unexpanded <code>${...}</code>
 template, is ignored. <code>SPEC_PROJECT_DIR</code> is used when it names a real
-path. Otherwise the process stays in the directory it was launched in.
-MCP clients that cannot see argv can
-call <code>project_root</code> to read the same directory as an absolute path.</p>
+path. MCP clients that cannot see argv can call <code>project_root</code> to read
+the resolved directory as an absolute path.</p>
 <pre><code class="language-bash">spec --root ~/code/calculator list
 spec list --root ~/code/calculator   # same thing
 </code></pre>
+<h3 id="discovery-what-happens-when-you-say-nothing"><a class="header" href="#discovery-what-happens-when-you-say-nothing">Discovery: what happens when you say nothing</a></h3>
+<p>Omit <code>--root</code> and <code>spec</code> walks <strong>up</strong> from the working directory to the
+nearest ancestor that looks like a project — one holding
+<code>requirements/requirements.json</code>, or failing that a <code>.spec/</code> directory.
+The first match wins, so a project nested inside another is found before
+its parent. If no ancestor qualifies, the process stays in the directory
+it was launched in, exactly as before.</p>
+<pre><code class="language-bash">cd ~/code/calculator/src/domain
+spec list        # finds ~/code/calculator — no flag needed
+</code></pre>
+<p>This is why a repository holding more than one spec needs no <code>--root</code> on
+every line: standing in the module is how you select its catalog. If
+ids come back with a prefix you did not expect, you are standing in a
+different project than you meant to — <code>spec config</code> reports the root it
+resolved and where that came from.</p>
+<p>Precedence is unchanged by discovery: an explicit <code>--root</code> wins, then
+<code>SPEC_PROJECT_DIR</code>, then the discovered ancestor, then the working
+directory.</p>
 <p>In the <a href="interactive-shell.html">interactive shell</a>, commands inherit the
 shell’s <code>--root</code> unless a line supplies its own.</p>
 <h2 id="--model-model"><a class="header" href="#--model-model"><code>--model &lt;MODEL&gt;</code></a></h2>

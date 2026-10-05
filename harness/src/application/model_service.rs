@@ -52,6 +52,37 @@ pub enum SessionModel {
     ProviderDown(String),
 }
 
+/// Nothing was named and the provider could not be asked which of its
+/// models could answer, so discovery had nothing to go on. Judgments
+/// are off for want of a reachable provider rather than a decision.
+const NO_PROVIDER_TO_DISCOVER_FROM: &str = "No decision model configured and none could be discovered - judgments are off \
+     this session. Name one to settle it:\n    spec judge use <model-name>";
+
+/// The typed decision status a session announces at startup, beside
+/// [`SessionModel`]: which model will answer judgments, or why none
+/// will.
+#[derive(Debug, PartialEq, Eq)]
+pub enum SessionDecision {
+    /// The model this session will put judgments to, and where the name
+    /// came from.
+    Ready { model: String, source: ModelSource },
+    /// Nothing will answer judgments this session, and what to do about
+    /// it. Not an error: judgments are advice, so every command still
+    /// returns the deterministic answer it always did.
+    Off { remedy: String },
+}
+
+impl SessionDecision {
+    /// The model judgments will be put to, or `None` when none will be
+    /// - shaped to hand straight to [`ModelService::decision_readiness`].
+    pub fn model(&self) -> Option<&str> {
+        match self {
+            Self::Ready { model, .. } => Some(model),
+            Self::Off { .. } => None,
+        }
+    }
+}
+
 /// Whether this machine can answer a decision, and what to do when it
 /// cannot. Every variant but [`Self::Ready`] names one next command.
 #[derive(Debug, PartialEq, Eq)]
@@ -86,23 +117,39 @@ impl DecisionReadiness {
     /// steps, and so a test can read them. Each remedy names a command
     /// that can be run as written.
     pub fn remedy(&self) -> Option<String> {
+        self.steps("to continue")
+    }
+
+    /// The same steps worded for a session announcing its state rather
+    /// than a command refusing to run. Startup blocks on none of this -
+    /// a judgment is advice about wording, so a session with nothing to
+    /// ask still returns every deterministic answer - and "to continue"
+    /// would describe a halt that is not happening.
+    pub fn announcement(&self) -> Option<String> {
+        self.steps("to turn judgments on")
+    }
+
+    /// `purpose` closes the sentence that names the situation, so the
+    /// two surfaces differ in exactly the clause that differs between
+    /// them and nowhere else.
+    fn steps(&self, purpose: &str) -> Option<String> {
         match self {
             // Nothing to fix, and nothing known to be broken.
             Self::Ready | Self::Unknown => None,
             Self::NoneInstalled => Some(format!(
-                "No decision model is installed - install one to continue:\n    \
+                "No decision model is installed - install one {purpose}:\n    \
                  ollama pull {RECOMMENDED_DECISION_MODEL}\n    \
                  spec judge use {RECOMMENDED_DECISION_MODEL}"
             )),
             Self::NoneConfigured { installed } => Some(format!(
-                "No decision model configured - choose one to continue:\n    \
+                "No decision model configured - choose one {purpose}:\n    \
                  spec judge use {}\ninstalled: {}",
                 installed[0],
                 installed.join(", ")
             )),
             Self::ConfiguredMissing { model, installed } => Some(format!(
-                "Decision model '{model}' cannot answer decisions here - install it to \
-                 continue:\n    ollama pull {model}\nor choose one already installed:\n    \
+                "Decision model '{model}' cannot answer decisions here - install it \
+                 {purpose}:\n    ollama pull {model}\nor choose one already installed:\n    \
                  spec judge use {}\ninstalled: {}",
                 installed[0],
                 installed.join(", ")
@@ -245,6 +292,89 @@ impl<C: ModelCatalog, S: ModelStore> ModelService<C, S> {
             Some(model) => DecisionReadiness::ConfiguredMissing {
                 model: model.to_string(),
                 installed,
+            },
+        }
+    }
+
+    /// The model judgments are put to: the configured name, or the
+    /// first decision-capable model installed when none is configured.
+    ///
+    /// A named model is honoured as given, without a capability probe,
+    /// exactly as [`Self::session_model`] honours a configured
+    /// generative name. An explicit instruction is not second-guessed,
+    /// and a model that turns out not to be there reports the real
+    /// failure against the endpoint - far better than judgments quietly
+    /// doing nothing on a project that asked for them by name.
+    ///
+    /// [`Self::session_decision`] is the surface that does probe, so
+    /// the problem is still said out loud at startup.
+    pub fn decision_model(&self, configured: Option<&str>) -> Option<String> {
+        match configured {
+            Some(model) => Some(model.to_string()),
+            None => self.decision_models().ok()?.into_iter().next(),
+        }
+    }
+
+    /// The decision role this session will use, beside
+    /// [`Self::session_model`] for the generative one: the configured
+    /// name, or - when none is configured - the first model the
+    /// provider reports as decision-capable.
+    ///
+    /// `source` describes where `configured` was read from, which only
+    /// the caller knows: the `[decision]` block and the
+    /// `--decision-model` flag are resolved together before this is
+    /// asked. Discovery supplies its own source and ignores it.
+    ///
+    /// Discovery is the same bargain [`Self::session_model`] strikes
+    /// for the generative role: borrow a model for the session, persist
+    /// nothing, and leave `spec judge use` as the only thing that makes
+    /// a choice stick. It is what makes judgments work on a machine
+    /// that has pulled a decision model without a second configuration
+    /// step. No model name is compiled in - the provider is asked which
+    /// of its models can decide, so one released tomorrow is used the
+    /// day it is pulled.
+    ///
+    /// A named model that [`Self::decision_readiness`] has nothing to
+    /// say against is used, including when the provider could not be
+    /// asked at all - on the same reasoning that readiness refuses
+    /// nothing on a [`DecisionReadiness::Unknown`]: a capability probe
+    /// that fails is not evidence a model is absent, and the first
+    /// judgment reports the real failure against the endpoint.
+    pub fn session_decision(
+        &self,
+        configured: Option<&str>,
+        source: ModelSource,
+    ) -> SessionDecision {
+        match self.decision_readiness(configured) {
+            DecisionReadiness::Ready => SessionDecision::Ready {
+                model: configured
+                    .expect("readiness is only Ready for a model that was named")
+                    .to_string(),
+                source,
+            },
+            // Nothing named, and the provider has models that can
+            // answer. Borrow the first, for this session only.
+            DecisionReadiness::NoneConfigured { mut installed } => SessionDecision::Ready {
+                source: if installed.len() == 1 {
+                    ModelSource::OnlyInstalled
+                } else {
+                    ModelSource::FirstInstalled
+                },
+                model: installed.remove(0),
+            },
+            DecisionReadiness::Unknown => match configured {
+                Some(model) => SessionDecision::Ready {
+                    model: model.to_string(),
+                    source,
+                },
+                None => SessionDecision::Off {
+                    remedy: NO_PROVIDER_TO_DISCOVER_FROM.to_string(),
+                },
+            },
+            off => SessionDecision::Off {
+                remedy: off
+                    .announcement()
+                    .expect("every remaining state names steps"),
             },
         }
     }
@@ -791,6 +921,179 @@ mod tests {
             *service.store.persisted.borrow(),
             None,
             "nothing is written when the choice is refused"
+        );
+    }
+
+    /// The line a session prints beside the inference one. The source
+    /// is the caller's to supply: by the time this is asked, the flag
+    /// and the `[decision]` block have already been resolved together.
+    #[test]
+    fn a_configured_decision_model_is_announced_with_where_it_came_from() {
+        let service = ModelService::new(
+            CapableCatalog::new(&[
+                ("coder:latest", &["completion"]),
+                ("nimble:latest", &["decision"]),
+            ]),
+            FakeStore::default(),
+        );
+        assert_eq!(
+            service.session_decision(Some("nimble:latest"), ModelSource::Config),
+            SessionDecision::Ready {
+                model: "nimble:latest".into(),
+                source: ModelSource::Config,
+            }
+        );
+        assert_eq!(
+            service.session_decision(Some("nimble:latest"), ModelSource::Flag),
+            SessionDecision::Ready {
+                model: "nimble:latest".into(),
+                source: ModelSource::Flag,
+            }
+        );
+    }
+
+    /// Judgments are on by default: a machine that pulled a decision
+    /// model gets one without a second configuration step, borrowed for
+    /// the session and never written down.
+    #[test]
+    fn with_nothing_configured_the_only_installed_decision_model_is_borrowed() {
+        let service = ModelService::new(
+            CapableCatalog::new(&[
+                ("coder:latest", &["completion", "tools"]),
+                ("nimble:latest", &["decision"]),
+            ]),
+            FakeStore::default(),
+        );
+        assert_eq!(
+            service.session_decision(None, ModelSource::Config),
+            SessionDecision::Ready {
+                model: "nimble:latest".into(),
+                source: ModelSource::OnlyInstalled,
+            },
+            "the one model that can decide, whatever else is installed"
+        );
+        assert_eq!(
+            *service.store.persisted.borrow(),
+            None,
+            "discovery must never persist a choice"
+        );
+    }
+
+    /// Provider order, and the source says it was a borrow rather than
+    /// the only candidate - the same distinction the generative role
+    /// draws, so `spec judge current` can say which happened.
+    #[test]
+    fn with_several_decision_models_the_first_is_the_session_default() {
+        let service = ModelService::new(
+            CapableCatalog::new(&[
+                ("nimble:latest", &["decision"]),
+                ("other:latest", &["decision"]),
+            ]),
+            FakeStore::default(),
+        );
+        assert_eq!(
+            service.session_decision(None, ModelSource::Config),
+            SessionDecision::Ready {
+                model: "nimble:latest".into(),
+                source: ModelSource::FirstInstalled,
+            }
+        );
+    }
+
+    /// Nothing installed that can decide is the one state discovery
+    /// cannot rescue, so the session says what to pull.
+    #[test]
+    fn with_no_decision_capable_model_installed_the_session_says_what_to_pull() {
+        let service = ModelService::new(
+            CapableCatalog::new(&[("coder:latest", &["completion", "tools"])]),
+            FakeStore::default(),
+        );
+        let SessionDecision::Off { remedy } = service.session_decision(None, ModelSource::Config)
+        else {
+            panic!("nothing installed can decide, so nothing can be borrowed");
+        };
+        assert!(remedy.contains("ollama pull"), "{remedy}");
+    }
+
+    /// The service honours a named model without a probe; the
+    /// announcement probes and says so. Both are deliberate, and a test
+    /// that reads only one of them would miss the pairing.
+    #[test]
+    fn a_named_decision_model_is_used_as_given_even_when_the_announcement_objects() {
+        let service = ModelService::new(
+            CapableCatalog::new(&[("nimble:latest", &["decision"])]),
+            FakeStore::default(),
+        );
+        assert_eq!(
+            service.decision_model(Some("never-pulled")),
+            Some("never-pulled".to_string()),
+            "an explicit instruction is not second-guessed"
+        );
+        assert!(
+            matches!(
+                service.session_decision(Some("never-pulled"), ModelSource::Config),
+                SessionDecision::Off { .. }
+            ),
+            "and the startup line still says it cannot answer"
+        );
+    }
+
+    #[test]
+    fn with_nothing_named_the_service_takes_the_discovered_model() {
+        let service = ModelService::new(
+            CapableCatalog::new(&[
+                ("coder:latest", &["completion"]),
+                ("nimble:latest", &["decision"]),
+            ]),
+            FakeStore::default(),
+        );
+        assert_eq!(
+            service.decision_model(None),
+            Some("nimble:latest".to_string())
+        );
+    }
+
+    /// The gap this announcement closes: a decision model named in
+    /// configuration but never pulled used to go unnoticed until the
+    /// first judgment was asked for.
+    #[test]
+    fn a_configured_decision_model_that_cannot_answer_is_off_at_startup() {
+        let service = ModelService::new(
+            CapableCatalog::new(&[("nimble:latest", &["decision"])]),
+            FakeStore::default(),
+        );
+        let SessionDecision::Off { remedy } =
+            service.session_decision(Some("never-pulled"), ModelSource::Config)
+        else {
+            panic!("a model the provider cannot decide with is not ready");
+        };
+        assert!(remedy.contains("ollama pull never-pulled"), "{remedy}");
+    }
+
+    /// Announcing must not become the one place that turns an
+    /// unreachable provider into a verdict on a model. Whatever is
+    /// configured is announced, and the first judgment reports the real
+    /// failure against the endpoint.
+    #[test]
+    fn an_unreachable_provider_still_announces_the_configured_decision_model() {
+        let service = ModelService::new(
+            FakeCatalog(Err(LlmError("connection refused".into()))),
+            FakeStore::default(),
+        );
+        assert_eq!(
+            service.session_decision(Some("nimble:latest"), ModelSource::Config),
+            SessionDecision::Ready {
+                model: "nimble:latest".into(),
+                source: ModelSource::Config,
+            }
+        );
+        let SessionDecision::Off { remedy } = service.session_decision(None, ModelSource::Config)
+        else {
+            panic!("discovery cannot borrow a model from a provider that will not answer");
+        };
+        assert!(
+            remedy.contains("spec judge use"),
+            "nothing to list, so the advice is to name one: {remedy}"
         );
     }
 

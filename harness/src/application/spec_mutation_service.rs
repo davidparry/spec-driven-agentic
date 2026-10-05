@@ -16,6 +16,7 @@ use crate::domain::proposal::{
     proposal_prompt, rewording_prompt,
 };
 use crate::domain::refiner::{RequirementRefiner, finding_signature, suggestion_for};
+use crate::domain::requirement_id::next_id;
 use crate::domain::spec_validator::SpecValidator;
 use crate::domain::tdd::TddPhase;
 use crate::domain::tools::ToolDefinition;
@@ -187,6 +188,10 @@ pub struct SpecMutationService<
     store: C,
     state: S,
     spec_path: String,
+    /// Where the command was run, relative to the project root, for
+    /// picking the catalog file that covers it. `None` leaves drafts at
+    /// the root, which is what every non-CLI caller wants.
+    working_dir: Option<String>,
     llm_attempts: u32,
     max_reword_passes: u32,
     tools: Vec<ToolDefinition>,
@@ -209,6 +214,7 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
             store,
             state,
             spec_path,
+            working_dir: None,
             llm_attempts: DEFAULT_LLM_ATTEMPTS,
             max_reword_passes: DEFAULT_MAX_REWORD_PASSES,
             tools: Vec::new(),
@@ -221,6 +227,13 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
     /// How many times a model reply is tried when validation fails.
     pub fn with_llm_attempts(mut self, attempts: u32) -> Self {
         self.llm_attempts = attempts.max(1);
+        self
+    }
+
+    /// Where the command was run, relative to the project root, so an
+    /// undirected draft lands in the catalog file covering it.
+    pub fn with_working_dir(mut self, working_dir: Option<String>) -> Self {
+        self.working_dir = working_dir;
         self
     }
 
@@ -264,7 +277,7 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
     ) -> Result<DraftReport, ServiceError> {
         let catalog = self.effective_catalog()?;
         let file = self.target_file(&catalog, file)?;
-        let id = next_id(&catalog.merged());
+        let id = next_id(&catalog, &file);
         self.manual_draft(prompter, DraftTarget { catalog, file }, id, None)
     }
 
@@ -328,7 +341,7 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
         let mut catalog = self.effective_catalog()?;
         let target = self.target_file(&catalog, file)?;
         let mut merged = catalog.merged();
-        let id = next_id(&merged);
+        let id = next_id(&catalog, &target);
         let description = match given {
             Some(text) => text.trim().to_string(),
             None => self.ask(
@@ -447,7 +460,7 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
         } in accepted
         {
             let requirement = Requirement {
-                id: next_id(&merged),
+                id: next_id(&catalog, &target),
                 title,
                 status: "pending".into(),
                 story,
@@ -661,7 +674,7 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
         let _claim = self.store.claim()?;
         let mut catalog = self.effective_catalog()?;
         let target = self.target_file(&catalog, file)?;
-        let id = next_id(&catalog.merged());
+        let id = next_id(&catalog, &target);
         let candidate = Requirement {
             id: id.clone(),
             title: title.to_string(),
@@ -1297,16 +1310,17 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
         load_effective_catalog(&self.repository, &self.store, &self.spec_path)
     }
 
-    /// The catalog document new requirements land in: the root by
-    /// default, or the `--file` target, which must already be part of
-    /// the include tree.
+    /// The catalog document new requirements land in: the `--file`
+    /// target, which must already be part of the include tree; failing
+    /// that the one the working directory sits in; failing that the
+    /// root.
     fn target_file(
         &self,
         catalog: &SpecCatalog,
         file: Option<&str>,
     ) -> Result<String, ServiceError> {
         let Some(file) = file else {
-            return Ok(catalog.root().path.clone());
+            return Ok(self.nearest_file(catalog));
         };
         let relative = self.catalog_relative(file);
         if catalog.file(&relative).is_some() {
@@ -1317,6 +1331,37 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
                  include add {file}, apply with spec changes commit, then draft into it."
             )))
         }
+    }
+
+    /// The catalog document covering the directory the command was run
+    /// in: the one whose own directory is the longest leading match of
+    /// it, and the root when nothing matches.
+    ///
+    /// Spec files mirror the tree they describe, so working in `core/`
+    /// drafts into the catalog under `core/` rather than the root's.
+    /// A working directory inside `requirements/` itself reads the same
+    /// way, so both `core/` and `requirements/core/` land together.
+    fn nearest_file(&self, catalog: &SpecCatalog) -> String {
+        let root = catalog.root().path.clone();
+        let Some(working) = &self.working_dir else {
+            return root;
+        };
+        let working = self.catalog_relative(working);
+        catalog
+            .files()
+            .iter()
+            .map(|file| parent_dir(&file.path))
+            .filter(|dir| covers(dir, &working))
+            // Deepest wins, and the first of equals keeps catalog order.
+            .max_by_key(|dir| dir.len())
+            .and_then(|dir| {
+                catalog
+                    .files()
+                    .iter()
+                    .find(|file| parent_dir(&file.path) == dir)
+                    .map(|file| file.path.clone())
+            })
+            .unwrap_or(root)
     }
 
     /// Accepts a spec file given either as a project path
@@ -1605,6 +1650,17 @@ fn parent_dir(path: &str) -> &str {
     }
 }
 
+/// Does `dir` contain `working`, counting whole path segments? The root
+/// (empty) covers everything; `core` covers `core` and `core/edge` but
+/// not `core_utils`.
+fn covers(dir: &str, working: &str) -> bool {
+    dir.is_empty()
+        || working == dir
+        || working
+            .strip_prefix(dir)
+            .is_some_and(|rest| rest.starts_with('/'))
+}
+
 /// `target` (relative to the root document's directory) expressed
 /// relative to `dir` — the form an include entry is written in.
 fn relative_to(dir: &str, target: &str) -> String {
@@ -1621,20 +1677,6 @@ fn relative_to(dir: &str, target: &str) -> String {
     let mut parts: Vec<&str> = vec![".."; dir_parts.len() - common];
     parts.extend(&target_parts[common..]);
     parts.join("/")
-}
-
-/// The next free REQ-### id, counting past staged drafts too.
-fn next_id(spec: &Spec) -> String {
-    let max = spec
-        .requirements
-        .iter()
-        .filter_map(|r| {
-            r.id.strip_prefix("REQ-")
-                .and_then(|n| n.parse::<u32>().ok())
-        })
-        .max()
-        .unwrap_or(0);
-    format!("REQ-{:03}", max + 1)
 }
 
 fn duplicate_warning(spec: &Spec, candidate: &Requirement) -> Option<String> {
@@ -3287,6 +3329,108 @@ mod tests {
             root.requirements.is_empty(),
             "the root document was left alone"
         );
+    }
+
+    /// A catalog split by directory mirrors the tree it describes, so
+    /// drafting from inside `core/` belongs in `core/`'s own spec file
+    /// without anyone passing `--file`.
+    #[test]
+    fn an_undirected_draft_lands_in_the_file_covering_the_working_directory() {
+        let service = service(Ok(spec()), green()).with_working_dir(Some("core".into()));
+        service
+            .store
+            .stage(
+                SPEC_PATH,
+                r#"{"project":"Kata","includes":["core/math.json"],"requirements":[]}"#,
+                "split the spec",
+            )
+            .unwrap();
+        service
+            .store
+            .stage(
+                "requirements/core/math.json",
+                &serde_json::to_string(&Spec {
+                    requirements: vec![requirement("MATH-001")],
+                    ..Spec::default()
+                })
+                .unwrap(),
+                "the core spec file",
+            )
+            .unwrap();
+
+        let report = service
+            .draft_direct_in(
+                "Newlines as delimiters",
+                CLEAN_STORY,
+                vec![CLEAN_CRITERION.into(), EDGE_CRITERION.into()],
+                None,
+            )
+            .unwrap();
+
+        // The prefix came from the file it landed in, not the root.
+        assert_eq!(report.id, "MATH-002");
+        let child: Spec = serde_json::from_str(
+            &service
+                .store
+                .content("requirements/core/math.json")
+                .unwrap()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(child.requirements.len(), 2);
+    }
+
+    /// Outside any included directory the root is still the answer, so
+    /// the common single-file project is untouched by any of this.
+    #[test]
+    fn a_working_directory_no_file_covers_drafts_into_the_root() {
+        let service = service(Ok(spec()), green()).with_working_dir(Some("src/domain".into()));
+        stage_split_spec(&service);
+
+        let report = service
+            .draft_direct_in(
+                "Newlines as delimiters",
+                CLEAN_STORY,
+                vec![CLEAN_CRITERION.into(), EDGE_CRITERION.into()],
+                None,
+            )
+            .unwrap();
+
+        assert_eq!(report.id, "REQ-008");
+        let root: Spec =
+            serde_json::from_str(&service.store.content(SPEC_PATH).unwrap().unwrap()).unwrap();
+        assert_eq!(root.requirements.len(), 1, "the root document took it");
+    }
+
+    /// `--file` is the explicit answer and outranks where the command
+    /// happens to be run.
+    #[test]
+    fn a_named_file_outranks_the_working_directory() {
+        let service = service(Ok(spec()), green()).with_working_dir(Some("core".into()));
+        stage_split_spec(&service);
+
+        let report = service
+            .draft_direct_in(
+                "Newlines as delimiters",
+                CLEAN_STORY,
+                vec![CLEAN_CRITERION.into(), EDGE_CRITERION.into()],
+                Some("requirements/requirements.json"),
+            )
+            .unwrap();
+
+        assert_eq!(report.id, "REQ-008");
+        let root: Spec =
+            serde_json::from_str(&service.store.content(SPEC_PATH).unwrap().unwrap()).unwrap();
+        assert_eq!(root.requirements.len(), 1);
+    }
+
+    #[test]
+    fn a_directory_covers_its_own_tree_and_nothing_that_merely_starts_the_same() {
+        assert!(covers("", "anything/at/all"));
+        assert!(covers("core", "core"));
+        assert!(covers("core", "core/edge"));
+        assert!(!covers("core", "core_utils"));
+        assert!(!covers("core", "other"));
     }
 
     #[test]

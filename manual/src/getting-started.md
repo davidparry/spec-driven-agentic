@@ -52,10 +52,14 @@ spec judge use nimble
 spec judge criterion --text "Given the refactored module, when the suite runs, then code quality is improved by at least 20%"
 ```
 
-This adds a second model; it does not replace the one above. Nothing
-asks a judgment until `spec judge use` names one, and a judgment is
-advice about wording: it never changes a test result, a requirement's
-status, or the deterministic review it sits beside. See
+This adds a second model; it does not replace the one above. The pull is
+the part that matters — judgments work as soon as a decision-capable
+model is installed, because Ollama is asked which of its models can
+answer. `spec judge use` only pins the choice so it stops depending on
+what else you pull later.
+
+A judgment is advice about wording: it never changes a test result, a
+requirement's status, or the deterministic review it sits beside. See
 [`spec judge`](commands/judge.md).
 
 ## Your first session
@@ -73,10 +77,17 @@ $ spec
   ▲                                  │
   ╰──────────────────────────────────╯
 
-Model set for this session: qwen3.8-flash-next:125b-mlx (not saved - keep it with: spec model use qwen3.8-flash-next:125b-mlx).
+Inference model set for this session: qwen3.8-flash-next:125b-mlx (not saved - keep it with: spec model use qwen3.8-flash-next:125b-mlx).
+Decision model set for this session: nimble:latest (not saved - keep it with: spec judge use nimble:latest).
 Interactive shell - type commands without the spec prefix (e.g. list).
 spec>
 ```
+
+One line per model role: the inference model that writes, and the
+decision model that judges. Neither was configured here — both were
+borrowed from what Ollama had installed, for this session only. With no
+decision-capable model pulled, that second line says so instead, and
+every other command works the same.
 
 ## Two ways to begin a project
 

@@ -183,7 +183,7 @@ query string, and <kbd>t</kbd> cycles through them live.
 | Format | Deck cut | What it covers |
 | --- | --- | --- |
 | **Conference session** (50 minutes) | [`?60`](slides/index.html?60) | The full narrative above — the harness first, taken from requirement to green on a local model, then pi as the free general-purpose on-ramp and the altitude comparison — with the live frontier-versus-local comparison and the *Where This Breaks* segment. The two exercise slides are delivered as demos from the stage rather than as hands-on time, which is what makes the 60-minute cut fit in 50. |
-| **A Day in the Life of a TDD Agentic Developer** (60 minutes) | [`?tdd`](slides/index.html?tdd) | A separate session, described [below](#a-day-in-the-life-of-a-tdd-agentic-developer): TDD in the agentic era told as one developer's morning, with the harness taking its own `HARNESS-013` from a vague draft to a green bar and growing a new MCP tool live. Shares the Red/Green/Refactor refresher and the harness argument with the cuts above; the demo and the closing segments are its own. Published at [/talktdd/](https://davidparry.github.io/spec-driven-agentic/talktdd/). |
+| **A Day in the Life of a TDD Agentic Developer** (60 minutes) | [`?tdd`](slides/index.html?tdd) | A separate session, described [below](#a-day-in-the-life-of-a-tdd-agentic-developer): TDD in the agentic era told as one developer's morning, starting from a single sentence and ending with the harness having drafted, specified, tested and implemented a new MCP tool of its own — then done the whole thing again autonomously. Shares the Red/Green/Refactor refresher and the harness argument with the cuts above; the demo and the closing segments are its own. Published at [/talktdd/](https://davidparry.github.io/spec-driven-agentic/talktdd/). |
 | **Short session** (30 minutes) | [`?30`](slides/index.html?30) | The harness and nothing else, demo-driven, with no hands-on segment: why a general agent gives a general result, what a purpose-built harness owns instead, then the runner taken from requirement to green with the Wi-Fi off — plus *Where This Breaks*. pi is 60-minute material and does not appear. Published at [/talk30/](https://davidparry.github.io/spec-driven-agentic/talk30/). |
 | **Hands-on workshop** (60 minutes) | [`?60`](slides/index.html?60) | Attendees run the loop on their own machines against a local model: draft a requirement, refine it until the wording review is clean, take it through RED, GREEN, and REFACTOR, then grade the run with `scripts/verify-workshop-run.sh check`. Companion material is the [workshop follow-along](../student-follow-docs/student-follow-along.md); the [pi path](../student-follow-docs/pi-path.md) is the free, no-IDE on-ramp, and the [harness path](../student-follow-docs/harness-path.md) covers attendees who prefer the terminal to an IDE. |
 
@@ -248,22 +248,33 @@ requirements to passing code: agents author the tests, a developer agent
 produces the code, and together with the human in the loop they iterate until
 the suite is green.
 
-The session is framed as **one developer's morning**. A requirement lands at
-9:00 saying almost nothing useful. By lunch it is implemented, proven, and
-traceable — and the thing it asked for has been built. The hook is two versions
-of that morning: the one everyone recognizes, where an agent returns 400 lines
-that compile, pass tests nobody asked for, and encode a design nobody approved;
-and the rerun, which is the rest of the talk.
+The session is framed as **one developer's morning**. Nothing is waiting at
+9:00 — the backlog is empty, and the morning begins with a single vague sentence
+said out loud. By lunch it is a requirement, implemented, proven, and traceable,
+and the thing it asked for has been built. The hook is two versions of that
+morning: the one everyone recognizes, where an agent returns 400 lines that
+compile, pass tests nobody asked for, and encode a design nobody approved; and
+the rerun, which is the rest of the talk.
 
 What makes the demo more than a kata is its subject. The harness is pointed at
-**itself**. `HARNESS-013` asks for `criteria_coverage` — a tool that reports,
-per requirement, which acceptance criteria have an asserting test and which do
-not. It starts structurally valid and badly written, and the wording review
-returns ten specific findings before a line of code exists. The room watches the
-criteria become a tagged Gherkin scenario and a failing test, watches a refactor
-request get refused on a red bar by a state machine rather than a prompt, and
-watches a developer agent produce an implementation that arrives as a reviewable
-diff because it has no shell and no free-hand write.
+**itself**. The sentence is drafted into `HARNESS-018`, a requirement asking for
+`criteria_coverage`, a tool that reports per requirement which acceptance
+criteria have an asserting test and which do not. Nobody types the id: the
+prefix is read off the catalog the command is standing in, and the same binary
+one directory up would have said `REQ-`.
+
+The session's sharpest moment is one the room does not see coming. The drafted
+requirement passes the wording review **clean** — because that review already
+ran, inside the draft, rejecting the model's first answer in front of everyone.
+And it is still the wrong requirement: its criteria ask for a function rather
+than the tool the morning is meant to produce. Rewording it changes the
+contract without moving the verdict, which makes the case plainly: a rule set
+can check that an outcome is concrete; it cannot check that you asked for the
+right thing. The room then watches the criteria become a tagged Gherkin
+scenario and a failing test, watches a refactor request get refused on a red bar
+by a state machine rather than a prompt, and watches a developer agent produce
+an implementation that arrives as a reviewable diff because it has no shell and
+no free-hand write.
 
 Then the beat the room enjoys most. The server now answers with one more tool
 than the plan names, and
@@ -271,6 +282,20 @@ nobody told the Java smoke test. `LiveSpecServerTest` fails, reporting
 `criteria_coverage` as *unexpected* — because `CLI-009` was written months ago
 to say that an unplanned MCP tool fails the Java build until it is planned. One module's
 spec caught new surface area in another, with nobody remembering to look.
+
+Then the whole morning runs again with nobody watching. `spec deliver` takes a
+sentence — or the entire backlog — and drives the identical nine stages the room
+just watched by hand, answering every prompt itself. Everything the factory
+gives up is a *human judgement*; everything it keeps is a *state machine*. It
+still cannot refactor on red, still cannot mark work implemented without a green
+bar and a tagged scenario, and still refuses to start while anything is staged.
+
+That sets up the close. Run autonomously from the same sentence, the factory
+would have passed every one of those gates and built the function — correctly,
+quickly, and wrongly. Every gate it enforces is about correctness; none of them
+asks whether this is the right thing to build. The gates are what make it safe
+to remove the human from everything except the one decision nothing is
+checking.
 
 The close is the thesis made literal: run the tool built at 10:15 against the
 requirement written at 9:10. Every acceptance criterion has an asserting test.
@@ -280,7 +305,8 @@ Throughout, "human in the loop" is given a precise meaning: **three moments**.
 The wording, because an ambiguous requirement produces a meaningless test. The
 staged diff, because every write lands in a staging area rather than the working
 tree. The implementation, because that is the design you will live with.
-Everything between those three is turning the crank.
+Everything between those three is turning the crank — and the autonomous segment
+shows exactly what a morning costs when you hand all three to the machine.
 
 ## What attendees leave with
 
@@ -289,7 +315,10 @@ Everything between those three is turning the crank.
   drifting apart.
 - The difference between a requirement that is **valid** and one that is
   **usable**, demonstrated by a spec that passes structural validation and still
-  earns ten wording findings.
+  earns a page of wording findings.
+- Where the line between **manual override and full autonomy** actually falls:
+  the same pipeline run both ways, and a precise account of which gates survive
+  when the human steps out.
 - A concrete answer to "where should the human actually spend attention" —
   three named moments rather than diffuse vigilance.
 - What it looks like when TDD's rules are **enforced in software**: a state

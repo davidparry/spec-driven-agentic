@@ -121,6 +121,19 @@ impl SpecCatalog {
         self.files.iter().find(|file| file.path == path)
     }
 
+    /// The file declaring `path` as one of its includes, or `None` for
+    /// the root — the one document nothing includes.
+    pub fn parent_of(&self, path: &str) -> Option<&str> {
+        self.files
+            .iter()
+            .find(|file| {
+                file.spec.includes.iter().any(|include| {
+                    resolve_include(parent_dir(&file.path), include).as_deref() == Some(path)
+                })
+            })
+            .map(|file| file.path.as_str())
+    }
+
     pub fn file_mut(&mut self, path: &str) -> Option<&mut Spec> {
         self.files
             .iter_mut()
@@ -186,6 +199,14 @@ fn walk(
         walk(&child, read, visited, files)?;
     }
     Ok(())
+}
+
+/// The directory part of a catalog-relative path, empty for the root.
+pub(crate) fn parent_dir(path: &str) -> &str {
+    match path.rfind('/') {
+        Some(cut) => &path[..cut],
+        None => "",
+    }
 }
 
 /// Resolve `include` against the including file's directory, lexically:

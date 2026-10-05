@@ -12,13 +12,19 @@ Usage: spec deliver [OPTIONS] [TARGET]...
 
 | Flag | Description |
 | --- | --- |
-| `--root <ROOT>` | Project root. Defaults to `.`. |
+| `--root <ROOT>` | Project root. Defaults to the nearest enclosing project, [searching upward](../global-flags.md#discovery-what-happens-when-you-say-nothing) from the working directory. |
 | `--model <MODEL>` | LLM model for the generation steps, this run only. |
 | `--retry <N>` | Max attempts when a model reply fails validation. Default 3. |
 | `--attempts <N>` | RED-to-GREEN rounds per requirement. Default 3. |
 | `--fail-fast` | Stop at the first requirement that falls short instead of carrying on. |
 | `--no-refactor` | Skip the refactor step even on a green bar. |
-| `--file <FILE>` | Draft new requirements into this included spec file instead of the root catalog. |
+| `--file <FILE>` | Draft new requirements into this included spec file. Omitted, the drafted requirement lands in the catalog document covering the working directory — see [`spec draft`](spec.md#spec-draft). |
+
+Requirements drafted from a description are numbered the way
+[`spec draft`](spec.md#how-the-id-is-chosen) numbers anything: the
+prefix is read off the catalog being drafted into, so delivering a
+description against a `HARNESS-` catalog plans `HARNESS-` ids and never
+`REQ-`.
 
 ## What the argument means
 
@@ -31,22 +37,38 @@ the command tells them apart by looking at what you typed:
 | `spec deliver "empty input means zero"` | Plain words: split into requirements first, then deliver each. |
 | `spec deliver` | Every pending requirement, in catalog order. |
 
-An argument shaped like `REQ-` followed by digits is a requirement id
-(case-insensitively, so `req-3` works). Several words are a description;
-the words do not need quoting, since everything after the flags is joined
-into one.
-
-A single word that was reaching for an id and missed is refused rather
-than drafted, because handing `R-003` to the model as prose invents a
-requirement nobody asked for:
+An argument that **names a requirement in the catalog** is that
+requirement, matched case-insensitively — so `req-3` and `harness-018`
+both work, and the prefix can be whatever the catalog uses. There is no
+hard-coded `REQ`: the command looks the argument up rather than matching
+a shape it was built with. An argument that merely *looks* like an id —
+an uppercase prefix, a dash, digits — is also taken as one, so a typo in
+the number is reported by name:
 
 ```text
-$ spec deliver R-003
-Error: R-003 is not a requirement id, and it is one word rather than a
+$ spec deliver REQ-999
+Error: No requirement with id REQ-999. Run spec list to see valid ids, or
+describe a new one with spec deliver "<what to build>".
+```
+
+Several words are a description; the words do not need quoting, since
+everything after the flags is joined into one.
+
+A single word that was reaching for an id and missed is refused rather
+than drafted, because handing `req7` to the model as prose invents a
+requirement nobody asked for. A lone word counts as a miss when it holds
+a digit, or opens with a prefix the catalog actually uses:
+
+```text
+$ spec deliver req7
+Error: req7 is not a requirement id, and it is one word rather than a
 requirement to break down, so nothing here can be delivered. Ids look
 like REQ-003 - run spec list to see them. To describe new work instead,
 use plain words: spec deliver "a custom delimiter on the first line".
 ```
+
+The example id in that message is taken from the catalog too, so a
+project numbering `HARNESS` is told `Ids look like HARNESS-001`.
 
 A description needs a model to break it down. Without one the run hands
 the work back rather than walking you through wording it — that is what
@@ -116,7 +138,7 @@ up front, with the reason and the command that settles it:
 | Scaffold a project (no build markers) | Run [`spec init --language`](init.md), or [`spec greenfield`](greenfield.md) to be walked through it |
 | Work from an empty catalog with nothing described | Describe it: `spec deliver "<what to build>"`, or [`spec greenfield`](greenfield.md) |
 | Break a description down with no model | Point one at the project with [`spec model use`](model.md), or word it with [`spec draft`](spec.md) |
-| Guess what `R-003` meant | Ids look like `REQ-003` — [`spec list`](spec.md) shows them |
+| Guess what `req7` meant | Ids look like `REQ-003` — [`spec list`](spec.md) shows them |
 
 Each of these exits nonzero without touching the spec, so nothing is
 half-written when you come back to it.

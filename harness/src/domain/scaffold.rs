@@ -116,10 +116,13 @@ endpoint = \"{endpoint}\"
 # A local decision model, used only to judge bounded questions about
 # evidence the deterministic rules cannot measure. It is a second,
 # separate model from [llm] above: that one writes, this one answers.
-# Nothing here is on until `model` names an installed decision model
-# (`spec judge models` lists them, `spec judge use <name>` writes it).
+# Judgments are on wherever a decision-capable model is installed: with
+# `model` unset, Ollama is asked which of its models can answer and the
+# first is used for the session. Set `model` to pin one, or
+# `mode = \"off\"` to ask nothing at all.
 [decision]
 # Persisted by `spec judge use`. Flag `--decision-model` wins for one run.
+# Unset means \"whichever decision model is installed\", not \"none\".
 # model = \"{decision_model}\"
 # Defaults to the [llm] endpoint above; set it only if the decision
 # model lives somewhere else.

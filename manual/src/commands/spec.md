@@ -111,8 +111,7 @@ in `nextStep` (`spec reword <id>` to address them). A title or
 criterion that collides with an existing requirement warns but still
 stages.
 
-By default the draft lands in the root `requirements.json`. To draft
-into an included spec file instead, name it with `--file` (it must
+To draft into a particular spec file, name it with `--file` (it must
 already be part of the catalog — see
 [`spec include`](#spec-include)):
 
@@ -120,8 +119,34 @@ already be part of the catalog — see
 spec draft --file requirements/core/arithmetic.json
 ```
 
-Ids are allocated across the whole catalog, so a requirement drafted
-into a child file still gets the next free `REQ-nnn`.
+When `--file` is omitted, the draft lands in the catalog document whose
+directory **covers the working directory**, deepest match first, falling
+back to the root `requirements.json`. Running in `core/` with
+`requirements/core/arithmetic.json` in the catalog drafts there; running
+in `src/domain`, which no included file covers, drafts into the root.
+
+### How the id is chosen
+
+Ids are **derived from the catalog**, never assumed. The prefix is the
+one the requirements already in the target file use; if that file is
+empty, the prefix of its nearest ancestor in the include tree, then the
+catalog root, and only then `REQ`. The number is the highest existing
+number *for that prefix* across the whole merged catalog, plus one — so
+two included files can never allocate the same id. Zero-padding matches
+the widest numeric part already in use, with a minimum of three digits.
+
+| The catalog's ids | Next drafted id |
+| --- | --- |
+| `REQ-001` … `REQ-006` | `REQ-007` |
+| `HARNESS-001` … `HARNESS-017` | `HARNESS-018` |
+| `REQ-0007` | `REQ-0008` |
+| none at all | `REQ-001` |
+
+The consequence worth knowing: one binary serves every spec with no
+per-project configuration, and nothing has to be told how a project
+numbers its work. Agents should **read** the next id rather than guess
+it — [`spec status`](status.md) reports it as `nextId`, and the same
+value reaches MCP callers through `list_requirements`.
 
 The prompts, first pass (interactive wizard, flags omitted):
 

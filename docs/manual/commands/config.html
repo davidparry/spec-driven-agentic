@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-f5fc82f3.js";
+            window.path_to_searchindex_js = "../searchindex-5a43e19b.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-2ab172c3.js"></script>
@@ -237,8 +237,12 @@ tools.profiles.implement	get_requirement, feature_read, …	(default)
 </code></pre>
 <p>The five <code>decision.*</code> rows describe the
 <a href="judge.html">decision model</a> — a second, separate model from <code>llm.model</code>
-above. <code>decision.model</code> is <code>(unset)</code> until <code>spec judge use</code> names one,
-and while it is unset nothing asks a judgment. <code>decision.endpoint</code> is
+above. <code>decision.model</code> is <code>(unset)</code> until <code>spec judge use</code> names one.
+Unset does not mean judgments are off: this command reports what the
+file says, and with no model named the first decision-capable model
+installed is used for the run. <a href="judge.html"><code>spec judge current</code></a> is the
+one that resolves it and names the model that will actually answer.
+<code>decision.endpoint</code> is
 attributed to the file when either it or <code>[llm] endpoint</code> supplied the
 host, since the decision plane defaults to wherever Ollama already is.</p>
 <p><code>refactor.attempts</code> is how many write-then-test rounds

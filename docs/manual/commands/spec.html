@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-f5fc82f3.js";
+            window.path_to_searchindex_js = "../searchindex-5a43e19b.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-2ab172c3.js"></script>
@@ -259,14 +259,42 @@ together. Structural validate must pass; refine findings are reported
 in <code>nextStep</code> (<code>spec reword &lt;id&gt;</code> to address them). A title or
 criterion that collides with an existing requirement warns but still
 stages.</p>
-<p>By default the draft lands in the root <code>requirements.json</code>. To draft
-into an included spec file instead, name it with <code>--file</code> (it must
+<p>To draft into a particular spec file, name it with <code>--file</code> (it must
 already be part of the catalog — see
 <a href="#spec-include"><code>spec include</code></a>):</p>
 <pre><code class="language-bash">spec draft --file requirements/core/arithmetic.json
 </code></pre>
-<p>Ids are allocated across the whole catalog, so a requirement drafted
-into a child file still gets the next free <code>REQ-nnn</code>.</p>
+<p>When <code>--file</code> is omitted, the draft lands in the catalog document whose
+directory <strong>covers the working directory</strong>, deepest match first, falling
+back to the root <code>requirements.json</code>. Running in <code>core/</code> with
+<code>requirements/core/arithmetic.json</code> in the catalog drafts there; running
+in <code>src/domain</code>, which no included file covers, drafts into the root.</p>
+<h3 id="how-the-id-is-chosen"><a class="header" href="#how-the-id-is-chosen">How the id is chosen</a></h3>
+<p>Ids are <strong>derived from the catalog</strong>, never assumed. The prefix is the
+one the requirements already in the target file use; if that file is
+empty, the prefix of its nearest ancestor in the include tree, then the
+catalog root, and only then <code>REQ</code>. The number is the highest existing
+number <em>for that prefix</em> across the whole merged catalog, plus one — so
+two included files can never allocate the same id. Zero-padding matches
+the widest numeric part already in use, with a minimum of three digits.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>The catalog’s ids</th><th>Next drafted id</th></tr>
+</thead>
+<tbody>
+<tr><td><code>REQ-001</code> … <code>REQ-006</code></td><td><code>REQ-007</code></td></tr>
+<tr><td><code>HARNESS-001</code> … <code>HARNESS-017</code></td><td><code>HARNESS-018</code></td></tr>
+<tr><td><code>REQ-0007</code></td><td><code>REQ-0008</code></td></tr>
+<tr><td>none at all</td><td><code>REQ-001</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>The consequence worth knowing: one binary serves every spec with no
+per-project configuration, and nothing has to be told how a project
+numbers its work. Agents should <strong>read</strong> the next id rather than guess
+it — <a href="status.html"><code>spec status</code></a> reports it as <code>nextId</code>, and the same
+value reaches MCP callers through <code>list_requirements</code>.</p>
 <p>The prompts, first pass (interactive wizard, flags omitted):</p>
 <pre><code class="language-text">REQ-004 title:
 REQ-004 story:

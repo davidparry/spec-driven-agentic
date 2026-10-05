@@ -3,6 +3,8 @@
 //! the same seams the composition root injects adapters into.
 
 use std::collections::{HashMap, HashSet};
+use std::fs;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use cucumber::gherkin::Step;
@@ -44,7 +46,7 @@ use spec_harness::application::init_service::{InitReport, InitService};
 use spec_harness::application::inspect_service::{InspectService, InspectionReport};
 use spec_harness::application::memory_service::MemoryAwareConversation;
 use spec_harness::application::model_service::{
-    DecisionReadiness, ModelResolution, ModelService, ModelSource, SessionModel,
+    DecisionReadiness, ModelResolution, ModelService, ModelSource, SessionDecision, SessionModel,
 };
 use spec_harness::application::scenario_service::ScenarioService;
 use spec_harness::application::spec_mutation_service::{
@@ -61,7 +63,7 @@ use spec_harness::application::tdd_service::{
 use spec_harness::application::tool_call_service::ToolCallService;
 use spec_harness::application::tool_service::{self, ToolService};
 use spec_harness::bootstrap::refresh_project_memory;
-use spec_harness::deliver::{Deliver, DeliverOptions, DeliverReport, parse_target};
+use spec_harness::deliver::{Deliver, DeliverOptions, DeliverReport, Target, parse_target};
 use spec_harness::domain::CACHE_DIR;
 use spec_harness::domain::decision::{DEFAULT_MIN_CONFIDENCE, Judgment, Mode, Policy, Verdict};
 use spec_harness::domain::feature::{FeatureDoc, FeatureSummary};
@@ -164,6 +166,7 @@ struct SpecWorld {
     init_report: Option<InitReport>,
     model_list: Option<Vec<ModelInfo>>,
     session_model: Option<SessionModel>,
+    session_decision: Option<SessionDecision>,
     recorded_filter: Arc<Mutex<Option<TestFilter>>>,
     model_system_prompt: Option<String>,
     offered_tools: Vec<String>,
@@ -208,6 +211,13 @@ struct SpecWorld {
     decision_readiness: Option<DecisionReadiness>,
     decision_question: Option<&'static DecisionPrompt>,
     findings_before_judgment: Option<Vec<String>>,
+    /// Where a command is pretending to run, relative to the project
+    /// root, for the steps about picking a catalog file.
+    working_dir: Option<String>,
+    discovery_dir: Option<tempfile::TempDir>,
+    discovery_start: Option<PathBuf>,
+    discovered_root: Option<Option<PathBuf>>,
+    deliver_target: Option<Target>,
 }
 
 // ---- fakes implementing the ports ----------------------------------------
@@ -1043,6 +1053,7 @@ impl SpecWorld {
     > {
         let root = self.project_root();
         spec_harness::wiring::mutation_service(&root, DEFAULT_LLM_ATTEMPTS)
+            .with_working_dir(self.working_dir.clone())
     }
 
     fn real_scenario_service(
@@ -1550,6 +1561,129 @@ fn requirement_drafted_into(world: &mut SpecWorld, title: String, file: String, 
             .real_mutation_service()
             .draft_direct_in(&title, &story, lines, Some(&file))
             .unwrap(),
+    );
+}
+
+#[when(regex = r#"^a requirement titled "([^"]+)" is drafted with:$"#)]
+fn requirement_drafted_undirected(world: &mut SpecWorld, title: String, step: &Step) {
+    let mut lines = docstring_lines(step);
+    let story = lines.remove(0);
+    world.draft_report = Some(
+        world
+            .real_mutation_service()
+            .draft_direct_in(&title, &story, lines, None)
+            .unwrap(),
+    );
+}
+
+#[given(regex = r#"^the command is run in "([^"]*)"$"#)]
+fn the_command_is_run_in(world: &mut SpecWorld, dir: String) {
+    world.working_dir = Some(dir);
+}
+
+// ---- project discovery steps ------------------------------------------------
+
+#[given("a project holding a spec catalog")]
+fn a_project_holding_a_spec_catalog(world: &mut SpecWorld) {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let root = dir.path();
+    fs::create_dir_all(root.join("requirements")).unwrap();
+    fs::write(root.join(SPEC_PATH), "{}").unwrap();
+    world.discovery_dir = Some(dir);
+}
+
+#[given("a project holding only a spec home")]
+fn a_project_holding_only_a_spec_home(world: &mut SpecWorld) {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    fs::create_dir_all(dir.path().join(spec_harness::domain::SPEC_DIR)).unwrap();
+    world.discovery_dir = Some(dir);
+}
+
+#[given("a directory belonging to no project")]
+fn a_directory_belonging_to_no_project(world: &mut SpecWorld) {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    world.discovery_start = Some(dir.path().to_path_buf());
+    world.discovery_dir = Some(dir);
+}
+
+#[given(regex = r#"^a nested project "([^"]+)" holding its own spec catalog$"#)]
+fn a_nested_project(world: &mut SpecWorld, name: String) {
+    let outer = world.discovery_dir.as_ref().expect("a project").path();
+    let inner = outer.join(name);
+    fs::create_dir_all(inner.join("requirements")).unwrap();
+    fs::write(inner.join(SPEC_PATH), "{}").unwrap();
+}
+
+#[given(regex = r#"^the working directory is "([^"]*)" inside it$"#)]
+fn the_working_directory_is(world: &mut SpecWorld, relative: String) {
+    let root = world.discovery_dir.as_ref().expect("a project").path();
+    let start = if relative.is_empty() {
+        root.to_path_buf()
+    } else {
+        root.join(&relative)
+    };
+    fs::create_dir_all(&start).unwrap();
+    world.discovery_start = Some(start);
+}
+
+#[when("the project root is discovered")]
+fn the_project_root_is_discovered(world: &mut SpecWorld) {
+    let start = world.discovery_start.clone().expect("a working directory");
+    world.discovered_root = Some(spec_harness::workspace::discover_project_root(&start));
+}
+
+#[then("the project root is the project directory")]
+fn the_project_root_is_the_project_directory(world: &mut SpecWorld) {
+    let expected = world.discovery_dir.as_ref().expect("a project").path();
+    let found = world.discovered_root.clone().expect("a discovery");
+    assert_eq!(found.as_deref(), Some(expected));
+}
+
+#[then("the project root is the nested project directory")]
+fn the_project_root_is_the_nested_project_directory(world: &mut SpecWorld) {
+    let expected = world
+        .discovery_dir
+        .as_ref()
+        .expect("a project")
+        .path()
+        .join("harness");
+    let found = world.discovered_root.clone().expect("a discovery");
+    assert_eq!(found.as_deref(), Some(expected.as_path()));
+}
+
+#[then("no project root is discovered")]
+fn no_project_root_is_discovered(world: &mut SpecWorld) {
+    let found = world.discovered_root.clone().expect("a discovery");
+    assert_eq!(found, None, "nothing should have been discovered");
+}
+
+// ---- delivery target steps --------------------------------------------------
+
+#[when(regex = r#"^the delivery target "([^"]+)" is read$"#)]
+fn the_delivery_target_is_read(world: &mut SpecWorld, raw: String) {
+    let known: Vec<String> = world
+        .real_mutation_service()
+        .list_requirements()
+        .map(|rows| rows.into_iter().map(|r| r.id).collect())
+        .unwrap_or_default();
+    match parse_target(Some(&raw), &known) {
+        Ok(target) => world.deliver_target = Some(target),
+        Err(message) => world.deliver_error = Some(message),
+    }
+}
+
+#[then(regex = r#"^the delivery target is the requirement "([^"]+)"$"#)]
+fn the_delivery_target_is_the_requirement(world: &mut SpecWorld, id: String) {
+    let target = world.deliver_target.as_ref().expect("a parsed target");
+    assert_eq!(target, &Target::Requirement(id));
+}
+
+#[then("the delivery target is a description")]
+fn the_delivery_target_is_a_description(world: &mut SpecWorld) {
+    let target = world.deliver_target.as_ref().expect("a parsed target");
+    assert!(
+        matches!(target, Target::Description(_)),
+        "target: {target:?}"
     );
 }
 
@@ -2404,6 +2538,12 @@ fn project_status_checked(world: &mut SpecWorld) {
     world.status_report = Some(world.status_service().status(&phase).unwrap());
 }
 
+#[then(regex = r#"^the status next id is "([^"]+)"$"#)]
+fn status_next_id_is(world: &mut SpecWorld, id: String) {
+    let report = world.status_report.as_ref().expect("a status report");
+    assert_eq!(report.next_id, id);
+}
+
 #[then(regex = r#"^the status next step contains "(.+)"$"#)]
 fn status_next_step_contains(world: &mut SpecWorld, fragment: String) {
     let report = world.status_report.as_ref().expect("a status report");
@@ -2851,9 +2991,9 @@ fn run_delivery(world: &mut SpecWorld, target: Option<&str>) {
         },
         "spec deliver never stops to ask",
     );
-    let result = parse_target(target).and_then(|parsed| {
-        Deliver::with_runner_factory(root, factory, llm, options).run(&mut prompter, &parsed)
-    });
+    let deliver = Deliver::with_runner_factory(root, factory, llm, options);
+    let result = parse_target(target, &deliver.known_ids())
+        .and_then(|parsed| deliver.run(&mut prompter, &parsed));
     world.prompt_transcript = prompter.into_inner().transcript;
     match result {
         Ok(report) => world.deliver_report = Some(report),
@@ -4507,6 +4647,80 @@ fn the_decision_readiness_is_checked_unconfigured(world: &mut SpecWorld) {
 #[when(regex = r#"^the decision readiness is checked with "([^"]+)" configured$"#)]
 fn the_decision_readiness_is_checked_with(world: &mut SpecWorld, model: String) {
     world.decision_readiness = Some(world.model_service().decision_readiness(Some(&model)));
+}
+
+#[when("the session decision status is checked with nothing configured")]
+fn the_session_decision_is_checked_unconfigured(world: &mut SpecWorld) {
+    world.session_decision = Some(
+        world
+            .model_service()
+            .session_decision(None, ModelSource::Config),
+    );
+}
+
+#[when(regex = r#"^the session decision status is checked with "([^"]+)" configured$"#)]
+fn the_session_decision_is_checked_with(world: &mut SpecWorld, model: String) {
+    world.session_decision = Some(
+        world
+            .model_service()
+            .session_decision(Some(&model), ModelSource::Config),
+    );
+}
+
+#[then(regex = r#"^the session announces the decision model "([^"]+)"$"#)]
+fn the_session_announces_the_decision_model(world: &mut SpecWorld, expected: String) {
+    let decision = world
+        .session_decision
+        .as_ref()
+        .expect("the session decision status was checked");
+    assert_eq!(
+        decision,
+        &SessionDecision::Ready {
+            model: expected,
+            source: ModelSource::Config,
+        },
+        "{decision:?}"
+    );
+}
+
+#[then(regex = r#"^the session borrows the decision model "([^"]+)" without saving it$"#)]
+fn the_session_borrows_the_decision_model(world: &mut SpecWorld, expected: String) {
+    let decision = world
+        .session_decision
+        .as_ref()
+        .expect("the session decision status was checked");
+    let SessionDecision::Ready { model, source } = decision else {
+        panic!("expected a borrowed model, got {decision:?}");
+    };
+    assert_eq!(model, &expected);
+    assert!(
+        matches!(
+            source,
+            ModelSource::OnlyInstalled | ModelSource::FirstInstalled
+        ),
+        "a borrow has a discovery source, not {source:?}"
+    );
+    assert_eq!(
+        *world.persisted_model.lock().unwrap(),
+        None,
+        "discovery must never persist a choice"
+    );
+}
+
+#[then(regex = r#"^the session announces judgments are off naming "([^"]+)"$"#)]
+fn the_session_announces_judgments_are_off(world: &mut SpecWorld, needle: String) {
+    let decision = world
+        .session_decision
+        .as_ref()
+        .expect("the session decision status was checked");
+    let SessionDecision::Off { remedy } = decision else {
+        panic!("expected judgments off, got {decision:?}");
+    };
+    assert!(remedy.contains(&needle), "announcement was:\n{remedy}");
+    assert!(
+        !remedy.contains("to continue"),
+        "startup gates on nothing, so it must not borrow the refusal's wording:\n{remedy}"
+    );
 }
 
 #[when(regex = r#"^the decision question "([^"]+)" is read from the prompt catalog$"#)]

@@ -14,6 +14,8 @@ use crate::application::spec_service::ServiceError;
 use crate::domain::generation::strip_code_fences;
 use crate::domain::language::Language;
 use crate::domain::memory::ProjectStructure;
+use crate::domain::model::{ROOT_SPEC_FILE, SpecCatalog};
+use crate::domain::requirement_id::next_id;
 use crate::domain::workflow::next_step_prompt;
 use crate::ports::{
     ChangeStore, FeatureCatalog, LlmConversation, Prompter, SourceFiles, SpecRepository, ToolBroker,
@@ -40,6 +42,14 @@ pub struct StatusReport {
     pub phase: String,
     pub staged: Vec<crate::ports::StagedChange>,
     pub requirements: Vec<RequirementStatus>,
+    /// The id the next drafted requirement will carry, read off the
+    /// catalog's own numbering.
+    ///
+    /// Here so an agent reads the shape rather than guessing it: ids are
+    /// `REQ-003` in the kata and `HARNESS-015` in this crate's own spec,
+    /// and a model that assumed one would name the other wrong.
+    #[serde(rename = "nextId")]
+    pub next_id: String,
     #[serde(rename = "nextStep")]
     pub next_step: String,
 }
@@ -168,6 +178,7 @@ where
             phase: phase.to_string(),
             staged,
             requirements,
+            next_id: next_id(&SpecCatalog::single_root(spec), ROOT_SPEC_FILE),
             next_step,
         })
     }

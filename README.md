@@ -51,7 +51,7 @@ Only `config.toml` is meant to be committed. The other children are gitignored. 
 
 ## Install `spec`
 
-Use the published installer from the [spec site](https://davidparry.github.io/spec-driven-agentic/). It places `spec` on your PATH. You want **0.7.0 or newer** — the `.spec/` directory described above replaced the flat `.spec.toml` in 0.6.0.
+Use the published installer from the [spec site](https://davidparry.github.io/spec-driven-agentic/). It places `spec` on your PATH. You want **0.7.3 or newer** — the `.spec/` directory described above replaced the flat `.spec.toml` in 0.6.0.
 
 macOS and Linux:
 

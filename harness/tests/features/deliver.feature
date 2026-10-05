@@ -182,10 +182,35 @@ Feature: Deliver mode
   Scenario: One word reaching for a requirement id is refused, not drafted
     Given a Java project marker
     And a working spec with the pending requirements "REQ-001"
-    When the delivery runs for "R-003"
-    Then the delivery error contains "R-003 is not a requirement id"
+    When the delivery runs for "req7"
+    Then the delivery error contains "req7 is not a requirement id"
     And the delivery error contains "spec list"
     And nothing is staged at the spec path
+
+  # "R-003" reads as an id - an uppercase prefix, a dash, a number - so
+  # the catalog is what decides, not the shape. A prefix the catalog does
+  # not use is reported by name rather than drafted from as prose.
+  Scenario: An id shaped correctly but naming nothing is reported by name
+    Given a Java project marker
+    And a working spec with the pending requirements "REQ-001"
+    When the delivery runs for "R-003"
+    Then the delivery error contains "No requirement with id R-003"
+    And the delivery error contains "spec list"
+    And nothing is staged at the spec path
+
+  # The prefix belongs to the catalog: this crate's own spec numbers
+  # HARNESS-014, and the same command has to reach it.
+  Scenario: A requirement carrying the catalog's own prefix is delivered
+    Given a Java project marker
+    And a working spec with the pending requirements "HARNESS-001"
+    And the delivery skips the refactor
+    And the test runs will report:
+      """
+      1 tests and 1 failures detailed "Harness001Test: TODO: assert"
+      """
+    When the delivery runs for "HARNESS-001"
+    Then the delivery is not completed
+    And the delivery planned "HARNESS-001"
 
   Scenario: A RED bar with no model stops the requirement and says who must implement it
     Given a Java project marker

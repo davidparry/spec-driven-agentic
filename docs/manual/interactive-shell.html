@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "searchindex-f5fc82f3.js";
+            window.path_to_searchindex_js = "searchindex-5a43e19b.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-2ab172c3.js"></script>
@@ -227,25 +227,64 @@ run <code>list</code>, <code>greenfield</code>, or anything else without relaunc
 commands and <kbd>Ctrl</kbd>+<kbd>R</kbd> for reverse search. If the
 history cannot be saved, the shell says so and exits normally.</p>
 <h2 id="model-announcement-at-startup"><a class="header" href="#model-announcement-at-startup">Model announcement at startup</a></h2>
-<p>The first prompt is preceded by one line describing the session’s
-model. This harness is developed and run against
-<code>qwen3.8-flash-next:125b-mlx</code>; your mileage will vary with a different
-model, especially one trained for work other than development. See
-<a href="getting-started.html#local-llm-ollama">Getting started</a> and
-<a href="commands/model.html"><code>spec model</code></a>.</p>
+<p>The first prompt is preceded by one line per model role: the
+<strong>inference</strong> model that writes scenarios, tests, and code, and the
+<strong>decision</strong> model that answers judgments. They are two different models
+doing different work — see <a href="commands/model.html"><code>spec model</code></a> and
+<a href="commands/judge.html"><code>spec judge</code></a> — so a session names both before you
+type anything, and names which is which.</p>
+<pre><code class="language-text">Inference model set: qwen3.8-flash-next:125b-mlx (from configuration).
+Decision model set: nimble (from configuration).
+</code></pre>
+<h3 id="the-inference-line"><a class="header" href="#the-inference-line">The inference line</a></h3>
+<p>This harness is developed and run against <code>qwen3.8-flash-next:125b-mlx</code>;
+your mileage will vary with a different model, especially one trained
+for work other than development. See
+<a href="getting-started.html#local-llm-ollama">Getting started</a>.</p>
 <div class="table-wrapper">
 <table>
 <thead>
 <tr><th>Situation</th><th>Announcement</th></tr>
 </thead>
 <tbody>
-<tr><td>Configured in <code>.spec/config.toml</code></td><td><code>Model set: qwen3.8-flash-next:125b-mlx (from configuration).</code></td></tr>
-<tr><td>No config, models installed</td><td><code>Model set for this session: qwen3.8-flash-next:125b-mlx (not saved - keep it with: spec model use qwen3.8-flash-next:125b-mlx).</code></td></tr>
+<tr><td>Configured in <code>.spec/config.toml</code></td><td><code>Inference model set: qwen3.8-flash-next:125b-mlx (from configuration).</code></td></tr>
+<tr><td><code>--model</code> passed</td><td><code>Inference model set: qwen3.8-flash-next:125b-mlx (from the --model flag).</code></td></tr>
+<tr><td>No config, models installed</td><td><code>Inference model set for this session: qwen3.8-flash-next:125b-mlx (not saved - keep it with: spec model use qwen3.8-flash-next:125b-mlx).</code></td></tr>
 <tr><td>Ollama up, no models</td><td><code>Ollama is running but has no models - generation will use deterministic templates. For optimal results pull a coding model, e.g.: ollama pull qwen3.8-flash-next:125b-mlx (mileage varies with models not trained for development)</code></td></tr>
 <tr><td>Ollama unreachable</td><td><code>Ollama is not reachable - generation will use deterministic templates. Install it from https://ollama.com, start it, and pull a coding model, e.g.: ollama pull qwen3.8-flash-next:125b-mlx (mileage varies with models not trained for development)</code></td></tr>
 </tbody>
 </table>
 </div>
+<h3 id="the-decision-line"><a class="header" href="#the-decision-line">The decision line</a></h3>
+<p>Resolving the decision model at startup is what turns a model named in
+<code>.spec/config.toml</code> but never pulled into something you find out about
+at the prompt rather than at the first judgment.</p>
+<p>With nothing configured, the line reports the model discovery borrowed
+— judgments are on wherever a decision-capable model is installed. The
+borrow is for the session only; <code>spec judge use</code> is what writes it down.
+Nothing is gated on the answer either way: a judgment is advice about
+wording, so a session with nothing to ask still returns every
+deterministic answer it always did.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Situation</th><th>Announcement</th></tr>
+</thead>
+<tbody>
+<tr><td>Configured in <code>.spec/config.toml</code></td><td><code>Decision model set: nimble (from configuration).</code></td></tr>
+<tr><td><code>--decision-model</code> passed</td><td><code>Decision model set: nimble (from the --decision-model flag).</code></td></tr>
+<tr><td>None configured, one installed</td><td><code>Decision model set for this session: nimble (not saved - keep it with: spec judge use nimble).</code></td></tr>
+<tr><td>None configured, several installed</td><td>The same line, naming the first the provider lists</td></tr>
+<tr><td>Configured, never pulled</td><td><code>Decision model 'nimble' cannot answer decisions here - install it to turn judgments on:</code> then <code>ollama pull nimble</code>, and the decision models that are installed</td></tr>
+<tr><td>None installed</td><td><code>No decision model is installed - install one to turn judgments on:</code> then <code>ollama pull nimble</code> and <code>spec judge use nimble</code></td></tr>
+<tr><td>Ollama unreachable, none configured</td><td><code>No decision model configured and none could be discovered - judgments are off this session.</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>When Ollama cannot be reached, a <em>configured</em> decision model is still
+announced as configured. A capability probe that could not run is not
+evidence the model is missing, and the first judgment reports the real
+failure against the endpoint rather than blaming the model.</p>
 <h2 id="the-greenfield-nudge"><a class="header" href="#the-greenfield-nudge">The greenfield nudge</a></h2>
 <p>When all three signs of a brand-new project line up —</p>
 <ol>

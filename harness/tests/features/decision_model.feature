@@ -179,6 +179,46 @@ Feature: Local decision model judgments
     When the decision readiness is checked with "nimble:test" configured
     Then the decision readiness is unknown and refuses nothing
 
+  # A session announces both model roles before its first prompt, and
+  # names which is which: the inference model writes, the decision model
+  # judges, and a line saying only "model" would leave the pair
+  # ambiguous.
+  Scenario: Session startup announces the configured decision model
+    Given Ollama reports the model "nimble:test" with the capability "decision"
+    And Ollama reports the model "coder:test" with the capability "completion"
+    When the session decision status is checked with "nimble:test" configured
+    Then the session announces the decision model "nimble:test"
+
+  # The gap the announcement closes: a model named in configuration but
+  # never pulled used to go unnoticed until the first judgment.
+  Scenario: Session startup catches a decision model that was never pulled
+    Given Ollama reports the model "nimble:test" with the capability "decision"
+    When the session decision status is checked with "absent:test" configured
+    Then the session announces judgments are off naming "ollama pull absent:test"
+
+  # Judgments are on by default. A machine that pulled a decision model
+  # gets one without a second configuration step - borrowed for the
+  # session, never written down, and no model name compiled in.
+  Scenario: Session startup borrows a decision model when the project names none
+    Given Ollama reports the model "nimble:test" with the capability "decision"
+    And Ollama reports the model "coder:test" with the capability "completion"
+    When the session decision status is checked with nothing configured
+    Then the session borrows the decision model "nimble:test" without saving it
+
+  # The one state discovery cannot rescue: nothing installed can answer.
+  Scenario: Session startup with nothing that can decide says what to pull
+    Given Ollama reports the model "coder:test" with the capability "completion"
+    When the session decision status is checked with nothing configured
+    Then the session announces judgments are off naming "ollama pull nimble"
+
+  # An unreachable provider is not evidence the configured model is
+  # missing, so the session announces it and the first judgment reports
+  # the real failure against the endpoint.
+  Scenario: Session startup announces the configured decision model even when Ollama is down
+    Given Ollama is unreachable
+    When the session decision status is checked with "nimble:test" configured
+    Then the session announces the decision model "nimble:test"
+
   # The wording sent to the decision model lives in the prompt catalog
   # with every other prompt, and its version lives in the same table -
   # a threshold calibrated against one phrasing is not evidence about

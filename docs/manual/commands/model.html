@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-f5fc82f3.js";
+            window.path_to_searchindex_js = "../searchindex-5a43e19b.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-2ab172c3.js"></script>
@@ -240,14 +240,16 @@ says the provider is unreachable.</p>
 <p>Show the resolved model and where it came from.</p>
 <pre><code class="language-bash">spec model current
 </code></pre>
-<pre><code class="language-text">Configured model: qwen3.8-flash-next:125b-mlx
+<pre><code class="language-text">qwen3.8-flash-next:125b-mlx (from configuration)
 </code></pre>
 <p>With nothing configured but models installed, the first one is the
 session default and the output tells you it is not saved:</p>
-<pre><code class="language-text">Model set for this session: qwen3.8-flash-next:125b-mlx (not saved - keep it with: spec model use qwen3.8-flash-next:125b-mlx).
+<pre><code class="language-text">qwen3.8-flash-next:125b-mlx (from the first installed model, this session only - persist it with: spec model use &lt;model-name&gt;)
 </code></pre>
-<p>The same announcement appears when the
-<a href="../interactive-shell.html">interactive shell</a> starts.</p>
+<p>This is the inference model — the one that writes scenarios, tests, and
+code. The decision model that answers judgments is a separate choice
+with its own command, <a href="judge.html"><code>spec judge current</code></a>. The
+<a href="../interactive-shell.html">interactive shell</a> announces both at startup.</p>
 <hr>
 <h2 id="spec-model-use"><a class="header" href="#spec-model-use">spec model use</a></h2>
 <p>Persist a model choice in the project’s configuration.</p>

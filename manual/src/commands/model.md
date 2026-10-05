@@ -81,18 +81,20 @@ spec model current
 ```
 
 ```text
-Configured model: qwen3.8-flash-next:125b-mlx
+qwen3.8-flash-next:125b-mlx (from configuration)
 ```
 
 With nothing configured but models installed, the first one is the
 session default and the output tells you it is not saved:
 
 ```text
-Model set for this session: qwen3.8-flash-next:125b-mlx (not saved - keep it with: spec model use qwen3.8-flash-next:125b-mlx).
+qwen3.8-flash-next:125b-mlx (from the first installed model, this session only - persist it with: spec model use <model-name>)
 ```
 
-The same announcement appears when the
-[interactive shell](../interactive-shell.md) starts.
+This is the inference model — the one that writes scenarios, tests, and
+code. The decision model that answers judgments is a separate choice
+with its own command, [`spec judge current`](judge.md). The
+[interactive shell](../interactive-shell.md) announces both at startup.
 
 ---
 

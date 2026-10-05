@@ -54,19 +54,60 @@ history cannot be saved, the shell says so and exits normally.
 
 ## Model announcement at startup
 
-The first prompt is preceded by one line describing the session's
-model. This harness is developed and run against
-`qwen3.8-flash-next:125b-mlx`; your mileage will vary with a different
-model, especially one trained for work other than development. See
-[Getting started](getting-started.md#local-llm-ollama) and
-[`spec model`](commands/model.md).
+The first prompt is preceded by one line per model role: the
+**inference** model that writes scenarios, tests, and code, and the
+**decision** model that answers judgments. They are two different models
+doing different work — see [`spec model`](commands/model.md) and
+[`spec judge`](commands/judge.md) — so a session names both before you
+type anything, and names which is which.
+
+```text
+Inference model set: qwen3.8-flash-next:125b-mlx (from configuration).
+Decision model set: nimble (from configuration).
+```
+
+### The inference line
+
+This harness is developed and run against `qwen3.8-flash-next:125b-mlx`;
+your mileage will vary with a different model, especially one trained
+for work other than development. See
+[Getting started](getting-started.md#local-llm-ollama).
 
 | Situation | Announcement |
 | --- | --- |
-| Configured in `.spec/config.toml` | `Model set: qwen3.8-flash-next:125b-mlx (from configuration).` |
-| No config, models installed | `Model set for this session: qwen3.8-flash-next:125b-mlx (not saved - keep it with: spec model use qwen3.8-flash-next:125b-mlx).` |
+| Configured in `.spec/config.toml` | `Inference model set: qwen3.8-flash-next:125b-mlx (from configuration).` |
+| `--model` passed | `Inference model set: qwen3.8-flash-next:125b-mlx (from the --model flag).` |
+| No config, models installed | `Inference model set for this session: qwen3.8-flash-next:125b-mlx (not saved - keep it with: spec model use qwen3.8-flash-next:125b-mlx).` |
 | Ollama up, no models | `Ollama is running but has no models - generation will use deterministic templates. For optimal results pull a coding model, e.g.: ollama pull qwen3.8-flash-next:125b-mlx (mileage varies with models not trained for development)` |
 | Ollama unreachable | `Ollama is not reachable - generation will use deterministic templates. Install it from https://ollama.com, start it, and pull a coding model, e.g.: ollama pull qwen3.8-flash-next:125b-mlx (mileage varies with models not trained for development)` |
+
+### The decision line
+
+Resolving the decision model at startup is what turns a model named in
+`.spec/config.toml` but never pulled into something you find out about
+at the prompt rather than at the first judgment.
+
+With nothing configured, the line reports the model discovery borrowed
+— judgments are on wherever a decision-capable model is installed. The
+borrow is for the session only; `spec judge use` is what writes it down.
+Nothing is gated on the answer either way: a judgment is advice about
+wording, so a session with nothing to ask still returns every
+deterministic answer it always did.
+
+| Situation | Announcement |
+| --- | --- |
+| Configured in `.spec/config.toml` | `Decision model set: nimble (from configuration).` |
+| `--decision-model` passed | `Decision model set: nimble (from the --decision-model flag).` |
+| None configured, one installed | `Decision model set for this session: nimble (not saved - keep it with: spec judge use nimble).` |
+| None configured, several installed | The same line, naming the first the provider lists |
+| Configured, never pulled | `Decision model 'nimble' cannot answer decisions here - install it to turn judgments on:` then `ollama pull nimble`, and the decision models that are installed |
+| None installed | `No decision model is installed - install one to turn judgments on:` then `ollama pull nimble` and `spec judge use nimble` |
+| Ollama unreachable, none configured | `No decision model configured and none could be discovered - judgments are off this session.` |
+
+When Ollama cannot be reached, a *configured* decision model is still
+announced as configured. A capability probe that could not run is not
+evidence the model is missing, and the first judgment reports the real
+failure against the endpoint rather than blaming the model.
 
 ## The greenfield nudge
 

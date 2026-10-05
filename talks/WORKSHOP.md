@@ -110,7 +110,7 @@ the branches apart.
 
 ## Prerequisites
 
-Install `spec` first — [published installer](../README.md#install-spec), **0.7.0 or newer** (the `.spec/` directory these exercises use replaced the flat `.spec.toml` in 0.6.0).
+Install `spec` first — [published installer](../README.md#install-spec), **0.7.3 or newer** (the `.spec/` directory these exercises use replaced the flat `.spec.toml` in 0.6.0).
 
 - Java 21+
 - Maven 3.9+
@@ -122,7 +122,7 @@ Install `spec` first — [published installer](../README.md#install-spec), **0.7
 
 ```bash
 git clone <this repo> && cd spec-driven-agentic
-spec --version                     # must succeed, and report 0.7.0 or newer
+spec --version                     # must succeed, and report 0.7.3 or newer
 mvn -q -pl smoke-test package     # MCP-server smoke-test jar
 mvn -q -f kata/pom.xml test       # standalone kata: JUnit + Cucumber
 ```

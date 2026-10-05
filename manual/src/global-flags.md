@@ -13,14 +13,37 @@ harness keeps its own files under `.spec/` (see
 for every relative path the harness reads or writes.
 A concrete path wins. An empty `--root`, or an unexpanded `${...}`
 template, is ignored. `SPEC_PROJECT_DIR` is used when it names a real
-path. Otherwise the process stays in the directory it was launched in.
-MCP clients that cannot see argv can
-call `project_root` to read the same directory as an absolute path.
+path. MCP clients that cannot see argv can call `project_root` to read
+the resolved directory as an absolute path.
 
 ```bash
 spec --root ~/code/calculator list
 spec list --root ~/code/calculator   # same thing
 ```
+
+### Discovery: what happens when you say nothing
+
+Omit `--root` and `spec` walks **up** from the working directory to the
+nearest ancestor that looks like a project — one holding
+`requirements/requirements.json`, or failing that a `.spec/` directory.
+The first match wins, so a project nested inside another is found before
+its parent. If no ancestor qualifies, the process stays in the directory
+it was launched in, exactly as before.
+
+```bash
+cd ~/code/calculator/src/domain
+spec list        # finds ~/code/calculator — no flag needed
+```
+
+This is why a repository holding more than one spec needs no `--root` on
+every line: standing in the module is how you select its catalog. If
+ids come back with a prefix you did not expect, you are standing in a
+different project than you meant to — `spec config` reports the root it
+resolved and where that came from.
+
+Precedence is unchanged by discovery: an explicit `--root` wins, then
+`SPEC_PROJECT_DIR`, then the discovered ancestor, then the working
+directory.
 
 In the [interactive shell](interactive-shell.md), commands inherit the
 shell's `--root` unless a line supplies its own.

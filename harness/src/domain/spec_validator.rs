@@ -3,15 +3,11 @@
 //! verbatim, except where a finding names the harness command that repairs
 //! it (the missing-featureFile finding points at mark-implemented).
 
-use regex::Regex;
 use std::collections::HashMap;
-use std::sync::LazyLock;
 
 use crate::domain::model::{Requirement, Spec, SpecCatalog};
+use crate::domain::requirement_id::is_id_shape;
 use crate::ports::FeatureFiles;
-
-static ID: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^[A-Z][A-Z0-9]*-\d+$").expect("valid regex"));
 
 const STATUSES: [&str; 2] = ["pending", "implemented"];
 
@@ -133,7 +129,7 @@ impl<'a> SpecValidator<'a> {
         issues: &mut Vec<String>,
     ) {
         let id = &r.id;
-        if !ID.is_match(id) {
+        if !is_id_shape(id) {
             issues.push(format!(
                 "{id}: id must look like REQ-007 (uppercase prefix, dash, number)"
             ));

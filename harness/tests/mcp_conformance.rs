@@ -486,6 +486,42 @@ fn serve_one_decision(status: u16, body: &'static str) -> String {
     format!("http://127.0.0.1:{port}")
 }
 
+/// A stub Ollama complete enough for the discovery path: `/api/tags`
+/// lists one model, `/api/show` reports it decision-capable, and
+/// anything else is answered as the judgment. Serves connections in a
+/// loop because resolving the model and asking it are separate calls.
+fn serve_discoverable_decision() -> String {
+    use std::io::{Read as _, Write as _};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { return };
+            let mut buffer = [0u8; 16384];
+            let read = stream.read(&mut buffer).unwrap_or(0);
+            let request = String::from_utf8_lossy(&buffer[..read]).to_string();
+            let body = if request.contains("/api/tags") {
+                r#"{"models":[{"name":"nimble:test"}]}"#
+            } else if request.contains("/api/show") {
+                r#"{"capabilities":["decision"]}"#
+            } else {
+                r#"{"model":"nimble:test",
+                    "answers":{"measurable":{"type":"noul","noul":0.04}},
+                    "usage":{"input_tokens":151,"output_tokens":1}}"#
+            };
+            let _ = stream.write_all(
+                format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\n\
+                     content-length: {}\r\nconnection: close\r\n\r\n{body}",
+                    body.len()
+                )
+                .as_bytes(),
+            );
+        }
+    });
+    format!("http://127.0.0.1:{port}")
+}
+
 /// A port nothing is listening on: a decision call aimed here fails
 /// immediately, so "no judgment was asked for" and "a judgment failed"
 /// stay distinguishable in the reply.
@@ -507,13 +543,25 @@ fn write_decision_config(root: &Path, endpoint: &str, mode: &str) {
     .unwrap();
 }
 
-/// With no decision model configured the reply is exactly what it has
-/// always been. This is the compatibility promise: a host that reads
-/// `refine_requirement` today sees no new keys until someone opts in.
+/// With nothing on this machine able to answer, the reply is exactly
+/// what it has always been: the deterministic findings and no new keys.
+///
+/// Configuring a model is no longer what switches judgments on - they
+/// are on wherever a decision-capable model is installed - so what
+/// keeps the keys out is having nothing to ask. The closed endpoint is
+/// what makes that true here whatever the machine running the test has
+/// pulled; against a live Ollama this would turn on whether the
+/// developer happened to have a decision model.
 #[tokio::test]
-async fn refine_requirement_carries_no_judgment_keys_until_a_model_is_configured() {
+async fn refine_requirement_carries_no_judgment_keys_when_nothing_can_answer() {
     let dir = tempfile::tempdir().unwrap();
     write_project(dir.path());
+    fs::create_dir_all(dir.path().join(".spec")).unwrap();
+    fs::write(
+        dir.path().join(".spec/config.toml"),
+        format!("[decision]\nendpoint = \"{}\"\n", closed_endpoint()),
+    )
+    .unwrap();
     let client = connect_default(dir.path()).await;
 
     let body = call_json(&client, "refine_requirement", json!({"id": "REQ-001"})).await;
@@ -529,6 +577,38 @@ async fn refine_requirement_carries_no_judgment_keys_until_a_model_is_configured
             "{absent} should be absent, keys were {keys:?}"
         );
     }
+
+    client.cancel().await.unwrap();
+}
+
+/// Judgments are on by default: a project that configured nothing still
+/// gets one, because the provider is asked which of its models can
+/// answer and the first is borrowed for the run.
+///
+/// The end of the chain that the unit tests cover a link at a time -
+/// here the model is never named anywhere, and a judgment comes back
+/// over the wire regardless.
+#[tokio::test]
+async fn refine_requirement_judges_with_no_decision_model_configured_at_all() {
+    let dir = tempfile::tempdir().unwrap();
+    write_project(dir.path());
+    fs::create_dir_all(dir.path().join(".spec")).unwrap();
+    fs::write(
+        dir.path().join(".spec/config.toml"),
+        format!(
+            "[decision]\nendpoint = \"{}\"\n",
+            serve_discoverable_decision()
+        ),
+    )
+    .unwrap();
+    let client = connect_default(dir.path()).await;
+
+    let body = call_json(&client, "refine_requirement", json!({"id": "REQ-001"})).await;
+    assert!(
+        body.get("judgments").is_some(),
+        "nothing was configured and a judgment still came back; keys were {:?}",
+        body.as_object().unwrap().keys().collect::<Vec<_>>()
+    );
 
     client.cancel().await.unwrap();
 }
