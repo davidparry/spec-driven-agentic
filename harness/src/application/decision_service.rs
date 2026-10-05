@@ -12,8 +12,8 @@ use serde::Serialize;
 
 use crate::application::spec_service::RefinementReport;
 use crate::domain::decision::{
-    CRITERION_MEASURABLE, Judgment, MEASURABLE_ANSWER, MEASURABLE_QUESTION, Mode, Policy, Request,
-    Transition, Verdict, measurable_finding, measurable_question, measurable_state,
+    CRITERION_MEASURABLE, Judgment, MEASURABLE_ANSWER, Mode, Policy, Request, Transition, Verdict,
+    measurable_finding, measurable_question, measurable_state, measurable_version,
 };
 use crate::ports::{DecisionError, DecisionModel};
 
@@ -107,7 +107,7 @@ impl<D: DecisionModel> DecisionService<D> {
             })?;
         let judgment = self.policy.judge(
             CRITERION_MEASURABLE,
-            MEASURABLE_QUESTION,
+            measurable_version(),
             // The tag the server echoed, not the one that was asked
             // for: `nimble` and `nimble:latest` are one request and two
             // different records.

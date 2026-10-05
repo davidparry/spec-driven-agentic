@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "searchindex-a361ab77.js";
+            window.path_to_searchindex_js = "searchindex-1e5fb135.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-2ab172c3.js"></script>
@@ -3165,8 +3165,11 @@ taken; in enforcing mode it is an error.</p>
 <code>decision</code> capability. No model name is hardcoded, and nothing is
 inferred from a name: a model is offered for this role only because the
 provider says it can do the job.</p>
-<p>With none installed, the command says so and suggests one:</p>
-<pre><code class="language-text">No decision models installed - pull one first (e.g. `ollama pull nimble`), then: spec judge use nimble
+<p>With none installed, the command is an error rather than an empty list,
+and gives the two commands that fix it:</p>
+<pre><code class="language-text">No decision model is installed - install one to continue:
+    ollama pull nimble
+    spec judge use nimble
 </code></pre>
 <hr>
 <h2 id="spec-judge-current"><a class="header" href="#spec-judge-current">spec judge current</a></h2>
@@ -3233,6 +3236,16 @@ is.</p>
 Arguments: [REQ_ID]   a requirement whose criteria are judged
 Options:   --text &lt;TEXT&gt;   judge this wording instead
            --json
+</code></pre>
+<p>Before it asks anything, this command checks that a model which can
+answer is both installed and chosen, and stops with the command to run
+if not. The check is on this command only. <code>spec refine</code> still judges
+nothing unless a model is configured, and says so in a note rather than
+failing — a wording review that worked before you had a decision model
+goes on working.</p>
+<pre><code class="language-text">No decision model configured - choose one to continue:
+    spec judge use nimble:latest
+installed: nimble:latest
 </code></pre>
 <p>Judge a piece of wording directly:</p>
 <pre><code class="language-bash">spec judge criterion --text "Given the refactored module, when the suite runs, then code quality is improved by at least 20%"
@@ -3410,6 +3423,13 @@ from 8 misses to none.</p>
 <p>The lesson is about the question, not the model: an open question
 invites a judgment of the sentence’s <em>style</em>, and style is exactly what
 convincing-looking wording gets right.</p>
+<p>The wording itself lives in <code>harness/prompts/prompts.toml</code>, under
+<code>[decision.measurable]</code>, beside the generative templates. It is built
+into the binary rather than read from your project, so a judgment means
+the same thing on every machine. <code>version</code> sits in that same table, next
+to the three strings it names, so the two cannot drift: any edit to the
+wording is a new version, because the numbers below were measured
+against one phrasing and are not evidence about another.</p>
 <p>The threshold came out of the same loop. At 0.70 the run produces three
 confident false alarms rather than one and leaves none of the six
 ambiguous criteria unsure. The two directions do not cost the same: a
@@ -3425,9 +3445,10 @@ project that would rather see every flag.</p>
 <tr><th>Message</th><th>What to do</th></tr>
 </thead>
 <tbody>
-<tr><td><code>No decision model configured</code></td><td><code>spec judge models</code>, then <code>spec judge use &lt;name&gt;</code></td></tr>
+<tr><td><code>No decision model is installed</code></td><td><code>ollama pull nimble</code>, then <code>spec judge use nimble</code></td></tr>
+<tr><td><code>No decision model configured</code></td><td><code>spec judge use &lt;name&gt;</code> — the message lists the installed names to choose from</td></tr>
 <tr><td><code>decision model 'X' is not installed</code></td><td><code>ollama pull X</code></td></tr>
-<tr><td><code>'X' cannot answer decisions</code></td><td>The model has no <code>decision</code> capability. <code>spec judge models</code> lists the ones that do</td></tr>
+<tr><td><code>'X' cannot answer decisions here</code></td><td>The model has no <code>decision</code> capability. The message lists the ones that do</td></tr>
 <tr><td><code>... has no /v1/systemone route</code></td><td>Ollama is older than 0.35. Upgrade it</td></tr>
 <tr><td><code>no decision within 60s</code></td><td>Raise <code>timeout_seconds</code> under <code>[decision]</code></td></tr>
 <tr><td><code>the decision brief is too large</code></td><td>The question’s brief is capped at 64 KiB by the server, which does not truncate</td></tr>

@@ -478,3 +478,26 @@ Rules:
 user = '''
 {{ task }}
 '''
+
+# ---------------------------------------------------------------------------
+# The decision plane. Not LLM prompts: these are bounded questions put to a
+# local *decision* model over /v1/systemone, which returns a typed answer and
+# a probability rather than text. See src/domain/decision.rs.
+#
+# Two rules that do not apply to the templates above:
+#
+# 1. `version` lives here, beside the wording it names. Any edit to
+#    `instructions`, `when_true` or `when_false` is a new version, because a
+#    threshold calibrated against one phrasing is not evidence about another.
+#    Bump `version` in the same edit or the calibration claim is silently
+#    false. `harness/tests/decision_live.rs` is the set it was measured on.
+#
+# 2. These are single-line literal strings on purpose. The bytes sent are the
+#    bytes measured, so a '''multi-line''' form that introduced newlines would
+#    change the request the published figures came from.
+
+[decision.measurable]
+version = 'measurable/v1'
+instructions = 'Read only the text after "then" in this acceptance criterion. That clause is the assertion a test would make. Does it name a specific value, state, status, or error that could be written into an assert statement exactly as stated, without anyone first deciding what the words mean?'
+when_true = 'Yes - the clause after "then" names a literal value, an exact status code, a named error type, or an exact relation between stated inputs, and two engineers reading it would write the same assertion.'
+when_false = 'No - the clause after "then" uses a word whose meaning a reader has to settle first (correct, proper, relevant, acceptable, improved, timely, successful, intuitive, as specified, best practice), or it refers to a document, standard, threshold or test suite that is not quoted here, or it restates the goal instead of naming a value. A number in the sentence does not count unless the assertion itself is that number: a percentage of a quantity nobody measured, or a placeholder such as an SLO or a limit named but not given, is still vague.'

@@ -584,10 +584,21 @@ impl Policy {
 /// The gate name for "is this acceptance criterion measurable".
 pub const CRITERION_MEASURABLE: &str = "CRITERION_MEASURABLE";
 
-/// The question set and version behind [`measurable_question`]. Any
-/// change to the wording below is a new version, because a threshold
-/// calibrated against one phrasing is not evidence about another.
-pub const MEASURABLE_QUESTION: &str = "measurable/v1";
+/// The name of the `[decision.*]` table holding this question.
+const MEASURABLE_PROMPT: &str = "measurable";
+
+/// The question set and version behind [`measurable_question`], e.g.
+/// `measurable/v1`.
+///
+/// Read from the same table as the wording rather than declared here,
+/// so the two cannot drift: any change to the wording is a new version,
+/// because a threshold calibrated against one phrasing is not evidence
+/// about another.
+pub fn measurable_version() -> &'static str {
+    crate::domain::prompts::decision_prompt(MEASURABLE_PROMPT)
+        .version
+        .as_str()
+}
 
 /// The name the answer comes back under.
 pub const MEASURABLE_ANSWER: &str = "measurable";
@@ -623,29 +634,17 @@ pub const MEASURABLE_ANSWER: &str = "measurable";
 /// none. The lesson is about the question, not the model: an open
 /// question invites a judgment of the sentence's style, and style is
 /// exactly what convincing-looking wording gets right.
+///
+/// The wording itself lives in `prompts/prompts.toml` under
+/// `[decision.measurable]`, with every other prompt the harness sends
+/// and beside the version that names it.
 pub fn measurable_question() -> Question {
+    let prompt = crate::domain::prompts::decision_prompt(MEASURABLE_PROMPT);
     Question::Noul {
-        instructions: "Read only the text after \"then\" in this acceptance criterion. That \
-                       clause is the assertion a test would make. Does it name a specific \
-                       value, state, status, or error that could be written into an assert \
-                       statement exactly as stated, without anyone first deciding what the \
-                       words mean?"
-            .to_string(),
+        instructions: prompt.instructions.clone(),
         criteria: Some(Outcomes {
-            when_false: "No - the clause after \"then\" uses a word whose meaning a reader \
-                         has to settle first (correct, proper, relevant, acceptable, \
-                         improved, timely, successful, intuitive, as specified, best \
-                         practice), or it refers to a document, standard, threshold or test \
-                         suite that is not quoted here, or it restates the goal instead of \
-                         naming a value. A number in the sentence does not count unless the \
-                         assertion itself is that number: a percentage of a quantity nobody \
-                         measured, or a placeholder such as an SLO or a limit named but not \
-                         given, is still vague."
-                .to_string(),
-            when_true: "Yes - the clause after \"then\" names a literal value, an exact \
-                        status code, a named error type, or an exact relation between stated \
-                        inputs, and two engineers reading it would write the same assertion."
-                .to_string(),
+            when_false: prompt.when_false.clone(),
+            when_true: prompt.when_true.clone(),
         }),
     }
 }
@@ -777,7 +776,7 @@ mod tests {
         let policy = Policy::new(Mode::Advisory, 0.70);
         let judgment = policy.judge(
             CRITERION_MEASURABLE,
-            MEASURABLE_QUESTION,
+            measurable_version(),
             "nimble:latest",
             noul(0.04),
             provenance(),
@@ -812,7 +811,7 @@ mod tests {
     fn a_judgment_serializes_the_same_words_it_prints() {
         let judgment = Policy::new(Mode::Enforce, 0.70).judge(
             "REQ-007",
-            MEASURABLE_QUESTION,
+            measurable_version(),
             "nimble:latest",
             Answer::Noul { noul: 0.02 },
             Provenance {
@@ -1085,7 +1084,7 @@ mod tests {
         let policy = Policy::new(Mode::Advisory, 0.70);
         let judgment = policy.judge(
             CRITERION_MEASURABLE,
-            MEASURABLE_QUESTION,
+            measurable_version(),
             "nimble:latest",
             noul(0.04),
             provenance(),

@@ -110,6 +110,75 @@ fn environment() -> &'static Environment<'static> {
     })
 }
 
+/// One bounded question for the decision plane, loaded from
+/// `[decision.<name>]`.
+///
+/// Not a template and never rendered: a decision question is sent
+/// verbatim, so there is no context to substitute and nothing that
+/// would make two sends differ.
+///
+/// `version` lives in the same table as the wording it names, which is
+/// the whole reason this type has the field at all. A threshold
+/// calibrated against one phrasing is not evidence about another, so
+/// wording that can change without its version changing turns a
+/// published figure into a claim nobody can reproduce.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+pub struct DecisionPrompt {
+    pub version: String,
+    pub instructions: String,
+    pub when_true: String,
+    pub when_false: String,
+}
+
+#[derive(serde::Deserialize)]
+struct DecisionCatalog {
+    #[serde(default)]
+    decision: std::collections::BTreeMap<String, DecisionPrompt>,
+}
+
+/// The decision questions, keyed by the name in `[decision.<name>]`.
+///
+/// Panics like the rest of this module: the catalog is a compile-time
+/// asset, so a missing question or an empty field is a build defect and
+/// not a runtime condition any caller could act on.
+fn decision_catalog() -> &'static std::collections::BTreeMap<String, DecisionPrompt> {
+    static QUESTIONS: OnceLock<std::collections::BTreeMap<String, DecisionPrompt>> =
+        OnceLock::new();
+    QUESTIONS.get_or_init(|| {
+        let catalog: DecisionCatalog = toml::from_str(PROMPTS_TOML)
+            .expect("prompts/prompts.toml is a compile-time asset and must parse");
+        for (name, question) in &catalog.decision {
+            for (field, text) in [
+                ("version", &question.version),
+                ("instructions", &question.instructions),
+                ("when_true", &question.when_true),
+                ("when_false", &question.when_false),
+            ] {
+                if text.trim().is_empty() {
+                    panic!("prompts/prompts.toml [decision.{name}] needs a {field}");
+                }
+                // The bytes sent are the bytes the published figures were
+                // measured on. A multi-line form would quietly change the
+                // request behind every number in the evaluation.
+                if text.contains('\n') {
+                    panic!(
+                        "prompts/prompts.toml [decision.{name}] {field} must be one line - \
+                         use a single-quoted literal, not '''...'''"
+                    );
+                }
+            }
+        }
+        catalog.decision
+    })
+}
+
+/// One decision question by name, e.g. `measurable`.
+pub fn decision_prompt(name: &str) -> &'static DecisionPrompt {
+    decision_catalog()
+        .get(name)
+        .unwrap_or_else(|| panic!("prompts/prompts.toml is missing [decision.{name}]"))
+}
+
 /// Render one section's system and user templates with the same context.
 pub(crate) fn render(section: &str, context: impl Serialize) -> RenderedPrompt {
     let value = minijinja::Value::from_serialize(&context);
@@ -218,5 +287,60 @@ mod tests {
         assert!(text.contains("Your previous reply was invalid"));
         assert!(text.contains("Reason: not a JSON array"));
         assert!(text.contains("Sure, here you go!"));
+    }
+
+    #[test]
+    fn the_measurable_question_is_loaded_from_the_catalog_with_its_version() {
+        let question = decision_prompt("measurable");
+        assert_eq!(question.version, "measurable/v1");
+        assert!(question.instructions.contains("after \"then\""));
+        assert!(question.when_true.contains("literal value"));
+        assert!(question.when_false.contains("vague"));
+    }
+
+    /// The bytes sent are the bytes the published evaluation measured.
+    /// A `'''multi-line'''` edit would change every figure behind it
+    /// without changing a single visible word, so the loader refuses
+    /// one and this is the proof it still does.
+    #[test]
+    fn every_decision_question_is_one_line_per_field_and_nothing_is_blank() {
+        let catalog = decision_catalog();
+        assert!(!catalog.is_empty(), "the decision plane needs a question");
+        for (name, question) in catalog {
+            for (field, text) in [
+                ("version", &question.version),
+                ("instructions", &question.instructions),
+                ("when_true", &question.when_true),
+                ("when_false", &question.when_false),
+            ] {
+                assert!(
+                    !text.trim().is_empty(),
+                    "[decision.{name}] {field} is blank"
+                );
+                assert!(
+                    !text.contains('\n'),
+                    "[decision.{name}] {field} spans lines"
+                );
+            }
+        }
+    }
+
+    /// A version names a wording. The two live in one table so an edit
+    /// cannot move one without the other being on screen, and the shape
+    /// is asserted so `measurable` and `measurable/v1` stay tellable
+    /// apart in a judgment record.
+    #[test]
+    fn a_question_version_names_the_question_and_a_revision() {
+        for (name, question) in decision_catalog() {
+            let (question_name, revision) = question
+                .version
+                .split_once('/')
+                .unwrap_or_else(|| panic!("[decision.{name}] version is not <name>/v<n>"));
+            assert_eq!(question_name, name, "the version names another question");
+            assert!(
+                revision.starts_with('v') && revision[1..].parse::<u32>().is_ok(),
+                "[decision.{name}] revision {revision:?} is not v<n>"
+            );
+        }
     }
 }

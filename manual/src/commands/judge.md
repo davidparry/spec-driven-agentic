@@ -80,10 +80,13 @@ The list comes from asking Ollama which of its models report the
 inferred from a name: a model is offered for this role only because the
 provider says it can do the job.
 
-With none installed, the command says so and suggests one:
+With none installed, the command is an error rather than an empty list,
+and gives the two commands that fix it:
 
 ```text
-No decision models installed - pull one first (e.g. `ollama pull nimble`), then: spec judge use nimble
+No decision model is installed - install one to continue:
+    ollama pull nimble
+    spec judge use nimble
 ```
 
 ---
@@ -186,6 +189,19 @@ Usage: spec judge criterion [OPTIONS] [REQ_ID]
 Arguments: [REQ_ID]   a requirement whose criteria are judged
 Options:   --text <TEXT>   judge this wording instead
            --json
+```
+
+Before it asks anything, this command checks that a model which can
+answer is both installed and chosen, and stops with the command to run
+if not. The check is on this command only. `spec refine` still judges
+nothing unless a model is configured, and says so in a note rather than
+failing — a wording review that worked before you had a decision model
+goes on working.
+
+```text
+No decision model configured - choose one to continue:
+    spec judge use nimble:latest
+installed: nimble:latest
 ```
 
 Judge a piece of wording directly:
@@ -395,6 +411,14 @@ The lesson is about the question, not the model: an open question
 invites a judgment of the sentence's *style*, and style is exactly what
 convincing-looking wording gets right.
 
+The wording itself lives in `harness/prompts/prompts.toml`, under
+`[decision.measurable]`, beside the generative templates. It is built
+into the binary rather than read from your project, so a judgment means
+the same thing on every machine. `version` sits in that same table, next
+to the three strings it names, so the two cannot drift: any edit to the
+wording is a new version, because the numbers below were measured
+against one phrasing and are not evidence about another.
+
 The threshold came out of the same loop. At 0.70 the run produces three
 confident false alarms rather than one and leaves none of the six
 ambiguous criteria unsure. The two directions do not cost the same: a
@@ -409,9 +433,10 @@ project that would rather see every flag.
 
 | Message | What to do |
 | --- | --- |
-| `No decision model configured` | `spec judge models`, then `spec judge use <name>` |
+| `No decision model is installed` | `ollama pull nimble`, then `spec judge use nimble` |
+| `No decision model configured` | `spec judge use <name>` — the message lists the installed names to choose from |
 | `decision model 'X' is not installed` | `ollama pull X` |
-| `'X' cannot answer decisions` | The model has no `decision` capability. `spec judge models` lists the ones that do |
+| `'X' cannot answer decisions here` | The model has no `decision` capability. The message lists the ones that do |
 | `... has no /v1/systemone route` | Ollama is older than 0.35. Upgrade it |
 | `no decision within 60s` | Raise `timeout_seconds` under `[decision]` |
 | `the decision brief is too large` | The question's brief is capped at 64 KiB by the server, which does not truncate |

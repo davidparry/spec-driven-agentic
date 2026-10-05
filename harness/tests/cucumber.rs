@@ -44,7 +44,7 @@ use spec_harness::application::init_service::{InitReport, InitService};
 use spec_harness::application::inspect_service::{InspectService, InspectionReport};
 use spec_harness::application::memory_service::MemoryAwareConversation;
 use spec_harness::application::model_service::{
-    ModelResolution, ModelService, ModelSource, SessionModel,
+    DecisionReadiness, ModelResolution, ModelService, ModelSource, SessionModel,
 };
 use spec_harness::application::scenario_service::ScenarioService;
 use spec_harness::application::spec_mutation_service::{
@@ -68,6 +68,7 @@ use spec_harness::domain::feature::{FeatureDoc, FeatureSummary};
 use spec_harness::domain::language::{Language, detect_languages};
 use spec_harness::domain::mcp_registry::{RegistryLoad, ServerSpec, parse_registry};
 use spec_harness::domain::model::{self, Requirement, Spec, TestRunSummary};
+use spec_harness::domain::prompts::DecisionPrompt;
 use spec_harness::domain::refiner::RequirementRefiner;
 use spec_harness::domain::tdd::{
     ImplementAttempt, StateEntry, TddPhase, TddSnapshot, TddStateMachine,
@@ -204,6 +205,8 @@ struct SpecWorld {
     judgment: Option<Judgment>,
     judge_error: Option<DecisionError>,
     decision_list: Option<Vec<String>>,
+    decision_readiness: Option<DecisionReadiness>,
+    decision_question: Option<&'static DecisionPrompt>,
     findings_before_judgment: Option<Vec<String>>,
 }
 
@@ -4461,6 +4464,105 @@ fn the_requirement_is_refined_with_judgment(world: &mut SpecWorld, id: String) {
         world.judge_error = Some(error);
     }
     world.refinement = Some(report);
+}
+
+#[when("the decision readiness is checked with nothing configured")]
+fn the_decision_readiness_is_checked_unconfigured(world: &mut SpecWorld) {
+    world.decision_readiness = Some(world.model_service().decision_readiness(None));
+}
+
+#[when(regex = r#"^the decision readiness is checked with "([^"]+)" configured$"#)]
+fn the_decision_readiness_is_checked_with(world: &mut SpecWorld, model: String) {
+    world.decision_readiness = Some(world.model_service().decision_readiness(Some(&model)));
+}
+
+#[when(regex = r#"^the decision question "([^"]+)" is read from the prompt catalog$"#)]
+fn the_decision_question_is_read(world: &mut SpecWorld, name: String) {
+    world.decision_question = Some(spec_harness::domain::prompts::decision_prompt(&name));
+}
+
+#[then(regex = r#"^the question version is "([^"]+)"$"#)]
+fn the_question_version_is(world: &mut SpecWorld, expected: String) {
+    let question = world.decision_question.expect("the catalog was read");
+    assert_eq!(question.version, expected);
+    assert_eq!(
+        spec_harness::domain::decision::measurable_version(),
+        expected,
+        "the judgment records the version the catalog holds"
+    );
+}
+
+#[then(regex = r#"^the question instructions name the clause after "([^"]+)"$"#)]
+fn the_question_instructions_name_the_clause(world: &mut SpecWorld, word: String) {
+    let question = world.decision_question.expect("the catalog was read");
+    assert!(
+        question.instructions.contains(&format!("after \"{word}\"")),
+        "instructions were {:?}",
+        question.instructions
+    );
+}
+
+/// Both outcomes described rather than left as Yes/No, so the model
+/// chooses between two stated criteria instead of guessing what the
+/// question meant.
+#[then("the question states both outcomes")]
+fn the_question_states_both_outcomes(world: &mut SpecWorld) {
+    let question = world.decision_question.expect("the catalog was read");
+    assert!(question.when_true.contains("literal value"));
+    assert!(question.when_false.contains("vague"));
+    let asked = spec_harness::domain::decision::measurable_question();
+    let json = serde_json::to_value(&asked).expect("the question serializes");
+    assert_eq!(json["criteria"]["true"], question.when_true);
+    assert_eq!(json["criteria"]["false"], question.when_false);
+}
+
+#[then("the decision readiness is ready")]
+fn the_decision_readiness_is_ready(world: &mut SpecWorld) {
+    let readiness = world
+        .decision_readiness
+        .as_ref()
+        .expect("readiness was checked");
+    assert_eq!(readiness, &DecisionReadiness::Ready, "{readiness:?}");
+    assert_eq!(
+        readiness.remedy(),
+        None,
+        "nothing to fix, so nothing to say"
+    );
+}
+
+/// Distinct from being ready: a failed probe is not evidence that a
+/// model is there, and it is not evidence that one is missing either.
+#[then("the decision readiness is unknown and refuses nothing")]
+fn the_decision_readiness_is_unknown(world: &mut SpecWorld) {
+    let readiness = world
+        .decision_readiness
+        .as_ref()
+        .expect("readiness was checked");
+    assert_eq!(readiness, &DecisionReadiness::Unknown, "{readiness:?}");
+    assert_eq!(readiness.remedy(), None, "an unknown state refuses nothing");
+}
+
+#[then(regex = r#"^the decision readiness refuses naming "([^"]+)"$"#)]
+fn the_decision_readiness_refuses_naming(world: &mut SpecWorld, needle: String) {
+    let readiness = world
+        .decision_readiness
+        .as_ref()
+        .expect("readiness was checked");
+    let remedy = readiness
+        .remedy()
+        .unwrap_or_else(|| panic!("{readiness:?} refused nothing"));
+    assert!(remedy.contains(&needle), "remedy was:\n{remedy}");
+}
+
+#[then(regex = r#"^the remedy names the command "([^"]+)"$"#)]
+fn the_remedy_names_the_command(world: &mut SpecWorld, needle: String) {
+    let remedy = world
+        .decision_readiness
+        .as_ref()
+        .expect("readiness was checked")
+        .remedy()
+        .expect("a refusal carries a remedy");
+    assert!(remedy.contains(&needle), "remedy was:\n{remedy}");
 }
 
 #[when("the decision models are listed")]

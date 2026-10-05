@@ -39,7 +39,7 @@ use spec_harness::application::init_service::InitService;
 use spec_harness::application::inspect_service::InspectService;
 use spec_harness::application::memory_service::MemoryAwareConversation;
 use spec_harness::application::model_service::{
-    ModelResolution, ModelService, ModelSource, SessionModel,
+    DecisionReadiness, ModelResolution, ModelService, ModelSource, SessionModel,
 };
 use spec_harness::application::refactor_service::{RefactorReport, RefactorService};
 use spec_harness::application::spec_mutation_service::SpecMutationService;
@@ -58,9 +58,7 @@ use spec_harness::domain::prompts::ask_prompt;
 use spec_harness::domain::spec_validator::{is_structural_issue, structural_repair};
 use spec_harness::domain::tdd::ImplementAttempt;
 use spec_harness::domain::tool_profile::{Caller, resolve};
-use spec_harness::domain::{
-    CACHE_DIR, HISTORY_FILE, LOG_DIR, RECOMMENDED_DECISION_MODEL, RECOMMENDED_MODEL, spec_rel,
-};
+use spec_harness::domain::{CACHE_DIR, HISTORY_FILE, LOG_DIR, RECOMMENDED_MODEL, spec_rel};
 use spec_harness::greenfield::Greenfield;
 use spec_harness::mcp::{WorkflowServer, builtin_tool_definitions};
 use spec_harness::ports::{
@@ -1688,12 +1686,12 @@ fn run_judge(root: &Path, flag: Option<&str>, command: &JudgeCommand) -> anyhow:
         JudgeCommand::Models => {
             let models = model_service(root).decision_models()?;
             if models.is_empty() {
-                println!(
-                    "No decision models installed - pull one first (e.g. `ollama pull \
-                     {RECOMMENDED_DECISION_MODEL}`), then: spec judge use \
-                     {RECOMMENDED_DECISION_MODEL}"
+                anyhow::bail!(
+                    "{}",
+                    DecisionReadiness::NoneInstalled
+                        .remedy()
+                        .expect("an empty machine has a remedy")
                 );
-                return Ok(());
             }
             for model in models {
                 println!("{model}");
@@ -1717,7 +1715,7 @@ fn run_judge(root: &Path, flag: Option<&str>, command: &JudgeCommand) -> anyhow:
                     "timeoutSeconds": settings.timeout.as_secs(),
                     "mode": settings.policy.mode,
                     "minConfidence": settings.policy.threshold,
-                    "question": spec_harness::domain::decision::MEASURABLE_QUESTION,
+                    "question": spec_harness::domain::decision::measurable_version(),
                 }));
             }
             match &settings.model {
@@ -1753,6 +1751,17 @@ fn run_judge(root: &Path, flag: Option<&str>, command: &JudgeCommand) -> anyhow:
             Ok(())
         }
         JudgeCommand::Criterion { req_id, text, json } => {
+            // A judgment needs a model that can answer one. Checked here
+            // rather than left to the round trip so the reply names the
+            // command that fixes it, and checked only on this path: the
+            // automatic judgments inside `refine` stay opt-in.
+            let configured = wiring::resolved_decision(root, flag).model;
+            if let Some(remedy) = model_service(root)
+                .decision_readiness(configured.as_deref())
+                .remedy()
+            {
+                anyhow::bail!("{remedy}");
+            }
             let Some(service) = wiring::decision_service(root, flag) else {
                 anyhow::bail!(
                     "No decision model configured - pick one with spec judge models, \
@@ -1782,7 +1791,7 @@ fn run_judge(root: &Path, flag: Option<&str>, command: &JudgeCommand) -> anyhow:
             println!("model\t{}", service.model());
             println!(
                 "question\t{}",
-                spec_harness::domain::decision::MEASURABLE_QUESTION
+                spec_harness::domain::decision::measurable_version()
             );
             println!("mode\t{}", service.policy().mode);
             println!("min_confidence\t{}", service.policy().threshold);

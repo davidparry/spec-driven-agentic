@@ -109,6 +109,57 @@ Feature: Local decision model judgments
     When the decision models are listed
     Then the decision model list is "nimble:test"
 
+  # `spec judge` is the one place a human asked for a judgment, so it
+  # checks a model can answer before paying for a round trip. The
+  # automatic judgments inside `refine` deliberately do not: a project
+  # with no decision model keeps behaving as it did before the decision
+  # plane existed.
+  Scenario: A machine with no decision model is told what to install
+    Given Ollama reports the model "coder:test" with the capability "completion"
+    When the decision readiness is checked with nothing configured
+    Then the decision readiness refuses naming "ollama pull nimble"
+    And the remedy names the command "spec judge use nimble"
+
+  Scenario: Installed decision models with none chosen name the ones to choose from
+    Given Ollama reports the model "nimble:test" with the capability "decision"
+    And Ollama reports the model "other:test" with the capability "decision"
+    When the decision readiness is checked with nothing configured
+    Then the decision readiness refuses naming "spec judge use nimble:test"
+    And the remedy names the command "installed: nimble:test, other:test"
+
+  Scenario: A chosen model that cannot decide names itself and the alternatives
+    Given Ollama reports the model "nimble:test" with the capability "decision"
+    And Ollama reports the model "coder:test" with the capability "completion"
+    When the decision readiness is checked with "coder:test" configured
+    Then the decision readiness refuses naming "ollama pull coder:test"
+    And the remedy names the command "spec judge use nimble:test"
+
+  # The provider lists a tag; a person types a name. Comparing the two
+  # as strings would report a model missing while it sat in the list
+  # printed directly below the error.
+  Scenario: An untagged name matches the tag the provider lists
+    Given Ollama reports the model "nimble:latest" with the capability "decision"
+    When the decision readiness is checked with "nimble" configured
+    Then the decision readiness is ready
+
+  # A capability probe that fails is not evidence a model is absent, so
+  # an unreachable provider refuses nothing here - the decision call
+  # reports the real failure against the endpoint instead.
+  Scenario: An unreachable provider refuses nothing before the call
+    Given Ollama is unreachable
+    When the decision readiness is checked with "nimble:test" configured
+    Then the decision readiness is unknown and refuses nothing
+
+  # The wording sent to the decision model lives in the prompt catalog
+  # with every other prompt, and its version lives in the same table -
+  # a threshold calibrated against one phrasing is not evidence about
+  # another, so the two must not be editable apart.
+  Scenario: The question wording and the version it is named by come from the prompt catalog
+    When the decision question "measurable" is read from the prompt catalog
+    Then the question version is "measurable/v1"
+    And the question instructions name the clause after "then"
+    And the question states both outcomes
+
   Scenario: The decision model is configured without touching the generative model
     Given the config file contains:
       """

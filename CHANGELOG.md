@@ -96,6 +96,34 @@
   ignore judgments, while silence costs nothing, because the
   deterministic rules are unchanged either way.
 
+  Because those numbers belong to one exact phrasing, the phrasing is
+  kept where it can be reviewed. The question moved out of a Rust
+  constant into `harness/prompts/prompts.toml` under
+  `[decision.measurable]`, beside the generative templates, with
+  `version` in that same table next to the three strings it names — so
+  a wording edit and the version bump that makes the calibration claim
+  honest are one edit in one place, not two files that can drift. It is
+  still `include_str!`'d into the binary rather than read from a
+  project: a judgment has to mean the same thing on every machine. The
+  loader refuses a blank field or an embedded newline at first use,
+  since the bytes measured were single-line literals and a multi-line
+  string would quietly change the request the published figures came
+  from. The move was verified by capturing the serialized question
+  before and after and diffing it; the live evaluation still reports
+  zero misses, one false alarm and three unsure at 0.80.
+
+  `spec judge criterion` and `spec judge models` now check that a model
+  able to answer is installed *and* chosen before doing anything, and
+  stop with the command that fixes it — `ollama pull nimble` when the
+  machine has none, `spec judge use <name>` listing the real installed
+  names when one is there but unchosen, and both when the configured
+  model cannot answer decisions. An untagged `nimble` matches the
+  `nimble:latest` the provider lists. The check is deliberately only on
+  `spec judge`, the command whose entire purpose is a judgment: an
+  unreachable provider refuses nothing, and `spec refine` still judges
+  nothing unless configured and says so in a note, so a wording review
+  that worked before any of this existed goes on working.
+
   `refine_requirement` over MCP carries the same judgment, under four
   keys that are absent entirely until a decision model is configured —
   so a host reading that reply today sees no change until someone opts

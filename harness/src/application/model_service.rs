@@ -9,8 +9,8 @@
 //! generative command used. Discovery now asks what a model can do
 //! before offering it for work it cannot perform.
 
-use crate::domain::RECOMMENDED_MODEL;
 use crate::domain::decision::{COMPLETION_CAPABILITY, DECISION_CAPABILITY};
+use crate::domain::{RECOMMENDED_DECISION_MODEL, RECOMMENDED_MODEL};
 use crate::ports::{LlmError, ModelCatalog, ModelInfo, ModelStore};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,6 +50,79 @@ pub enum SessionModel {
     NoGenerativeModel { installed: Vec<String> },
     /// The provider is not reachable at all.
     ProviderDown(String),
+}
+
+/// Whether this machine can answer a decision, and what to do when it
+/// cannot. Every variant but [`Self::Ready`] names one next command.
+#[derive(Debug, PartialEq, Eq)]
+pub enum DecisionReadiness {
+    /// A decision-capable model is installed and chosen.
+    Ready,
+    /// The provider answered and reports no decision-capable model.
+    NoneInstalled,
+    /// Decision models are installed; this project picked none.
+    NoneConfigured { installed: Vec<String> },
+    /// The chosen model is not one the provider can decide with -
+    /// never pulled, or pulled and not decision-capable.
+    ConfiguredMissing {
+        model: String,
+        installed: Vec<String>,
+    },
+    /// The provider could not be asked, so nothing is known.
+    ///
+    /// Deliberately not a refusal, on the same reasoning as
+    /// [`generative_candidate`]: a capability probe that fails is not
+    /// evidence a model is absent. The decision call that follows
+    /// reports the real failure through its own typed error, which
+    /// names the endpoint rather than blaming the model.
+    Unknown,
+}
+
+impl DecisionReadiness {
+    /// What to do about it, or `None` when there is nothing to do.
+    ///
+    /// The wording lives with the state rather than at the command that
+    /// prints it, so every surface reaching a state says the same
+    /// steps, and so a test can read them. Each remedy names a command
+    /// that can be run as written.
+    pub fn remedy(&self) -> Option<String> {
+        match self {
+            // Nothing to fix, and nothing known to be broken.
+            Self::Ready | Self::Unknown => None,
+            Self::NoneInstalled => Some(format!(
+                "No decision model is installed - install one to continue:\n    \
+                 ollama pull {RECOMMENDED_DECISION_MODEL}\n    \
+                 spec judge use {RECOMMENDED_DECISION_MODEL}"
+            )),
+            Self::NoneConfigured { installed } => Some(format!(
+                "No decision model configured - choose one to continue:\n    \
+                 spec judge use {}\ninstalled: {}",
+                installed[0],
+                installed.join(", ")
+            )),
+            Self::ConfiguredMissing { model, installed } => Some(format!(
+                "Decision model '{model}' cannot answer decisions here - install it to \
+                 continue:\n    ollama pull {model}\nor choose one already installed:\n    \
+                 spec judge use {}\ninstalled: {}",
+                installed[0],
+                installed.join(", ")
+            )),
+        }
+    }
+}
+
+/// `nimble` and `nimble:latest` name one model.
+///
+/// The provider lists the tagged form; a person configures whichever
+/// they typed, and `spec judge use nimble` is a reasonable thing to
+/// type. Comparing the strings alone would report a model as missing
+/// while it sat in the list directly above the error.
+fn same_model(configured: &str, installed: &str) -> bool {
+    let tagged = |long: &str, short: &str| {
+        long.strip_prefix(short)
+            .is_some_and(|rest| rest.starts_with(':'))
+    };
+    configured == installed || tagged(installed, configured) || tagged(configured, installed)
 }
 
 /// Whether a model may be handed to generative work.
@@ -147,6 +220,33 @@ impl<C: ModelCatalog, S: ModelStore> ModelService<C, S> {
             })
             .map(|model| model.name)
             .collect())
+    }
+
+    /// Whether this machine can answer a decision right now.
+    ///
+    /// Only `spec judge` asks. The automatic judgments inside `refine`
+    /// deliberately do not: a project with no decision model configured
+    /// behaves exactly as it did before the decision plane existed, and
+    /// turning that into an error would make an opt-in feature
+    /// mandatory. A human who typed `spec judge` has asked for one
+    /// judgment, so an actionable refusal beats a late failure.
+    pub fn decision_readiness(&self, configured: Option<&str>) -> DecisionReadiness {
+        let Ok(installed) = self.decision_models() else {
+            return DecisionReadiness::Unknown;
+        };
+        if installed.is_empty() {
+            return DecisionReadiness::NoneInstalled;
+        }
+        match configured {
+            None => DecisionReadiness::NoneConfigured { installed },
+            Some(model) if installed.iter().any(|name| same_model(model, name)) => {
+                DecisionReadiness::Ready
+            }
+            Some(model) => DecisionReadiness::ConfiguredMissing {
+                model: model.to_string(),
+                installed,
+            },
+        }
     }
 
     pub fn resolve(&self, flag: Option<&str>) -> ModelResolution {
@@ -545,6 +645,116 @@ mod tests {
             FakeStore::default(),
         );
         assert_eq!(service.decision_models().unwrap(), vec!["nimble:latest"]);
+    }
+
+    #[test]
+    fn a_machine_with_a_decision_model_installed_and_chosen_is_ready() {
+        let service = ModelService::new(
+            CapableCatalog::new(&[
+                ("coder:latest", &["completion"]),
+                ("nimble:latest", &["decision"]),
+            ]),
+            FakeStore::default(),
+        );
+        assert_eq!(
+            service.decision_readiness(Some("nimble:latest")),
+            DecisionReadiness::Ready
+        );
+    }
+
+    /// The whole point of the preflight: a machine that has pulled a
+    /// coding model and nothing else is told what to install, not told
+    /// to pick from an empty list.
+    #[test]
+    fn no_decision_capable_model_installed_is_its_own_state() {
+        let service = ModelService::new(
+            CapableCatalog::new(&[("coder:latest", &["completion", "tools"])]),
+            FakeStore::default(),
+        );
+        assert_eq!(
+            service.decision_readiness(None),
+            DecisionReadiness::NoneInstalled
+        );
+        assert_eq!(
+            service.decision_readiness(Some("nimble:latest")),
+            DecisionReadiness::NoneInstalled,
+            "nothing can answer, whatever was configured"
+        );
+    }
+
+    #[test]
+    fn decision_models_installed_but_none_chosen_names_the_ones_to_choose_from() {
+        let service = ModelService::new(
+            CapableCatalog::new(&[
+                ("nimble:latest", &["decision"]),
+                ("other:latest", &["decision"]),
+            ]),
+            FakeStore::default(),
+        );
+        assert_eq!(
+            service.decision_readiness(None),
+            DecisionReadiness::NoneConfigured {
+                installed: vec!["nimble:latest".into(), "other:latest".into()]
+            }
+        );
+    }
+
+    #[test]
+    fn a_chosen_model_that_cannot_decide_names_itself_and_the_alternatives() {
+        let service = ModelService::new(
+            CapableCatalog::new(&[
+                ("nimble:latest", &["decision"]),
+                ("coder:latest", &["completion"]),
+            ]),
+            FakeStore::default(),
+        );
+        assert_eq!(
+            service.decision_readiness(Some("coder:latest")),
+            DecisionReadiness::ConfiguredMissing {
+                model: "coder:latest".into(),
+                installed: vec!["nimble:latest".into()]
+            }
+        );
+    }
+
+    /// `spec judge use nimble` is a reasonable thing to type, and the
+    /// provider lists `nimble:latest`. Comparing the strings alone
+    /// would report the model missing while it sat in the list printed
+    /// directly below the error.
+    #[test]
+    fn an_untagged_name_matches_the_tag_the_provider_lists() {
+        let service = ModelService::new(
+            CapableCatalog::new(&[("nimble:latest", &["decision"])]),
+            FakeStore::default(),
+        );
+        assert_eq!(
+            service.decision_readiness(Some("nimble")),
+            DecisionReadiness::Ready
+        );
+        assert_eq!(
+            service.decision_readiness(Some("nimble-mini")),
+            DecisionReadiness::ConfiguredMissing {
+                model: "nimble-mini".into(),
+                installed: vec!["nimble:latest".into()]
+            },
+            "a prefix is not a tag"
+        );
+    }
+
+    /// A probe that could not run is not evidence a model is absent, so
+    /// the preflight stands aside and lets the decision call report the
+    /// real failure against the endpoint.
+    #[test]
+    fn an_unreachable_provider_refuses_nothing() {
+        let service = ModelService::new(
+            FakeCatalog(Err(LlmError("down".into()))),
+            FakeStore::default(),
+        );
+        assert_eq!(
+            service.decision_readiness(Some("nimble:latest")),
+            DecisionReadiness::Unknown
+        );
+        assert_eq!(service.decision_readiness(None), DecisionReadiness::Unknown);
     }
 
     #[test]
