@@ -31,7 +31,7 @@ problem: a bigger model is a better System 1, and System 2 has to come from
 somewhere else. A model trained to decide rather than to write is still
 System 1 — faster and typed, but holding no ground truth.
 
-There is a better answer, and Java developers have had it for twenty years:
+There is a better answer, and developers have had it for twenty years:
 write the specification first, and make the tests the contract. The way to make
 an agent honor that is not a better model but a **purpose-built harness** —
 software that already knows the job, with the model as its smallest component.
@@ -168,10 +168,12 @@ be on the review, is stated plainly rather than skipped.
 
 ## Who it is for
 
-Java developers, tech leads, and architects who are adopting AI coding agents
+Developers, tech leads, and architects who are adopting AI coding agents
 and are accountable for what those agents produce — especially in regulated,
 air-gapped, or cost-constrained environments. Level: intermediate. No prior MCP
-or LLM experience required; comfort with JUnit and Cucumber is assumed.
+or LLM experience required; comfort with unit tests and BDD scenarios is
+assumed, in whatever language you write them — the examples on stage are
+JUnit and Cucumber.
 
 ## Formats
 
