@@ -20,6 +20,7 @@ Usage: spec deliver [OPTIONS] [TARGET]...
 | `--no-refactor` | Skip the refactor step even on a green bar. |
 | `--file <FILE>` | Draft new requirements into this included spec file. Omitted, the drafted requirement lands in the catalog document covering the working directory — see [`spec draft`](spec.md#spec-draft). |
 | `--no-branch` | Skip [the branch gate](../branch-gate.md) entirely: git is not consulted and no branch is created. |
+| `--judge-draft` | Put each drafted criterion to the [decision model](judge.md) and give the drafting model one round to reword what it cannot read as an assertion. Off by default — see [below](#judge-draft-the-decision-model-during-drafting). |
 
 Requirements drafted from a description are numbered the way
 [`spec draft`](spec.md#how-the-id-is-chosen) numbers anything: the
@@ -108,6 +109,49 @@ Running the tests - working ...
 A step that loops on its own is called once and its loop is trusted:
 drafting's validate-and-reword rounds, `spec implement`'s attempts,
 and `spec refactor`'s rounds are not wrapped in a second loop here.
+
+## `--judge-draft`: the decision model during drafting
+
+Delivering a description rather than an id means the spec is written by
+a model with nobody reading it. `--judge-draft` puts the
+[decision model](judge.md) in that loop — the only place in the harness
+its answer is used as **feedback rather than a gate**.
+
+With the flag, a proposal that clears the deterministic edge-case rule
+has each of its criteria put to the question `measurable/v2`. Anything
+the model cannot read as an assertion comes back as a rejection reason,
+naming every flagged criterion, and the drafting model gets one round
+to reword them. Then the draft is kept, whatever the second answer was.
+
+**It is off by default, and the reason is measured.** A drafting model
+writes criteria like `then the roll-up verdict is "covered"`, which is
+the shape this question reads worst. Put one real six-criterion draft
+through it and four come back flagged — so the usual outcome is a
+redraft the question was wrong to ask for. A redraft also rewrites the
+criteria every later stage is prompted from, which costs an unattended
+run its reproducibility and a cached rehearsal its cache.
+
+Three properties bound what it can cost you when you do turn it on:
+
+- **It never blocks.** One rejection, one redraft, draft kept. There is
+  no path where a judgment stops the run.
+- **It never spends the last attempt.** A question the loop has no
+  round left to act on is not asked.
+- **An unreachable model is not an objection.** The first failed
+  request stops the asking and the draft proceeds.
+
+It is feedback and not a gate for the same measured reason: the
+question reads 14 of this repository's own 73 criteria as unmeasurable
+when they plainly are not. A gate wired to that would block a fifth of
+an unattended pipeline. A rejection reason wired to it costs one round
+— and a wrong objection still tends to improve the wording, since a
+model asked to make `then the verdict is "covered"` assertable writes
+`then the reply is an error naming "covered"`, which scores 0.912 and
+reads better.
+
+`--decision-model` picks the model and `[decision] mode = "off"`
+refuses to ask whatever the flag says. `advisory` and `enforce` behave
+identically here, because nothing is being enforced.
 
 ## It stops once, before it writes anything
 

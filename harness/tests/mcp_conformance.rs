@@ -639,7 +639,7 @@ async fn refine_requirement_gates_on_a_judgment_when_the_project_enforces() {
         findings[0]
             .as_str()
             .unwrap()
-            .starts_with("judgment (measurable/v1):"),
+            .starts_with("judgment (measurable/v2):"),
         "a probabilistic finding has to be labelled as one: {body}"
     );
     assert!(
@@ -653,7 +653,7 @@ async fn refine_requirement_gates_on_a_judgment_when_the_project_enforces() {
     let judgments = body["judgments"].as_array().expect("judgments");
     assert_eq!(judgments.len(), 1, "{body}");
     let judgment = &judgments[0];
-    assert_eq!(judgment["question"], "measurable/v1");
+    assert_eq!(judgment["question"], "measurable/v2");
     assert_eq!(judgment["model"], "nimble:test");
     assert_eq!(judgment["verdict"], "FAILS");
     assert_eq!(judgment["action"], "REWORK", "{body}");

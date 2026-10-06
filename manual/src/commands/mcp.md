@@ -154,7 +154,7 @@ model, and it does so only when a [decision model](judge.md) is
 configured. The other 24 never call one.
 
 When it does, each acceptance criterion is put to that model as the
-question `measurable/v1` — could a test check this with one unambiguous
+question `measurable/v2` — could a test check this with one unambiguous
 result? — and the reply gains `judgments`, `judgmentAdvisories` and
 `judgmentAction`. Those keys are absent entirely otherwise, which is the
 compatibility promise: a host reading this tool today sees no change
@@ -173,7 +173,7 @@ Two rules hold whatever the project configured:
   over MCP, and no new field to obey: the instruction to iterate until
   there are no findings already covers it. The deterministic findings
   keep their place and are never edited or dropped, and the judgment
-  lines are prefixed `judgment (measurable/v1):` so you can tell which
+  lines are prefixed `judgment (measurable/v2):` so you can tell which
   rules found what. Set `mode = "advisory"` to report without gating.
 - **`mode = "off"` stops it asking.** The model stays configured for
   `spec judge`, which a human types, while automatic judgments —

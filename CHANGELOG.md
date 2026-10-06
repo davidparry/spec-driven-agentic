@@ -2,6 +2,121 @@
 
 ## Unreleased
 
+- **`spec deliver --judge-draft` puts the decision model in the draft
+  loop, as feedback rather than as a gate.** Delivering from a
+  description writes a spec with nobody reading it, which made it the
+  one place in the harness where the second opinion mattered most and
+  the one place it could not be asked: `judge_refinement` was reachable
+  only from `spec refine` and the `refine_requirement` MCP tool.
+
+  With the flag, a proposal that clears the deterministic edge-case
+  rule has each criterion put to `measurable/v2`. Flagged criteria come
+  back as a rejection reason naming all of them, the drafting model
+  gets one round to reword, and then the draft is kept whatever the
+  second answer is. One rejection, never more; the question is not
+  asked when no round is left to act on it; and the first failed
+  request stops the asking, because an unreachable model is not an
+  objection.
+
+  Feedback rather than a gate for the measured reason below — a gate
+  wired to a question that misreads a fifth of this repository's own
+  criteria would block a fifth of an unattended pipeline, where a
+  rejection reason costs one round and tends to improve the wording
+  even when the objection is wrong. `advisory` and `enforce` behave
+  identically here; `mode = "off"` refuses to ask whatever the flag
+  says.
+
+  **Opt-in rather than on**, which is the one thing here that was
+  decided by measurement against the feature rather than for it. A
+  drafting model writes `then the roll-up verdict is "covered"`, and
+  that copula shape is the one this question reads worst: a real
+  six-criterion draft comes back with four flagged. So the usual
+  outcome is a redraft the question was wrong to ask for — and a
+  redraft rewrites the criteria every later stage is prompted from,
+  which costs an unattended run its reproducibility and a cached
+  rehearsal its cache. Unflagged, `deliver` sends the drafting model
+  exactly the prompts it sent before any of this existed.
+
+- **The decision question is not safe to gate on, and `spec refine` in
+  this repository now runs it `advisory`.** The published figures are unchanged and
+  still true — 0 misses, 1 false alarm, 3 left unsure over the
+  32-criterion labelled set — but they do not generalize. Put the
+  harness's own 73 criteria through the same question and **15 come
+  back `FAILS`**, every one of them a count or a quoted literal, with 9
+  more `INCONCLUSIVE`. `then the verdict is "valid"` scores 0.649,
+  `then there are 5 findings` 0.115.
+
+  The cause is not the one recorded here for two releases, and the
+  replacement explanation in the first draft of this entry was wrong
+  too. It is not the quoted word — swap it and nothing moves
+  (`"invalid"` 0.025, `"GREEN"` 0.041, `"banana"` 0.047). It is not
+  context length either. There are two distinct defects, both
+  reproducible with `spec judge criterion` and both written up above
+  `KNOWN_FALSE_ALARM` in `tests/decision_live.rs`:
+
+  **Hedge words leak in from the setup.** Hold `then there are 5
+  findings` byte-identical and grow the `Given`: 0.991 with nothing,
+  0.972, 0.962 — and 0.115 once the `Given` says `three ambiguous
+  words`. Change that one word to `unusual` and it is 0.884, to `red`
+  0.973, and quoting it as `"ambiguous"` restores 0.975. `when_false`
+  lists the hedge words that make a clause vague and the model scans
+  the whole criterion for them, which is the one thing `instructions`
+  tells it not to do.
+
+  **The copula.** In one fixed frame, `then the reply is an error
+  naming "covered"` scores 0.912, `then the reply names "covered"`
+  0.785, and `then the verdict is "covered"` 0.058; `then there are 5
+  findings` 0.915 against `then the reply lists 5 findings` 0.032.
+  `then the X is "Y"` reads as describing a state rather than asserting
+  one. That is the most common assertion shape in this repository's
+  spec, which is where the 15 come from.
+
+  Two fixes were measured and rejected. Naming quoted status words in
+  `when_true` takes the labelled set to zero false alarms, but the
+  words it names are that set's own and the score returns the moment
+  they come out, which is fitting the prompt to the test. Sending only
+  the clause after `then` does what the first defect predicts —
+  `then there are 5 findings` goes 0.115 to 0.994 — and is worse on
+  both sets: the labelled set goes from 0 misses, 1 false alarm and 3
+  unsure to **1 miss**, 3 false alarms and 1 unsure, and the harness
+  spec goes from 22 flagged criteria to 31.
+
+  That miss closes the question. `then the system achieves 99.9%
+  correctness across all code paths` scores 0.933 alone and fails
+  correctly inside its frame: the model is not leaking context into
+  the then-clause, it is judging the vagueness of the whole sentence,
+  and that is one mechanism working in both directions. The first
+  defect is the behaviour that works, seen from the other side, and no
+  rewording separates them.
+
+  What needs fixing first is the evaluation set: 32 cases from one
+  author, with most of the measurable half in the shape `then the
+  result is N` — a shape the question happens to answer well.
+  `KNOWN_FALSE_ALARMS` therefore stays at 1 and the published figures
+  stay as they were.
+
+- **`measurable/v2`** sharpens the wording without moving the figures —
+  `when_true` now says that text in quotation marks is a literal
+  whatever the word would mean as prose, and that a count is one too;
+  `when_false` says *unquoted* word. The version is bumped because the
+  strings changed, which is the rule for that table, not because the
+  question got better.
+
+- **The decision model is pinned in `harness/.spec/config.toml`** —
+  `model = "nimble:latest"`, `mode = "advisory"`. Pinned for the same
+  reason `[llm] model` is: the question is calibrated against one
+  model, and a session that discovered a different decision-capable one
+  is not the run the published figures describe. The kata root's
+  `[decision]` block is deliberately left commented, because
+  `spec judge use` is a beat in the binary walkthrough.
+
+- **Two `HARNESS-018` criteria now say what their scenarios assert.**
+  `then the name is refused and 0 branches are created` and `then the
+  run continues on "main"` became `then 0 branches are created and the
+  warning names "not a usable branch name"` and `… names "main" as the
+  branch the run stays on`. The feature file was already asserting
+  exactly that.
+
 - **Every command writes the project's real files, and git is the
   review.** The staging area is gone: `.spec/staged/`, the overlay that
   made a staged edit readable before it was applied, and the four
@@ -200,8 +315,8 @@
   `mode = "off"`.
 
   `decision.min_confidence` defaults to `0.80` for the same measured
-  reason. At 0.70 the run produces three confident false alarms instead
-  of one and leaves none of the six ambiguous criteria unsure. The two
+  reason. At 0.70 the run produces two confident false alarms instead
+  of one and leaves one of the six ambiguous criteria unsure. The two
   error directions do not cost the same: a confident false alarm
   asserts wording is unmeasurable when it is not, while an inconclusive
   one asks for clarity and is right to ask.

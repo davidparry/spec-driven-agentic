@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-b4e7eb24.js";
+            window.path_to_searchindex_js = "../searchindex-5300ee44.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-0006eac3.js"></script>
@@ -201,6 +201,7 @@ there.</p>
 <tr><td><code>--no-refactor</code></td><td>Skip the refactor step even on a green bar.</td></tr>
 <tr><td><code>--file &lt;FILE&gt;</code></td><td>Draft new requirements into this included spec file. Omitted, the drafted requirement lands in the catalog document covering the working directory — see <a href="spec.html#spec-draft"><code>spec draft</code></a>.</td></tr>
 <tr><td><code>--no-branch</code></td><td>Skip <a href="../branch-gate.html">the branch gate</a> entirely: git is not consulted and no branch is created.</td></tr>
+<tr><td><code>--judge-draft</code></td><td>Put each drafted criterion to the <a href="judge.html">decision model</a> and give the drafting model one round to reword what it cannot read as an assertion. Off by default — see <a href="#judge-draft-the-decision-model-during-drafting">below</a>.</td></tr>
 </tbody>
 </table>
 </div>
@@ -278,6 +279,43 @@ Running the tests - working ...
 <p>A step that loops on its own is called once and its loop is trusted:
 drafting’s validate-and-reword rounds, <code>spec implement</code>’s attempts,
 and <code>spec refactor</code>’s rounds are not wrapped in a second loop here.</p>
+<h2 id="--judge-draft-the-decision-model-during-drafting"><a class="header" href="#--judge-draft-the-decision-model-during-drafting"><code>--judge-draft</code>: the decision model during drafting</a></h2>
+<p>Delivering a description rather than an id means the spec is written by
+a model with nobody reading it. <code>--judge-draft</code> puts the
+<a href="judge.html">decision model</a> in that loop — the only place in the harness
+its answer is used as <strong>feedback rather than a gate</strong>.</p>
+<p>With the flag, a proposal that clears the deterministic edge-case rule
+has each of its criteria put to the question <code>measurable/v2</code>. Anything
+the model cannot read as an assertion comes back as a rejection reason,
+naming every flagged criterion, and the drafting model gets one round
+to reword them. Then the draft is kept, whatever the second answer was.</p>
+<p><strong>It is off by default, and the reason is measured.</strong> A drafting model
+writes criteria like <code>then the roll-up verdict is "covered"</code>, which is
+the shape this question reads worst. Put one real six-criterion draft
+through it and four come back flagged — so the usual outcome is a
+redraft the question was wrong to ask for. A redraft also rewrites the
+criteria every later stage is prompted from, which costs an unattended
+run its reproducibility and a cached rehearsal its cache.</p>
+<p>Three properties bound what it can cost you when you do turn it on:</p>
+<ul>
+<li><strong>It never blocks.</strong> One rejection, one redraft, draft kept. There is
+no path where a judgment stops the run.</li>
+<li><strong>It never spends the last attempt.</strong> A question the loop has no
+round left to act on is not asked.</li>
+<li><strong>An unreachable model is not an objection.</strong> The first failed
+request stops the asking and the draft proceeds.</li>
+</ul>
+<p>It is feedback and not a gate for the same measured reason: the
+question reads 14 of this repository’s own 73 criteria as unmeasurable
+when they plainly are not. A gate wired to that would block a fifth of
+an unattended pipeline. A rejection reason wired to it costs one round
+— and a wrong objection still tends to improve the wording, since a
+model asked to make <code>then the verdict is "covered"</code> assertable writes
+<code>then the reply is an error naming "covered"</code>, which scores 0.912 and
+reads better.</p>
+<p><code>--decision-model</code> picks the model and <code>[decision] mode = "off"</code>
+refuses to ask whatever the flag says. <code>advisory</code> and <code>enforce</code> behave
+identically here, because nothing is being enforced.</p>
 <h2 id="it-stops-once-before-it-writes-anything"><a class="header" href="#it-stops-once-before-it-writes-anything">It stops once, before it writes anything</a></h2>
 <p>A run that delivers a backlog writes a lot of files. So before the first
 one, it asks a single question: a branch name for this run, Enter for a

@@ -280,7 +280,7 @@ spec judge criterion --text "Given the refactored module, when the suite runs, t
 
 ```text
 model	nimble:latest
-question	measurable/v1
+question	measurable/v2
 mode	enforce
 min_confidence	0.8
 
@@ -353,24 +353,62 @@ It prints every answer, a confusion matrix, and a threshold sweep.
 Against `nimble:latest` at the shipped threshold the question misses
 nothing: no vague criterion is judged measurable, including all eight
 written to look finished. It does produce **one false alarm**, and that
-one is worth knowing about, because the pattern is common here:
+one is worth knowing about, because what is wrong with it is not what
+it looks like:
 
 > Given a requirement, when coverage is requested, then the verdict is `"covered"`
 
-The assertion is an exact quoted string, so this is measurable. The
-model reads the quoted word as a judgement and scores it 0.09. Two
-longer criteria of the same shape score 0.27 and 0.30, which the dead
-band swallows — that is the band doing its job, not the question getting
-them right.
+The assertion is an exact quoted string, so this is measurable, and the
+question scores it 0.08. That was recorded for two releases as the
+model reading the quoted word as a judgement. It is not the word —
+swap it and nothing moves (`"invalid"` 0.025, `"GREEN"` 0.041,
+`"banana"` 0.047). There are two real defects, both reproducible with
+`spec judge criterion`:
 
-Enforcing by default means being honest about that number. Over the 32
-labelled criteria, the default blocks on 4 the labels call fine: the
-one false alarm, plus the 3 the band leaves `INCONCLUSIVE`. Roughly one
-in eight. It is still the default because a miss is the costlier
-direction — a false alarm costs a reword, while a miss ships wording no
-deterministic rule would have caught. Reword it, widen
-`min_confidence`, or set `mode = "advisory"` while you measure the
-question against your own criteria.
+- **Hedge words leak in from the setup.** Hold `then there are 5
+  findings` fixed and grow the Given: 0.991 with no setup, 0.962 with
+  `Given a story naming no actor`, and **0.115** once the Given says
+  `three ambiguous words`. It is not length — change that one word to
+  `unusual` and it is 0.884, to `red` 0.973, and putting `"ambiguous"`
+  in quotation marks restores it to 0.975. `when_false` lists the
+  hedge words that make a clause vague, and the model scans the whole
+  criterion for them instead of only the clause after `then`.
+- **The copula.** In one fixed frame, `then the reply is an error
+  naming "covered"` scores 0.912, `then the reply names "covered"`
+  0.785, and `then the verdict is "covered"` **0.058**. Likewise `then
+  there are 5 findings` 0.915 against `then the reply lists 5 findings`
+  0.032. `then the X is "Y"` reads to this model as describing a state
+  rather than asserting one.
+
+The second one is expensive, because that is the most common assertion
+shape in this repository's spec. Put all 73 of its criteria through the
+question and **14 come back `FAILS`** — every one a quoted literal or a
+count — with 8 more `INCONCLUSIVE`.
+
+Two fixes were measured and rejected. Naming quoted status words in
+`when_true` takes the labelled set to zero false alarms, but the words
+it names are that set's own and the score returns the moment they come
+out. Sending only the clause after `then` does exactly what the first
+defect predicts — `then there are 5 findings` goes 0.115 to 0.994 —
+and is worse on both sets anyway: the labelled set goes from 0 misses,
+1 false alarm and 3 unsure to **1 miss**, 3 false alarms and 1 unsure,
+and the harness spec goes from 22 flagged criteria to 31.
+
+The miss is the lesson. `then the system achieves 99.9% correctness
+across all code paths` scores **0.933 alone** and fails correctly in
+its frame. The model is not leaking context into the then-clause; it
+is judging the vagueness of the whole sentence, and that is one
+mechanism working in both directions. Strip the setup and the false
+alarm and the true catch go together. The first defect is not a bug
+beside the behaviour that works — it is that behaviour from the other
+side, and no rewording separates them.
+
+The set is the thing to fix first: 32 cases from one author, and most
+of the measurable half is `then the result is N` — a shape the question
+happens to answer well. That is why `harness/.spec/config.toml` runs
+this in `advisory` rather than the shipped `enforce` default. The
+judgments are worth reading and not yet worth blocking on. Measure it
+against your own criteria before you decide which you want.
 
 The phrasing of the question is itself an evaluation result. An earlier,
 open phrasing — "could a test check this criterion?" — scored well on
@@ -383,7 +421,7 @@ an open question invites a judgment of the sentence's style, and style
 is what convincing-looking wording gets right.
 
 The threshold is an evaluation result too. At 0.70 the same run produces
-three confident false alarms instead of one and leaves none of the six
+two confident false alarms instead of one and leaves one of the six
 ambiguous criteria unsure; 0.80 keeps 14 of the 15 vague criteria
 flagged and moves the near-misses into the band. Flagging good wording
 teaches people to ignore judgments, while staying quiet costs nothing —

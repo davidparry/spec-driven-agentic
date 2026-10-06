@@ -393,6 +393,13 @@ struct DeliverArgs {
     /// the root catalog (e.g. requirements/core/math.json)
     #[arg(long)]
     file: Option<String>,
+    /// Put each drafted criterion to the decision model and give the
+    /// drafting model one round to reword what it cannot read as an
+    /// assertion. Off by default: the question misreads a fifth of
+    /// ordinary criteria, so this costs a redraft it is often wrong to
+    /// ask for
+    #[arg(long)]
+    judge_draft: bool,
 }
 
 #[derive(Args)]
@@ -746,7 +753,9 @@ fn execute(
         }
         Command::Init(args) => run_init(root, args),
         Command::Greenfield => run_greenfield(root, model, attempts, no_branch),
-        Command::Deliver(args) => run_deliver(root, model, attempts, no_branch, args),
+        Command::Deliver(args) => {
+            run_deliver(root, model, decision_model, attempts, no_branch, args)
+        }
         Command::Mcp(command) => run_mcp(root, command),
         Command::Tools(command) => run_tools(root, command),
         Command::Ask { task, json } => {
@@ -2014,6 +2023,7 @@ fn run_greenfield(
 fn run_deliver(
     root: &Path,
     model_flag: Option<&str>,
+    decision_model: Option<&str>,
     attempts: u32,
     no_branch: bool,
     args: &DeliverArgs,
@@ -2026,7 +2036,9 @@ fn run_deliver(
     };
     let llm = cached_chat(root, model_flag)
         .map(|(model, chat)| (model, std::sync::Arc::new(chat) as DynLlm));
-    let deliver = Deliver::new(root.to_path_buf(), llm, options).with_llm_attempts(attempts);
+    let deliver = Deliver::new(root.to_path_buf(), llm, options)
+        .with_llm_attempts(attempts)
+        .with_decision_model(decision_model.map(str::to_string), args.judge_draft);
     // The argument is read against the ids the catalog holds, so a spec
     // numbering HARNESS-014 is as deliverable as one numbering REQ-003.
     let target = parse_target(Some(args.target.join(" ").as_str()), &deliver.known_ids())

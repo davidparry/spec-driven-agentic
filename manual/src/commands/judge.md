@@ -83,7 +83,7 @@ requirement moving on. A verdict against a criterion appends its line to
 `findings`, makes `clean` false, and exits nonzero — the same three
 signals a deterministic finding produces, so the loop you already run
 iterates on it without being taught anything new. The lines are prefixed
-`judgment (measurable/v1):` so you can always tell which rules found
+`judgment (measurable/v2):` so you can always tell which rules found
 what, and the deterministic findings keep their place above them.
 
 That is the default because of what the question is for. It is aimed at
@@ -174,7 +174,7 @@ spec judge current --json
   "minConfidence": 0.8,
   "mode": "enforce",
   "model": "nimble:latest",
-  "question": "measurable/v1",
+  "question": "measurable/v2",
   "source": "configuration",
   "timeoutSeconds": 60
 }
@@ -259,7 +259,7 @@ spec judge criterion --text "Given the refactored module, when the suite runs, t
 
 ```text
 model	nimble:latest
-question	measurable/v1
+question	measurable/v2
 mode	enforce
 min_confidence	0.8
 
@@ -271,7 +271,7 @@ input	--text
 state	sha256:048965344f62409e5399403357ce83c4e7b3cce836b14673c0745b6f7ff7237d
 tokens	in 385 out 1
 
-judgment (measurable/v1): criterion "Given the refactored module, when the suite runs, then code quality is improved by at least 20%": the outcome may not be measurable - nimble:latest says probability of true 0.038
+judgment (measurable/v2): criterion "Given the refactored module, when the suite runs, then code quality is improved by at least 20%": the outcome may not be measurable - nimble:latest says probability of true 0.038
 
 A judgment gates on wording only. It becomes a finding and exits nonzero, the same as a deterministic one, and it does not change the test bar or whether a requirement is implemented.
 ```
@@ -295,7 +295,7 @@ spec judge criterion REQ-003
   "judgments": [
     {
       "gate": "CRITERION_MEASURABLE",
-      "question": "measurable/v1",
+      "question": "measurable/v2",
       "model": "nimble:latest",
       "verdict": "HOLDS",
       "action": "CONTINUE",
@@ -322,7 +322,7 @@ Every judgment records enough to be argued with later:
 | Field | What it is |
 | --- | --- |
 | `gate` | Which question was being decided |
-| `question` | The question's version — `measurable/v1`. A threshold calibrated against one phrasing is not evidence about another, so a change to the wording is a new version |
+| `question` | The question's version — `measurable/v2`. A threshold calibrated against one phrasing is not evidence about another, so a change to the wording is a new version |
 | `model` | The model that answered |
 | `answer` | The typed answer exactly as returned |
 | `verdict` | `HOLDS`, `FAILS`, or `INCONCLUSIVE` after the threshold is applied |
@@ -351,12 +351,12 @@ In the default `enforce` mode a verdict against a criterion lands in
   "id": "REQ-007",
   "clean": false,
   "findings": [
-    "judgment (measurable/v1): criterion \"...\": the outcome may not be measurable - nimble:latest says probability of true 0.014"
+    "judgment (measurable/v2): criterion \"...\": the outcome may not be measurable - nimble:latest says probability of true 0.014"
   ],
   "nextStep": "Call requirement_reword to address each finding ... Iterate until there are no findings.",
   "judgments": [ { "...": "as above" } ],
   "judgmentAdvisories": [
-    "judgment (measurable/v1): criterion \"...\": the outcome may not be measurable - nimble:latest says probability of true 0.014"
+    "judgment (measurable/v2): criterion \"...\": the outcome may not be measurable - nimble:latest says probability of true 0.014"
   ],
   "judgmentAction": "REWORK"
 }
@@ -483,17 +483,116 @@ Against `nimble:latest` at the shipped threshold, nothing vague is
 judged measurable — including all eight criteria written to look
 finished, one of which is a direct prompt-injection attempt.
 
-It produces one false alarm, and that one is worth knowing because the
-shape is ordinary:
+It produces one false alarm, on an ordinary shape:
 
 > Given a requirement, when coverage is requested, then the verdict is `"covered"`
 
-That assertion is an exact quoted string, so it is measurable. The model
-reads the quoted word as a judgement and scores it 0.09. Two longer
-criteria of the same shape score 0.27 and 0.30, which the dead band
-swallows — the band hiding a wrong answer, not the question getting it
-right. **If your criteria assert quoted status words, expect to overrule
-the judgment.**
+That assertion is an exact quoted string, so it is measurable, and the
+question scores it 0.08.
+
+### What is actually wrong with it
+
+This was recorded for two releases as the model reading the quoted word
+as a judgement. It is not, and the real answer matters more than the
+one wrong case, because it bounds what this question can be trusted to
+do. There are two defects, and both are reproducible with
+`spec judge criterion`.
+
+**Defect one: hedge words leak in from the setup.** Hold
+`then there are 5 findings` byte-identical and grow the Given:
+
+| Setup in front of the same assertion | |
+| --- | --- |
+| *(nothing)* | 0.991 |
+| `Given a story, …` | 0.972 |
+| `Given a story naming no actor, …` | 0.962 |
+| `Given a story naming no actor, no benefit and three ambiguous words, …` | 0.115 |
+
+It looks like sentence length until you change the one word:
+
+| …three **_X_** words, when the requirement is refined, … | |
+| --- | --- |
+| `ambiguous` | 0.115 |
+| `unusual` | 0.884 |
+| `red` | 0.973 |
+| `"ambiguous"`, in quotation marks | 0.975 |
+
+`when_false` lists the hedge words that make a clause vague. The model
+scans the whole criterion for them rather than only the clause after
+`then` — the one thing the question's first sentence tells it not to
+do. Quoting the word neutralises it, because `when_true` says quoted
+text is a literal.
+
+**Defect two: the assertion shape.** In one fixed short frame:
+
+| `Given a requirement, when it is checked, …` | |
+| --- | --- |
+| `then the reply is an error naming "covered"` | 0.912 |
+| `then the reply names "covered"` | 0.785 |
+| `then the "verdict" field is "covered"` | 0.085 |
+| `then the verdict is "covered"` | 0.058 |
+| `then there are 5 findings` | 0.915 |
+| `then the reply lists 5 findings` | 0.032 |
+
+A copula with a literal on the right reads to this model as describing
+a state rather than asserting one. Swap `is` for `names` and the same
+literal scores fifteen times higher.
+
+That second defect is the expensive one, because `then the X is "Y"` is
+the most common assertion shape in this repository's own spec.
+
+### The set is the thing to fix first
+
+32 cases from one author, and most of the measurable half is
+`then the result is N` — a shape the question happens to answer well.
+Run the harness's own spec through it instead:
+
+| `harness/requirements/requirements.json`, 73 criteria | |
+| --- | --- |
+| `HOLDS` | 51 |
+| `INCONCLUSIVE` | 8 |
+| `FAILS` | 14 |
+
+Every one of those 14 is a quoted literal or a count:
+`then the verdict is "valid"` 0.649, `then the phase is "GREEN"` 0.598,
+`then there are 5 findings` 0.115, `then 0 steps are missing` 0.135,
+`then an issue reads "REQ-006: …"` 0.271.
+
+### Two fixes that were measured and do not work
+
+**Name quoted status words in `when_true`.** Adding `"covered"`,
+`"uncovered"` and `"NaN"` as examples of literals takes the labelled
+set to 0 false alarms and 2 unsure. It also fits the prompt to the
+test: those are that set's own words, and removing them returns the
+score exactly to the published figures. A question that scores well
+only on the words it was shown has not been improved.
+
+**Send only the clause after `then`.** This is the structural version
+of what `instructions` already asks for, and it does exactly what
+defect one predicts — `then there are 5 findings` goes from 0.115 to
+0.994. It is still worse on both sets:
+
+| | labelled set (32) | harness spec (73) |
+| --- | --- | --- |
+| as shipped | 0 miss, 1 false alarm, 3 unsure | 22 flagged |
+| clause only | **1 miss**, 3 false alarms, 1 unsure | 31 flagged |
+
+The miss is the reason to stop looking for a wording that fixes defect
+one. `then the system achieves 99.9% correctness across all code paths`
+scores **0.933 alone**, and fails correctly inside its frame. The model
+is not reading the then-clause and leaking context into it — it is
+judging the vagueness of the whole sentence, which is one mechanism
+working in both directions. Strip the setup and you lose the false
+alarm on `three ambiguous words` and the true catch on `a
+production-grade request payload` together.
+
+Defect one is not a bug sitting beside the behaviour that works. It is
+that behaviour, seen from the other side. A real fix has to separate
+them, and nothing in the prompt's wording can.
+
+Until something does, this repository runs the question in `advisory`
+and not `enforce`. The judgments are worth reading; they are not yet
+worth blocking on.
 
 ### What the default costs you
 
@@ -501,28 +600,40 @@ Be clear about the trade the default makes. Over those 32 labelled
 criteria, enforcing blocks on 4 of them that the labels call fine: the
 1 false alarm above, plus the 3 the dead band leaves `INCONCLUSIVE`,
 which gate as `ESCALATE`. That is roughly one criterion in eight
-stopping a loop that should have carried on.
+stopping a loop that should have carried on — and on a spec whose
+criteria do not look like this set's, much worse than that.
 
-It is still the default, because the alternative is worse in a way that
-does not show up in that count. The question is aimed at exactly the
-wording no deterministic rule reaches — "then code quality is improved
-by at least 20%" earns no finding from the regex rules, because a
-number is present. A judgment that cannot refuse leaves that gap
-unenforced entirely, and the 0 misses above stop meaning anything the
-moment nobody is required to read them. A false alarm costs a reword;
-a miss ships vague wording into a test suite.
+The default is `enforce` anyway, because the alternative is worse in a
+way that does not show up in that count. The question is aimed at
+exactly the wording no deterministic rule reaches — "then code quality
+is improved by at least 20%" earns no finding from the regex rules,
+because a number is present. A judgment that cannot refuse leaves that
+gap unenforced entirely, and the 0 misses above stop meaning anything
+the moment nobody is required to read them. A false alarm costs a
+reword; a miss ships vague wording into a test suite.
+
+**Measure it against your own criteria before you leave it on.** That
+is not boilerplate caution: this repository did exactly that and turned
+its own gate down to `advisory` on the result.
 
 Your options, in the order worth trying:
 
-- Reword the criterion. The false-alarm shape above is narrow, and the
-  reword that satisfies the model usually reads better anyway.
+- Reword the criterion. The reword that satisfies the model usually
+  reads better anyway, and a criterion that survives a long Given is
+  usually one whose assertion names its own subject.
 - Widen `min_confidence`, which moves confident wrong answers into
   `INCONCLUSIVE`. They still gate, but with a finding that asks for
   clarity rather than asserting unmeasurability.
-- Set `mode = "advisory"` while you measure the question against your
-  own criteria with `cargo test --test decision_live`, then turn it
-  back on.
+- Set `mode = "advisory"`, which is what this repository runs. The
+  judgments are still reported on every `refine`, under `judgments` and
+  `judgmentAdvisories`; they simply do not enter `findings` or clear
+  `clean`.
 - Set `mode = "off"` if the question does not fit your project at all.
+
+Rewording the *question* is the one option not on that list, and the
+section above is why: it is the right instinct, and both attempts at it
+failed in ways that only showed up against criteria the question had
+not been tuned on.
 
 ### Why the question is worded the way it is
 
@@ -538,6 +649,17 @@ The lesson is about the question, not the model: an open question
 invites a judgment of the sentence's *style*, and style is exactly what
 convincing-looking wording gets right.
 
+`measurable/v2` sharpens that wording — it says a quoted value is a
+literal whatever the word would mean as prose, and that a count is one
+too — without moving the measured figures. The version is bumped
+because the strings changed, which is the rule for this table, not
+because the question got better. What the attempt to make it better
+produced is in [What is actually wrong with
+it](#what-is-actually-wrong-with-it) above, and the short version is
+that the lesson repeats one level up: an evaluation set invites a
+judgment of the *shapes it contains*, and those are exactly what a
+question tuned on it gets right.
+
 The wording itself lives in `harness/prompts/prompts.toml`, under
 `[decision.measurable]`, beside the generative templates. It is built
 into the binary rather than read from your project, so a judgment means
@@ -546,8 +668,8 @@ to the three strings it names, so the two cannot drift: any edit to the
 wording is a new version, because the numbers below were measured
 against one phrasing and are not evidence about another.
 
-The threshold came out of the same loop. At 0.70 the run produces three
-confident false alarms rather than one and leaves none of the six
+The threshold came out of the same loop. At 0.70 the run produces two
+confident false alarms rather than one and leaves one of the six
 ambiguous criteria unsure. The two directions do not cost the same: a
 confident false alarm asserts the wording is unmeasurable when it is
 not, while an inconclusive one asks for clarity and is right to ask.

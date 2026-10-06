@@ -33,12 +33,12 @@ cargo install --path harness
 spec --version
 ```
 
-Requires `spec` **0.7.9 or newer** — check with `spec --version`. The
+Requires `spec` **0.7.10 or newer** — check with `spec --version`. The
 generation behavior this page describes, where the polish pass sees only
 the newly generated members, arrived during 0.5.x development, but the
-floor is 0.7.9 because this page reads and writes `.spec/config.toml`:
+floor is 0.7.10 because this page reads and writes `.spec/config.toml`:
 the `.spec/` directory replaced the flat `.spec.toml` in 0.6.0, and
-0.7.9 is the newest release, so it is the one everything here was
+0.7.10 is the newest release, so it is the one everything here was
 checked against. The ones that change what you do, rather than what you
 read:
 
@@ -442,7 +442,7 @@ spec judge criterion --text "<wording>" # judge wording with no requirement
 spec --decision-model nimble:latest judge criterion REQ-007   # one run only
 ```
 
-The one question asked is `measurable/v1`: *can this acceptance
+The one question asked is `measurable/v2`: *can this acceptance
 criterion be checked by a test with a single unambiguous result?* It
 reaches wording the rule set cannot. The rules ask whether the clause
 after `then` looks concrete — a number, a quoted literal, a named error

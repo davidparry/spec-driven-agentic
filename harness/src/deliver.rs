@@ -217,6 +217,12 @@ pub struct Deliver {
     runner_factory: RunnerFactory,
     llm: Option<(String, DynLlm)>,
     llm_attempts: u32,
+    /// `--decision-model`, when the caller was given one. `None`
+    /// resolves from config, the same as every other decision caller.
+    decision_model: Option<String>,
+    /// `--judge-draft`. Off by default, so an unflagged run sends the
+    /// drafting model exactly the prompts it sent before this existed.
+    judge_draft: bool,
     options: DeliverOptions,
 }
 
@@ -238,6 +244,8 @@ impl Deliver {
             runner_factory,
             llm,
             llm_attempts: DEFAULT_LLM_ATTEMPTS,
+            decision_model: None,
+            judge_draft: false,
             options,
         }
     }
@@ -245,6 +253,14 @@ impl Deliver {
     /// How many times a model reply is tried when validation fails.
     pub fn with_llm_attempts(mut self, attempts: u32) -> Self {
         self.llm_attempts = attempts.max(1);
+        self
+    }
+
+    /// The decision model the drafting step puts its criteria to, and
+    /// whether it is asked at all.
+    pub fn with_decision_model(mut self, model: Option<String>, judge_draft: bool) -> Self {
+        self.decision_model = model;
+        self.judge_draft = judge_draft;
         self
     }
 
@@ -1004,6 +1020,24 @@ impl Deliver {
         crate::wiring::spec_service(&self.root, crate::workspace::workshop_layout())
     }
 
+    /// The drafting service, with the decision model attached only when
+    /// `--judge-draft` asked for it.
+    ///
+    /// This run has no human reading its drafts, which is the argument
+    /// for asking here and not the argument for obeying the answer:
+    /// the judgment arrives as a rejection reason the drafting model
+    /// gets one round to address, never as a gate. See
+    /// [`SpecMutationService::with_criterion_judge`].
+    ///
+    /// Opt-in rather than on, and the reason is the measured one. A
+    /// drafting model writes `then the roll-up verdict is "covered"`,
+    /// which is the shape the question reads worst: put one real draft
+    /// of six criteria through it and four come back flagged. That
+    /// earns a redraft the question was usually wrong to ask for, and
+    /// a redraft changes the criteria every later stage is prompted
+    /// from - so an unattended run that was reproducible stops being
+    /// reproducible. The flag is for someone who wants the second
+    /// opinion and has the rounds to spend on it.
     fn mutation_service(
         &self,
     ) -> SpecMutationService<
@@ -1012,7 +1046,16 @@ impl Deliver {
         FsWorkTree,
         FsStateStore,
     > {
-        crate::wiring::mutation_service(&self.root, self.llm_attempts)
+        let service = crate::wiring::mutation_service(&self.root, self.llm_attempts);
+        if !self.judge_draft {
+            return service;
+        }
+        match crate::wiring::decision_service(&self.root, self.decision_model.as_deref())
+            .and_then(|service| service.when_asking())
+        {
+            Some(judge) => service.with_criterion_judge(Box::new(judge)),
+            None => service,
+        }
     }
 
     fn scenario_service(&self) -> ScenarioService<FsWorkTree, crate::wiring::ProjectFeatures> {
@@ -1309,6 +1352,33 @@ mod tests {
 
     fn deliver(root: &Path) -> Deliver {
         Deliver::new(root.to_path_buf(), None, DeliverOptions::default())
+    }
+
+    /// An unflagged run drafts exactly as it did before the decision
+    /// model reached this command.
+    ///
+    /// Worth a test of its own rather than a reading of the branch,
+    /// because what it protects is not in this crate: a rehearsed
+    /// demo whose every later stage is cached on prompts built from
+    /// the criteria this stage writes. One judgment here earns a
+    /// redraft, a redraft rewrites the criteria, and the whole cached
+    /// chain behind it misses.
+    #[test]
+    fn deliver_asks_the_decision_model_nothing_unless_judge_draft_is_given() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!deliver(dir.path()).judge_draft);
+        assert!(
+            !deliver(dir.path())
+                .with_decision_model(Some("nimble:latest".into()), false)
+                .judge_draft,
+            "naming a decision model is not asking for one during drafting"
+        );
+        assert!(
+            deliver(dir.path())
+                .with_decision_model(None, true)
+                .judge_draft,
+            "--judge-draft asks, and resolves the model from config"
+        );
     }
 
     #[test]

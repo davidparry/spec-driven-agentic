@@ -17,6 +17,24 @@ use crate::domain::decision::{
 };
 use crate::ports::{DecisionError, DecisionModel};
 
+/// One criterion, judged, for a caller that wants the answer without
+/// owning the model.
+///
+/// [`DecisionService`] is generic over its client, which makes it
+/// awkward to store beside the unrelated generics a drafting service
+/// already carries. This is the narrow slice the draft loop needs: ask
+/// about one sentence, get one [`Judgment`] back. Nothing here decides
+/// what the answer means.
+pub trait CriterionJudge {
+    fn judge(&self, input: &str, criterion: &str) -> Result<Judgment, DecisionError>;
+}
+
+impl<D: DecisionModel> CriterionJudge for DecisionService<D> {
+    fn judge(&self, input: &str, criterion: &str) -> Result<Judgment, DecisionError> {
+        self.judge_criterion(input, criterion)
+    }
+}
+
 /// The configured decision model and the policy its answers are read
 /// against.
 ///
@@ -202,7 +220,7 @@ impl<D: DecisionModel> DecisionService<D> {
 /// those two fields, and the question is aimed at wording no
 /// deterministic rule reaches, so a judgment reported only beside them
 /// is one the loop never acts on. The lines keep their
-/// `judgment (measurable/v1):` prefix and are appended after the
+/// `judgment (measurable/v2):` prefix and are appended after the
 /// deterministic ones, which are never edited or dropped — `findings`
 /// gains entries, it does not change meaning. They stay in
 /// `judgmentAdvisories` too, so a reader wanting only the
@@ -348,7 +366,7 @@ mod tests {
         assert_eq!(judgment.verdict, Verdict::Holds);
         assert_eq!(judgment.action, Transition::Continue);
         assert_eq!(judgment.model, "nimble:test");
-        assert_eq!(judgment.question, "measurable/v1");
+        assert_eq!(judgment.question, "measurable/v2");
         assert_eq!(judgment.gate, "CRITERION_MEASURABLE");
         assert_eq!(judgment.usage.input_tokens, 151);
         assert_eq!(judgment.provenance.input, "REQ-007 acceptance criterion 1");
@@ -434,7 +452,7 @@ mod tests {
             review
                 .advisories
                 .iter()
-                .all(|line| line.starts_with("judgment (measurable/v1):"))
+                .all(|line| line.starts_with("judgment (measurable/v2):"))
         );
         assert_eq!(review.action, Transition::Continue);
         assert_eq!(
@@ -502,7 +520,7 @@ mod tests {
         assert_eq!(action, Transition::Rework);
         assert!(!report.clean, "a gating judgment is not a clean report");
         assert_eq!(report.findings.len(), 1);
-        assert!(report.findings[0].starts_with("judgment (measurable/v1):"));
+        assert!(report.findings[0].starts_with("judgment (measurable/v2):"));
         assert_eq!(
             report.findings, report.judgment_advisories,
             "the same line, reported in both places"
@@ -529,7 +547,7 @@ mod tests {
             .unwrap();
         assert_eq!(report.findings.len(), 2);
         assert_eq!(report.findings[0], "criteria: only happy paths");
-        assert!(report.findings[1].starts_with("judgment (measurable/v1):"));
+        assert!(report.findings[1].starts_with("judgment (measurable/v2):"));
     }
 
     /// A judgment that holds gates nothing, so the deterministic reply

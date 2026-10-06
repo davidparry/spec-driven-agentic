@@ -13,7 +13,7 @@ Feature: Local decision model judgments
     When the criterion "Given the input "1,2", when add is called, then the result is 3" is judged
     Then the judgment verdict is "measurable"
     And the judgment records the model "nimble:test"
-    And the judgment records the question "measurable/v1"
+    And the judgment records the question "measurable/v2"
 
   # The deterministic rules ask whether the outcome clause looks
   # concrete - a number, a quoted literal, a named error. A number
@@ -288,7 +288,7 @@ Feature: Local decision model judgments
   # another, so the two must not be editable apart.
   Scenario: The question wording and the version it is named by come from the prompt catalog
     When the decision question "measurable" is read from the prompt catalog
-    Then the question version is "measurable/v1"
+    Then the question version is "measurable/v2"
     And the question instructions name the clause after "then"
     And the question states both outcomes
 

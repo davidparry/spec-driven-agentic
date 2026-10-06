@@ -88,8 +88,8 @@
       "acceptanceCriteria": [
         "Given a pending requirement and an implemented one, when the requirements are listed, then 2 requirements are listed with their ids, titles and statuses",
         "Given a requirement that lives in an included file, when the requirements are listed, then the listing names that file as its \"specFile\"",
-        "Given a known requirement id, when the requirement is shown, then the reply names its feature file and carries a workflow hint of 1 next step",
-        "Given an unknown requirement id, when the requirement is shown, then the reply is an error pointing at list_requirements"
+        "Given a known requirement id, when the requirement is shown, then the reply names feature location \"features/x.feature\" and a workflow hint naming \"@REQ-001\"",
+        "Given an unknown requirement id, when the requirement is shown, then the reply is an error reading \"No requirement with id 'REQ-999'. Call list_requirements to see valid ids.\""
       ],
       "featureFile": "tests/features/spec_reading.feature"
     },
@@ -222,8 +222,8 @@
         "Given a run started with --no-branch, when the branch gate runs, then the developer is asked 0 questions",
         "Given a project that is not a git repository, when the branch gate runs, then the warning names \"no undo\"",
         "Given a git repository on \"main\" holding uncommitted work, when the branch gate runs, then the warning names \"uncommitted work\" before the question",
-        "Given a git repository on \"main\", when the branch gate is answered \"bad..name\", then the name is refused and 0 branches are created",
-        "Given a git repository on \"main\" where creating a branch fails, when the branch gate is answered \"newlines\", then the run continues on \"main\"",
+        "Given a git repository on \"main\", when the branch gate is answered \"bad..name\", then 0 branches are created and the warning names \"not a usable branch name\"",
+        "Given a git repository on \"main\" where creating a branch fails, when the branch gate is answered \"newlines\", then 0 branches are created and the warning names \"main\" as the branch the run stays on",
         "Given a git repository on \"main\" and no one left to answer, when the branch gate runs, then 0 branches are created"
       ],
       "featureFile": "tests/features/branch_gate.feature"

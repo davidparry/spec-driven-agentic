@@ -18,3 +18,23 @@ timeout_seconds = 3600
 # 600 that only held if the rehearsal was in the same ten minutes as
 # the talk, which is no use the night before.
 cache_ttl_seconds = 86400
+
+# The second model: [llm] above writes, this one answers the bounded
+# question the deterministic rules cannot. Pinned for the same reason,
+# and for one more - `measurable/v2` is calibrated against this model,
+# so a session that discovered a different decision-capable one would
+# not be the run tests/decision_live.rs measured.
+#
+# `advisory` rather than the shipped `enforce` default, and the reason
+# is measured rather than cautious. Put this repository's own spec
+# through the question and 14 of its 73 criteria come back plainly
+# wrong - every one of them a quoted literal or a count - with 8 more
+# left unsure. `then there are 5 findings` scores 0.115 and `then the
+# verdict is "valid"` 0.649. Enforcing that would block a fifth of the
+# spec it was built to check. Judgments are worth reading here and
+# not worth blocking on until the question is fixed; the two defects
+# behind those numbers are measured out above KNOWN_FALSE_ALARM in
+# tests/decision_live.rs.
+[decision]
+model = "nimble:latest"
+mode = "advisory"

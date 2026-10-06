@@ -19,7 +19,7 @@
 //!
 //! Why an evaluation and not a benchmark number: Ollama publishes
 //! aggregate scores for its decision models on its own eval suite. Those
-//! say nothing about whether `measurable/v1` works on acceptance
+//! say nothing about whether `measurable/v2` works on acceptance
 //! criteria written by workshop students, which is the only question
 //! that matters here. The labels below are the author's, the set is
 //! small, and the result is a local measurement rather than a claim
@@ -240,13 +240,93 @@ const CASES: &[Case] = &[
     // the question's one known false alarm, and they are kept labeled as
     // the author labels them rather than relabeled to make the score
     // look better. See `KNOWN_FALSE_ALARM` below.
+    //
+    // Why they are wrong is worth writing down, because two earlier
+    // explanations of it were wrong and one of those nearly shipped.
+    //
+    // The note here first said the model reads the quoted word as a
+    // judgement. It does not: hold the frame and swap the quoted word
+    // and nothing moves - "covered" 0.058, "invalid" 0.025, "GREEN"
+    // 0.041, "banana" 0.047, "xyzzy" 0.045.
+    //
+    // The second explanation was that the surrounding text dominates
+    // because it is long. Also wrong, and measurably so. Hold
+    // `then there are 5 findings` byte-identical and grow the Given:
+    // nothing 0.991, `Given a story` 0.972, `Given a story naming no
+    // actor` 0.962, and then `Given a story naming no actor, no benefit
+    // and three ambiguous words` 0.115. Length is not what moved it.
+    // Change that one word and the score comes back - `unusual` 0.884,
+    // `red` 0.973 - and putting the same word in quotation marks
+    // restores it to 0.975. `when_false` lists the hedge words that
+    // make a clause vague, and the model scans the whole criterion for
+    // them instead of only the clause after `then`.
+    //
+    // That is defect one. Defect two is the assertion shape itself.
+    // In one fixed short frame: `then the verdict is "covered"` 0.058,
+    // `then the reply names "covered"` 0.785, `then the reply is an
+    // error naming "covered"` 0.912; `then the reply lists 5 findings`
+    // 0.032 against `then there are 5 findings` 0.915. A copula with a
+    // literal on the right reads to this model as describing a state
+    // rather than asserting one. That shape is the most common
+    // assertion in `harness/requirements/requirements.json`, which is
+    // why 14 of its 73 criteria come back plainly wrong - every one of
+    // them a quoted literal or a count - with 8 more left unsure.
+    //
+    // Two fixes were measured and rejected, and the second one is the
+    // reason to stop looking for a wording that fixes defect one.
+    //
+    // Naming quoted status words in `when_true` takes this set to zero
+    // false alarms, but the words it names are this set's own and the
+    // score returns the moment they come out, so that is fitting the
+    // prompt to the test.
+    //
+    // Sending only the clause after `then` is the structural version
+    // of what `instructions` already asks for, and it does exactly
+    // what defect one predicts: `then there are 5 findings` goes 0.115
+    // to 0.994. (Keep the word `then` when you slice - without it the
+    // same clause is 0.723, because the question asks about "the text
+    // after \"then\"".) It is still worse on both sets: this one goes
+    // from 0 misses, 1 false alarm and 3 unsure to 1 miss, 3 false
+    // alarms and 1 unsure, and the harness spec goes from 22 flagged
+    // criteria to 31.
+    //
+    // The miss says why, and it is the whole lesson. `then the system
+    // achieves 99.9% correctness across all code paths` scores 0.933
+    // alone. In its frame it fails, correctly. The model is not
+    // reading the then-clause and leaking context into it; it is
+    // judging the vagueness of the whole sentence, which is the same
+    // mechanism in both directions. Strip the setup and you lose the
+    // false alarm on `three ambiguous words` and the true catch on
+    // `a production-grade request payload` together. Defect one is not
+    // a bug sitting next to the behaviour that works - it is that
+    // behaviour, seen from the other side.
+    //
+    // All 24 of those were read one at a time before any of this was
+    // written down, because "the question is wrong" is the comfortable
+    // conclusion and it had to survive the spec being wrong instead.
+    // Fifteen are sound as they stand and were left alone: every one is
+    // a count or a quoted literal, and one of them quotes a
+    // forty-character exact string. Rewording good criteria to raise a
+    // score is the same mistake as fitting the prompt to the test, one
+    // level out. The five `is refused` criteria were kept too - it is
+    // this spec's term for a binary outcome and the feature files
+    // assert it consistently. Two were genuinely loose and were
+    // reworded: HARNESS-007 said `names its feature file` and `an error
+    // pointing at list_requirements`, both back-references to something
+    // the sentence never gives, and both now quote what
+    // `tests/features/spec_reading.feature` already asserts.
+    //
+    // A real fix needs something better to measure against first. This
+    // set is 32 cases from one author and most of its measurable half
+    // is `then the result is N`, a shape the question happens to answer
+    // well.
     Case {
         criterion: "Given a requirement whose every criterion is matched by a tagged \
                     scenario and an asserting test, when the criteria_coverage MCP tool \
                     is called with its id, then the verdict is \"covered\"",
         label: Label::Measurable,
-        note: "the assertion is an exact quoted string; read as vague because the quoted \
-               word itself reads like a judgement",
+        note: "the assertion is an exact quoted string; `the X is \"literal\"` is the shape \
+               this question cannot read, whatever the word or the setup",
     },
     Case {
         criterion: "Given a requirement carrying 0 acceptance criteria, when the \

@@ -4869,7 +4869,7 @@ fn deterministic_findings_kept_and_judgment_appended(world: &mut SpecWorld) {
     assert!(
         appended
             .iter()
-            .all(|line| line.starts_with("judgment (measurable/v1):")),
+            .all(|line| line.starts_with("judgment (measurable/v2):")),
         "a probabilistic finding has to be labelled as one: {appended:?}"
     );
     assert_eq!(

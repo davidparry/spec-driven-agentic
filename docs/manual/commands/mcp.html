@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-b4e7eb24.js";
+            window.path_to_searchindex_js = "../searchindex-5300ee44.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-0006eac3.js"></script>
@@ -319,7 +319,7 @@ run isolated; see <a href="../branch-gate.html">the branch gate</a>.</p>
 model, and it does so only when a <a href="judge.html">decision model</a> is
 configured. The other 24 never call one.</p>
 <p>When it does, each acceptance criterion is put to that model as the
-question <code>measurable/v1</code> — could a test check this with one unambiguous
+question <code>measurable/v2</code> — could a test check this with one unambiguous
 result? — and the reply gains <code>judgments</code>, <code>judgmentAdvisories</code> and
 <code>judgmentAction</code>. Those keys are absent entirely otherwise, which is the
 compatibility promise: a host reading this tool today sees no change
@@ -342,7 +342,7 @@ line to <code>findings</code> and makes <code>clean</code> false. There is no ex
 over MCP, and no new field to obey: the instruction to iterate until
 there are no findings already covers it. The deterministic findings
 keep their place and are never edited or dropped, and the judgment
-lines are prefixed <code>judgment (measurable/v1):</code> so you can tell which
+lines are prefixed <code>judgment (measurable/v2):</code> so you can tell which
 rules found what. Set <code>mode = "advisory"</code> to report without gating.</li>
 <li><strong><code>mode = "off"</code> stops it asking.</strong> The model stays configured for
 <code>spec judge</code>, which a human types, while automatic judgments —

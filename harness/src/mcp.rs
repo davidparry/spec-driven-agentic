@@ -469,7 +469,7 @@ impl WorkflowServer {
         developer approve the wording before writing any scenario. When a decision model is \
         configured the reply also carries judgments, under judgments/judgmentAdvisories/\
         judgmentAction, and those keys are absent entirely when one is not. Each criterion \
-        is put to the model as the question `measurable/v1`: could a test check this with \
+        is put to the model as the question `measurable/v2`: could a test check this with \
         one unambiguous result? The answer is a probability read against a decision band of \
         0.80 - at or above reads HOLDS, at or below 0.20 reads FAILS, between is \
         INCONCLUSIVE. That band is a dead zone, not an accuracy score; measured accuracy \

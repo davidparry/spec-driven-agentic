@@ -292,7 +292,7 @@ mod tests {
     #[test]
     fn the_measurable_question_is_loaded_from_the_catalog_with_its_version() {
         let question = decision_prompt("measurable");
-        assert_eq!(question.version, "measurable/v1");
+        assert_eq!(question.version, "measurable/v2");
         assert!(question.instructions.contains("after \"then\""));
         assert!(question.when_true.contains("literal value"));
         assert!(question.when_false.contains("vague"));
@@ -327,7 +327,7 @@ mod tests {
 
     /// A version names a wording. The two live in one table so an edit
     /// cannot move one without the other being on screen, and the shape
-    /// is asserted so `measurable` and `measurable/v1` stay tellable
+    /// is asserted so `measurable` and `measurable/v2` stay tellable
     /// apart in a judgment record.
     #[test]
     fn a_question_version_names_the_question_and_a_revision() {

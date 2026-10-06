@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "searchindex-b4e7eb24.js";
+            window.path_to_searchindex_js = "searchindex-5300ee44.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-0006eac3.js"></script>
@@ -1145,6 +1145,7 @@ there.</p>
 <tr><td><code>--no-refactor</code></td><td>Skip the refactor step even on a green bar.</td></tr>
 <tr><td><code>--file &lt;FILE&gt;</code></td><td>Draft new requirements into this included spec file. Omitted, the drafted requirement lands in the catalog document covering the working directory — see <a href="#spec-draft"><code>spec draft</code></a>.</td></tr>
 <tr><td><code>--no-branch</code></td><td>Skip <a href="#the-branch-gate">the branch gate</a> entirely: git is not consulted and no branch is created.</td></tr>
+<tr><td><code>--judge-draft</code></td><td>Put each drafted criterion to the <a href="#spec-judge">decision model</a> and give the drafting model one round to reword what it cannot read as an assertion. Off by default — see <a href="#judge-draft-the-decision-model-during-drafting">below</a>.</td></tr>
 </tbody>
 </table>
 </div>
@@ -1222,6 +1223,43 @@ Running the tests - working ...
 <p>A step that loops on its own is called once and its loop is trusted:
 drafting’s validate-and-reword rounds, <code>spec implement</code>’s attempts,
 and <code>spec refactor</code>’s rounds are not wrapped in a second loop here.</p>
+<h2 id="--judge-draft-the-decision-model-during-drafting"><a class="header" href="#--judge-draft-the-decision-model-during-drafting"><code>--judge-draft</code>: the decision model during drafting</a></h2>
+<p>Delivering a description rather than an id means the spec is written by
+a model with nobody reading it. <code>--judge-draft</code> puts the
+<a href="#spec-judge">decision model</a> in that loop — the only place in the harness
+its answer is used as <strong>feedback rather than a gate</strong>.</p>
+<p>With the flag, a proposal that clears the deterministic edge-case rule
+has each of its criteria put to the question <code>measurable/v2</code>. Anything
+the model cannot read as an assertion comes back as a rejection reason,
+naming every flagged criterion, and the drafting model gets one round
+to reword them. Then the draft is kept, whatever the second answer was.</p>
+<p><strong>It is off by default, and the reason is measured.</strong> A drafting model
+writes criteria like <code>then the roll-up verdict is "covered"</code>, which is
+the shape this question reads worst. Put one real six-criterion draft
+through it and four come back flagged — so the usual outcome is a
+redraft the question was wrong to ask for. A redraft also rewrites the
+criteria every later stage is prompted from, which costs an unattended
+run its reproducibility and a cached rehearsal its cache.</p>
+<p>Three properties bound what it can cost you when you do turn it on:</p>
+<ul>
+<li><strong>It never blocks.</strong> One rejection, one redraft, draft kept. There is
+no path where a judgment stops the run.</li>
+<li><strong>It never spends the last attempt.</strong> A question the loop has no
+round left to act on is not asked.</li>
+<li><strong>An unreachable model is not an objection.</strong> The first failed
+request stops the asking and the draft proceeds.</li>
+</ul>
+<p>It is feedback and not a gate for the same measured reason: the
+question reads 14 of this repository’s own 73 criteria as unmeasurable
+when they plainly are not. A gate wired to that would block a fifth of
+an unattended pipeline. A rejection reason wired to it costs one round
+— and a wrong objection still tends to improve the wording, since a
+model asked to make <code>then the verdict is "covered"</code> assertable writes
+<code>then the reply is an error naming "covered"</code>, which scores 0.912 and
+reads better.</p>
+<p><code>--decision-model</code> picks the model and <code>[decision] mode = "off"</code>
+refuses to ask whatever the flag says. <code>advisory</code> and <code>enforce</code> behave
+identically here, because nothing is being enforced.</p>
 <h2 id="it-stops-once-before-it-writes-anything"><a class="header" href="#it-stops-once-before-it-writes-anything">It stops once, before it writes anything</a></h2>
 <p>A run that delivers a backlog writes a lot of files. So before the first
 one, it asks a single question: a branch name for this run, Enter for a
@@ -1824,10 +1862,10 @@ finding:</p>
   "clean": false,
   "findings": [
     "...",
-    "judgment (measurable/v1): criterion \"...\": the outcome may not be measurable - nimble:latest says probability of true 0.014"
+    "judgment (measurable/v2): criterion \"...\": the outcome may not be measurable - nimble:latest says probability of true 0.014"
   ],
   "judgments": [ { "verdict": "FAILS", "answer": { "type": "noul", "noul": 0.014 } } ],
-  "judgmentAdvisories": ["judgment (measurable/v1): criterion \"...\": the outcome may not be measurable - nimble:latest says probability of true 0.014"],
+  "judgmentAdvisories": ["judgment (measurable/v2): criterion \"...\": the outcome may not be measurable - nimble:latest says probability of true 0.014"],
   "judgmentAction": "REWORK"
 }
 </code></pre>
@@ -1836,7 +1874,7 @@ what, and the deterministic findings keep their place above them — a
 judgment adds to that list, it never edits or drops an entry. Under
 <code>mode = "advisory"</code> nothing is merged and <code>clean</code> stays deterministic.
 Those keys are absent entirely until a decision model can answer.</p>
-<p>The question is <code>measurable/v1</code>: could a test check this criterion with
+<p>The question is <code>measurable/v2</code>: could a test check this criterion with
 one unambiguous result? The probability is read against a decision band
 of <strong>0.80</strong> — at or above reads <code>HOLDS</code>, at or below <code>0.20</code> reads
 <code>FAILS</code>, and anything between is <code>INCONCLUSIVE</code>, which also gates, with
@@ -3250,7 +3288,7 @@ requirement moving on. A verdict against a criterion appends its line to
 <code>findings</code>, makes <code>clean</code> false, and exits nonzero — the same three
 signals a deterministic finding produces, so the loop you already run
 iterates on it without being taught anything new. The lines are prefixed
-<code>judgment (measurable/v1):</code> so you can always tell which rules found
+<code>judgment (measurable/v2):</code> so you can always tell which rules found
 what, and the deterministic findings keep their place above them.</p>
 <p>That is the default because of what the question is for. It is aimed at
 wording the regex rules cannot reach — “then code quality is improved by
@@ -3310,7 +3348,7 @@ question version:</p>
   "minConfidence": 0.8,
   "mode": "enforce",
   "model": "nimble:latest",
-  "question": "measurable/v1",
+  "question": "measurable/v2",
   "source": "configuration",
   "timeoutSeconds": 60
 }
@@ -3366,7 +3404,7 @@ installed: nimble:latest
 <pre><code class="language-bash">spec judge criterion --text "Given the refactored module, when the suite runs, then code quality is improved by at least 20%"
 </code></pre>
 <pre><code class="language-text">model	nimble:latest
-question	measurable/v1
+question	measurable/v2
 mode	enforce
 min_confidence	0.8
 
@@ -3378,7 +3416,7 @@ input	--text
 state	sha256:048965344f62409e5399403357ce83c4e7b3cce836b14673c0745b6f7ff7237d
 tokens	in 385 out 1
 
-judgment (measurable/v1): criterion "Given the refactored module, when the suite runs, then code quality is improved by at least 20%": the outcome may not be measurable - nimble:latest says probability of true 0.038
+judgment (measurable/v2): criterion "Given the refactored module, when the suite runs, then code quality is improved by at least 20%": the outcome may not be measurable - nimble:latest says probability of true 0.038
 
 A judgment gates on wording only. It becomes a finding and exits nonzero, the same as a deterministic one, and it does not change the test bar or whether a requirement is implemented.
 </code></pre>
@@ -3395,7 +3433,7 @@ zero — a judgment you typed still answers, it just does not gate.</p>
   "judgments": [
     {
       "gate": "CRITERION_MEASURABLE",
-      "question": "measurable/v1",
+      "question": "measurable/v2",
       "model": "nimble:latest",
       "verdict": "HOLDS",
       "action": "CONTINUE",
@@ -3423,7 +3461,7 @@ zero — a judgment you typed still answers, it just does not gate.</p>
 </thead>
 <tbody>
 <tr><td><code>gate</code></td><td>Which question was being decided</td></tr>
-<tr><td><code>question</code></td><td>The question’s version — <code>measurable/v1</code>. A threshold calibrated against one phrasing is not evidence about another, so a change to the wording is a new version</td></tr>
+<tr><td><code>question</code></td><td>The question’s version — <code>measurable/v2</code>. A threshold calibrated against one phrasing is not evidence about another, so a change to the wording is a new version</td></tr>
 <tr><td><code>model</code></td><td>The model that answered</td></tr>
 <tr><td><code>answer</code></td><td>The typed answer exactly as returned</td></tr>
 <tr><td><code>verdict</code></td><td><code>HOLDS</code>, <code>FAILS</code>, or <code>INCONCLUSIVE</code> after the threshold is applied</td></tr>
@@ -3449,12 +3487,12 @@ In the default <code>enforce</code> mode a verdict against a criterion lands in
   "id": "REQ-007",
   "clean": false,
   "findings": [
-    "judgment (measurable/v1): criterion \"...\": the outcome may not be measurable - nimble:latest says probability of true 0.014"
+    "judgment (measurable/v2): criterion \"...\": the outcome may not be measurable - nimble:latest says probability of true 0.014"
   ],
   "nextStep": "Call requirement_reword to address each finding ... Iterate until there are no findings.",
   "judgments": [ { "...": "as above" } ],
   "judgmentAdvisories": [
-    "judgment (measurable/v1): criterion \"...\": the outcome may not be measurable - nimble:latest says probability of true 0.014"
+    "judgment (measurable/v2): criterion \"...\": the outcome may not be measurable - nimble:latest says probability of true 0.014"
   ],
   "judgmentAction": "REWORK"
 }
@@ -3564,43 +3602,164 @@ measurable. There are none.</p>
 <p>Against <code>nimble:latest</code> at the shipped threshold, nothing vague is
 judged measurable — including all eight criteria written to look
 finished, one of which is a direct prompt-injection attempt.</p>
-<p>It produces one false alarm, and that one is worth knowing because the
-shape is ordinary:</p>
+<p>It produces one false alarm, on an ordinary shape:</p>
 <blockquote>
 <p>Given a requirement, when coverage is requested, then the verdict is <code>"covered"</code></p>
 </blockquote>
-<p>That assertion is an exact quoted string, so it is measurable. The model
-reads the quoted word as a judgement and scores it 0.09. Two longer
-criteria of the same shape score 0.27 and 0.30, which the dead band
-swallows — the band hiding a wrong answer, not the question getting it
-right. <strong>If your criteria assert quoted status words, expect to overrule
-the judgment.</strong></p>
+<p>That assertion is an exact quoted string, so it is measurable, and the
+question scores it 0.08.</p>
+<h3 id="what-is-actually-wrong-with-it"><a class="header" href="#what-is-actually-wrong-with-it">What is actually wrong with it</a></h3>
+<p>This was recorded for two releases as the model reading the quoted word
+as a judgement. It is not, and the real answer matters more than the
+one wrong case, because it bounds what this question can be trusted to
+do. There are two defects, and both are reproducible with
+<code>spec judge criterion</code>.</p>
+<p><strong>Defect one: hedge words leak in from the setup.</strong> Hold
+<code>then there are 5 findings</code> byte-identical and grow the Given:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Setup in front of the same assertion</th><th></th></tr>
+</thead>
+<tbody>
+<tr><td><em>(nothing)</em></td><td>0.991</td></tr>
+<tr><td><code>Given a story, …</code></td><td>0.972</td></tr>
+<tr><td><code>Given a story naming no actor, …</code></td><td>0.962</td></tr>
+<tr><td><code>Given a story naming no actor, no benefit and three ambiguous words, …</code></td><td>0.115</td></tr>
+</tbody>
+</table>
+</div>
+<p>It looks like sentence length until you change the one word:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>…three <strong><em>X</em></strong> words, when the requirement is refined, …</th><th></th></tr>
+</thead>
+<tbody>
+<tr><td><code>ambiguous</code></td><td>0.115</td></tr>
+<tr><td><code>unusual</code></td><td>0.884</td></tr>
+<tr><td><code>red</code></td><td>0.973</td></tr>
+<tr><td><code>"ambiguous"</code>, in quotation marks</td><td>0.975</td></tr>
+</tbody>
+</table>
+</div>
+<p><code>when_false</code> lists the hedge words that make a clause vague. The model
+scans the whole criterion for them rather than only the clause after
+<code>then</code> — the one thing the question’s first sentence tells it not to
+do. Quoting the word neutralises it, because <code>when_true</code> says quoted
+text is a literal.</p>
+<p><strong>Defect two: the assertion shape.</strong> In one fixed short frame:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th><code>Given a requirement, when it is checked, …</code></th><th></th></tr>
+</thead>
+<tbody>
+<tr><td><code>then the reply is an error naming "covered"</code></td><td>0.912</td></tr>
+<tr><td><code>then the reply names "covered"</code></td><td>0.785</td></tr>
+<tr><td><code>then the "verdict" field is "covered"</code></td><td>0.085</td></tr>
+<tr><td><code>then the verdict is "covered"</code></td><td>0.058</td></tr>
+<tr><td><code>then there are 5 findings</code></td><td>0.915</td></tr>
+<tr><td><code>then the reply lists 5 findings</code></td><td>0.032</td></tr>
+</tbody>
+</table>
+</div>
+<p>A copula with a literal on the right reads to this model as describing
+a state rather than asserting one. Swap <code>is</code> for <code>names</code> and the same
+literal scores fifteen times higher.</p>
+<p>That second defect is the expensive one, because <code>then the X is "Y"</code> is
+the most common assertion shape in this repository’s own spec.</p>
+<h3 id="the-set-is-the-thing-to-fix-first"><a class="header" href="#the-set-is-the-thing-to-fix-first">The set is the thing to fix first</a></h3>
+<p>32 cases from one author, and most of the measurable half is
+<code>then the result is N</code> — a shape the question happens to answer well.
+Run the harness’s own spec through it instead:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th><code>harness/requirements/requirements.json</code>, 73 criteria</th><th></th></tr>
+</thead>
+<tbody>
+<tr><td><code>HOLDS</code></td><td>51</td></tr>
+<tr><td><code>INCONCLUSIVE</code></td><td>8</td></tr>
+<tr><td><code>FAILS</code></td><td>14</td></tr>
+</tbody>
+</table>
+</div>
+<p>Every one of those 14 is a quoted literal or a count:
+<code>then the verdict is "valid"</code> 0.649, <code>then the phase is "GREEN"</code> 0.598,
+<code>then there are 5 findings</code> 0.115, <code>then 0 steps are missing</code> 0.135,
+<code>then an issue reads "REQ-006: …"</code> 0.271.</p>
+<h3 id="two-fixes-that-were-measured-and-do-not-work"><a class="header" href="#two-fixes-that-were-measured-and-do-not-work">Two fixes that were measured and do not work</a></h3>
+<p><strong>Name quoted status words in <code>when_true</code>.</strong> Adding <code>"covered"</code>,
+<code>"uncovered"</code> and <code>"NaN"</code> as examples of literals takes the labelled
+set to 0 false alarms and 2 unsure. It also fits the prompt to the
+test: those are that set’s own words, and removing them returns the
+score exactly to the published figures. A question that scores well
+only on the words it was shown has not been improved.</p>
+<p><strong>Send only the clause after <code>then</code>.</strong> This is the structural version
+of what <code>instructions</code> already asks for, and it does exactly what
+defect one predicts — <code>then there are 5 findings</code> goes from 0.115 to
+0.994. It is still worse on both sets:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th></th><th>labelled set (32)</th><th>harness spec (73)</th></tr>
+</thead>
+<tbody>
+<tr><td>as shipped</td><td>0 miss, 1 false alarm, 3 unsure</td><td>22 flagged</td></tr>
+<tr><td>clause only</td><td><strong>1 miss</strong>, 3 false alarms, 1 unsure</td><td>31 flagged</td></tr>
+</tbody>
+</table>
+</div>
+<p>The miss is the reason to stop looking for a wording that fixes defect
+one. <code>then the system achieves 99.9% correctness across all code paths</code>
+scores <strong>0.933 alone</strong>, and fails correctly inside its frame. The model
+is not reading the then-clause and leaking context into it — it is
+judging the vagueness of the whole sentence, which is one mechanism
+working in both directions. Strip the setup and you lose the false
+alarm on <code>three ambiguous words</code> and the true catch on <code>a production-grade request payload</code> together.</p>
+<p>Defect one is not a bug sitting beside the behaviour that works. It is
+that behaviour, seen from the other side. A real fix has to separate
+them, and nothing in the prompt’s wording can.</p>
+<p>Until something does, this repository runs the question in <code>advisory</code>
+and not <code>enforce</code>. The judgments are worth reading; they are not yet
+worth blocking on.</p>
 <h3 id="what-the-default-costs-you"><a class="header" href="#what-the-default-costs-you">What the default costs you</a></h3>
 <p>Be clear about the trade the default makes. Over those 32 labelled
 criteria, enforcing blocks on 4 of them that the labels call fine: the
 1 false alarm above, plus the 3 the dead band leaves <code>INCONCLUSIVE</code>,
 which gate as <code>ESCALATE</code>. That is roughly one criterion in eight
-stopping a loop that should have carried on.</p>
-<p>It is still the default, because the alternative is worse in a way that
-does not show up in that count. The question is aimed at exactly the
-wording no deterministic rule reaches — “then code quality is improved
-by at least 20%” earns no finding from the regex rules, because a
-number is present. A judgment that cannot refuse leaves that gap
-unenforced entirely, and the 0 misses above stop meaning anything the
-moment nobody is required to read them. A false alarm costs a reword;
-a miss ships vague wording into a test suite.</p>
+stopping a loop that should have carried on — and on a spec whose
+criteria do not look like this set’s, much worse than that.</p>
+<p>The default is <code>enforce</code> anyway, because the alternative is worse in a
+way that does not show up in that count. The question is aimed at
+exactly the wording no deterministic rule reaches — “then code quality
+is improved by at least 20%” earns no finding from the regex rules,
+because a number is present. A judgment that cannot refuse leaves that
+gap unenforced entirely, and the 0 misses above stop meaning anything
+the moment nobody is required to read them. A false alarm costs a
+reword; a miss ships vague wording into a test suite.</p>
+<p><strong>Measure it against your own criteria before you leave it on.</strong> That
+is not boilerplate caution: this repository did exactly that and turned
+its own gate down to <code>advisory</code> on the result.</p>
 <p>Your options, in the order worth trying:</p>
 <ul>
-<li>Reword the criterion. The false-alarm shape above is narrow, and the
-reword that satisfies the model usually reads better anyway.</li>
+<li>Reword the criterion. The reword that satisfies the model usually
+reads better anyway, and a criterion that survives a long Given is
+usually one whose assertion names its own subject.</li>
 <li>Widen <code>min_confidence</code>, which moves confident wrong answers into
 <code>INCONCLUSIVE</code>. They still gate, but with a finding that asks for
 clarity rather than asserting unmeasurability.</li>
-<li>Set <code>mode = "advisory"</code> while you measure the question against your
-own criteria with <code>cargo test --test decision_live</code>, then turn it
-back on.</li>
+<li>Set <code>mode = "advisory"</code>, which is what this repository runs. The
+judgments are still reported on every <code>refine</code>, under <code>judgments</code> and
+<code>judgmentAdvisories</code>; they simply do not enter <code>findings</code> or clear
+<code>clean</code>.</li>
 <li>Set <code>mode = "off"</code> if the question does not fit your project at all.</li>
 </ul>
+<p>Rewording the <em>question</em> is the one option not on that list, and the
+section above is why: it is the right instinct, and both attempts at it
+failed in ways that only showed up against criteria the question had
+not been tuned on.</p>
 <h3 id="why-the-question-is-worded-the-way-it-is"><a class="header" href="#why-the-question-is-worded-the-way-it-is">Why the question is worded the way it is</a></h3>
 <p>An earlier phrasing asked the open question — “could a test check this
 criterion?” — and scored well on plain vagueness while reading <strong>every</strong>
@@ -3612,6 +3771,16 @@ from 8 misses to none.</p>
 <p>The lesson is about the question, not the model: an open question
 invites a judgment of the sentence’s <em>style</em>, and style is exactly what
 convincing-looking wording gets right.</p>
+<p><code>measurable/v2</code> sharpens that wording — it says a quoted value is a
+literal whatever the word would mean as prose, and that a count is one
+too — without moving the measured figures. The version is bumped
+because the strings changed, which is the rule for this table, not
+because the question got better. What the attempt to make it better
+produced is in <a href="#what-is-actually-wrong-with-it">What is actually wrong with
+it</a> above, and the short version is
+that the lesson repeats one level up: an evaluation set invites a
+judgment of the <em>shapes it contains</em>, and those are exactly what a
+question tuned on it gets right.</p>
 <p>The wording itself lives in <code>harness/prompts/prompts.toml</code>, under
 <code>[decision.measurable]</code>, beside the generative templates. It is built
 into the binary rather than read from your project, so a judgment means
@@ -3619,8 +3788,8 @@ the same thing on every machine. <code>version</code> sits in that same table, n
 to the three strings it names, so the two cannot drift: any edit to the
 wording is a new version, because the numbers below were measured
 against one phrasing and are not evidence about another.</p>
-<p>The threshold came out of the same loop. At 0.70 the run produces three
-confident false alarms rather than one and leaves none of the six
+<p>The threshold came out of the same loop. At 0.70 the run produces two
+confident false alarms rather than one and leaves one of the six
 ambiguous criteria unsure. The two directions do not cost the same: a
 confident false alarm asserts the wording is unmeasurable when it is
 not, while an inconclusive one asks for clarity and is right to ask.
@@ -3890,7 +4059,7 @@ run isolated; see <a href="#the-branch-gate">the branch gate</a>.</p>
 model, and it does so only when a <a href="#spec-judge">decision model</a> is
 configured. The other 24 never call one.</p>
 <p>When it does, each acceptance criterion is put to that model as the
-question <code>measurable/v1</code> — could a test check this with one unambiguous
+question <code>measurable/v2</code> — could a test check this with one unambiguous
 result? — and the reply gains <code>judgments</code>, <code>judgmentAdvisories</code> and
 <code>judgmentAction</code>. Those keys are absent entirely otherwise, which is the
 compatibility promise: a host reading this tool today sees no change
@@ -3913,7 +4082,7 @@ line to <code>findings</code> and makes <code>clean</code> false. There is no ex
 over MCP, and no new field to obey: the instruction to iterate until
 there are no findings already covers it. The deterministic findings
 keep their place and are never edited or dropped, and the judgment
-lines are prefixed <code>judgment (measurable/v1):</code> so you can tell which
+lines are prefixed <code>judgment (measurable/v2):</code> so you can tell which
 rules found what. Set <code>mode = "advisory"</code> to report without gating.</li>
 <li><strong><code>mode = "off"</code> stops it asking.</strong> The model stays configured for
 <code>spec judge</code>, which a human types, while automatic judgments —

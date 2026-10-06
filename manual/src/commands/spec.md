@@ -330,10 +330,10 @@ finding:
   "clean": false,
   "findings": [
     "...",
-    "judgment (measurable/v1): criterion \"...\": the outcome may not be measurable - nimble:latest says probability of true 0.014"
+    "judgment (measurable/v2): criterion \"...\": the outcome may not be measurable - nimble:latest says probability of true 0.014"
   ],
   "judgments": [ { "verdict": "FAILS", "answer": { "type": "noul", "noul": 0.014 } } ],
-  "judgmentAdvisories": ["judgment (measurable/v1): criterion \"...\": the outcome may not be measurable - nimble:latest says probability of true 0.014"],
+  "judgmentAdvisories": ["judgment (measurable/v2): criterion \"...\": the outcome may not be measurable - nimble:latest says probability of true 0.014"],
   "judgmentAction": "REWORK"
 }
 ```
@@ -344,7 +344,7 @@ judgment adds to that list, it never edits or drops an entry. Under
 `mode = "advisory"` nothing is merged and `clean` stays deterministic.
 Those keys are absent entirely until a decision model can answer.
 
-The question is `measurable/v1`: could a test check this criterion with
+The question is `measurable/v2`: could a test check this criterion with
 one unambiguous result? The probability is read against a decision band
 of **0.80** — at or above reads `HOLDS`, at or below `0.20` reads
 `FAILS`, and anything between is `INCONCLUSIVE`, which also gates, with

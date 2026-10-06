@@ -78,7 +78,7 @@ pub const DEFAULT_MIN_CONFIDENCE: f64 = 0.80;
 /// places together.
 pub const DECISION_PLANE_HELP: &str = "\
 Each acceptance criterion is put to the model as the question \
-`measurable/v1`: could a test check this with one unambiguous result? \
+`measurable/v2`: could a test check this with one unambiguous result? \
 The reply is a probability read against a decision band of 0.80 - at or \
 above reads HOLDS, at or below 0.20 reads FAILS, and anything between \
 is INCONCLUSIVE.
@@ -484,7 +484,7 @@ pub struct Provenance {
 pub struct Judgment {
     /// The gate this judgment informs, e.g. `CRITERION_MEASURABLE`.
     pub gate: &'static str,
-    /// The question set and its version, e.g. `measurable/v1`. Bumped
+    /// The question set and its version, e.g. `measurable/v2`. Bumped
     /// whenever the wording changes, because a threshold measured
     /// against one wording says nothing about another.
     pub question: &'static str,
@@ -631,7 +631,7 @@ pub const CRITERION_MEASURABLE: &str = "CRITERION_MEASURABLE";
 const MEASURABLE_PROMPT: &str = "measurable";
 
 /// The question set and version behind [`measurable_question`], e.g.
-/// `measurable/v1`.
+/// `measurable/v2`.
 ///
 /// Read from the same table as the wording rather than declared here,
 /// so the two cannot drift: any change to the wording is a new version,
@@ -851,7 +851,7 @@ mod tests {
             },
         );
         assert_eq!(judgment.gate, "CRITERION_MEASURABLE");
-        assert_eq!(judgment.question, "measurable/v1");
+        assert_eq!(judgment.question, "measurable/v2");
         assert_eq!(judgment.model, "nimble:latest");
         assert_eq!(judgment.verdict, Verdict::Fails);
         assert_eq!(judgment.action, Transition::Continue);
@@ -1157,7 +1157,7 @@ mod tests {
         );
         let finding =
             measurable_finding("Given a, when b, then it works", &judgment).expect("a failure");
-        assert!(finding.starts_with("judgment (measurable/v1):"));
+        assert!(finding.starts_with("judgment (measurable/v2):"));
         assert!(finding.contains("Given a, when b, then it works"));
         assert!(finding.contains("nimble:latest"));
         assert!(finding.contains("probability of true 0.040"));
@@ -1182,7 +1182,7 @@ mod tests {
         };
         let unsure = measurable_finding("Given a, when b, then it is valid", &judge(0.55))
             .expect("an inconclusive answer gates, so it has to say something");
-        assert!(unsure.starts_with("judgment (measurable/v1):"));
+        assert!(unsure.starts_with("judgment (measurable/v2):"));
         assert!(unsure.contains("too unclear to judge either way"));
         assert!(unsure.contains("after \"then\""));
         assert!(unsure.contains("probability of true 0.550"));
