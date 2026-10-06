@@ -410,14 +410,9 @@ requirement broken on purpose.
   "id": "REQ-007",
   "title": "Custom delimiter declared on the first line",
   "written": true,
-  "nextStep": "Add the @REQ-007 scenario with scenario add."
+  "nextStep": "Add the @REQ-007 scenario with spec scenario add."
 }
 ```
-
-One footnote on that reply. `scenario add` is missing its `spec `
-prefix: the rewriter that turns the services' advice into commands only
-prefixes phrases it cannot mistake for English, and `scenario add` is
-not on that list. Paste `spec scenario add`, not what it says.
 
 Note the two characters `\n` in the prompt and in every criterion the
 model gave back. The spec writes an input newline as the literal

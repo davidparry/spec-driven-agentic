@@ -1064,11 +1064,11 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: WorkTree, S: StateS
             self.write_file(&catalog, &file, &format!("draft {id}: {title}"))?;
         }
         let next_step = if unresolved.is_empty() {
-            format!("Add the @{id} scenario with scenario add.")
+            format!("Add the @{id} scenario with spec scenario add.")
         } else {
             format!(
                 "Wrote {id} with {} wording finding(s) you accepted. Run spec reword \
-                 {id} to revisit them, or add the @{id} scenario with scenario add.",
+                 {id} to revisit them, or add the @{id} scenario with spec scenario add.",
                 unresolved.len()
             )
         };
@@ -1811,7 +1811,12 @@ mod tests {
         let report = service.draft(&mut prompter).unwrap();
         assert_eq!(report.id, "REQ-008");
         assert!(report.written);
-        assert!(report.next_step.contains("scenario add"));
+        // Pinned whole, prefix included: a `contains` here let the
+        // wizard advise a bare `scenario add` nobody could paste.
+        assert_eq!(
+            report.next_step,
+            "Add the @REQ-008 scenario with spec scenario add."
+        );
         let written = service.store.get(SPEC_PATH).unwrap();
         let written_spec: Spec = serde_json::from_str(&written).unwrap();
         assert_eq!(written_spec.requirements.len(), 3);

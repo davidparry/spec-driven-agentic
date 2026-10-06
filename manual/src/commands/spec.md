@@ -161,7 +161,10 @@ REQ-004 criterion 2 (leave blank to finish the criteria):
 - The id is allocated automatically (next free `REQ-nnn`).
 - A **blank criterion ends the list** — enter at least one first.
 - On a color console the bracketed suggestion — the text
-  <kbd>Enter</kbd> will use — renders green; the destructive
+  <kbd>Enter</kbd> will use — renders green; the
+  `(As a ..., I want ..., so that ...)` story shape renders in the
+  banner's muted REFACTOR yellow, because it is the form the answer
+  must take rather than a value to accept; the destructive
   `'-' drops it` hint on criterion prompts, model failures, and other
   dead ends render red; the animated dots on `working ...` lines
   render light yellow.
@@ -232,7 +235,7 @@ When the draft is clean it is written:
   "id": "REQ-004",
   "title": "Newlines act as delimiters",
   "written": true,
-  "nextStep": "Add the @REQ-004 scenario with scenario add."
+  "nextStep": "Add the @REQ-004 scenario with spec scenario add."
 }
 ```
 

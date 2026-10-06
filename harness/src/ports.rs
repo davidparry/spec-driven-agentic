@@ -624,6 +624,116 @@ string_error!(ExecError);
 mod tests {
     use super::*;
 
+    /// A single-document source - an in-memory fake, or any repository
+    /// that never grew an include tree - gets `read_raw` for free. The
+    /// root document renders from the loaded spec, and every other path
+    /// is the same "does not exist" sentence a real adapter would give,
+    /// so a caller probing the tree cannot tell the two apart.
+    #[test]
+    fn the_default_read_raw_serves_the_root_document_and_refuses_the_rest() {
+        struct OneDocument;
+        impl SpecRepository for OneDocument {
+            fn load(&self) -> Result<Spec, SpecError> {
+                Ok(Spec {
+                    project: "kata".into(),
+                    ..Spec::default()
+                })
+            }
+        }
+        let raw = OneDocument.read_raw(ROOT_SPEC_FILE).unwrap();
+        assert_eq!(
+            raw,
+            crate::domain::model::render(&OneDocument.load().unwrap()).unwrap()
+        );
+        assert!(raw.contains("\"project\": \"kata\""), "{raw}");
+        assert_eq!(
+            OneDocument.read_raw("features/extra.json"),
+            Err(SpecError(
+                "spec: features/extra.json is not readable - the file does not exist".into()
+            ))
+        );
+    }
+
+    /// Services take a broker by reference as often as by value. The
+    /// blanket impl is what lets one borrowed broker be shared across
+    /// them without each service naming a lifetime.
+    #[test]
+    fn a_borrowed_tool_broker_calls_through_to_the_one_it_borrows() {
+        struct Echo;
+        impl ToolBroker for Echo {
+            fn call(
+                &self,
+                name: &str,
+                arguments: &serde_json::Value,
+            ) -> Result<crate::domain::tools::ToolOutcome, ToolError> {
+                Ok(crate::domain::tools::ToolOutcome {
+                    text: format!("{name}{arguments}"),
+                    is_error: false,
+                })
+            }
+        }
+        let borrowed: &dyn ToolBroker = &Echo;
+        assert_eq!(
+            (&borrowed)
+                .call("validate_spec", &serde_json::json!({}))
+                .unwrap()
+                .text,
+            "validate_spec{}"
+        );
+    }
+
+    /// `spec tools refresh` asks for a cache bypass. A discovery that
+    /// has no cache to bypass must still answer, rather than leaving
+    /// refresh unimplemented for every uncached source.
+    #[test]
+    fn a_discovery_without_a_cache_refreshes_by_discovering_again() {
+        struct Fixed;
+        impl ToolDiscovery for Fixed {
+            fn discover(
+                &self,
+                server: &crate::domain::mcp_registry::ServerSpec,
+            ) -> Result<Vec<crate::domain::tools::ToolDefinition>, ToolError> {
+                Ok(vec![crate::domain::tools::ToolDefinition {
+                    name: server.name.clone(),
+                    description: String::new(),
+                    schema: serde_json::json!({}),
+                    origin: crate::domain::tools::ToolOrigin::Server(server.name.clone()),
+                }])
+            }
+        }
+        let server = crate::domain::mcp_registry::ServerSpec {
+            name: "playwright".into(),
+            program: "npx".into(),
+            args: vec![],
+            env: vec![],
+        };
+        assert_eq!(
+            Fixed.discover_fresh(&server).unwrap(),
+            Fixed.discover(&server).unwrap()
+        );
+    }
+
+    /// A failed write surfaces wherever the write was attempted from -
+    /// writing a feature file, writing a source file - and the sentence
+    /// the adapter wrote is the one the caller must see. These
+    /// conversions exist so `?` can carry it without rewording.
+    #[test]
+    fn a_write_failure_keeps_its_sentence_when_it_becomes_a_feature_or_source_error() {
+        let write = WriteError("cannot write src/Calc.java - permission denied".into());
+        assert_eq!(
+            FeatureError::from(write.clone()),
+            FeatureError("cannot write src/Calc.java - permission denied".into())
+        );
+        assert_eq!(
+            SourceError::from(write.clone()),
+            SourceError("cannot write src/Calc.java - permission denied".into())
+        );
+        assert_eq!(
+            FeatureError::from(write.clone()).to_string(),
+            write.to_string()
+        );
+    }
+
     /// Every reason a decision can fail has to tell the reader what to
     /// do about it. These sentences are the whole user interface when
     /// the decision plane does not work, and a judgment that fails

@@ -14,7 +14,7 @@ use spec_harness::adapters::config::{
     TomlDecisionStore, TomlModelStore, TomlToolStore, config_path, inspect_config,
     refactor_attempts, tools_settings,
 };
-use spec_harness::adapters::console_prompt::ConsolePrompter;
+use spec_harness::adapters::console_prompt::{ConsolePrompter, MUTED_YELLOW};
 use spec_harness::adapters::fs_project::FsProjectFiles;
 use spec_harness::adapters::fs_scaffold::FsScaffoldWriter;
 use spec_harness::adapters::fs_spec::FsSpecRepository;
@@ -959,7 +959,7 @@ fn execute(
 fn print_banner() {
     const R: &str = "\x1b[31m"; // the red arc
     const G: &str = "\x1b[32m"; // the green arc
-    const Y: &str = "\x1b[38;5;179m"; // muted yellow - the refactor step
+    const Y: &str = MUTED_YELLOW; // muted yellow - the refactor step
     const B: &str = "\x1b[1m"; // bold
     const D: &str = "\x1b[2m"; // dim
     const X: &str = "\x1b[0m"; // reset

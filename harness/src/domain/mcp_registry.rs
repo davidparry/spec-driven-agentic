@@ -269,4 +269,89 @@ mod tests {
         let load = parse_registry("{}", "/root", &env);
         assert!(load.problems.iter().any(|p| p.contains("neither")));
     }
+
+    /// Registrations are copied between editors, and each spells the
+    /// project directory its own way. All three spellings mean the same
+    /// directory here, so a config written for one editor works unedited.
+    #[test]
+    fn every_spelling_of_the_project_directory_expands_to_the_root() {
+        let (text, problems) = expand(
+            "${workspaceFolder}/a ${workspaceRoot}/b ${cwd}/c",
+            "/root",
+            &env,
+        );
+        assert_eq!(text, "/root/a /root/b /root/c");
+        assert!(problems.is_empty(), "{problems:?}");
+    }
+
+    /// `$VAR` is as common as `${env:VAR}` in a hand-written config, and
+    /// an unset one must be reported the same way. Silently expanding it
+    /// to nothing would hand the server a command it cannot run and no
+    /// hint about why.
+    #[test]
+    fn a_bare_unset_variable_expands_to_nothing_and_says_so() {
+        let (text, problems) = expand("$FOO:$MISSING", "/root", &env);
+        assert_eq!(text, "bar:");
+        assert_eq!(problems, ["environment variable MISSING is unset"]);
+    }
+
+    /// A server's `env` block is expanded like its command and args, and
+    /// the pairs are sorted so the same registration always produces the
+    /// same spec - the cached tool catalog is keyed on it.
+    #[test]
+    fn a_server_env_block_is_expanded_sorted_and_reports_what_is_unset() {
+        let json = r#"{
+            "servers": {
+                "api": {
+                    "command": "npx",
+                    "env": { "TOKEN": "$FOO", "BASE": "${env:MISSING}", "PORT": 8080 }
+                }
+            }
+        }"#;
+        let load = parse_registry(json, "/root", &env);
+        assert_eq!(
+            load.servers[0].env,
+            [
+                ("BASE".to_string(), String::new()),
+                ("PORT".to_string(), String::new()),
+                ("TOKEN".to_string(), "bar".to_string()),
+            ]
+        );
+        assert!(
+            load.problems
+                .iter()
+                .any(|p| p == "environment variable MISSING is unset"),
+            "{:?}",
+            load.problems
+        );
+    }
+
+    /// A name is a tool-name prefix, so it cannot be empty, and two keys
+    /// that sanitize alike would hide one server's tools behind the
+    /// other's. The collision is renamed and reported rather than
+    /// silently dropping a server the developer registered.
+    #[test]
+    fn an_unusable_name_falls_back_and_a_collision_is_numbered_and_reported() {
+        let load = parse_registry(
+            r#"{ "servers": { "": { "command": "x" } } }"#,
+            "/root",
+            &env,
+        );
+        assert_eq!(load.servers[0].name, "server");
+
+        let json = r#"{
+            "servers": {
+                "play wright": { "command": "a" },
+                "play.wright": { "command": "b" }
+            }
+        }"#;
+        let load = parse_registry(json, "/root", &env);
+        let mut names: Vec<&str> = load.servers.iter().map(|s| s.name.as_str()).collect();
+        names.sort_unstable();
+        assert_eq!(names, ["play_wright", "play_wright_2"]);
+        assert_eq!(
+            load.problems,
+            ["duplicate server name play_wright renamed to play_wright_2"]
+        );
+    }
 }

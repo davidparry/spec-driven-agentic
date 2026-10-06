@@ -234,7 +234,9 @@ mod tests {
             .collect()
     }
 
-    fn service(fail: bool) -> ToolService<MemoryStore, FakeDiscovery, FakeRegistry> {
+    type Svc = ToolService<MemoryStore, FakeDiscovery, FakeRegistry>;
+
+    fn service(fail: bool) -> Svc {
         ToolService::new(
             MemoryStore(RefCell::new(ProfileOverrides::default())),
             FakeDiscovery {
@@ -312,10 +314,60 @@ mod tests {
         let service = service(false);
         let shown = service.show("validate_spec").unwrap();
         assert_eq!(shown.name, "validate_spec");
+        assert_eq!(Svc::origin_label(&shown.origin), "builtin");
+    }
+
+    #[test]
+    fn refresh_discovers_past_the_cache() {
+        let service = service(false);
+        let list = service.catalog(true, false);
+        assert_eq!(*service.discovery.calls.borrow(), 1);
+        assert!(list.tools.iter().any(|t| t.name == "self__extra"));
+        assert!(list.undiscovered.is_empty());
+    }
+
+    #[test]
+    fn the_registry_is_readable_without_discovering_anything() {
+        let service = service(true);
+        let load = service.registry();
+        assert_eq!(load.path.as_deref(), Some("mcp.json"));
+        assert_eq!(load.servers.len(), 1);
+        assert_eq!(*service.discovery.calls.borrow(), 0);
+    }
+
+    #[test]
+    fn disable_persists_a_removal_without_resolving_the_name() {
+        let service = service(false);
+        // Unlike enable, detaching does not look the tool up: a tool
+        // from a server that has since gone away must still be
+        // removable from a profile.
+        service.disable("gone__tool", Caller::Ask).unwrap();
         assert_eq!(
-            ToolService::<MemoryStore, FakeDiscovery, FakeRegistry>::origin_label(&shown.origin),
-            "builtin"
+            service.overrides().removed.get("ask").unwrap(),
+            &vec!["gone__tool".to_string()]
         );
+        assert_eq!(*service.discovery.calls.borrow(), 0);
+    }
+
+    #[test]
+    fn a_listed_tool_reads_as_one_line_naming_where_it_came_from() {
+        let tool = ToolDefinition {
+            name: "browser_click".into(),
+            description: "Click an element. Takes a selector and waits for it.".into(),
+            schema: serde_json::json!({"type": "object"}),
+            origin: ToolOrigin::Server("playwright".into()),
+        };
+        assert_eq!(Svc::summary(&tool), "browser_click — Click an element.");
+        assert_eq!(Svc::origin_label(&tool.origin), "server playwright");
+    }
+
+    #[test]
+    fn a_callers_default_profile_is_readable_without_a_catalog() {
+        assert_eq!(
+            Svc::default_names(Caller::Status),
+            default_profile(Caller::Status)
+        );
+        assert!(!Svc::default_names(Caller::Ask).is_empty());
     }
 
     #[test]

@@ -39,6 +39,8 @@ pub(crate) const RED: &str = "\x1b[31m";
 pub(crate) const GREEN: &str = "\x1b[32m";
 /// Bright yellow - the spinner's animated dots.
 pub(crate) const YELLOW: &str = "\x1b[93m";
+/// Muted yellow - the banner's REFACTOR step and the story shape.
+pub const MUTED_YELLOW: &str = "\x1b[38;5;179m";
 pub(crate) const RESET: &str = "\x1b[0m";
 
 /// The criterion prompts' drop convention - typing `-` removes the
@@ -50,10 +52,15 @@ fn paint_drop_hint(text: &str) -> String {
     text.replace(DROP_HINT, &format!("'{RED}-{RESET}' {RED}drops it{RESET}"))
 }
 
+/// The draft and reword wizards' wording shape. Yellow, not green:
+/// it is the form the answer must take, not a value to accept.
+const STORY_SHAPE: &str = "(As a ..., I want ..., so that ...)";
+
 /// Parenthetical hints and pick lists - `(java, javascript, ...)`,
-/// `(As a ..., I want ..., so that ...)` - painted green like the
-/// bracketed Enter-default. Nested parens do not appear in these
-/// prompts, so the first `)` closes the span.
+/// `(Enter keeps it)` - painted green like the bracketed Enter-default,
+/// with the story shape in the banner's REFACTOR yellow instead.
+/// Nested parens do not appear in these prompts, so the first `)`
+/// closes the span.
 fn paint_parens(text: &str) -> String {
     let mut out = String::new();
     let mut rest = text;
@@ -62,9 +69,14 @@ fn paint_parens(text: &str) -> String {
             out.push_str(rest);
             return out;
         };
+        let span = &rest[open..=close];
         out.push_str(&rest[..open]);
-        out.push_str(GREEN);
-        out.push_str(&rest[open..=close]);
+        out.push_str(if span == STORY_SHAPE {
+            MUTED_YELLOW
+        } else {
+            GREEN
+        });
+        out.push_str(span);
         out.push_str(RESET);
         rest = &rest[close + 1..];
     }
@@ -75,8 +87,9 @@ fn paint_parens(text: &str) -> String {
 /// Render the question's suggestions in green and the destructive
 /// `'-' drops it` hint in red. Bracketed spans (`[prior answer]`,
 /// `[y/N]`, `[1-3, Enter for 1]`) are the Enter-default; parenthetical
-/// spans are the pick list or wording shape. Both are what the
-/// developer is being asked to take.
+/// spans are the pick list. Both are what the developer is being asked
+/// to take, which is what green marks - the wording shape is yellow
+/// because it is a form to fill, not a value to accept.
 pub(crate) fn highlight_suggestion(question: &str) -> String {
     let (Some(open), Some(close)) = (question.find('['), question.rfind(']')) else {
         return paint_drop_hint(&paint_parens(question));
@@ -227,22 +240,26 @@ mod tests {
             "Language for the new project \x1b[32m(java, javascript, typescript, dotnet, rust)\x1b[0m:"
         );
         assert_eq!(
-            highlight_suggestion("REQ-001 story (As a ..., I want ..., so that ...):"),
-            "REQ-001 story \x1b[32m(As a ..., I want ..., so that ...)\x1b[0m:"
-        );
-        assert_eq!(
             highlight_suggestion("REQ-001 criterion 1 (leave blank to finish the criteria):"),
             "REQ-001 criterion 1 \x1b[32m(leave blank to finish the criteria)\x1b[0m:"
         );
     }
 
     #[test]
-    fn a_story_shape_stays_green_beside_the_bracketed_enter_default() {
+    fn the_story_shape_is_rendered_in_the_refactor_yellow() {
+        assert_eq!(
+            highlight_suggestion("REQ-001 story (As a ..., I want ..., so that ...):"),
+            "REQ-001 story \x1b[38;5;179m(As a ..., I want ..., so that ...)\x1b[0m:"
+        );
+    }
+
+    #[test]
+    fn the_story_shape_is_yellow_beside_the_green_enter_default() {
         assert_eq!(
             highlight_suggestion(
                 "REQ-002 story (As a ..., I want ..., so that ...) [As a user, I want 0] (Enter keeps it):"
             ),
-            "REQ-002 story \x1b[32m(As a ..., I want ..., so that ...)\x1b[0m \
+            "REQ-002 story \x1b[38;5;179m(As a ..., I want ..., so that ...)\x1b[0m \
              \x1b[32m[As a user, I want 0]\x1b[0m \x1b[32m(Enter keeps it)\x1b[0m:"
         );
     }
