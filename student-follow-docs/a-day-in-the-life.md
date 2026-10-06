@@ -67,7 +67,7 @@ are one directory too high.
 Confirm the starting state:
 
 ```bash
-spec list       # 16 implemented, 0 pending
+spec list       # 17 implemented, 0 pending
 spec validate   # valid: true
 spec status     # nextId: HARNESS-019
 cargo test --manifest-path Cargo.toml --test spec_completeness
@@ -146,13 +146,15 @@ catalog numbers `REQ`. There is nothing to configure and nothing for an
 agent to guess — `spec status` reports `nextId` precisely so the shape
 can be read rather than invented.
 
-Try it from further down to see the discovery for yourself:
+Try it from further down to see the discovery for yourself. You are
+still in `harness/`, so this is `harness/src/domain` — run it from the
+repository root instead and there is no `src/` to step into:
 
 ```bash
 cd src/domain && spec status && cd ../..
 ```
 
-Same catalog, three directories up, found by walking up the tree.
+Same catalog, two directories up, found by walking up the tree.
 
 > **Shortcut.** `spec deliver "the harness should handle coverage
 > properly so gaps are found easily"` runs this exact draft as its first
@@ -774,7 +776,7 @@ cargo install --path . --force
 # 4. confirm you are back at the start
 git status --short          # clean
 cd harness
-spec list                   # 16 implemented, 0 pending
+spec list                   # 17 implemented, 0 pending
 spec status                 # nextId: HARNESS-019
 ```
 

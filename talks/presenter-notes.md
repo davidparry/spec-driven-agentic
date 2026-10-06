@@ -57,7 +57,7 @@ server grows a tool the plan does not name, and the best beat in the
 talk does not fire. Verified: the planned set green, one tool past it
 `BUILD FAILURE`.
 
-The starting state is: 16 implemented requirements, nothing pending,
+The starting state is: 17 implemented requirements, nothing pending,
 exactly the planned tools served, every bar green. If `spec_completeness`
 is red before you start, the catalog and the feature tags have drifted —
 fix that, do not demo around it.

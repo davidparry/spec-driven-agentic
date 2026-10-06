@@ -87,6 +87,17 @@ From `harness/` itself use `cargo install --path .` — `--path harness` from th
 
 Then reload the MCP server in Cursor (toggle it off/on). To try a debug binary without installing: `harness/target/debug/spec mcp serve --root .`.
 
+### Remove `spec` from this machine
+
+The cargo copy and the installer copy are tracked separately, so removing one can leave the other answering `spec`. Undo the cargo one with the **package** name, `spec-harness`, not the binary name:
+
+```bash
+cargo uninstall spec-harness
+which -a spec                 # nothing left
+```
+
+If `which -a spec` still finds one, it came from the published installer — remove that with the [uninstaller above](#install-spec). A `cargo build` copy is not on PATH at all; deleting `harness/target/` is enough.
+
 ## Verify everything is ready for production
 
 Before pushing to `trunk` (which deploys the website) or tagging a
