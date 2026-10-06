@@ -461,10 +461,11 @@ cd harness
 spec status      # 17 implemented · 0 pending · nextId: HARNESS-019
       </code></pre>
       <p class="small">No ticket. No spec. An empty backlog and a sentence I am about to say out loud:</p>
-      <blockquote>"for one requirement, show me which acceptance criteria no test proves"</blockquote>
+      <blockquote class="small">"for one requirement, report each acceptance criterion as proven or unproven; report all criteria proven when none are left unproven; count a scenario as proof only when it is tagged with that requirement id; treat a scenario whose step is undefined as proving nothing; and raise an error when the requirement id is absent from the spec"</blockquote>
       <ul class="small">
         <li>Seventeen requirements say <code>implemented</code>. Each has a tagged scenario, and a test proves it — <code>tests/spec_completeness.rs</code> fails the build otherwise</li>
         <li>Today we build <strong>a new MCP tool</strong>: given a requirement, which acceptance criteria have an asserting test, and which do not</li>
+        <li>One sentence, <strong>five behaviors named</strong> — and note what it never says: no tool, no endpoint, no module. That omission is the whole of 9:10</li>
         <li>But first the sentence has to become something a machine can work from</li>
       </ul>
     </section>
@@ -491,16 +492,17 @@ edge case to each) — asking again (2 of 3)        ← the harness rejects its 
       <h2>The first human gate is one keystroke</h2>
       <pre><code class="language-text" data-trim>
 The description holds 5 requirement(s):
-  1. Unproven acceptance criteria of one requirement are listed
-  2. A fully proven requirement reports the verdict all criteria proven
-  3. A scenario with an undefined step proves nothing
-  4. Only scenarios tagged with the requirement id count as proof
-  5. The proof report refuses an unknown requirement id
+  1. Each acceptance criterion gets a proven or unproven verdict
+  2. The roll-up verdict reads all criteria proven once none are unproven
+  3. Only scenarios tagged with the requirement id count as proof
+  4. A scenario with an undefined step proves nothing
+  5. An unknown requirement id raises an error
 
 Accept [Enter for all, or comma-separated numbers]: 1
       </code></pre>
       <ul class="small">
         <li>One sentence became a <strong>backlog</strong>. The model split it until every requirement was atomic — one capability each</li>
+        <li>Five behaviors named, five requirements proposed. The split held across all three attempts — the count is the sentence's doing, not the model's mood</li>
         <li>Typing <code>1</code> is a real decision: everything else is discarded, unbuilt. <strong>You</strong> set the scope, not the machine</li>
         <li>What stages is <code>HARNESS-019</code>, and nothing has touched the working tree yet</li>
       </ul>
@@ -526,7 +528,8 @@ spec status      # same catalog, found by walking up
         <div>
           <h3><code>validate_spec</code> → <span class="badge green">valid</span></h3>
           <h3><code>refine_requirement</code> → <span class="badge green">clean</span></h3>
-          <p class="small">No findings. The wording review already ran — you watched it reject the model at 9:00.</p>
+          <p class="small">No findings from the rule set — it already ran, and you watched it reject the model at 9:00.</p>
+          <p class="small">A <strong>second model</strong> was asked too, one criterion at a time: could a test check this with a single unambiguous result? <code>HOLDS</code> at <strong>0.887</strong>, <code>judgmentAction: CONTINUE</code>.</p>
         </div>
         <div>
           <p class="small">So read what it actually wrote:</p>
@@ -534,7 +537,8 @@ spec status      # same catalog, found by walking up
           <p class="small">Concrete outcome. Real edge cases. Testable by anyone. And it asks for a <strong>function</strong> — nothing here asked for a tool.</p>
         </div>
       </div>
-      <blockquote>A rule set can check that an outcome is concrete. It cannot check that you asked for the right thing. <strong>This one is yours.</strong></blockquote>
+      <p class="small">Both reviews are <em>correct</em>. A test could assert that criterion. Nothing is going to catch this.</p>
+      <blockquote>A rule set checks that an outcome is concrete; a second model guesses whether a test could assert it. Neither checks that you asked for the right thing. <strong>This one is yours.</strong></blockquote>
     </section>
 
     <section data-track="tdd">
@@ -556,6 +560,58 @@ spec status      # same catalog, found by walking up
         <li>Measured, not asserted: implementing the left-hand version returns <code>requirement_coverage()</code>, a function, green on every criterion and useless at 10:50</li>
         <li>The criteria are the contract. If a new MCP tool is what you want, the criteria have to say so</li>
       </ul>
+    </section>
+
+    <section data-track="tdd">
+      <h2>The review that is not a rule</h2>
+      <div class="two-col">
+        <div>
+          <h3>Your four criteria</h3>
+          <table class="small">
+            <tr><td><code>… an error naming "REQ-999"</code></td><td><span class="badge green">0.998</span></td></tr>
+            <tr><td><code>… 1 criterion is reported uncovered</code></td><td><span class="badge red">0.709</span></td></tr>
+            <tr><td><code>… the verdict is "uncovered"</code></td><td><span class="badge red">0.672</span></td></tr>
+            <tr><td><code>… the verdict is "covered"</code></td><td><span class="badge red">0.211</span></td></tr>
+          </table>
+          <p class="small">Two unsure and one <em>rejected</em> — about criteria the room would call testable.</p>
+        </div>
+        <div>
+          <h3>What it is <em>for</em></h3>
+          <table class="small">
+            <tr><td><code>… code quality is improved by at least 20%</code></td><td><span class="badge green">0.032</span></td></tr>
+            <tr><td><code>… latency is acceptable (p99 &lt; SLO)</code></td><td><span class="badge green">0.048</span></td></tr>
+          </table>
+          <p class="small"><code>refine</code> reports <strong>nothing at all</strong> about either. A number is present, so the regex rule is satisfied. Nobody measured code quality.</p>
+        </div>
+      </div>
+      <blockquote>Right about the wording that fools a regex. Confidently wrong about wording that is fine. <strong>That is not a thing you wire a blocking gate to.</strong></blockquote>
+    </section>
+
+    <section data-track="tdd">
+      <h2>…so find out <em>exactly</em> how it is wrong</h2>
+      <div class="two-col">
+        <div>
+          <h3>Grow the setup, keep the assertion</h3>
+          <table class="small">
+            <tr><td><em>(nothing)</em> <code>then there are 5 findings</code></td><td><span class="badge green">0.991</span></td></tr>
+            <tr><td><code>Given a story, …</code></td><td><span class="badge green">0.972</span></td></tr>
+            <tr><td><code>Given a story naming no actor, …</code></td><td><span class="badge green">0.962</span></td></tr>
+            <tr><td><code>… no benefit and three <strong>ambiguous</strong> words, …</code></td><td><span class="badge red">0.115</span></td></tr>
+          </table>
+          <p class="small">Not length — that <em>word</em>. <code>unusual</code> → 0.884. <code>red</code> → 0.973. <code>"ambiguous"</code> in quotes → 0.975. It scans the whole sentence for hedge words instead of just the <code>then</code> clause.</p>
+        </div>
+        <div>
+          <h3>Then swap one verb</h3>
+          <table class="small">
+            <tr><td><code>then the reply is an error naming "covered"</code></td><td><span class="badge green">0.912</span></td></tr>
+            <tr><td><code>then the reply names "covered"</code></td><td><span class="badge green">0.785</span></td></tr>
+            <tr><td><code>then the verdict is "covered"</code></td><td><span class="badge red">0.058</span></td></tr>
+          </table>
+          <p class="small">Same literal. <code>is</code> instead of <code>names</code>. A copula reads as <em>describing</em> a state, not asserting one — and <code>then the X is "Y"</code> is how most of this spec is written.</p>
+        </div>
+      </div>
+      <p class="small">Cost: <strong>14 of this repo's 73 criteria come back <code>FAILS</code></strong>, every one a count or a quoted literal. Published accuracy on the 32-criterion labelled set — 0 misses, 1 false alarm, 3 unsure — is <em>true</em>, and useless here.</p>
+      <blockquote>This is 9:10 again, one level up. Every check passed, the number on the box was honest, and the gate still was not safe to obey — because the set it was measured on did not look like the work.</blockquote>
     </section>
 
     <section data-track="tdd">
@@ -679,6 +735,7 @@ spec deliver --no-branch           # already on a throwaway branch: do not ask
         <tr><th>Gate</th><th>Verdict</th></tr>
         <tr><td><code>validate_spec</code></td><td><span class="badge green">valid</span></td></tr>
         <tr><td><code>refine_requirement</code></td><td><span class="badge green">clean</span></td></tr>
+        <tr><td>Second model</td><td><span class="badge red">never asked — <code>deliver</code> does not consult it</span></td></tr>
         <tr><td>Tagged scenario exists</td><td><span class="badge green">yes</span></td></tr>
         <tr><td>RED, then GREEN</td><td><span class="badge green">green</span></td></tr>
         <tr><td>Java smoke test at 10:50</td><td><span class="badge green">green — no new MCP tool to be unplanned</span></td></tr>

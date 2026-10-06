@@ -110,6 +110,25 @@
   `[decision]` block is deliberately left commented, because
   `spec judge use` is a beat in the binary walkthrough.
 
+- **The morning's walkthrough treats the decision plane as part of the
+  loop rather than an optional aside**, and the lesson is the one the
+  evidence supports. `refine` reports judgments on every run; at 9:10
+  the second model answers `HOLDS` at 0.887 on the model's wording and
+  is *right* to — a test could assert it — and the requirement is
+  still the wrong one, which is the point. 9:20 then shows the question
+  confident and right on `then code quality is improved by at least
+  20%`, which no deterministic rule reaches, and confidently wrong on
+  `then the verdict is "covered"`, and walks the reader through both
+  sensitivity sweeps so the conclusion is earned rather than asserted:
+  a gate with an honest accuracy number measured on the wrong set is
+  9:10's own failure one level up.
+
+  The presenter notes also taught a criterion the student doc did not —
+  `then the reply is an error naming the unknown id`, which scores
+  0.200 and deserves to, since "the unknown id" is a back-reference
+  rather than a value. Both documents now teach the `"REQ-999"`
+  wording.
+
 - **Two `HARNESS-018` criteria now say what their scenarios assert.**
   `then the name is refused and 0 branches are created` and `then the
   run continues on "main"` became `then 0 branches are created and the

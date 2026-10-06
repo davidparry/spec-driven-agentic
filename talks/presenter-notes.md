@@ -62,26 +62,32 @@ exactly the planned tools served, every bar green. If `spec_completeness`
 is red before you start, the catalog and the feature tags have drifted —
 fix that, do not demo around it.
 
-**Optional, and off unless you turn it on: the decision model.** If you
-mean to show the 9:10 aside below, do this before you walk on, because
-the first call pays a cold-start cost of about a third of a second and
-nothing else in the talk does:
+**The decision model is part of the demo, not a bonus.** `refine` gates
+on it at 9:10 and the beat does not work without it. Do this before you
+walk on, because the first call pays a cold-start cost of about a third
+of a second and nothing else in the talk does:
 
 ```bash
-ollama --version                                    # 0.35 or newer, or skip the aside
+ollama --version                                    # 0.35 or newer, or 9:10 has no second half
 ollama pull nimble
 spec judge models                                   # nimble:latest must be listed
-spec config | grep -E "llm.model|decision.model"    # llm.model unchanged, decision.model unset
+spec config | grep -E "llm.model|decision.model"    # both pinned, both from .spec/config.toml
 ```
 
-Use the **flag**, not `spec judge use`. The flag configures nothing, so
-there is no config edit in your diff and nothing to reset. It also keeps
-the "the coding model is untouched" claim trivially true on stage: the
-last command above shows `decision.model` with no value at all.
+It is pinned in the tracked config rather than passed as a flag, for
+the same reason the coding model is: the question is calibrated against
+this model, and a rehearsal that judged with a different one was not a
+rehearsal. Nothing to set up on stage and nothing to reset after.
 
-If `ollama --version` is older than 0.35 there is no `/v1/systemone` and
-the aside cannot run. Cut it. Nothing later in the talk refers back to
-it.
+Say the two-models line early and once: **`llm.model` writes,
+`decision.model` answers.** They are different models doing different
+jobs, and the room will otherwise assume you turned the coding model on
+itself.
+
+If `ollama --version` is older than 0.35 there is no `/v1/systemone`,
+the gate cannot run, and `refine` comes back with no `judgments` key at
+all. Rehearse that fallback — 9:10's first half still lands — but do
+not plan on it.
 
 ## 9:00 — one sentence
 
@@ -98,8 +104,14 @@ spec draft
 ```
 
 ```
-for one requirement, show me which acceptance criteria no test proves
+for one requirement, report each acceptance criterion as proven or unproven; report all criteria proven when none are left unproven; count a scenario as proof only when it is tagged with that requirement id; treat a scenario whose step is undefined as proving nothing; and raise an error when the requirement id is absent from the spec
 ```
+
+Long for a sentence you say out loud, and that is the point — it names
+five behaviors, which is what gets you five proposals rather than one.
+Have it on the clipboard; do not retype it live. What it never says is
+just as load-bearing: no tool, no endpoint, no module. That omission is
+what 9:10 is about, so do not "improve" it beforehand.
 
 Three things happen while it runs, and all three are worth narrating.
 
@@ -123,10 +135,14 @@ sets up 9:10.
 **Then it proposes.** The description is broken into atomic
 requirements, one capability each.
 
-> **Do not promise a number.** The same sentence gave five proposals on
-> one rehearsal and one on the next. Say "it proposes a handful" and
-> read whatever is on screen. If you want a predictable slide, the
-> count is the one thing here you cannot pin.
+> **The count follows the sentence.** Five named behaviors gave five
+> proposals on every attempt measured, and the split held even across
+> the retries. That is why the sentence is phrased the way it is — the
+> earlier one-clause version ("show me which acceptance criteria no
+> test proves") came back with a single requirement and no `Accept`
+> prompt, which kills the beat below. Still read what is on screen
+> rather than the slide: the titles are the model's wording and they
+> move even when the count does not.
 
 ### This beat is yours — the first human gate
 
@@ -162,25 +178,34 @@ Same catalog, found by walking up. This is the first instance of the
 argument the whole talk makes — the tool reads its context rather than
 being told it.
 
-> **Deliver parity.** `spec deliver "the harness should handle coverage
-> properly so gaps are found easily"` runs exactly this as its *draft*
-> stage, via `draft_plan`. It drafts, commits, reads back what actually
-> reached the catalog, and plans those ids.
+> **Deliver parity.** `spec deliver "<the same sentence>"` runs exactly
+> this as its *draft* stage, via `draft_plan`. It drafts, commits, reads
+> back what actually reached the catalog, and plans those ids.
 
 ## 9:10 — it is clean, and that is the problem
 
 ```bash
 spec validate            # valid: true
-spec refine HARNESS-019  # clean: true
+spec refine HARNESS-019  # clean: true, judgmentAction: CONTINUE
 ```
 
 **This is not the beat the old version of this talk had, and it is a
 better one.** Do not apologise for the green result — walk toward it.
 
-The wording review comes back clean because it *already ran*. You
-watched it run at 9:00, inside the draft loop, rejecting the model's
-first answer for covering only happy paths. The deterministic gate did
-its job thirty seconds ago. Nothing is left for it to find.
+Two reviews ran, not one, and the room should hear about both.
+
+The deterministic rule set *already ran*. You watched it at 9:00,
+inside the draft loop, rejecting the model's first answer for covering
+only happy paths. Nothing is left for it to find.
+
+The second is a different model answering one bounded question per
+criterion — could a test check this with a single unambiguous result?
+It came back **`HOLDS` at 0.887**. Point at `judgmentAction: CONTINUE`.
+
+**This is the beat.** Two reviews with nothing in common but the
+sentence they read, both of them correct, both of them happy — and the
+requirement is the wrong one. If the room is waiting for a tool to
+catch it, make them wait; nothing is going to.
 
 So read the criteria the model actually wrote:
 
@@ -199,8 +224,9 @@ answering over MCP, and nothing here asked for a tool.
 
 That is the line to land:
 
-> A rule set can check that an outcome is concrete. It cannot check that
-> you asked for the right thing.
+> A rule set can check that an outcome is concrete. A second model can
+> guess whether a test could assert it. Neither can check that you
+> asked for the right thing.
 
 The three human moments are unchanged in number and sharper in kind.
 This one is not "the machine wrote mush and I tidied it". It is "the
@@ -214,8 +240,8 @@ survives either way, and it is the one worth the room's attention.
 ### This beat is yours
 
 The human rewrites so that every criterion **names the tool**. Paste
-this — it is verified refine-clean, so the pass afterwards comes back
-`clean: true` with no findings:
+this exactly — the numbers in the next section were measured against
+this wording:
 
 **Title**
 
@@ -234,7 +260,7 @@ As a developer closing out a requirement, I want each acceptance criterion repor
 ```
 Given a requirement whose every criterion is matched by a tagged scenario and an asserting test, when the criteria_coverage MCP tool is called with its id, then the verdict is "covered"
 Given a requirement with 3 criteria of which 1 is matched by no asserting test, when the criteria_coverage MCP tool is called with its id, then 1 criterion is reported uncovered
-Given a requirement id that is absent from the spec, when the criteria_coverage MCP tool is called with it, then the reply is an error naming the unknown id
+Given the requirement id "REQ-999" is absent from the spec, when the criteria_coverage MCP tool is called with it, then the reply is an error naming "REQ-999"
 Given a requirement carrying 0 acceptance criteria, when the criteria_coverage MCP tool is called with its id, then the verdict is "uncovered"
 ```
 
@@ -247,13 +273,15 @@ function, green on every criterion and no use at all to the 10:50 beat.
 ```bash
 spec reword HARNESS-019
 git diff requirements/  # read the edit out loud
-spec refine HARNESS-019 # clean: true, same as before the edit
+spec refine HARNESS-019 # clean, same as before the edit
 ```
 
 Point at that last line. `refine` said `clean` before the reword and
-says `clean` after it. The deterministic review could not tell the
-difference between the two requirements, and they build different
-software.
+says `clean` after it. The deterministic review could not tell the two
+requirements apart, and they build different software. That is the
+beat you came for.
+
+Then open the `judgments` block and go to the next section.
 
 > **Deliver parity, and the sharpest one in the talk.** `deliver` has no
 > equivalent of this beat: its draft stage runs the same validate/refine
@@ -263,55 +291,71 @@ software.
 > been the wrong thing. Hold that thought until 11:10; it is what the
 > autonomous segment is actually about.
 
-### Optional aside, 90 seconds: a model that judges instead of writing
+### The second review, 4 minutes: measuring your own gate
 
-Only if you set it up before walking on. Skip freely — nothing later
-refers to it. Worth doing for a room that keeps asking whether a model
-could do the reviewing.
+This is the strongest section in the talk and the easiest to get
+wrong. The point is **not** "a model can review wording". It is that
+this repository built a gate, published an honest accuracy number for
+it, and still had to turn it off — and why.
 
-Setting it up means a `spec` built from this repository, not the
-published release: `spec judge` landed after `v0.7.0` was tagged. Check
-with `spec judge models` before the session rather than on stage.
+**Know the result cold before you show it.** Of the four criteria the
+room just approved, one comes back `HOLDS` at 0.998, two land
+`INCONCLUSIVE` at 0.709 and 0.672, and `then the verdict is "covered"`
+is rejected outright at **0.211**. All four are testable. Let the room
+be annoyed about that for a moment; it is the setup.
 
-The wording review you just ran is a fixed rule set, and it has a hole.
-One rule asks whether the clause after `then` *looks* concrete: a
-number, a quoted value, a named error. Any number satisfies it:
+Then show what the thing is actually for:
 
 ```bash
-spec --decision-model nimble:latest judge criterion \
+spec judge criterion \
   --text "Given the refactored module, when the suite runs, then code quality is improved by at least 20%"
 ```
 
-`refine` reports **nothing at all** about that criterion. The judgment
-reads it at 0.038, `FAILS`. Nobody measured code quality. The rule asks
-whether a number is present; it cannot ask whether the number *is* the
-assertion.
+0.032, `FAILS`, and `refine` reports **nothing at all** about that
+criterion. One deterministic rule asks whether the clause after `then`
+looks concrete — a number, a quoted value, a named error — and `20%`
+is a number. Nobody measured code quality. The rule asks whether a
+number is present; it cannot ask whether the number *is* the
+assertion. The second model can, and it is confident and right.
 
-Then turn it on the wording the room just approved:
+So: right about the wording that fools a regex, confidently wrong
+about wording that is fine. Say the line: *that is exactly the shape
+of thing you do not wire a blocking gate to.*
 
-```bash
-spec --decision-model nimble:latest judge criterion HARNESS-019
-```
+**Now the turn, and this is the part worth rehearsing.** Do not leave
+it at "models are unreliable" — show the room that you can find out
+exactly *how* unreliable, and why, in about ten minutes. The next slide
+has two sweeps on it:
 
-**Know this result before you show it.** One of the four comes back
-`HOLDS` at 0.855. The other three come back `INCONCLUSIVE` at 0.269,
-0.745 and 0.298 — and all four are testable. The two in the 0.2s are a
-known false alarm: their assertion is a quoted string, but the quoted
-word (`"covered"`) reads like a judgement and the model weighs the word
-over the quotes. It is in the repository's labeled evaluation with a
-note saying so.
+- Grow the Given in front of `then there are 5 findings` and it holds
+  at 0.99, 0.97, 0.96 — then collapses to 0.115 when the Given happens
+  to contain the word **ambiguous**. Swap that one word for `unusual`
+  and it is back to 0.884; put it in quotation marks and 0.975. The
+  question's own `when_false` text lists hedge words, and the model
+  scans the whole sentence for them instead of just the then-clause.
+- `then the reply is an error naming "covered"` 0.912 against `then the
+  verdict is "covered"` 0.058. Same literal. `is` instead of `naming`.
 
-Do not apologise for it — it is the strongest version of the point.
-Three answers that are wrong or unsure about wording four engineers
-agreed on, delivered with exactly the same confident tone as the right
-one. Say the line: *this is why it is reported and not obeyed.* Then
-read `action`: `CONTINUE`. The deterministic `clean: true` above did not
-move, and neither did the three moments that are yours.
+Then the cost: 14 of this repository's 73 criteria come back `FAILS`,
+every one a count or a quoted literal, because `then the X is "Y"` is
+how most of the spec is written. `harness/.spec/config.toml` sets
+`advisory` for that reason.
 
-If Ollama is not running, the command fails with `cannot reach the
-decision model provider` and a nonzero exit. That is also a usable beat
-— a question that was never answered is never an answer, and never an
-approval — but only if you say it on purpose rather than discovering it.
+Land it: **that is 9:10 again, one level up.** Every check passed, the
+number on the box was honest — 0 misses, 1 false alarm, 3 unsure over
+32 labelled criteria, all true — and the gate still was not safe to
+obey, because the set it was measured on did not look like the work.
+The only thing that caught it was running it against criteria it had
+never seen.
+
+**The question this always gets.** "So is it useless?" No — read the
+two FAILS again. It is the only thing in the loop that can tell a real
+number from a decorative one. You read it; you do not yet obey it.
+
+If Ollama is not running, `refine` returns no `judgments` key at all
+and the deterministic review stands alone. That is a usable beat — a
+question that was never asked is never an approval — but only if you
+say it on purpose rather than discovering it.
 
 ## 9:30 — the criteria become an executable scenario
 

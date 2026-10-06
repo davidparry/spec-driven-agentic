@@ -1802,7 +1802,7 @@ spec judge criterion --text "Given the refactored module, when the suite runs, t
 
 ```text
 model	nimble:latest
-question	measurable/v1
+question	measurable/v2
 mode	enforce
 min_confidence	0.8
 
@@ -1814,14 +1814,14 @@ input	--text
 state	sha256:048965344f62409e5399403357ce83c4e7b3cce836b14673c0745b6f7ff7237d
 tokens	in 385 out 1
 
-judgment (measurable/v1): criterion "...": the outcome may not be measurable - nimble:latest says probability of true 0.038
+judgment (measurable/v2): criterion "...": the outcome may not be measurable - nimble:latest says probability of true 0.038
 
 A judgment gates on wording only. It becomes a finding and exits nonzero, the same as a deterministic one, and it does not change the test bar or whether a requirement is implemented.
 ```
 
 Read the record, because the record is the real lesson:
 
-- `question` is `measurable/v1` — the question is **versioned**. Change
+- `question` is `measurable/v2` — the question is **versioned**. Change
   its wording and the threshold you calibrated is no longer evidence
   about anything, so it becomes `v2`.
 - `answer` is the raw number the model returned. Not a grade, not a
@@ -1860,24 +1860,30 @@ alternative is wording slipping through on a coin flip. If that is too
 strict for your project, `[decision] mode = "advisory"` reports every
 one of these and acts on none.
 
-**Do this** — see it get one wrong:
+**Do this** — see it get one wrong, and then see why:
 
 ```bash
-spec judge criterion --text 'Given a requirement, when coverage is requested, then the verdict is "covered"'
+spec judge criterion --text 'Given a requirement, when it is checked, then the verdict is "covered"'
+spec judge criterion --text 'Given a requirement, when it is checked, then the reply is an error naming "covered"'
 ```
 
 ```text
-answer	probability of true 0.090
-verdict	FAILS
+answer	probability of true 0.058    verdict	FAILS
+answer	probability of true 0.912    verdict	HOLDS
 ```
 
-That criterion is measurable. The assertion is an exact quoted string —
-two engineers would write the same assert. The model reads the quoted
-word as a judgement and says no, confidently.
+Same frame, same quoted literal, and the second one is arguably the
+*less* ordinary sentence. The only real difference is `is` against
+`naming`. `then the X is "Y"` reads to this model as describing a
+state rather than asserting one, and it scores it like a judgement
+word.
 
-This is a known false alarm, not a surprise: it is in the repository's
-own labeled evaluation, with a note explaining the shape. Hold on to
-it, because the next step is where it bites.
+That is one of the question's two measured defects, recorded in the
+repository's own labeled evaluation rather than hidden —
+`cargo test --test decision_live -- --ignored --nocapture` prints this
+family as a false alarm, and the comment above `KNOWN_FALSE_ALARM`
+sets out both defects and what the attempted fixes did. Hold on to it,
+because the next step is where it bites.
 
 **Do this** — see the judgment attached to the real wording review:
 
@@ -1895,7 +1901,7 @@ That is the design, not an accident. The whole reason for the decision
 model is the gap at the top of this section — wording the regex rules
 cannot reach — and a judgment reported quietly beside `clean` is one
 your loop never acts on. So it lands where the loop already looks. The
-lines are prefixed `judgment (measurable/v1):`, the deterministic
+lines are prefixed `judgment (measurable/v2):`, the deterministic
 findings keep their place above them, and nothing is ever edited or
 dropped: `findings` gains entries, it does not change meaning.
 
@@ -1909,8 +1915,10 @@ model wrong. Three answers, in order: reword it, widen
 `min_confidence`, or set `[decision] mode = "advisory"` so judgments
 are reported and acted on by nobody but you. The repository's own
 evaluation puts the cost at 4 blocked criteria in 32 — one false
-alarm and three in the dead band — which is worth knowing before you
-leave the gate on.
+alarm and three in the dead band — while running the same question
+over this repository's *own* spec blocks 22 of 73, which is why
+`harness/.spec/config.toml` sets `advisory`. Measure it on your own
+criteria before you leave the gate on.
 
 **Do this** — break it on purpose, which is the last thing worth seeing:
 

@@ -17,8 +17,12 @@ This is the attendee copy. The deck is at
   tagged, so no downloadable binary has it yet.
 - Rust toolchain — `cargo --version`
 - Java 21 and Maven, for the smoke test that catches you at the end
-- Optional: Ollama with a local model pulled, if you want the generation
-  steps to run offline
+- Ollama 0.35 or newer, with a decision model pulled: `ollama pull
+  nimble`. This one is not an extra. `spec refine` puts every
+  acceptance criterion to it and reports what comes back, and 9:20 is
+  built on reading those answers
+- Optional: a generation model pulled locally as well, if you want the
+  drafting steps to run offline
 
 `harness/.spec/config.toml` pins the model the talk uses. Check what you
 actually have and override for a run if it differs:
@@ -82,8 +86,13 @@ spec draft
 ```
 
 ```
-for one requirement, show me which acceptance criteria no test proves
+for one requirement, report each acceptance criterion as proven or unproven; report all criteria proven when none are left unproven; count a scenario as proof only when it is tagged with that requirement id; treat a scenario whose step is undefined as proving nothing; and raise an error when the requirement id is absent from the spec
 ```
+
+One sentence, but a sentence that names five behaviors. That is
+deliberate, and the next section is where it pays off. Note what it
+still does *not* say: nothing here asks for a tool, an MCP endpoint, or
+a module. Keep it that way — 9:10 depends on it.
 
 Watch what scrolls past while it thinks. Three things are worth
 catching:
@@ -92,8 +101,9 @@ catching:
 `list_requirements`, then `get_requirement` on an existing requirement
 or two, to match the house style of the spec it is adding to.
 
-**The harness rejects its own model.** You will usually see at least
-one of these:
+**The harness rejects its own model.** Expect one of these, and with
+this sentence usually two — five requirements are five chances to miss
+an edge case, and one that misses sends the whole batch back:
 
 ```text
 The model reply was invalid (requirements "..." cover only happy paths -
@@ -103,22 +113,34 @@ add at least one edge case to each) - asking again (2 of 3)
 That is the wording review running *inside* the draft, before anything
 is written. Remember it — it is the whole of the next section.
 
+Running out of retries costs you nothing: the last attempt is accepted
+whatever its criteria look like, and whatever it still lacks returns as
+a finding in the wording round. Budget three to four minutes here.
+
 **Then it proposes**, having split your sentence into atomic
 requirements, one capability each:
 
 ```text
 The description holds 5 requirement(s):
-  1. Unproven acceptance criteria of one requirement are listed
-  2. A fully proven requirement reports the verdict all criteria proven
-  3. A scenario with an undefined step proves nothing
-  4. Only scenarios tagged with the requirement id count as proof
-  5. The proof report refuses an unknown requirement id
+  1. Each acceptance criterion gets a proven or unproven verdict
+  2. The roll-up verdict reads all criteria proven once none are unproven
+  3. Only scenarios tagged with the requirement id count as proof
+  4. A scenario with an undefined step proves nothing
+  5. An unknown requirement id raises an error
 
 Accept [Enter for all, or comma-separated numbers]:
 ```
 
-**Do not expect five.** The count moves run to run — the same sentence
-gave five on one pass and one on the next. Read what is on your screen.
+**Five behaviors in, five requirements out.** The count is your
+sentence's doing rather than the model's mood: across all three
+attempts above the split stayed at five and only the criteria were
+reworked. Ask for less and you get less — an earlier version of this
+walk opened with "for one requirement, show me which acceptance
+criteria no test proves", one capability in one clause, and the same
+model answered with a single requirement and no `Accept` prompt at all.
+
+The titles are still the model's wording, so read what is on your
+screen rather than matching it to the list above.
 
 ### Your first decision of the morning
 
@@ -131,7 +153,7 @@ lands in `requirements.json` is `HARNESS-019`:
 ```text
 {
   "id": "HARNESS-019",
-  "title": "Uncovered acceptance criteria are listed for one requirement",
+  "title": "Each acceptance criterion gets a proven or unproven verdict",
   "written": true
 }
 ```
@@ -156,10 +178,10 @@ cd src/domain && spec status && cd ../..
 
 Same catalog, two directories up, found by walking up the tree.
 
-> **Shortcut.** `spec deliver "the harness should handle coverage
-> properly so gaps are found easily"` runs this exact draft as its first
-> stage and then keeps going, all the way to implemented. You will do
-> that at the end of the morning; for now, one stage at a time.
+> **Shortcut.** `spec deliver "<the sentence you just typed>"` runs this
+> exact draft as its first stage and then keeps going, all the way to
+> implemented. You will do that at the end of the morning; for now, one
+> stage at a time.
 
 ## 9:10 — find out that clean is not the same as right
 
@@ -172,10 +194,26 @@ spec refine HARNESS-019  # clean: true  — no findings at all
 
 A green result, and it is the most interesting moment of the morning.
 
-The wording review has nothing to say because it **already ran** — you
-watched it reject the model's first answer at 9:00 for covering only
-happy paths. By the time a requirement reaches you, the deterministic
+`refine` ran two reviews, not one, and it is worth knowing what each
+of them did.
+
+The deterministic rule set has nothing to say because it **already
+ran** — you watched it reject the model's first answer at 9:00 for
+covering only happy paths. By the time a requirement reaches you, that
 gate has done its work.
+
+The second review is a different model, answering one bounded question
+per criterion: could a test check this with a single unambiguous
+result? It writes no prose and returns a probability. Scroll up in the
+same reply:
+
+```text
+"judgments": [ … "verdict": "HOLDS", "answer": { "noul": 0.887 } … ],
+"judgmentAction": "CONTINUE"
+```
+
+It approved. Two reviews with nothing in common but the sentence they
+read, and both of them are happy.
 
 So read what the model actually wrote:
 
@@ -193,10 +231,18 @@ a module somewhere — correct, green, and no use at all, because the
 morning is supposed to end with a new tool answering over MCP and
 nothing here asked for a tool.
 
-This is the point of the whole exercise:
+Notice that the second review **approved it at 0.887**, and that it
+was right to. The question it answers is "could a test assert this?",
+and a test absolutely could. Both reviews did their jobs correctly and
+the requirement is still the wrong one, because neither of them was
+asked the question that mattered:
 
-> A rule set can check that an outcome is concrete. It cannot check
-> that you asked for the right thing.
+> A rule set can check that an outcome is concrete. A second model can
+> guess whether a test could assert it. Neither can check that you
+> asked for the right thing.
+
+That is not a gap you close by adding a third reviewer. It is the gap
+where you are standing.
 
 If your `refine` does come back with a finding or two, fix them — the
 argument above is unaffected, and it is the one that matters.
@@ -231,7 +277,7 @@ Given a requirement carrying 0 acceptance criteria, when the criteria_coverage M
 ```bash
 spec reword HARNESS-019
 git diff requirements/    # read what you just changed
-spec refine HARNESS-019   # no findings from the rule set — exactly as before the edit
+spec refine HARNESS-019   # clean again, and the judgments are worth a look
 ```
 
 Look hard at that last line. The rule set had nothing to say about the
@@ -244,89 +290,121 @@ Do not skip the `git diff` either. Every mutation the harness makes is
 already in the file; reading it is one of three places the morning asks
 for your judgment.
 
-### Optional: ask a second model the question the rules cannot
+### The review that is not a rule
 
-Skip this unless you have a decision model pulled — Ollama 0.35 or newer
-and `ollama pull nimble`. It adds about three minutes and changes nothing
-downstream. The flag below configures nothing, so there is no cleanup.
+Run `refine` again on your reworded version and read the `judgments`
+block properly this time. Four criteria, four answers:
 
-`refine` just gave you a page of findings from a fixed rule set. Those rules
-have a blind spot worth seeing. One of them asks whether the clause after
-`then` *looks* concrete — a number, a quoted value, a named error. Any
-number satisfies it, so `refine` reports **nothing at all** about this:
+| Your assertion | |
+| --- | --- |
+| `then the reply is an error naming "REQ-999"` | `HOLDS` 0.998 |
+| `then 1 criterion is reported uncovered` | `INCONCLUSIVE` 0.709 |
+| `then the verdict is "uncovered"` | `INCONCLUSIVE` 0.672 |
+| `then the verdict is "covered"` | `FAILS` 0.211 |
+
+Three of four it will not sign off, and the last one it rejects
+outright — about criteria you and the room would both call testable.
+Before you write the whole thing off, see what it is for. One
+deterministic rule asks whether the clause after `then` *looks*
+concrete — a number, a quoted value, a named error. Any number
+satisfies it, so `refine` reports **nothing at all** about either of
+these:
 
 ```bash
-spec --decision-model nimble:latest judge criterion --text "Given the refactored module, when the suite runs, then code quality is improved by at least 20%"
+spec judge criterion --text "Given the refactored module, when the suite runs, then code quality is improved by at least 20%"
+spec judge criterion --text "Given a deployed service, when load is applied, then latency is acceptable (p99 < SLO)"
 ```
 
 ```text
-answer	probability of true 0.038
-verdict	FAILS
+answer	probability of true 0.032    verdict	FAILS
+answer	probability of true 0.048    verdict	FAILS
 ```
 
-Nobody measured code quality. The rule asks whether a number is
-*present*; it cannot ask whether the number *is* the assertion. A
-decision model can — it writes no prose and answers one bounded question
-with a probability.
+Nobody measured code quality and nobody wrote down the SLO. The rule
+asks whether a number is *present*; it cannot ask whether the number
+*is* the assertion. The second model can, and it is confident and right
+about both. That is the gap it exists to cover, and nothing
+deterministic reaches it.
 
-Now ask it about the wording you just committed:
+So: confident and right on the wording that fools a regex, and
+confidently wrong on `then the verdict is "covered"`. Which is exactly
+the shape of thing you should not wire a blocking gate to.
 
-```bash
-spec --decision-model nimble:latest judge criterion HARNESS-019
-```
+### Why this one runs advisory
 
-```text
-criterion	Given a requirement id that is absent from the spec, when the criteria_coverage MCP tool is called with it, then the reply is an error naming the unknown id
-answer	probability of true 0.855
-verdict	HOLDS
-action	CONTINUE
-input	HARNESS-019 acceptance criterion 3
-state	sha256:cf5a07a68ecc239ac89c6210470a587886d2c353d091b560730d5caf8ea9a98f
-```
+`mode` ships as `enforce`, where `FAILS` asks to `REWORK` and
+`INCONCLUSIVE` to `ESCALATE`, so all three of those lines would land
+in `findings`, clear `clean`, and exit nonzero.
+`harness/.spec/config.toml` turns it down to `advisory`, and the
+reason is measured rather than cautious.
 
-That is one of four, and the other three come back `INCONCLUSIVE` at
-0.269, 0.745 and 0.298. Which is not the result you were expecting, and
-is the reason this section exists. All four of those criteria are
-testable — you can write the assert for each without asking anyone what
-a word means. The judgment confidently agrees with one of them.
+The question publishes its accuracy: 0 misses, 1 false alarm, 3 unsure,
+over a 32-criterion labelled set you can run yourself with
+`cargo test --test decision_live -- --ignored --nocapture`. Those
+figures are real. They are also measured on 32 criteria written by one
+person, and most of the measurable half looks like `then the result is
+3`. Put this repository's **own** spec through the same question — 73
+criteria, in shapes that set does not contain — and 14 come back
+`FAILS` with 8 more `INCONCLUSIVE`. Every one of the 14 is a count or
+a quoted literal:
 
-The two scoring in the 0.2s are a known weakness of this question: their
-assertion is a quoted string, but the quoted word (`"covered"`) reads
-like a judgement and the model weighs the word over the quotes. The
-repository records it rather than hiding it —
-`cargo test --test decision_live -- --ignored --nocapture` prints it as a
-false alarm.
+| | |
+| --- | --- |
+| `then the verdict is "valid"` | 0.649 |
+| `then the phase is "GREEN"` | 0.598 |
+| `then an issue reads "REQ-006: no scenario tagged …"` | 0.271 |
+| `then 0 steps are missing` | 0.135 |
+| `then there are 5 findings` | 0.115 |
 
-Now notice what the default does with that. `mode` defaults to
-`enforce`, so `INCONCLUSIVE` is not used for nothing: it asks to
-`ESCALATE`, which means all three land in `findings`, `clean` goes
-false, and the command exits nonzero. Three of four criteria you have
-already reasoned about, blocking.
+Two things are going wrong, and both are worth seeing yourself, because
+the lesson is not "models are unreliable" — it is that you can find out
+*exactly how* in about ten minutes.
 
-That is the trade, and it is worth sitting with rather than explaining
-away. The default gates because the question reaches wording the regex
-rules cannot — the `code quality is improved by at least 20%` case
-above earns *no* deterministic finding, so a judgment that cannot
-refuse leaves that gap unenforced entirely. The cost of that is runs
-like this one.
+Take the last one and grow the setup in front of it, leaving the
+assertion byte-identical:
 
-What you do about it, in order:
+| Setup | |
+| --- | --- |
+| *(nothing)* | 0.991 |
+| `Given a story, …` | 0.972 |
+| `Given a story naming no actor, …` | 0.962 |
+| `Given a story naming no actor, no benefit and three ambiguous words, …` | 0.115 |
 
-- **Read the finding first.** An `INCONCLUSIVE` line asks you to reword
-  the clause after `then` so a test could assert it. Sometimes it is
-  right and the reword is an improvement.
-- **Widen `min_confidence`** if your criteria keep landing in the dead
-  band for the same reason. It does not silence them — both `FAILS`
-  and `INCONCLUSIVE` gate — but it changes which complaint you get.
-- **Set `[decision] mode = "advisory"`** while you measure the question
-  against your own wording. It then reports exactly as described above
-  and the harness uses it for nothing, which is the behaviour this
-  section originally assumed.
+That looks like sentence length, and it is not. Change the one word:
+`three unusual words` scores 0.884, `three red words` 0.973, and
+putting `"ambiguous"` in quotation marks puts it back to 0.975. The
+question's `when_false` text lists the hedge words that make a clause
+vague, and the model is scanning the **whole criterion** for them
+instead of only the clause after `then`.
 
-The three places this morning asks for *your* judgment are still exactly
-three, and a decision model is not one of them: it can stop work, and it
-can never approve any. This run is a decent argument for measuring the
-question against your own criteria before you leave the gate on.
+The second is simpler and costs more. In one fixed frame, `then the
+reply is an error naming "covered"` scores 0.912 and `then the verdict
+is "covered"` scores 0.058 — same literal, and the only difference is
+`is` instead of `naming`. `then the X is "Y"` reads to this model as
+describing a state rather than asserting one, and that is the most
+common assertion shape in the whole spec.
+
+Sit with what this is an example of, because it is this morning's
+argument pointed back at the harness. A gate was built, measured, and
+shipped with an honest number on the box. The number was true and the
+gate was still not safe to obey, because the set it was measured on did
+not look like the work. **That is the same failure as 9:10** — every
+check passing and the thing still being wrong — and the only thing that
+caught it was running it against criteria it had never seen.
+
+So you read these judgments and you do not obey them:
+
+- **A flagged line is a prompt to re-read the criterion**, not a
+  verdict on it. Sometimes it is right and the reword is an
+  improvement. Here, three times out of four, it is not.
+- **Turn it up to `enforce` when you have measured it on your own
+  criteria** and not before. `mode = "enforce"` in `[decision]`.
+- **Turn it `off`** if the question does not fit your project at all.
+
+The three places this morning asks for *your* judgment are still
+exactly three, and the decision model is not a fourth. Advisory or
+enforcing, it can never approve anything — and today it cannot reliably
+refuse either.
 
 ## 9:30 — turn the criteria into tests
 
@@ -591,6 +669,8 @@ Go back to 9:10 and imagine you had not been there.
 The model's own wording was `valid`. It was `clean`. Delivered
 autonomously it would have earned a tagged scenario, a red bar, a green
 bar, and the `implemented` flag — every gate satisfied, honestly. The
+decision model would not have been asked at all: `deliver` never
+consults it, in any mode. The
 Java smoke test at 10:50 would have stayed green too, because no new
 MCP tool would exist to be unplanned.
 
@@ -719,9 +799,22 @@ become the tests.
 - **`refine` is clean on the first pass** — expected, and the point of
   9:10. The draft loop already applied the wording review. Reword it
   anyway, so the criteria name the tool.
-- **The draft proposes a different number of requirements** — also
-  expected. Measured at five on one run and one on the next from the
-  identical sentence. Accept the one you want and carry on.
+- **`refine` has no `judgments` in its reply** — no decision model was
+  found, so only the deterministic review ran. `ollama pull nimble`,
+  then `spec judge models` to confirm it is seen and `spec config` to
+  check `decision.model`. Without it nothing in 9:20 happens, and that
+  section is the one this morning is built around.
+- **A judgment blocks a criterion you are sure of** — then you are not
+  running the config in this repository, which sets `[decision] mode =
+  "advisory"` for the reasons in 9:20. On the shipped `enforce`
+  default, `INCONCLUSIVE` gates. Read the line, and if you still
+  disagree, set `advisory` to report without gating or `off` to ask
+  nothing.
+- **The draft proposes a different number of requirements** — the count
+  tracks the sentence, not the run: five named behaviors gave five
+  proposals on every attempt measured. Shorten the sentence and the
+  count drops, and at one proposal the `Accept` prompt does not appear
+  at all. Accept the one you want and carry on.
 - **The draft is slow** — about three and a half minutes on a large
   local model, before `scenario generate` adds five more. Nine minutes
   of waiting between the sentence and the first red bar is normal.
