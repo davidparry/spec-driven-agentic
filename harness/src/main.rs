@@ -1773,8 +1773,8 @@ fn judge_refinement(
     let Some(service) = wiring::decision_service(root, flag) else {
         return Ok(false);
     };
-    let criteria = match spec_service(root).get_requirement(&report.id) {
-        Ok(requirement) => requirement.acceptance_criteria,
+    let criteria = match spec_service(root).effective_criteria(&report.id) {
+        Ok(criteria) => criteria,
         // The caller already refined this id successfully, so a failure
         // here is not worth turning into the command's error.
         Err(_) => return Ok(false),

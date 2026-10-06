@@ -252,6 +252,27 @@ impl<R: SpecRepository, F: FeatureFiles, C: ChangeStore> SpecService<R, F, C> {
             })
     }
 
+    /// The acceptance criteria of `id` as they would read after commit.
+    ///
+    /// [`Self::get_requirement`] reads the committed spec, which is the
+    /// wrong copy to judge: [`Self::refine_requirement`] resolves
+    /// staged-first, and a requirement that has just been drafted or
+    /// reworded exists *only* in staging. Judging the committed copy
+    /// there asks the model about wording the developer has already
+    /// moved past, and asks nothing at all about a draft.
+    pub fn effective_criteria(&self, id: &str) -> Result<Vec<String>, ServiceError> {
+        let spec = load_effective_spec(&self.repository, &self.store)?;
+        spec.requirements
+            .into_iter()
+            .find(|r| r.id == id)
+            .map(|r| r.acceptance_criteria)
+            .ok_or_else(|| {
+                ServiceError(format!(
+                    "No requirement with id '{id}'. Call list_requirements to see valid ids."
+                ))
+            })
+    }
+
     /// Validate the committed spec on disk. This is the frozen workshop
     /// tool and it deliberately does not see staging - `changes_validate`
     /// is the staged-aware twin. It does say so when an uncommitted spec
@@ -759,6 +780,42 @@ mod tests {
             .unwrap();
         assert_eq!(report.source, STAGED);
         assert!(!report.clean, "findings: {:?}", report.findings);
+    }
+
+    /// The criteria a judgment is put to are the ones
+    /// [`SpecService::refine_requirement`] just reviewed, not the
+    /// committed copy the developer has moved past.
+    ///
+    /// `get_requirement` answers from the committed spec by contract,
+    /// so a caller that judged through it asked about the wrong
+    /// wording - and about nothing at all for a requirement that has
+    /// only ever been staged.
+    #[test]
+    fn the_criteria_a_judgment_reads_come_from_staging_when_staging_has_them() {
+        let committed = one_requirement_spec();
+        let mut staged_spec = committed.clone();
+        staged_spec.requirements[0].acceptance_criteria =
+            vec!["Given \"1,2\", when add is called, then the result is 3".into()];
+        staged_spec.requirements.push(Requirement {
+            acceptance_criteria: vec!["Given \"4,5\", when add is called, then 9".into()],
+            ..requirement("REQ-002")
+        });
+
+        let store = InMemoryChangeStore::default();
+        stage(&store, &staged_spec);
+        let service = service_staging(committed, store);
+
+        assert_eq!(
+            service.effective_criteria("REQ-001").unwrap(),
+            vec!["Given \"1,2\", when add is called, then the result is 3".to_string()]
+        );
+        // Drafted and never committed: the committed spec cannot answer
+        // this at all.
+        assert_eq!(
+            service.effective_criteria("REQ-002").unwrap(),
+            vec!["Given \"4,5\", when add is called, then 9".to_string()]
+        );
+        assert!(service.get_requirement("REQ-002").is_err());
     }
 
     /// A staged edit to some *other* requirement leaves this one read

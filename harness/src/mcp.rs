@@ -314,7 +314,10 @@ impl WorkflowServer {
         id: &str,
         report: &mut crate::application::spec_service::RefinementReport,
     ) -> Option<CallToolResult> {
-        let requirement = self.spec_service().get_requirement(id).ok()?;
+        // Staged-first, matching the wording `refine_requirement` just
+        // reviewed: the tool is most often called on a draft, which the
+        // committed spec does not hold yet.
+        let criteria = self.spec_service().effective_criteria(id).ok()?;
         // A config read and nothing else, so it is safe on the runtime
         // thread. Held for the panicked-task arm below, which has to
         // refuse on the mode the project configured rather than on a
@@ -330,7 +333,6 @@ impl WorkflowServer {
         // panic. The service is therefore built where it is used.
         let root = self.root.clone();
         let req_id = report.id.clone();
-        let criteria = requirement.acceptance_criteria;
         let asked = tokio::task::spawn_blocking(move || {
             let _span = tool_call("refine_requirement");
             // `when_asking` is what makes `off` mean off here. This tool

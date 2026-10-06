@@ -229,7 +229,7 @@ As a developer closing out a requirement, I want each acceptance criterion repor
 ```
 Given a requirement whose every criterion is matched by a tagged scenario and an asserting test, when the criteria_coverage MCP tool is called with its id, then the verdict is "covered"
 Given a requirement with 3 criteria of which 1 is matched by no asserting test, when the criteria_coverage MCP tool is called with its id, then 1 criterion is reported uncovered
-Given a requirement id that is absent from the spec, when the criteria_coverage MCP tool is called with it, then the reply is an error naming the unknown id
+Given the requirement id "REQ-999" is absent from the spec, when the criteria_coverage MCP tool is called with it, then the reply is an error naming "REQ-999"
 Given a requirement carrying 0 acceptance criteria, when the criteria_coverage MCP tool is called with its id, then the verdict is "uncovered"
 ```
 
@@ -237,14 +237,14 @@ Given a requirement carrying 0 acceptance criteria, when the criteria_coverage M
 spec reword HARNESS-018
 spec changes show         # read it
 spec changes commit
-spec refine HARNESS-018   # clean: true — exactly as it was before the edit
+spec refine HARNESS-018   # no findings from the rule set — exactly as before the edit
 ```
 
-Look hard at that last line. `refine` said `clean` before your reword
-and says `clean` after it. The deterministic review cannot tell the two
-requirements apart, and they build different software. That gap is
-where your judgment lives, and it is the reason this step is not
-automated.
+Look hard at that last line. The rule set had nothing to say about the
+model's wording, and it has nothing to say about yours. The
+deterministic review cannot tell the two requirements apart, and they
+build different software. That gap is where your judgment lives, and it
+is the reason this step is not automated.
 
 Do not skip `changes show` either. Every mutation the harness makes
 lands in staging first; this is one of three places the morning asks
@@ -620,8 +620,20 @@ everything except the one decision nothing is checking.
 spec mcp call criteria_coverage --arg id=HARNESS-018
 ```
 
+```text
+verdict     covered
+criteria    4
+uncovered   []
+```
+
 Every acceptance criterion you wrote at 9:10 has an asserting test. The
 tool you built reports on the requirement that asked for it.
+
+The matching is literal: a criterion is covered when a test feeds in
+the same quoted inputs and names the same expected number. That is why
+criterion 3 names `"REQ-999"` and not "the unknown id" — a criterion
+with no literal in it is invisible to the tool, and reads uncovered
+beside a test that proves it.
 
 Notice that you reached it through `mcp call`. That is the only door it
 has so far, which is the subject of the homework section below.
