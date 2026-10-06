@@ -9,19 +9,6 @@ same morning again with nobody driving.
 This is the attendee copy. The deck is at
 [`talks/slides/index.html?tdd`](../talks/slides/index.html?tdd).
 
-## What makes this different from the kata
-
-The usual workshop drives the String Calculator. This one points the
-harness at **itself**: `harness/requirements/requirements.json` is the
-spec for the `spec` binary, its scenarios live in `harness/tests/features`,
-and `harness/tests/spec_completeness.rs` fails the build when the two
-drift apart.
-
-Sixteen requirements are implemented and **nothing is pending**. There
-is no ticket waiting for you. You are going to say one vague sentence,
-watch the harness turn it into `HARNESS-018`, find out that what came
-back is unusable, fix it, and then build what it describes.
-
 ## Prerequisites
 
 - `spec` **built from this repository**, on PATH — `cargo install --path
