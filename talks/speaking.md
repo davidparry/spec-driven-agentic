@@ -258,7 +258,7 @@ compile, pass tests nobody asked for, and encode a design nobody approved; and
 the rerun, which is the rest of the talk.
 
 What makes the demo more than a kata is its subject. The harness is pointed at
-**itself**. The sentence is drafted into `HARNESS-018`, a requirement asking for
+**itself**. The sentence is drafted into `HARNESS-019`, a requirement asking for
 `criteria_coverage`, a tool that reports per requirement which acceptance
 criteria have an asserting test and which do not. Nobody types the id: the
 prefix is read off the catalog the command is standing in, and the same binary

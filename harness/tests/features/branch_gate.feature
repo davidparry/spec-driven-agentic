@@ -5,6 +5,7 @@ Feature: Branch gate
   I want to be offered a branch of my own once, up front
   So that the whole run is one thing I can keep, merge, or throw away
 
+  @HARNESS-018
   Scenario: A repository is offered a branch, and the typed name is created
     Given the project is a git repository on "main"
     When the branch gate runs and the developer answers "newline support"

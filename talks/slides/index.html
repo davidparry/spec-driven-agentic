@@ -296,7 +296,7 @@
             <td><code>harness/requirements/requirements.json</code></td></tr>
         <tr><td><strong>BDD</strong> <span class="muted">behavior-driven</span></td>
             <td>one behavior</td><td>what would the business sign?</td>
-            <td><code>@HARNESS-018</code> in <code>tests/features/</code></td></tr>
+            <td><code>@HARNESS-019</code> in <code>tests/features/</code></td></tr>
         <tr><td><strong>TDD</strong> <span class="muted">test-driven</span></td>
             <td>one unit</td><td>does it work, right now?</td>
             <td>the failing test, then <code>cargo test</code></td></tr>
@@ -458,12 +458,12 @@ requirements/
       <h2>9:00 — nothing is waiting</h2>
       <pre><code class="language-bash" data-trim>
 cd harness
-spec status      # 16 implemented · 0 pending · nextId: HARNESS-018
+spec status      # 16 implemented · 0 pending · nextId: HARNESS-019
       </code></pre>
       <p class="small">No ticket. No spec. An empty backlog and a sentence I am about to say out loud:</p>
       <blockquote>"for one requirement, show me which acceptance criteria no test proves"</blockquote>
       <ul class="small">
-        <li>Sixteen requirements say <code>implemented</code>. Each has a tagged scenario, and a test proves it — <code>tests/spec_completeness.rs</code> fails the build otherwise</li>
+        <li>Seventeen requirements say <code>implemented</code>. Each has a tagged scenario, and a test proves it — <code>tests/spec_completeness.rs</code> fails the build otherwise</li>
         <li>Today we build <strong>a new MCP tool</strong>: given a requirement, which acceptance criteria have an asserting test, and which do not</li>
         <li>But first the sentence has to become something a machine can work from</li>
       </ul>
@@ -482,7 +482,7 @@ edge case to each) — asking again (2 of 3)        ← the harness rejects its 
       </code></pre>
       <ul class="small">
         <li>The wording review fires <strong>before anything is written</strong>. The deterministic gate is not at the end of the pipeline, it is inside the draft</li>
-        <li><strong>Nobody typed <code>HARNESS</code>.</strong> The highest id here is <code>HARNESS-017</code>, so the next is <code>HARNESS-018</code> — prefix read off the neighbours, number <code>max + 1</code> across the merged catalog</li>
+        <li><strong>Nobody typed <code>HARNESS</code>.</strong> The highest id here is <code>HARNESS-018</code>, so the next is <code>HARNESS-019</code> — prefix read off the neighbours, number <code>max + 1</code> across the merged catalog</li>
         <li>The same binary at the repo root would have said <code>REQ-007</code>; in the Java module, <code>CLI-010</code>. Nothing configured, nothing guessed</li>
       </ul>
     </section>
@@ -502,7 +502,7 @@ Accept [Enter for all, or comma-separated numbers]: 1
       <ul class="small">
         <li>One sentence became a <strong>backlog</strong>. The model split it until every requirement was atomic — one capability each</li>
         <li>Typing <code>1</code> is a real decision: everything else is discarded, unbuilt. <strong>You</strong> set the scope, not the machine</li>
-        <li>What stages is <code>HARNESS-018</code>, and nothing has touched the working tree yet</li>
+        <li>What stages is <code>HARNESS-019</code>, and nothing has touched the working tree yet</li>
       </ul>
     </section>
 
@@ -561,12 +561,12 @@ spec status      # same catalog, found by walking up
     <section data-track="tdd">
       <h2>9:30 — the criteria become the tests</h2>
       <pre><code class="language-bash" data-trim>
-spec scenario generate HARNESS-018 --feature tests/features/tool_coverage.feature
-spec unittest generate HARNESS-018
+spec scenario generate HARNESS-019 --feature tests/features/tool_coverage.feature
+spec unittest generate HARNESS-019
 git diff              # ← yours: read what landed
       </code></pre>
       <ul class="small">
-        <li>The scenario is written <strong>from the acceptance criteria</strong> and tagged <code>@HARNESS-018</code> — nobody re-typed the requirement into a test</li>
+        <li>The scenario is written <strong>from the acceptance criteria</strong> and tagged <code>@HARNESS-019</code> — nobody re-typed the requirement into a test</li>
         <li>Both edits are <strong>in your files</strong>. <code>git restore</code> is the undo</li>
       </ul>
       <p class="small muted">This is the step the abstract promises: requirements driving executable tests. It is also the step where a human reads a diff.</p>
@@ -588,7 +588,7 @@ spec refactor --note "tidy the coverage module"
     <section data-track="tdd">
       <h2>10:15 — the developer agent writes the code</h2>
       <pre><code class="language-bash" data-trim>
-spec implement HARNESS-018
+spec implement HARNESS-019
 git diff              # ← yours: the third and last moment
 spec test             # GREEN
       </code></pre>
@@ -620,14 +620,14 @@ mvn -f smoke-test/pom.xml test -Dspec.binary=$(which spec)
     <section data-track="tdd">
       <h2>11:05 — close it out</h2>
       <pre><code class="language-bash" data-trim>
-spec mark-implemented HARNESS-018   # gated: GREEN + a tagged scenario
-spec mcp call criteria_coverage --arg id=HARNESS-018
+spec mark-implemented HARNESS-019   # gated: GREEN + a tagged scenario
+spec mcp call criteria_coverage --arg id=HARNESS-019
       </code></pre>
       <p class="small">Run the tool you built at 10:15 against the requirement you wrote at 9:10:</p>
-      <blockquote>Every acceptance criterion of HARNESS-018 has an asserting test. <span class="badge green">covered</span></blockquote>
+      <blockquote>Every acceptance criterion of HARNESS-019 has an asserting test. <span class="badge green">covered</span></blockquote>
       <ul class="small">
         <li>The requirement cannot say <code>implemented</code> without a green bar <em>and</em> a scenario carrying its tag</li>
-        <li>And now the drift gate covers 17 requirements instead of 16 — including this one's wording</li>
+        <li>And now the drift gate covers 18 requirements instead of 17 — including this one's wording</li>
         <li>Note the command: <code>mcp call</code>. There is no <code>spec coverage</code> yet — and that is deliberate</li>
       </ul>
     </section>
@@ -698,7 +698,7 @@ spec deliver --no-branch           # already on a throwaway branch: do not ask
         <tr><td><code>spec mcp call criteria_coverage --arg id=…</code> works today</td>
             <td><strong>No prompt names it.</strong> <code>[tool_rules]</code> in <code>prompts/prompts.toml</code>, step 8 of <code>prompts/workflow.md</code>, and <code>[advice]</code>'s list of next commands</td></tr>
         <tr><td>The Java smoke test plans for it, so CI stays honest</td>
-            <td><strong>No <code>spec coverage HARNESS-018</code>.</strong> That is a new arm on <code>Command</code> in <code>main.rs</code> plus a service</td></tr>
+            <td><strong>No <code>spec coverage HARNESS-019</code>.</strong> That is a new arm on <code>Command</code> in <code>main.rs</code> plus a service</td></tr>
       </table>
       <p class="small">The cheapest of the three is one command — no recompile, it persists in <code>.spec/config.toml</code>:</p>
       <pre><code class="language-bash" data-trim>

@@ -138,7 +138,7 @@ the widest numeric part already in use, with a minimum of three digits.
 | The catalog's ids | Next drafted id |
 | --- | --- |
 | `REQ-001` … `REQ-006` | `REQ-007` |
-| `HARNESS-001` … `HARNESS-017` | `HARNESS-018` |
+| `HARNESS-001` … `HARNESS-018` | `HARNESS-019` |
 | `REQ-0007` | `REQ-0008` |
 | none at all | `REQ-001` |
 

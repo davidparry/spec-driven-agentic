@@ -209,6 +209,24 @@
         "Given a catalog including \"core/math.json\" and a command run in \"core\", when a requirement is drafted naming \"requirements/requirements.json\", then the draft is written as \"REQ-002\""
       ],
       "featureFile": "tests/features/project_discovery.feature"
+    },
+    {
+      "id": "HARNESS-018",
+      "title": "A generating run offers the developer a branch of its own before it writes",
+      "status": "implemented",
+      "story": "As a developer about to let a generating run author real files, I want the run to offer me a branch of its own once before it writes anything so that the whole run is one thing I can keep, merge, or throw away.",
+      "acceptanceCriteria": [
+        "Given a git repository on \"main\", when the branch gate is answered \"newline support\", then the branch \"spec/newline-support\" is created",
+        "Given a git repository on \"main\", when the branch gate is answered with an empty line, then the created branch starts with \"spec/\"",
+        "Given a git repository on \"main\", when the branch gate is answered \"n\", then 0 branches are created",
+        "Given a run started with --no-branch, when the branch gate runs, then the developer is asked 0 questions",
+        "Given a project that is not a git repository, when the branch gate runs, then the warning names \"no undo\"",
+        "Given a git repository on \"main\" holding uncommitted work, when the branch gate runs, then the warning names \"uncommitted work\" before the question",
+        "Given a git repository on \"main\", when the branch gate is answered \"bad..name\", then the name is refused and 0 branches are created",
+        "Given a git repository on \"main\" where creating a branch fails, when the branch gate is answered \"newlines\", then the run continues on \"main\"",
+        "Given a git repository on \"main\" and no one left to answer, when the branch gate runs, then 0 branches are created"
+      ],
+      "featureFile": "tests/features/branch_gate.feature"
     }
   ]
 }
