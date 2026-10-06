@@ -551,7 +551,7 @@ its own — the only stop it makes:
 
 ```text
 This run writes the project's files directly. You are on talk-<date>.
-Branch name for this run (Enter for spec/2026-10-05-amber-kite, or n to stay on talk-<date>)
+Branch name for this run (Enter for spec/2026-10-05-k3f92a, or n to stay on talk-<date>)
 ```
 
 Type a name. It answers with the undo, which is the line to read out

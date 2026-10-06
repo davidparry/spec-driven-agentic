@@ -446,8 +446,9 @@ requests are answered from `.spec/cache/` without calling the model at
 all, and the TTL in `harness/.spec/config.toml` is a day, so a
 rehearsal the night before replays in seconds. Two things to know about
 that cache: the key is the prompt, so a different `--into` or an
-edited scenario misses it and you pay full price again; and expired entries are swept on the next write, so raising the
-TTL afterwards does not bring back a run you have already let go stale.
+edited scenario misses it and you pay full price again; and expired
+entries are swept on the next write, so raising the TTL afterwards does
+not bring back a run you have already let go stale.
 
 If rehearsal never gives you an attempt that compiles, that is the
 honest answer for this model on this requirement, and the thing to do

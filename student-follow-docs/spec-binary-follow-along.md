@@ -67,11 +67,11 @@ list of bare commands, one per step.
 
 You need:
 
-- **`spec` on PATH.** Check with `spec --version`; you want **0.8.0 or
+- **`spec` on PATH.** Check with `spec --version`; you want **0.7.9 or
   newer**. 0.5.5 was the first release that prints its `nextStep` advice as
   commands you can paste rather than as the tool names the MCP server uses
   — which is the dialect every reply on this page is quoted in — but the
-  floor is 0.8.0, because this page reads and writes `.spec/config.toml`
+  floor is 0.7.9, because this page reads and writes `.spec/config.toml`
   and the `.spec/` directory replaced the flat `.spec.toml` in 0.6.0.
   Install with
   `cargo install --path harness` from the repository root, or use a GitHub

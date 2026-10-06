@@ -128,7 +128,7 @@ This repo already ships the server registration at
 There is no `--root` in those args, so `spec` uses the current directory.
 **Launch pi from the repository root** or the server will serve the wrong
 project. `spec` must be on PATH (`cargo install --path harness`) and must
-report **0.8.0 or newer** — check with `spec --version`.
+report **0.7.9 or newer** — check with `spec --version`.
 
 Now start pi with its own tools switched off:
 
@@ -242,7 +242,7 @@ Continue with [harness-path.md](harness-path.md).
 | Symptom | Cause |
 | --- | --- |
 | `/mcp` shows no servers | pi was started outside the repo root, or the project was not trusted — restart with `--approve` |
-| Tools listed but every call errors | `spec` is not on PATH; check `spec --version` reports 0.8.0 or newer |
+| Tools listed but every call errors | `spec` is not on PATH; check `spec --version` reports 0.7.9 or newer |
 | Model missing from `/model` | No auth configured for the provider — keep the placeholder `apiKey` in `models.json` |
 | Tool calls vanish mid-stream | Ollama's OpenAI-compat shim drops `tool_calls` when streaming; use a tool-capable model and a current Ollama |
 | Server serves the wrong project | No `--root` in `.pi/mcp.json`; `cd` to the repository root first |

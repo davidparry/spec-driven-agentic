@@ -43,7 +43,7 @@
 
   ```text
   This run writes the project's files directly. You are on main.
-  Branch name for this run (Enter for spec/2026-10-05-amber-kite, or n to stay on main)
+  Branch name for this run (Enter for spec/2026-10-05-k3f92a, or n to stay on main)
   ```
 
   One question, three answers, no wrong one: a name, an empty line to
