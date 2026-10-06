@@ -8,8 +8,8 @@ practices (package naming for Java, snake_case modules for Rust, and
 so on), and must reply with complete files:
 the production code plus real bodies for the TODO placeholders in the
 generated tests and step definitions. Everything it writes lands in
-the staging area — you review before anything touches the working
-tree, and the next test run is the real validator.
+the working tree as it goes — read it with `git diff`, undo it with
+`git restore`, and let the next test run be the real validator.
 
 ```text
 Usage: spec implement [OPTIONS] <REQ_ID>
@@ -52,7 +52,7 @@ REQ-001: checking prerequisites - phase RED, 2 recorded failure(s), 0 prior atte
   unit test: src/test/java/Req001Test.java - present
   production code (the attempt creates it when missing): src/main/java/StringCalculator.java - missing
 Sending the sources, the failures, and the attempt history to the model - working ...
-  staged: src/main/java/StringCalculator.java
+  wrote: src/main/java/StringCalculator.java
 ```
 
 ```json
@@ -62,24 +62,24 @@ Sending the sources, the failures, and the attempt history to the model - workin
     "src/test/java/Req001Test.java",
     "src/test/java/GeneratedSteps.java"
   ],
-  "staged": true,
+  "written": true,
   "source": "llm",
-  "nextStep": "Apply with spec changes commit, then spec test - the run decides."
+  "nextStep": "Run spec test - the run decides."
 }
 ```
 
 ## The follow-up offer
 
-When files were staged and you are on a terminal, the command closes
+When files were written and you are on a terminal, the command closes
 the loop itself:
 
 ```text
-Apply the staged files and run the tests now? [y/N]
+Run the tests now? [y/N]
 ```
 
-Answering `y` runs `changes commit` and `test` in one go and prints
-both reports, ending with the verdict in color — green
-`GREEN - next: refactor (optional), then spec mark-implemented REQ-001 && changes commit.`
+Answering `y` runs `test` and prints the report, ending with the
+verdict in color — green
+`GREEN - next: refactor (optional), then mark-implemented REQ-001.`
 or red
 `Still RED - the fresh failures are recorded; run implement REQ-001 for another model attempt, or implement by hand and rerun test.`
 
@@ -87,13 +87,12 @@ Pressing <kbd>Enter</kbd> (or piping the output, where no question is
 asked) declines and prints the next command in plain words instead:
 
 ```text
-Next: changes commit && test - then implement REQ-001 again if the bar stays RED.
+Next: test - then implement REQ-001 again if the bar stays RED.
 ```
 
-In every one of these lines the command itself — `changes commit &&
-test`, `implement REQ-001`, `spec mark-implemented REQ-001 && changes
-commit` — is printed in green, the harness's marker for text meant to be
-copied and pasted.
+In every one of these lines the command itself — `test`,
+`implement REQ-001`, `mark-implemented REQ-001` — is printed in green,
+the harness's marker for text meant to be copied and pasted.
 
 ## The preflight
 
@@ -122,7 +121,7 @@ and the JSON reply is the readiness report:
   ],
   "findings": [
     "No RED test run is recorded - run spec test first so its failures brief the model.",
-    "No scenario is tagged @REQ-001 - add one with spec scenario add, then spec changes commit."
+    "No scenario is tagged @REQ-001 - add one with spec scenario add."
   ],
   "nextStep": "No RED test run is recorded - run spec test first so its failures brief the model."
 }
@@ -143,7 +142,7 @@ updates. Only two kinds of path are accepted: files already in the
 project's sources (the generated unit test and step definitions it
 needs to wire up), and the production file described below. Anything
 else in the reply is dropped. A reply with no usable update fails with
-`The model's reply held no usable file update.` — nothing is staged,
+`The model's reply held no usable file update.` — nothing is written,
 and you implement by hand instead.
 
 A reply that would *destroy* a file it replaces is dropped too, and
@@ -152,7 +151,7 @@ file declares today, or braces that never close. Both describe a
 truncated or junk reply rather than a wrong one — the test run is what
 decides whether an attempt is any good, and it never gets to run when
 the reply deletes the code the tests were going to call. The refusal
-is per file, so the rest of an otherwise fine attempt is still staged.
+is per file, so the rest of an otherwise fine attempt is still written.
 
 ## Where the work lands
 
@@ -206,12 +205,12 @@ production code (the attempt creates it when missing): unknown - pass --into <pa
 
 ## When an attempt reaches past its requirement
 
-The report's `warning` also calls out staged code that looks like it
+The report's `warning` also calls out written code that looks like it
 satisfies a *different* requirement still marked `pending`:
 
 ```text
-The staged code also satisfies REQ-005, still pending - REQ-006 was the
-requirement asked for. Review the diff with spec changes show and drop what
+The code written also satisfies REQ-005, still pending - REQ-006 was the
+requirement asked for. Review the diff with git diff and drop what
 REQ-006 does not need, so each requirement keeps its own RED bar.
 ```
 
@@ -219,7 +218,7 @@ It is a literal match — the code feeds in the same quoted inputs the other
 requirement's criteria name and lands on the same expected numbers — so it
 warns and never blocks. A criterion worded without literals is invisible to
 it, and a literal two requirements share can raise it when nothing is wrong.
-Read the staged diff and decide; that is the check this is a prompt for, not
+Read the diff and decide; that is the check this is a prompt for, not
 a replacement of.
 
 The implementation prompt is the largest call the harness makes, and
@@ -244,9 +243,8 @@ on a RED bar inside the loop. Use it to continue a paused run:
 
 ```bash
 spec test                 # confirm RED, record the failures
-spec implement REQ-001    # stage the model's attempt
-spec changes show         # review what it wrote
-spec changes commit
+spec implement REQ-001    # the model's attempt, written into the tree
+git diff                  # review what it wrote
 spec test                 # GREEN? then spec refactor / spec mark-implemented
 ```
 
@@ -277,14 +275,14 @@ The attempt log is scoped to the requirement and cleared the moment a
 test run goes GREEN — a closed loop leaves no history for the next
 requirement to inherit.
 
-`run_tests` during this command sees the **working tree**, not the
-unstaged patch sitting in `.spec/staged/`. Commit (or apply) before you
-trust the bar. If the model requests `command_run`, the harness asks you to
-confirm first; piped or CI stdin declines and never hangs.
+`run_tests` during this command sees the **working tree** — which is
+where the attempt just wrote, so the bar is measured against exactly
+the files the model produced. If the model requests `command_run`, the
+harness asks you to confirm first; piped or CI stdin declines and never
+hangs.
 
 ## See also
 
 - [`spec greenfield`](greenfield.md) — the orchestrated loop with the same attempt built in.
-- [`spec changes`](changes.md) — review and apply the staged files.
 - [`spec test`](test.md) — the run that decides.
 - [`spec tools`](tools.md) — the implement profile (includes `command_run`).

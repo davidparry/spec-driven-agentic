@@ -1,14 +1,14 @@
-//! `spec status`: the workflow query aggregating the TDD phase, the
-//! staging area, and every requirement's asset gaps into the one next
-//! step that moves the project toward all requirements implemented.
-//! The report itself is deterministic reading; when a model is
-//! resolved, `advice` additionally briefs it with the workflow process
-//! and the full state so it names the next command.
+//! `spec status`: the workflow query aggregating the TDD phase and
+//! every requirement's asset gaps into the one next step that moves
+//! the project toward all requirements implemented. The report itself
+//! is deterministic reading; when a model is resolved, `advice`
+//! additionally briefs it with the workflow process and the full state
+//! so it names the next command.
 
 use serde::Serialize;
 
 use crate::application::LlmReplyError;
-use crate::application::assets::{asset_survey, load_effective_spec};
+use crate::application::assets::{asset_survey, load_spec};
 use crate::application::generation_service::ResolvedLlm;
 use crate::application::spec_service::ServiceError;
 use crate::domain::generation::strip_code_fences;
@@ -18,7 +18,7 @@ use crate::domain::model::{ROOT_SPEC_FILE, SpecCatalog};
 use crate::domain::requirement_id::next_id;
 use crate::domain::workflow::next_step_prompt;
 use crate::ports::{
-    ChangeStore, FeatureCatalog, LlmConversation, Prompter, SourceFiles, SpecRepository, ToolBroker,
+    FeatureCatalog, LlmConversation, Prompter, SourceFiles, SpecRepository, ToolBroker,
 };
 
 /// One requirement's position on the road to implemented: its status
@@ -30,17 +30,14 @@ pub struct RequirementStatus {
     pub title: String,
     pub status: String,
     pub findings: Vec<String>,
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
-    pub staged: bool,
 }
 
-/// Reply of `spec status`: the TDD phase, what waits in staging, every
-/// requirement's position, and the one next step that moves the
-/// project toward all requirements implemented.
+/// Reply of `spec status`: the TDD phase, every requirement's
+/// position, and the one next step that moves the project toward all
+/// requirements implemented.
 #[derive(Debug, Serialize, PartialEq, Eq)]
 pub struct StatusReport {
     pub phase: String,
-    pub staged: Vec<crate::ports::StagedChange>,
     pub requirements: Vec<RequirementStatus>,
     /// The id the next drafted requirement will carry, read off the
     /// catalog's own numbering.
@@ -54,29 +51,26 @@ pub struct StatusReport {
     pub next_step: String,
 }
 
-pub struct StatusService<F, S, C, R, L, B = crate::application::agent_service::NullBroker>
+pub struct StatusService<F, S, R, L, B = crate::application::agent_service::NullBroker>
 where
     F: FeatureCatalog,
     S: SourceFiles,
-    C: ChangeStore,
     R: SpecRepository,
     L: LlmConversation,
     B: ToolBroker,
 {
     features: F,
     sources: S,
-    store: C,
     spec: R,
     language: Language,
     layout: ProjectStructure,
     llm: Option<ResolvedLlm<L, B>>,
 }
 
-impl<F, S, C, R, L, B> StatusService<F, S, C, R, L, B>
+impl<F, S, R, L, B> StatusService<F, S, R, L, B>
 where
     F: FeatureCatalog,
     S: SourceFiles,
-    C: ChangeStore,
     R: SpecRepository,
     L: LlmConversation,
     B: ToolBroker,
@@ -84,7 +78,6 @@ where
     pub fn new(
         features: F,
         sources: S,
-        store: C,
         spec: R,
         language: Language,
         layout: ProjectStructure,
@@ -93,7 +86,6 @@ where
         Self {
             features,
             sources,
-            store,
             spec,
             language,
             layout,
@@ -109,18 +101,11 @@ where
 
     /// Where the project stands on the road to every requirement being
     /// implemented, and the one next step that moves it forward. The
-    /// priority order mirrors the loop itself: staged changes await
-    /// review first; then the requirement in flight (assets complete)
-    /// is tested or marked; then the earliest asset gap; and when
-    /// nothing is left, the next draft.
+    /// priority order mirrors the loop itself: the requirement in
+    /// flight (assets complete) is tested or marked; then the earliest
+    /// asset gap; and when nothing is left, the next draft.
     pub fn status(&self, phase: &str) -> Result<StatusReport, ServiceError> {
-        let spec = load_effective_spec(&self.spec, &self.store)?;
-        let disk_ids: std::collections::HashSet<String> = self
-            .spec
-            .load()
-            .map(|s| s.requirements.into_iter().map(|r| r.id).collect())
-            .unwrap_or_default();
-        let staged = self.store.changes()?;
+        let spec = load_spec(&self.spec)?;
         let mut requirements = Vec::new();
         let mut in_flight: Option<String> = None;
         let mut first_gap: Option<String> = None;
@@ -148,20 +133,13 @@ where
                 title: requirement.title.clone(),
                 status: requirement.status.clone(),
                 findings,
-                staged: !disk_ids.contains(&requirement.id),
             });
         }
-        let next_step = if !staged.is_empty() {
-            format!(
-                "{} staged file(s) await review - inspect with spec changes show, \
-                 apply with spec changes commit, then run spec test.",
-                staged.len()
-            )
-        } else if let Some(id) = in_flight {
+        let next_step = if let Some(id) = in_flight {
             if phase == "GREEN" {
                 format!(
                     "The bar is GREEN - close the loop: spec mark-implemented \
-                     {id}, then spec changes validate, then spec changes commit."
+                     {id}, then spec validate."
                 )
             } else {
                 format!(
@@ -176,7 +154,6 @@ where
         };
         Ok(StatusReport {
             phase: phase.to_string(),
-            staged,
             requirements,
             next_id: next_id(&SpecCatalog::single_root(spec), ROOT_SPEC_FILE),
             next_step,
@@ -195,12 +172,7 @@ where
         let Some(llm) = &self.llm else {
             return Ok(None);
         };
-        let prompt = next_step_prompt(
-            &report.phase,
-            last_run,
-            &report.staged,
-            &report.requirements,
-        );
+        let prompt = next_step_prompt(&report.phase, last_run, &report.requirements);
         let reply = match llm.ask(
             prompter,
             &prompt,
@@ -233,24 +205,17 @@ mod tests {
     use crate::domain::model::{Requirement, Spec, TestRunSummary};
     use crate::ports::SourceFile;
     use crate::test_support::{
-        FakeLlm, FakeSources, InMemoryChangeStore, InMemoryFeatureCatalog, InMemorySpecRepository,
-        calculator_catalog, calculator_spec, covered_steps_source, flat_layout, unit_test_source,
+        FakeLlm, FakeSources, InMemoryFeatureCatalog, InMemorySpecRepository, calculator_catalog,
+        calculator_spec, covered_steps_source, flat_layout, unit_test_source,
     };
 
     fn service_with_llm(
         sources: Vec<SourceFile>,
         llm: Option<ResolvedLlm<FakeLlm>>,
-    ) -> StatusService<
-        InMemoryFeatureCatalog,
-        FakeSources,
-        InMemoryChangeStore,
-        InMemorySpecRepository,
-        FakeLlm,
-    > {
+    ) -> StatusService<InMemoryFeatureCatalog, FakeSources, InMemorySpecRepository, FakeLlm> {
         StatusService::new(
             calculator_catalog(),
             FakeSources(sources),
-            InMemoryChangeStore::default(),
             InMemorySpecRepository(Ok(calculator_spec())),
             Language::Java,
             flat_layout(Language::Java),
@@ -260,32 +225,8 @@ mod tests {
 
     fn service(
         sources: Vec<SourceFile>,
-    ) -> StatusService<
-        InMemoryFeatureCatalog,
-        FakeSources,
-        InMemoryChangeStore,
-        InMemorySpecRepository,
-        FakeLlm,
-    > {
+    ) -> StatusService<InMemoryFeatureCatalog, FakeSources, InMemorySpecRepository, FakeLlm> {
         service_with_llm(sources, None)
-    }
-
-    #[test]
-    fn status_puts_staged_changes_before_everything_else() {
-        let service = service(vec![covered_steps_source(), unit_test_source()]);
-        service
-            .store
-            .stage("src/main/java/Kata.java", "class Kata {}", "attempt")
-            .unwrap();
-        let report = service.status("RED").unwrap();
-        assert_eq!(report.phase, "RED");
-        assert_eq!(report.staged.len(), 1);
-        assert!(
-            report.next_step.contains("1 staged file(s) await review"),
-            "next step: {}",
-            report.next_step
-        );
-        assert!(report.next_step.contains("spec changes commit"));
     }
 
     #[test]
@@ -298,11 +239,10 @@ mod tests {
             report.next_step
         );
         assert!(
-            report.next_step.contains("then spec changes validate"),
+            report.next_step.contains("then spec validate"),
             "validate is part of the chain: {}",
             report.next_step
         );
-        assert!(report.next_step.contains("then spec changes commit"));
         let by_id = |id: &str| report.requirements.iter().find(|r| r.id == id).unwrap();
         assert!(by_id("REQ-001").findings.is_empty(), "REQ-001 is in flight");
         assert!(!by_id("REQ-002").findings.is_empty(), "REQ-002 has gaps");
@@ -346,10 +286,9 @@ mod tests {
             }],
             ..Spec::default()
         };
-        let service: StatusService<_, _, _, _, FakeLlm> = StatusService::new(
+        let service: StatusService<_, _, _, FakeLlm> = StatusService::new(
             calculator_catalog(),
             FakeSources(vec![]),
-            InMemoryChangeStore::default(),
             InMemorySpecRepository(Ok(spec)),
             Language::Java,
             flat_layout(Language::Java),
@@ -388,14 +327,10 @@ mod tests {
         let service = service_with_llm(
             vec![],
             Some(FakeLlm::replying(
-                "Run spec steps generate, then spec changes commit.",
+                "Run spec steps generate, then spec test.",
             )),
         );
         assert!(service.has_model());
-        service
-            .store
-            .stage("features/calc.feature", "Feature: Calc\n", "scenario")
-            .unwrap();
         let report = service.status("RED").unwrap();
         let advice = service
             .advice(
@@ -409,7 +344,7 @@ mod tests {
             )
             .unwrap()
             .unwrap();
-        assert_eq!(advice, "Run spec steps generate, then spec changes commit.");
+        assert_eq!(advice, "Run spec steps generate, then spec test.");
         let prompts = service.llm.as_ref().unwrap().chat().prompts.borrow();
         assert!(
             prompts[0].contains("THE LOOP FOR ONE REQUIREMENT"),
@@ -417,7 +352,6 @@ mod tests {
         );
         assert!(prompts[0].contains("The TDD phase: RED"));
         assert!(prompts[0].contains("tests=6 failures=2 errors=0 skipped=0"));
-        assert!(prompts[0].contains("features/calc.feature"));
         assert!(prompts[0].contains("REQ-001"));
         assert!(prompts[0].contains("status=implemented") || prompts[0].contains("status=pending"));
     }

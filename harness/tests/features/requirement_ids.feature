@@ -17,7 +17,7 @@ Feature: Requirement ids follow the catalog
       Given a requirement whose criteria are all matched by an asserting test, when coverage is requested for its id, then the verdict is "covered"
       Given a requirement carrying 0 acceptance criteria, when coverage is requested for its id, then the verdict is "uncovered"
       """
-    Then the draft is staged as "HARNESS-015"
+    Then the draft is written as "HARNESS-015"
 
   @HARNESS-015
   Scenario: An empty catalog starts at the default prefix
@@ -28,7 +28,7 @@ Feature: Requirement ids follow the catalog
       Given the input "", when add is called, then the result is 0
       Given the input "1", when add is called, then the result is 1
       """
-    Then the draft is staged as "REQ-001"
+    Then the draft is written as "REQ-001"
 
   @HARNESS-015
   Scenario: Numbering follows the width the catalog already uses
@@ -39,7 +39,7 @@ Feature: Requirement ids follow the catalog
       Given the input "1\n2,3", when add is called, then the result is 6
       Given an empty string "", when add is called, then the result is 0
       """
-    Then the draft is staged as "REQ-0008"
+    Then the draft is written as "REQ-0008"
 
   # A prefix the catalog does not use must not raise its number, or one
   # borrowed id would push every later id past a gap nobody created.
@@ -54,7 +54,7 @@ Feature: Requirement ids follow the catalog
       Given a requirement whose criteria are all matched by an asserting test, when coverage is requested for its id, then the verdict is "covered"
       Given a requirement carrying 0 acceptance criteria, when coverage is requested for its id, then the verdict is "uncovered"
       """
-    Then the draft is staged as "HARNESS-002"
+    Then the draft is written as "HARNESS-002"
 
   @HARNESS-015
   Scenario: The next id is reported so an agent reads the shape rather than guessing it

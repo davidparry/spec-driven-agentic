@@ -70,11 +70,11 @@ and `pi -nbt` disables pi's own `bash`/`write`/`edit` so these tools are all
 the model gets. The bridge registers them as `mcp_<server>_<tool>`, so
 `run_tests` arrives as `mcp_spec_driven_server_run_tests`.
 
-Cursor sees **all 25 tools**, including staging, and so does `pi -nbt`.
-Harness commands that call a model attach a **narrower profile**
-(`spec tools profiles`) — 3–7 tools for a generating command, 12 for the
-read-only `spec ask` — so a local model is not offered commit or
-mark-implemented.
+Cursor sees **all 21 tools**, including the writing ones, and so does
+`pi -nbt`. Harness commands that call a model attach a **narrower
+profile** (`spec tools profiles`) — 3–7 tools for a generating command,
+10 for the read-only `spec ask` — so a local model is never offered a
+tool that writes.
 
 ## spec mcp tools
 
@@ -103,12 +103,17 @@ spec mcp call run_tests --stdio
 
 ## The tools served
 
-Twenty-five tools in three groups. There is no `spec_draft` or
+Twenty-one tools in three groups. There is no `spec_draft` or
 `implement` MCP tool: a **new** requirement is still drafted by the
 human (`spec draft`) and Cursor writes production Java. Rewording an
-existing requirement, Gherkin, steps, unit-test scaffolds,
-mark-implemented, and staging all go through tools. Generation over MCP
-is **template-only** (`source: "template"`).
+existing requirement, Gherkin, steps, unit-test scaffolds and
+mark-implemented all go through tools. Generation over MCP is
+**template-only** (`source: "template"`).
+
+Every writing tool writes the real file — there is no staging area and
+nothing to commit afterwards. The server never prompts and never creates
+a branch, so put yourself on one before an agent session if you want the
+run isolated; see [the branch gate](../branch-gate.md).
 
 ### Frozen seven (reply shapes stay)
 
@@ -122,14 +127,12 @@ is **template-only** (`source: "template"`).
 | `get_tdd_state` | [`spec state`](state.md) |
 | `start_refactor` | [`spec refactor`](refactor.md) |
 
-### Authoring and staging
+### Authoring
 
 | MCP tool | Harness equivalent |
 | --- | --- |
 | `feature_list` / `feature_read` / `feature_create` | [`spec feature`](feature.md) |
 | `scenario_add` / `scenario_update` / `scenario_delete` | [`spec scenario`](scenario.md) |
-| `changes_show` / `changes_commit` / `changes_discard` | [`spec changes`](changes.md) |
-| `changes_validate` | [`spec changes validate`](changes.md#spec-changes-validate) (staged-wins; frozen `validate_spec` stays on disk) |
 | `requirement_reword` | [`spec reword`](spec.md#spec-reword) (the repair path for `validate_spec` and `refine_requirement` findings; never hand-edit the spec file) |
 | `requirement_mark_implemented` | [`spec mark-implemented`](spec.md#spec-mark-implemented) |
 | `step_definitions_find` | [`spec steps missing`](steps.md#spec-steps-missing) |
@@ -218,16 +221,17 @@ build tool can still run build scripts. What the policy makes
 unexpressible is running destructive binaries and reaching outside
 the project root.
 
-`run_tests` during `spec implement` sees the **working tree**, not an
-unstaged patch. Commit (or apply staged files) before you trust the
-bar.
+`run_tests` during `spec implement` sees the **working tree** — which is
+also where every tool just wrote, so the bar is measured against exactly
+the files the tools produced.
 
 ## Why serve tools instead of letting the agent edit files?
 
 - **No escape hatches.** The agent gets exactly these tools — no
   open-ended shell, no arbitrary file writes. The one command tool is
-  allowlisted, jailed to the root, and phase-gated; mutations go
-  through the [staging area](../staged-changes.md) for human review.
+  allowlisted, jailed to the root, and phase-gated; every write is
+  confined to the project and lands as a reviewable
+  [direct write](../direct-writes.md).
 - **The discipline is in the server.** An agent cannot skip RED,
   refactor while failing, or invent requirements: the tools refuse,
   with a `nextStep` that teaches the correct move.

@@ -16,8 +16,8 @@ use rmcp::{ClientLifecycleMode, ClientServiceExt, ServiceExt as _};
 use serde_json::{Value, json};
 
 use spec_harness::adapters::spec_home::spec_file;
+use spec_harness::domain::STATE_FILE;
 use spec_harness::domain::model::TestRunSummary;
-use spec_harness::domain::{STAGED_DIR, STATE_FILE};
 use spec_harness::mcp::WorkflowServer;
 use spec_harness::ports::{RunnerError, TestFilter, TestRunner};
 
@@ -169,10 +169,6 @@ async fn the_server_identifies_as_the_workshop_server_and_lists_all_tools() {
         "scenario_add",
         "scenario_update",
         "scenario_delete",
-        "changes_show",
-        "changes_validate",
-        "changes_commit",
-        "changes_discard",
         "command_run",
         "requirement_reword",
         "requirement_mark_implemented",
@@ -185,7 +181,7 @@ async fn the_server_identifies_as_the_workshop_server_and_lists_all_tools() {
             "additive tool {additive} missing: {names:?}"
         );
     }
-    assert_eq!(tools.len(), 25, "tools: {names:?}");
+    assert_eq!(tools.len(), 21, "tools: {names:?}");
 
     let root_body = call_json(&client, "project_root", json!({})).await;
     let expected_root = std::path::absolute(dir.path()).unwrap();
@@ -404,11 +400,10 @@ async fn refine_requirement_reports_clean_and_unknown_ids_error() {
     assert_eq!(body["id"], "REQ-001");
     assert_eq!(body["clean"], true);
     assert_eq!(body["findings"], json!([]));
-    assert_eq!(body["source"], "working tree");
 
-    // requirement_reword stages. Refining after it has to review the
-    // staged wording, or vague text the developer just wrote comes back
-    // clean because only the untouched on-disk copy was ever read.
+    // requirement_reword writes. Refining after it reads the wording
+    // back off disk, so vague text the developer just wrote is what
+    // gets judged.
     call_json(
         &client,
         "requirement_reword",
@@ -417,7 +412,6 @@ async fn refine_requirement_reports_clean_and_unknown_ids_error() {
     .await;
     let body = call_json(&client, "refine_requirement", json!({"id": "REQ-001"})).await;
     assert_eq!(body["clean"], false, "{body}");
-    assert_eq!(body["source"], "staged", "{body}");
     assert!(
         body["findings"]
             .as_array()
@@ -426,15 +420,16 @@ async fn refine_requirement_reports_clean_and_unknown_ids_error() {
             .any(|f| f.as_str().unwrap().contains("missing the actor")),
         "{body}"
     );
-    // And the loop converges without the agent inventing a commit.
+    // And the loop converges on another reword, not on a commit step
+    // the agent would have to invent.
     let next_step = body["nextStep"].as_str().unwrap();
     assert!(
-        next_step.contains("no need to commit between passes"),
+        next_step.contains("Call requirement_reword to address each finding"),
         "{next_step}"
     );
 
-    // The pass right after a fixing reword is clean, still with nothing
-    // committed, and points at the commit as the way to apply it.
+    // The pass right after a fixing reword is clean and points at the
+    // scenario as the next thing to write.
     call_json(
         &client,
         "requirement_reword",
@@ -446,15 +441,13 @@ async fn refine_requirement_reports_clean_and_unknown_ids_error() {
     .await;
     let body = call_json(&client, "refine_requirement", json!({"id": "REQ-001"})).await;
     assert_eq!(body["clean"], true, "{body}");
-    assert_eq!(body["source"], "staged", "{body}");
     assert!(
         body["nextStep"]
             .as_str()
             .unwrap()
-            .contains("changes_commit"),
+            .contains("write the Gherkin scenario"),
         "{body}"
     );
-    call_json(&client, "changes_discard", json!({})).await;
 
     let (is_error, text) = call(&client, "refine_requirement", json!({"id": "REQ-999"})).await;
     assert_eq!(is_error, Some(true));
@@ -893,7 +886,11 @@ async fn the_additive_tools_inspect_read_mutate_and_commit() {
         json!({"path": "features/new.feature", "name": "New rules"}),
     )
     .await;
-    assert_eq!(created["staged"], true);
+    assert_eq!(created["written"], true);
+    assert!(
+        dir.path().join("features/new.feature").exists(),
+        "feature_create must land the file straight away"
+    );
 
     let listed = call_json(&client, "feature_list", json!({})).await;
     assert!(
@@ -902,7 +899,7 @@ async fn the_additive_tools_inspect_read_mutate_and_commit() {
             .unwrap()
             .iter()
             .any(|row| row["path"] == "features/new.feature"),
-        "staged feature missing from feature_list: {listed}"
+        "the new feature is missing from feature_list: {listed}"
     );
     let created_doc = call_json(
         &client,
@@ -911,9 +908,6 @@ async fn the_additive_tools_inspect_read_mutate_and_commit() {
     )
     .await;
     assert_eq!(created_doc["name"], "New rules");
-
-    let validated = call_json(&client, "changes_validate", json!({})).await;
-    assert_eq!(validated["valid"], true, "{validated}");
 
     let added = call_json(
         &client,
@@ -939,13 +933,12 @@ async fn the_additive_tools_inspect_read_mutate_and_commit() {
     )
     .await;
     assert_eq!(updated["action"], "update");
-
-    let shown = call_json(&client, "changes_show", json!({})).await;
-    assert_eq!(shown["changes"].as_array().unwrap().len(), 1);
-
-    let committed = call_json(&client, "changes_commit", json!({})).await;
-    assert_eq!(committed["changes"].as_array().unwrap().len(), 1);
-    assert!(dir.path().join("features/new.feature").exists());
+    assert!(
+        fs::read_to_string(dir.path().join("features/new.feature"))
+            .unwrap()
+            .contains("Then the result is 1"),
+        "the update must be on disk, not held anywhere"
+    );
 
     let deleted = call_json(
         &client,
@@ -954,8 +947,12 @@ async fn the_additive_tools_inspect_read_mutate_and_commit() {
     )
     .await;
     assert_eq!(deleted["action"], "delete");
-    let discarded = call_json(&client, "changes_discard", json!({})).await;
-    assert_eq!(discarded["changes"].as_array().unwrap().len(), 1);
+    assert!(
+        !fs::read_to_string(dir.path().join("features/new.feature"))
+            .unwrap()
+            .contains("First rule"),
+        "the delete must be on disk too"
+    );
 
     let (is_error, text) = call(
         &client,
@@ -970,7 +967,7 @@ async fn the_additive_tools_inspect_read_mutate_and_commit() {
 }
 
 #[tokio::test]
-async fn requirement_reword_stages_criteria_whose_escaping_survives_the_round_trip() {
+async fn requirement_reword_writes_criteria_whose_escaping_survives_the_round_trip() {
     let dir = tempfile::tempdir().unwrap();
     write_project(dir.path());
     let client = connect_default(dir.path()).await;
@@ -990,16 +987,15 @@ async fn requirement_reword_stages_criteria_whose_escaping_survives_the_round_tr
     )
     .await;
     assert_eq!(body["id"], "REQ-001");
-    assert_eq!(body["staged"], true);
+    assert_eq!(body["written"], true);
     // Over MCP the next step names tools, never harness commands the agent
     // has no shell to run.
     let next_step = body["nextStep"].as_str().unwrap();
-    assert!(next_step.contains("changes_commit"), "{next_step}");
+    assert!(next_step.contains("requirement_reword"), "{next_step}");
     assert!(!next_step.contains("spec "), "{next_step}");
 
-    let validated = call_json(&client, "changes_validate", json!({})).await;
+    let validated = call_json(&client, "validate_spec", json!({})).await;
     assert_eq!(validated["valid"], true, "{validated}");
-    call_json(&client, "changes_commit", json!({})).await;
 
     let shown = call_json(&client, "get_requirement", json!({"id": "REQ-001"})).await;
     assert_eq!(shown["acceptanceCriteria"], json!([criterion]));
@@ -1049,11 +1045,10 @@ async fn requirement_reword_refuses_unknown_ids_and_criteria_that_are_not_given_
     assert_eq!(is_error, Some(true));
     assert!(text.contains("must be phrased Given/When/Then"), "{text}");
 
-    let shown = call_json(&client, "changes_show", json!({})).await;
-    assert_eq!(
-        shown["changes"].as_array().unwrap().len(),
-        0,
-        "a rejected reword must not stage anything: {shown}"
+    let on_disk = fs::read_to_string(dir.path().join("requirements/requirements.json")).unwrap();
+    assert!(
+        !on_disk.contains("the result should be 6"),
+        "a rejected reword must not touch the file: {on_disk}"
     );
 
     client.cancel().await.unwrap();
@@ -1076,10 +1071,6 @@ async fn broken_project_state_surfaces_as_tool_errors_not_crashes() {
     let state = spec_file(dir.path(), STATE_FILE);
     fs::create_dir_all(state.parent().unwrap()).unwrap();
     fs::write(&state, "{{{").unwrap();
-    // Corrupt staging manifest: the changes tools report the staging error.
-    let staged = spec_file(dir.path(), STAGED_DIR);
-    fs::create_dir_all(&staged).unwrap();
-    fs::write(staged.join("manifest.json"), "{{{").unwrap();
 
     let client = connect_default(dir.path()).await;
 
@@ -1093,15 +1084,6 @@ async fn broken_project_state_surfaces_as_tool_errors_not_crashes() {
 
     let (is_error, _) = call(&client, "get_tdd_state", json!({})).await;
     assert_eq!(is_error, Some(true));
-
-    for tool in ["changes_show", "changes_commit", "changes_discard"] {
-        let (is_error, _) = call(&client, tool, json!({})).await;
-        assert_eq!(
-            is_error,
-            Some(true),
-            "{tool} should report the broken manifest"
-        );
-    }
 
     client.cancel().await.unwrap();
 }
@@ -1314,7 +1296,7 @@ async fn requirement_mark_implemented_is_gated_on_green_and_a_tagged_scenario() 
     .await;
     assert_eq!(body["id"], "REQ-001");
     assert_eq!(body["status"], "implemented");
-    assert_eq!(body["staged"], true);
+    assert_eq!(body["written"], true);
     client.cancel().await.unwrap();
 }
 
@@ -1331,11 +1313,11 @@ async fn generation_tools_are_template_only_and_name_spec_inspect_without_a_lang
 
     let created = call_json(&client, "step_definition_create", json!({})).await;
     assert_eq!(created["source"], "template");
-    assert_eq!(created["staged"], true);
+    assert_eq!(created["written"], true);
 
     let unit = call_json(&client, "unit_test_create", json!({"req_id": "REQ-001"})).await;
     assert_eq!(unit["source"], "template");
-    assert_eq!(unit["staged"], true);
+    assert_eq!(unit["written"], true);
 
     let (is_error, text) = call(&client, "unit_test_create", json!({"req_id": "REQ-999"})).await;
     assert_eq!(is_error, Some(true));

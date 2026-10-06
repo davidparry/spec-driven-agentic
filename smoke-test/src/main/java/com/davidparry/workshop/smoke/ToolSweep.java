@@ -9,7 +9,7 @@ import java.util.stream.Collectors;
 /**
  * Lists the server's tools, diffs them against {@link ToolPlan}, and
  * calls every row the current mode allows. Default mode is read-only;
- * {@code includeMutating} opts into staging and gated tools.
+ * {@code includeMutating} opts into the writing and gated tools.
  */
 public final class ToolSweep {
 

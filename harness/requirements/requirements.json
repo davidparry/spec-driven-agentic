@@ -37,31 +37,31 @@
         "Given a story naming no actor, no benefit and three ambiguous words, when the requirement is refined, then there are 5 findings",
         "Given a story that opens without an actor, when the requirement is refined, then a finding reads \"story: missing the actor - start with 'As a ...' so we know who this is for\"",
         "Given a story and criteria naming an actor, a benefit, a concrete outcome and an edge case, when the requirement is refined, then the verdict is \"clean\"",
-        "Given a rewording staged but not committed, when the requirement is refined, then the reviewed wording is reported as \"staged\""
+        "Given a vague rewording written over a clean requirement, when the requirement is refined, then the verdict is \"not clean\""
       ],
       "featureFile": "tests/features/requirement_refinement.feature"
     },
     {
       "id": "HARNESS-004",
-      "title": "Authored changes are held in staging until a human commits them",
+      "title": "Authored changes are written straight to the project's files",
       "status": "implemented",
-      "story": "As a developer keeping control of every edit an agent proposes, I want authored changes held in a staging area so that nothing reaches the working tree until I have read it as a diff.",
+      "story": "As a developer whose project the harness is editing, I want every authored change written straight to the file it belongs in so that my editor, my build, and git diff see it the moment it is made.",
       "acceptanceCriteria": [
-        "Given a feature file created through staging, when the working tree is read, then the working tree is empty",
-        "Given a feature file created through staging, when the staged changes are committed, then the working tree file contains \"Feature: Calc\"",
-        "Given a feature file created through staging, when the staged changes are discarded, then 0 staged changes remain",
-        "Given staged content that is not Gherkin, when the staged changes are validated, then the verdict is \"invalid\""
+        "Given a feature file created through the work tree, when the working tree is read, then the working tree file contains \"Feature: Calc\"",
+        "Given a file that does not exist yet, when it is written, then the write is reported as a \"create\"",
+        "Given a path that escapes the project root, when it is written, then the write is refused",
+        "Given a path inside the harness's own .spec directory, when it is written, then the write is refused"
       ],
-      "featureFile": "tests/features/staged_changes.feature"
+      "featureFile": "tests/features/direct_writes.feature"
     },
     {
       "id": "HARNESS-005",
       "title": "Each command is offered only the tools that step of the loop needs",
       "status": "implemented",
-      "story": "As a developer running an LLM-backed command, I want that caller offered a named subset of the tool catalog so that the model stays on task and cannot stage or commit unless the step calls for it.",
+      "story": "As a developer running an LLM-backed command, I want that caller offered a named subset of the tool catalog so that the model stays on task and cannot write a file unless the step calls for it.",
       "acceptanceCriteria": [
         "Given the default profiles, when every one of them is inspected, then the only caller offered command_run is \"implement\"",
-        "Given the default profiles, when every one of them is inspected, then 0 of them offer a staging or commit tool",
+        "Given the default profiles, when every one of them is inspected, then 0 of them offer a tool that writes",
         "Given the caller \"spec-draft\", when its tools are listed offline, then the offered tools are \"list_requirements, get_requirement, validate_spec, refine_requirement\"",
         "Given a config naming an invalid tool, when the tools are listed offline, then the offered tools exclude \"nope_tool\""
       ],
@@ -97,24 +97,24 @@
       "id": "HARNESS-008",
       "title": "A requirement cannot be marked implemented without proof",
       "status": "implemented",
-      "story": "As a developer who owns the spec wording, I want drafting, status flips and scenario edits staged and gated so that the catalog stays a reviewed source of truth rather than a record of what an agent felt like doing.",
+      "story": "As a developer who owns the spec wording, I want drafting, status flips and scenario edits gated before they reach the file so that the catalog stays a reviewed source of truth rather than a record of what an agent felt like doing.",
       "acceptanceCriteria": [
         "Given a session whose last run failed, when a requirement is marked implemented, then the flip is refused",
-        "Given a green bar and a scenario carrying the requirement's tag, when the requirement is marked implemented, then 1 staged change records the feature file",
+        "Given a green bar and a scenario carrying the requirement's tag, when the requirement is marked implemented, then the written spec names \"features/calc.feature\" as the feature file",
         "Given a green bar and no scenario carrying the tag, when the requirement is marked implemented, then the flip is refused and the message names the recovery commands",
-        "Given a draft the developer declines, when the wizard finishes, then 0 staged changes remain"
+        "Given a draft the developer declines, when the wizard finishes, then the spec file still holds 1 requirement"
       ],
       "featureFile": "tests/features/spec_mutations.feature"
     },
     {
       "id": "HARNESS-009",
-      "title": "Generated tests land in staging and fall back to a template",
+      "title": "Generated tests are written to the project and fall back to a template",
       "status": "implemented",
       "story": "As a developer generating step definitions and unit tests, I want a deterministic template as the floor and model output used only after it validates so that a generation step can degrade but never break the run.",
       "acceptanceCriteria": [
-        "Given a project with no model resolved, when step definitions are generated, then 1 staged change holds the deterministic template",
-        "Given invalid model output, when step definitions are generated, then 1 staged change holds the template rather than the model reply",
-        "Given a requirement carrying acceptance criteria, when a unit test is generated, then the staged test fails",
+        "Given a project with no model resolved, when step definitions are generated, then the generation is written from \"template\"",
+        "Given invalid model output, when step definitions are generated, then the generation is written from \"template\" rather than the model reply",
+        "Given a requirement carrying acceptance criteria, when a unit test is generated, then the written test fails",
         "Given a feature whose every step is already defined, when step definitions are generated, then the generation is refused"
       ],
       "featureFile": "tests/features/generation.feature"
@@ -175,10 +175,10 @@
       "status": "implemented",
       "story": "As a developer drafting into a spec that already numbers its requirements, I want the new id to carry the prefix the catalog uses so that one binary serves every spec without being told how each one numbers.",
       "acceptanceCriteria": [
-        "Given a catalog whose highest id is \"HARNESS-014\", when a requirement is drafted, then the staged id is \"HARNESS-015\"",
-        "Given an empty catalog holding 0 requirements, when a requirement is drafted, then the staged id is \"REQ-001\"",
-        "Given a catalog whose highest id is \"REQ-0007\", when a requirement is drafted, then the staged id is \"REQ-0008\"",
-        "Given a catalog numbering \"HARNESS-001\" that also includes a file numbering \"CLI-099\", when a requirement is drafted, then the staged id is \"HARNESS-002\"",
+        "Given a catalog whose highest id is \"HARNESS-014\", when a requirement is drafted, then the draft is written as \"HARNESS-015\"",
+        "Given an empty catalog holding 0 requirements, when a requirement is drafted, then the draft is written as \"REQ-001\"",
+        "Given a catalog whose highest id is \"REQ-0007\", when a requirement is drafted, then the draft is written as \"REQ-0008\"",
+        "Given a catalog numbering \"HARNESS-001\" that also includes a file numbering \"CLI-099\", when a requirement is drafted, then the draft is written as \"HARNESS-002\"",
         "Given a catalog whose highest id is \"HARNESS-014\", when the status is reported, then the next id is \"HARNESS-015\"",
         "Given a catalog holding \"HARNESS-014\", when the delivery target \"harness-014\" is read, then the target is requirement \"HARNESS-014\""
       ],
@@ -206,7 +206,7 @@
       "acceptanceCriteria": [
         "Given a catalog including \"core/math.json\" and a command run in \"core\", when a requirement is drafted with no file named, then \"requirements/core/math.json\" holds 2 requirements",
         "Given a command run in \"src/domain\", for which a covering spec file is missing, when a requirement is drafted with no file named, then \"requirements/requirements.json\" holds 2 requirements",
-        "Given a catalog including \"core/math.json\" and a command run in \"core\", when a requirement is drafted naming \"requirements/requirements.json\", then the staged id is \"REQ-002\""
+        "Given a catalog including \"core/math.json\" and a command run in \"core\", when a requirement is drafted naming \"requirements/requirements.json\", then the draft is written as \"REQ-002\""
       ],
       "featureFile": "tests/features/project_discovery.feature"
     }

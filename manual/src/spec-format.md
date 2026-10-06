@@ -99,9 +99,8 @@ The rules:
 ### Growing the catalog
 
 ```bash
-# Stage a new (empty) spec file and the include entry on the root:
+# Write a new (empty) spec file and the include entry on the root:
 spec include add requirements/core/arithmetic.json
-spec changes commit
 
 # Draft directly into it:
 spec draft --file requirements/core/arithmetic.json

@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-bb14de4e.js";
+            window.path_to_searchindex_js = "../searchindex-d84b362c.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-2ab172c3.js"></script>
+        <script src="../toc-0006eac3.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -235,11 +235,11 @@ so it needs the <code>pi-mcp-extension</code> package; the repo ships a ready
 and <code>pi -nbt</code> disables pi’s own <code>bash</code>/<code>write</code>/<code>edit</code> so these tools are all
 the model gets. The bridge registers them as <code>mcp_&lt;server&gt;_&lt;tool&gt;</code>, so
 <code>run_tests</code> arrives as <code>mcp_spec_driven_server_run_tests</code>.</p>
-<p>Cursor sees <strong>all 25 tools</strong>, including staging, and so does <code>pi -nbt</code>.
-Harness commands that call a model attach a <strong>narrower profile</strong>
-(<code>spec tools profiles</code>) — 3–7 tools for a generating command, 12 for the
-read-only <code>spec ask</code> — so a local model is not offered commit or
-mark-implemented.</p>
+<p>Cursor sees <strong>all 21 tools</strong>, including the writing ones, and so does
+<code>pi -nbt</code>. Harness commands that call a model attach a <strong>narrower
+profile</strong> (<code>spec tools profiles</code>) — 3–7 tools for a generating command,
+10 for the read-only <code>spec ask</code> — so a local model is never offered a
+tool that writes.</p>
 <h2 id="spec-mcp-tools"><a class="header" href="#spec-mcp-tools">spec mcp tools</a></h2>
 <p>List the built-in tools over one throwaway session. Default is an
 in-process loopback; <code>--stdio</code> spawns <code>spec mcp serve</code> as a child
@@ -257,12 +257,16 @@ spec mcp call run_tests --stdio
 <p><code>--arg key=value</code> is always a string unless the value parses as JSON.
 <code>--args '{"id":"REQ-003"}'</code> merges a JSON object.</p>
 <h2 id="the-tools-served"><a class="header" href="#the-tools-served">The tools served</a></h2>
-<p>Twenty-five tools in three groups. There is no <code>spec_draft</code> or
+<p>Twenty-one tools in three groups. There is no <code>spec_draft</code> or
 <code>implement</code> MCP tool: a <strong>new</strong> requirement is still drafted by the
 human (<code>spec draft</code>) and Cursor writes production Java. Rewording an
-existing requirement, Gherkin, steps, unit-test scaffolds,
-mark-implemented, and staging all go through tools. Generation over MCP
-is <strong>template-only</strong> (<code>source: "template"</code>).</p>
+existing requirement, Gherkin, steps, unit-test scaffolds and
+mark-implemented all go through tools. Generation over MCP is
+<strong>template-only</strong> (<code>source: "template"</code>).</p>
+<p>Every writing tool writes the real file — there is no staging area and
+nothing to commit afterwards. The server never prompts and never creates
+a branch, so put yourself on one before an agent session if you want the
+run isolated; see <a href="../branch-gate.html">the branch gate</a>.</p>
 <h3 id="frozen-seven-reply-shapes-stay"><a class="header" href="#frozen-seven-reply-shapes-stay">Frozen seven (reply shapes stay)</a></h3>
 <div class="table-wrapper">
 <table>
@@ -280,7 +284,7 @@ is <strong>template-only</strong> (<code>source: "template"</code>).</p>
 </tbody>
 </table>
 </div>
-<h3 id="authoring-and-staging"><a class="header" href="#authoring-and-staging">Authoring and staging</a></h3>
+<h3 id="authoring"><a class="header" href="#authoring">Authoring</a></h3>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -289,8 +293,6 @@ is <strong>template-only</strong> (<code>source: "template"</code>).</p>
 <tbody>
 <tr><td><code>feature_list</code> / <code>feature_read</code> / <code>feature_create</code></td><td><a href="feature.html"><code>spec feature</code></a></td></tr>
 <tr><td><code>scenario_add</code> / <code>scenario_update</code> / <code>scenario_delete</code></td><td><a href="scenario.html"><code>spec scenario</code></a></td></tr>
-<tr><td><code>changes_show</code> / <code>changes_commit</code> / <code>changes_discard</code></td><td><a href="changes.html"><code>spec changes</code></a></td></tr>
-<tr><td><code>changes_validate</code></td><td><a href="changes.html#spec-changes-validate"><code>spec changes validate</code></a> (staged-wins; frozen <code>validate_spec</code> stays on disk)</td></tr>
 <tr><td><code>requirement_reword</code></td><td><a href="spec.html#spec-reword"><code>spec reword</code></a> (the repair path for <code>validate_spec</code> and <code>refine_requirement</code> findings; never hand-edit the spec file)</td></tr>
 <tr><td><code>requirement_mark_implemented</code></td><td><a href="spec.html#spec-mark-implemented"><code>spec mark-implemented</code></a></td></tr>
 <tr><td><code>step_definitions_find</code></td><td><a href="steps.html#spec-steps-missing"><code>spec steps missing</code></a></td></tr>
@@ -385,15 +387,16 @@ to its last 200 lines.</li>
 build tool can still run build scripts. What the policy makes
 unexpressible is running destructive binaries and reaching outside
 the project root.</p>
-<p><code>run_tests</code> during <code>spec implement</code> sees the <strong>working tree</strong>, not an
-unstaged patch. Commit (or apply staged files) before you trust the
-bar.</p>
+<p><code>run_tests</code> during <code>spec implement</code> sees the <strong>working tree</strong> — which is
+also where every tool just wrote, so the bar is measured against exactly
+the files the tools produced.</p>
 <h2 id="why-serve-tools-instead-of-letting-the-agent-edit-files"><a class="header" href="#why-serve-tools-instead-of-letting-the-agent-edit-files">Why serve tools instead of letting the agent edit files?</a></h2>
 <ul>
 <li><strong>No escape hatches.</strong> The agent gets exactly these tools — no
 open-ended shell, no arbitrary file writes. The one command tool is
-allowlisted, jailed to the root, and phase-gated; mutations go
-through the <a href="../staged-changes.html">staging area</a> for human review.</li>
+allowlisted, jailed to the root, and phase-gated; every write is
+confined to the project and lands as a reviewable
+<a href="../direct-writes.html">direct write</a>.</li>
 <li><strong>The discipline is in the server.</strong> An agent cannot skip RED,
 refactor while failing, or invent requirements: the tools refuse,
 with a <code>nextStep</code> that teaches the correct move.

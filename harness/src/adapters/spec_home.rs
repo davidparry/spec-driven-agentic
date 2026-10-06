@@ -1,13 +1,13 @@
-//! The `.spec/` directory: where configuration, state, cache, logs, and
-//! staging live. Creating it also moves the layout those files used to
-//! have in the project root, and only when the new path is still empty.
+//! The `.spec/` directory: where configuration, state, cache, and logs
+//! live. Creating it also moves the layout those files used to have in
+//! the project root, and only when the new path is still empty.
 
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::domain::{
-    CACHE_DIR, CONFIG_FILE, HISTORY_FILE, LOG_DIR, MEMORY_FILE, SPEC_DIR, STAGED_DIR, STATE_FILE,
+    CACHE_DIR, CONFIG_FILE, HISTORY_FILE, LOG_DIR, MEMORY_FILE, SPEC_DIR, STATE_FILE,
 };
 
 /// Names that used to sit in the project root, paired with the file or
@@ -19,7 +19,6 @@ const LEGACY: &[(&str, &str)] = &[
     (".spec-history", HISTORY_FILE),
     (".spec-cache", CACHE_DIR),
     (".spec-log", LOG_DIR),
-    (".spec-staged", STAGED_DIR),
 ];
 
 pub fn spec_home(root: &Path) -> PathBuf {

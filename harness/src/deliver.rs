@@ -37,12 +37,11 @@ use std::sync::Arc;
 use serde::Serialize;
 
 use crate::adapters::fs_spec::FsSpecRepository;
-use crate::adapters::fs_staging::FsChangeStore;
 use crate::adapters::fs_state::FsStateStore;
+use crate::adapters::fs_worktree::FsWorkTree;
 use crate::adapters::runners::detect_runner;
 use crate::application::DEFAULT_LLM_ATTEMPTS;
-use crate::application::assets::{asset_survey, load_effective_spec};
-use crate::application::change_service::ChangeService;
+use crate::application::assets::{asset_survey, load_spec};
 use crate::application::generation_service::GenerationService;
 use crate::application::implement_service::ImplementService;
 use crate::application::refactor_service::RefactorService;
@@ -59,9 +58,9 @@ use crate::domain::scaffold::slug;
 use crate::domain::steps::criterion_to_steps;
 use crate::domain::tdd::ImplementAttempt;
 use crate::ports::{
-    ChangeStore as _, FeatureCatalog as _, Prompter, SpecRepository as _, TestFilter, TestRunner,
+    FeatureCatalog as _, Prompter, SpecRepository as _, TestFilter, TestRunner, WorkTree as _,
 };
-use crate::wiring::{DynLlm, OverlayFeatures, OverlayTree, RunnerFactory};
+use crate::wiring::{DynLlm, ProjectFeatures, ProjectTree, RunnerFactory};
 use crate::workspace::project_layout;
 
 /// How many times one authoring step is re-run while the asset survey
@@ -447,7 +446,6 @@ impl Deliver {
         let draft = mutation
             .draft_assisted_from(prompter, &model, llm.as_ref(), file, description)
             .map_err(|e| e.to_string())?;
-        self.commit()?;
         // The plan is what actually reached the catalog, read back rather
         // than taken from the draft's own report: every pending id it
         // added, so a description that held three requirements plans all
@@ -483,21 +481,6 @@ impl Deliver {
         };
         if requirement.status == "implemented" {
             return Ok(Outcome::AlreadyImplemented);
-        }
-
-        // Staged work from an earlier session would ride along on this
-        // run's first commit, and the refactor loop refuses outright
-        // while anything is staged. It is the author's to settle.
-        let staged = self.change_store().changes().map_err(|e| e.to_string())?;
-        if !staged.is_empty() {
-            return Ok(Outcome::Stopped {
-                reason: format!(
-                    "{} change(s) are already staged - review with spec changes show, \
-                     then spec changes commit or spec changes discard before delivering.",
-                    staged.len()
-                ),
-                phase: None,
-            });
         }
 
         if let Some(stopped) = self.author_scenarios(prompter, language, req_id, requirement)? {
@@ -593,7 +576,6 @@ impl Deliver {
             added += 1;
         }
         if added == 0 {
-            self.discard()?;
             return Ok(Some(Outcome::Stopped {
                 reason: format!(
                     "No acceptance criterion of {req_id} is Given/When/Then shaped, so no \
@@ -602,8 +584,7 @@ impl Deliver {
                 phase: None,
             }));
         }
-        self.commit()?;
-        prompter.tell(&format!("Scenarios committed to {feature_path}."));
+        prompter.tell(&format!("Scenarios written to {feature_path}."));
         Ok(verified(self.scenario_missing(language, req_id)?, || {
             unverified_scenario(req_id, &feature_path)
         }))
@@ -631,8 +612,7 @@ impl Deliver {
             let generated = generation.steps_generate(prompter);
             drop(work);
             let report = generated.map_err(|e| e.to_string())?;
-            prompter.tell(&format!("Staged {} ({}).", report.target, report.source));
-            self.commit()?;
+            prompter.tell(&format!("Wrote {} ({}).", report.target, report.source));
         }
         let missing = generation.steps_missing().map_err(|e| e.to_string())?;
         if missing.missing.is_empty() {
@@ -663,16 +643,15 @@ impl Deliver {
         let generated = generation.unittest_generate(prompter, req_id);
         drop(work);
         let report = generated.map_err(|e| e.to_string())?;
-        prompter.tell(&format!("Staged {} ({}).", report.target, report.source));
+        prompter.tell(&format!("Wrote {} ({}).", report.target, report.source));
         if let Some(content) = self
-            .change_store()
-            .content(&report.target)
+            .work_tree()
+            .read(&report.target)
             .map_err(|e| e.to_string())?
         {
             prompter.tell("Generated unit test (the assertions are yours to sharpen):");
             prompter.tell(&content);
         }
-        self.commit()?;
         match verified(self.unit_test_missing(language, req_id)?, || {
             unverified_unit_test(req_id, &report.target)
         }) {
@@ -825,8 +804,8 @@ impl Deliver {
         }
     }
 
-    /// Close the loop: flip the status, validate the staged edit, apply
-    /// it, and read the spec back to be sure it landed.
+    /// Close the loop: flip the status, then read the spec back to be
+    /// sure it landed and still validates.
     fn mark_implemented(
         &self,
         prompter: &mut dyn Prompter,
@@ -841,18 +820,13 @@ impl Deliver {
                 phase: None,
             });
         }
-        let validation = self
-            .change_service()
-            .validate()
-            .map_err(|e| e.to_string())?;
+        let validation = self.spec_service().validate_spec();
         if !validation.valid {
-            self.discard()?;
             return Ok(Outcome::Stopped {
                 reason: invalid_mark(req_id, &validation.issues),
                 phase: None,
             });
         }
-        self.commit()?;
         let implemented = self
             .spec()?
             .requirements
@@ -862,15 +836,15 @@ impl Deliver {
     }
 
     /// Ask the model to make the failing tests pass and commit whatever
-    /// it staged. A model failure is narrated, not fatal - the next
+    /// it wrote. A model failure is narrated, not fatal - the next
     /// round, or a human, can still implement.
     fn attempt_implementation(
         &self,
         prompter: &mut dyn Prompter,
         implement: &ImplementService<
-            crate::wiring::OverlayFeatures,
-            crate::wiring::OverlayTree,
-            FsChangeStore,
+            crate::wiring::ProjectFeatures,
+            crate::wiring::ProjectTree,
+            FsWorkTree,
             FsSpecRepository,
             DynLlm,
         >,
@@ -907,7 +881,6 @@ impl Deliver {
                     ..Default::default()
                 })
                 .map_err(tdd_message)?;
-                self.commit()?;
             }
             Err(error) => prompter.warn(&format!("{} Implement by hand instead.", error.0)),
         }
@@ -950,14 +923,13 @@ impl Deliver {
     /// command would see rather than by its own return value.
     fn survey_gap(&self, language: Language, req_id: &str, needle: &str) -> Result<bool, String> {
         let layout = project_layout(&self.root);
-        let spec =
-            load_effective_spec(&self.spec_repository(), &self.change_store()).map_err(|e| e.0)?;
+        let spec = load_spec(&self.spec_repository()).map_err(|e| e.0)?;
         let Some(requirement) = spec.requirements.iter().find(|r| r.id == req_id) else {
             return Ok(false);
         };
         let (_, findings) = asset_survey(
             &self.feature_catalog(),
-            &crate::wiring::overlay_sources(&self.root, layout.module_root.as_deref()),
+            &crate::wiring::source_tree(&self.root, layout.module_root.as_deref()),
             language,
             requirement,
             &spec.project,
@@ -1015,50 +987,42 @@ impl Deliver {
         crate::wiring::spec_repository(&self.root)
     }
 
-    fn feature_catalog(&self) -> crate::wiring::OverlayFeatures {
-        crate::wiring::overlay_catalog(&self.root)
+    fn feature_catalog(&self) -> crate::wiring::ProjectFeatures {
+        crate::wiring::feature_catalog(&self.root)
     }
 
-    fn commit(&self) -> Result<(), String> {
-        self.change_service().commit().map_err(|e| e.to_string())?;
-        Ok(())
+    fn work_tree(&self) -> FsWorkTree {
+        crate::wiring::work_tree(&self.root)
     }
 
-    fn discard(&self) -> Result<(), String> {
-        self.change_service().discard().map_err(|e| e.to_string())?;
-        Ok(())
-    }
-
-    fn change_store(&self) -> FsChangeStore {
-        crate::wiring::change_store(&self.root)
-    }
-
-    fn change_service(
+    fn spec_service(
         &self,
-    ) -> ChangeService<FsChangeStore, FsSpecRepository, crate::wiring::OverlayFeatures> {
-        crate::wiring::change_service(&self.root)
+    ) -> crate::application::spec_service::SpecService<
+        FsSpecRepository,
+        crate::adapters::fs_spec::FsFeatureFiles,
+    > {
+        crate::wiring::spec_service(&self.root, crate::workspace::workshop_layout())
     }
 
     fn mutation_service(
         &self,
     ) -> SpecMutationService<
         FsSpecRepository,
-        crate::wiring::OverlayFeatures,
-        FsChangeStore,
+        crate::wiring::ProjectFeatures,
+        FsWorkTree,
         FsStateStore,
     > {
         crate::wiring::mutation_service(&self.root, self.llm_attempts)
     }
 
-    fn scenario_service(&self) -> ScenarioService<FsChangeStore, crate::wiring::OverlayFeatures> {
+    fn scenario_service(&self) -> ScenarioService<FsWorkTree, crate::wiring::ProjectFeatures> {
         crate::wiring::scenario_service(&self.root)
     }
 
     fn generation_service(
         &self,
         language: Language,
-    ) -> GenerationService<OverlayFeatures, OverlayTree, FsChangeStore, FsSpecRepository, DynLlm>
-    {
+    ) -> GenerationService<ProjectFeatures, ProjectTree, FsWorkTree, FsSpecRepository, DynLlm> {
         crate::wiring::generation_service(
             &self.root,
             language,
@@ -1070,8 +1034,7 @@ impl Deliver {
     fn implement_service(
         &self,
         language: Language,
-    ) -> ImplementService<OverlayFeatures, OverlayTree, FsChangeStore, FsSpecRepository, DynLlm>
-    {
+    ) -> ImplementService<ProjectFeatures, ProjectTree, FsWorkTree, FsSpecRepository, DynLlm> {
         crate::wiring::implement_service(&self.root, language, self.llm.as_ref(), self.llm_attempts)
     }
 
@@ -1080,7 +1043,7 @@ impl Deliver {
     fn refactor_service(
         &self,
         language: Language,
-    ) -> RefactorService<OverlayTree, FsChangeStore, FsSpecRepository, DynLlm> {
+    ) -> RefactorService<ProjectTree, FsWorkTree, FsSpecRepository, DynLlm> {
         crate::wiring::refactor_service(
             &self.root,
             language,
@@ -1167,7 +1130,8 @@ fn unverified_mark(req_id: &str) -> String {
 
 fn invalid_mark(req_id: &str, issues: &[String]) -> String {
     format!(
-        "The staged mark-implemented for {req_id} did not validate ({}), so it was discarded.",
+        "{req_id} was marked implemented, but the spec no longer validates ({}). Fix it, \
+         or undo the edit with git.",
         issues.join("; ")
     )
 }
@@ -1487,7 +1451,7 @@ mod tests {
         );
         assert!(reason.contains("no scenario tagged @REQ-001"), "{reason}");
         assert!(reason.contains("story is empty"), "{reason}");
-        assert!(reason.contains("was discarded"), "{reason}");
+        assert!(reason.contains("undo the edit with git"), "{reason}");
     }
 
     #[test]
@@ -1787,13 +1751,13 @@ mod tests {
         );
     }
 
-    /// Marking is staged and validated like every other edit, and the
+    /// Marking is written and validated like every other edit, and the
     /// validation reads the whole spec. A requirement left implemented
     /// without a scenario by some earlier session makes every later mark
-    /// invalid, so this one is discarded and the issue is named rather
-    /// than a half-valid spec being committed.
+    /// invalid; the run stops and names the issue rather than carrying
+    /// on over a spec that no longer validates.
     #[test]
-    fn a_mark_that_would_commit_an_invalid_spec_is_discarded_with_its_issues() {
+    fn a_mark_that_leaves_the_spec_invalid_stops_with_its_issues() {
         let dir = kata(one_criterion());
         let mut spec = deliver(dir.path()).spec().unwrap();
         spec.requirements.push(Requirement {
@@ -1818,17 +1782,9 @@ mod tests {
             no_refactor(),
         );
         let reason = stopped_because(&outcome);
-        assert!(reason.contains("did not validate"), "{reason}");
+        assert!(reason.contains("no longer validates"), "{reason}");
         assert!(reason.contains("REQ-002"), "{reason}");
-        assert!(reason.contains("was discarded"), "{reason}");
-        assert!(
-            deliver(dir.path())
-                .change_store()
-                .changes()
-                .unwrap()
-                .is_empty(),
-            "the refused edit left nothing staged"
-        );
+        assert!(reason.contains("undo the edit with git"), "{reason}");
     }
 
     /// The spec can change under a long run - a requirement named in the

@@ -1,4 +1,4 @@
-//! Project-relative path jail, shared by staging writes and `command_run`
+//! Project-relative path jail, shared by every write and `command_run`
 //! argv policy. Pure string/component logic: no filesystem, no `unsafe`.
 
 use std::fmt;

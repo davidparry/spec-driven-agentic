@@ -103,7 +103,7 @@ Feature: The tool-calling agent loop
           Then the result is 3
       """
     When step definitions are generated without a model
-    Then the generation is staged at "src/test/java/GeneratedSteps.java" from "template"
+    Then the generation is written at "src/test/java/GeneratedSteps.java" from "template"
 
   Scenario: The model is never offered a tool outside its caller's profile
     Given the agent may use "get_tdd_state, validate_spec"

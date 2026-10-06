@@ -7,7 +7,7 @@ use serde::Serialize;
 
 use crate::application::LlmReplyError;
 use crate::application::assets::{
-    asset_survey, find_requirement, load_effective_spec, production_path, scenario_evidence,
+    asset_survey, find_requirement, load_spec, production_path, scenario_evidence,
 };
 use crate::application::generation_service::ResolvedLlm;
 use crate::application::spec_service::ServiceError;
@@ -23,14 +23,14 @@ use crate::domain::reply_guard::{Damage, damage};
 use crate::domain::steps::source_extension;
 use crate::domain::tdd::{ImplementAttempt, StateEntry};
 use crate::ports::{
-    ChangeStore, FeatureCatalog, LlmConversation, Prompter, SourceFiles, SpecRepository, ToolBroker,
+    FeatureCatalog, LlmConversation, Prompter, SourceFiles, SpecRepository, ToolBroker, WorkTree,
 };
 
 /// Reply of an implementation attempt: the files the model updated.
 #[derive(Debug, Serialize, PartialEq, Eq)]
 pub struct ImplementationReport {
     pub targets: Vec<String>,
-    pub staged: bool,
+    pub written: bool,
     pub source: String,
     /// Set when the reply left the production code untouched - the
     /// attempt is incomplete and the caller narrates it loudly.
@@ -56,7 +56,7 @@ pub struct ImplementService<F, S, C, R, L, B = crate::application::agent_service
 where
     F: FeatureCatalog,
     S: SourceFiles,
-    C: ChangeStore,
+    C: WorkTree,
     R: SpecRepository,
     L: LlmConversation,
     B: ToolBroker,
@@ -74,7 +74,7 @@ impl<F, S, C, R, L, B> ImplementService<F, S, C, R, L, B>
 where
     F: FeatureCatalog,
     S: SourceFiles,
-    C: ChangeStore,
+    C: WorkTree,
     R: SpecRepository,
     L: LlmConversation,
     B: ToolBroker,
@@ -107,7 +107,7 @@ where
 
     /// Ask the model to make the failing tests pass: production code plus
     /// real bodies for the TODO placeholders in the test scaffolding.
-    /// Every update is staged; the caller commits and reruns the tests -
+    /// Every update is written; the caller reruns the tests -
     /// the test run is the real validator.
     pub fn generate(
         &self,
@@ -123,7 +123,7 @@ where
                 "No model resolved - implement by hand and rerun spec test.".into(),
             ));
         };
-        let spec = load_effective_spec(&self.spec, &self.store)?;
+        let spec = load_spec(&self.spec)?;
         let requirement = find_requirement(&spec, req_id)?;
         let sources = self.sources.sources(source_extension(self.language))?;
         let files: Vec<(String, String)> = sources
@@ -198,7 +198,7 @@ where
         let mut refused = Vec::new();
         for update in &updates {
             // The model is shown every source file and often hands one
-            // back word for word. Staging that puts a "modify" on the
+            // back word for word. Exclusive that puts a "modify" on the
             // review surface with nothing in it to review, and the
             // reviewer has to diff it to find out.
             if is_unchanged(&files, update) {
@@ -210,7 +210,7 @@ where
                 refused.push((update.path.as_str(), damage));
                 continue;
             }
-            self.store.stage(&update.path, &update.content, &summary)?;
+            self.store.write(&update.path, &update.content, &summary)?;
             targets.push(update.path.clone());
         }
         let production_written = targets.contains(&production);
@@ -226,7 +226,7 @@ where
             warnings.push(if targets.is_empty() {
                 format!(
                     "The model left every file as it found it, including the \
-                     production code ({production}) - nothing was staged."
+                     production code ({production}) - nothing was written."
                 )
             } else {
                 format!(
@@ -238,7 +238,7 @@ where
         }
         warnings.extend(ran_ahead_of_the_spec(&updates, &spec, req_id));
         let next_step = if production_written {
-            "Apply with spec changes commit, then spec test - the run decides.".to_string()
+            "Run spec test - the run decides.".to_string()
         } else if targets.is_empty() {
             format!(
                 "There is nothing to apply. Run spec implement {req_id} again - \
@@ -246,13 +246,12 @@ where
             )
         } else {
             format!(
-                "The attempt is incomplete without {production}. Apply what was \
-                 staged with spec changes commit, rerun spec test, then spec implement \
-                 {req_id} again - or implement {production} by hand."
+                "The attempt is incomplete without {production}. Rerun spec test, \
+                 then spec implement {req_id} again - or implement {production} by hand."
             )
         };
         Ok(ImplementationReport {
-            staged: !targets.is_empty(),
+            written: !targets.is_empty(),
             targets,
             source: "llm".into(),
             warning: (!warnings.is_empty()).then(|| warnings.join(" ")),
@@ -271,7 +270,7 @@ where
         failures: &[String],
         into: Option<&str>,
     ) -> Result<ReadinessReport, ServiceError> {
-        let spec = load_effective_spec(&self.spec, &self.store)?;
+        let spec = load_spec(&self.spec)?;
         let requirement = find_requirement(&spec, req_id)?;
         let mut findings = Vec::new();
         if requirement.status == "implemented" {
@@ -327,7 +326,7 @@ where
         let Some(llm) = &self.llm else {
             return Ok(None);
         };
-        let spec = load_effective_spec(&self.spec, &self.store)?;
+        let spec = load_spec(&self.spec)?;
         let requirement = find_requirement(&spec, req_id)?;
         let prompt = advice_prompt(
             self.language,
@@ -366,20 +365,20 @@ where
 ///
 /// Observed live: `spec implement REQ-006` implemented REQ-005 too, the
 /// bar went green, and nothing said a word — the run had drifted ahead
-/// of the spec it is supposed to be driven by. The staged code is
+/// of the spec it is supposed to be driven by. The written code is
 /// matched against the other pending requirements with the literal
 /// Whether the model handed back a file exactly as it was given it.
 ///
 /// `files` is what the prompt showed the model, which is the working
-/// tree with any staged changes already applied - so a match means
-/// staging this update would change nothing.
+/// tree as it stands - so a match means writing this update would
+/// change nothing.
 fn is_unchanged(files: &[(String, String)], update: &FileUpdate) -> bool {
     files
         .iter()
         .any(|(path, content)| *path == update.path && *content == update.content)
 }
 
-/// What staging this update would destroy, if the file already exists.
+/// What writing this update would destroy, if the file already exists.
 ///
 /// A path the project has never seen is the attempt creating something,
 /// and there is nothing there to lose.
@@ -396,7 +395,7 @@ fn replacing(
 /// blocks: a shared input literal can make two requirements look alike,
 /// and only the developer can say whether the extra code belongs.
 fn ran_ahead_of_the_spec(updates: &[FileUpdate], spec: &Spec, req_id: &str) -> Option<String> {
-    let staged: String = updates
+    let written: String = updates
         .iter()
         .map(|update| update.content.as_str())
         .collect::<Vec<_>>()
@@ -405,14 +404,14 @@ fn ran_ahead_of_the_spec(updates: &[FileUpdate], spec: &Spec, req_id: &str) -> O
         .requirements
         .iter()
         .filter(|requirement| requirement.id != req_id && requirement.status == "pending")
-        .filter(|requirement| covers_all(&staged, &requirement.acceptance_criteria))
+        .filter(|requirement| covers_all(&written, &requirement.acceptance_criteria))
         .map(|requirement| requirement.id.as_str())
         .collect();
     (!reached.is_empty()).then(|| {
         format!(
-            "The staged code also satisfies {}, still pending - {req_id} was the \
-             requirement asked for. Review the diff with spec changes show and drop \
-             what {req_id} does not need, so each requirement keeps its own RED bar.",
+            "The code written also satisfies {}, still pending - {req_id} was the \
+             requirement asked for. Read the diff with git diff and drop what \
+             {req_id} does not need, so each requirement keeps its own RED bar.",
             reached.join(", ")
         )
     })
@@ -424,7 +423,7 @@ mod tests {
     use crate::application::agent_service::NullPrompter;
     use crate::ports::SourceFile;
     use crate::test_support::{
-        FakeLlm, FakeSources, InMemoryChangeStore, InMemoryFeatureCatalog, InMemorySpecRepository,
+        FakeLlm, FakeSources, InMemoryFeatureCatalog, InMemorySpecRepository, InMemoryWorkTree,
         calculator_catalog, calculator_spec, covered_steps_source, flat_layout, unit_test_source,
     };
 
@@ -434,14 +433,14 @@ mod tests {
     ) -> ImplementService<
         InMemoryFeatureCatalog,
         FakeSources,
-        InMemoryChangeStore,
+        InMemoryWorkTree,
         InMemorySpecRepository,
         FakeLlm,
     > {
         ImplementService::new(
             calculator_catalog(),
             FakeSources(sources),
-            InMemoryChangeStore::default(),
+            InMemoryWorkTree::default(),
             InMemorySpecRepository(Ok(calculator_spec())),
             Language::Java,
             flat_layout(Language::Java),
@@ -461,11 +460,11 @@ mod tests {
     }
 
     /// Observed live on REQ-003: the model was shown the step
-    /// definitions, handed them straight back, and spec staged them as
+    /// definitions, handed them straight back, and spec wrote them as
     /// a "modify" that was byte-identical to the working tree. The
     /// reviewer had to diff it to discover there was nothing in it.
     #[test]
-    fn a_file_handed_back_word_for_word_is_not_staged_as_a_change() {
+    fn a_file_handed_back_word_for_word_is_not_written_as_a_change() {
         let steps = SourceFile {
             path: "src/test/java/KataSteps.java".into(),
             content: "public class KataSteps {}".into(),
@@ -479,13 +478,13 @@ mod tests {
             .generate(&mut NullPrompter, "REQ-001", &[], &[], &[], None)
             .unwrap();
         assert_eq!(report.targets, vec!["src/main/java/Kata.java".to_string()]);
-        assert!(report.staged);
+        assert!(report.written);
     }
 
     /// A file changed only in whitespace is still a change - the model
     /// meant it, and the reviewer should see it.
     #[test]
-    fn a_file_returned_with_any_difference_at_all_is_still_staged() {
+    fn a_file_returned_with_any_difference_at_all_is_still_written() {
         let steps = SourceFile {
             path: "src/main/java/Kata.java".into(),
             content: "public class Kata {}".into(),
@@ -498,7 +497,7 @@ mod tests {
     }
 
     /// If every file came back unchanged there is nothing to review,
-    /// and saying "staged" would send the student to an empty diff.
+    /// and saying "written" would send the student to an empty diff.
     #[test]
     fn a_reply_that_changes_nothing_stages_nothing_and_says_so() {
         let production = SourceFile {
@@ -510,7 +509,7 @@ mod tests {
             .generate(&mut NullPrompter, "REQ-001", &[], &[], &[], None)
             .unwrap();
         assert!(report.targets.is_empty());
-        assert!(!report.staged);
+        assert!(!report.written);
         let warning = report.warning.expect("a warning that nothing landed");
         assert!(
             warning.contains("left every file as it found it"),
@@ -524,11 +523,11 @@ mod tests {
     }
 
     /// Observed live: asked to add one tool to a 1124-line module, the
-    /// model replied `placeholder`. It was staged, applied, and the
+    /// model replied `placeholder`. It was written over the file, and the
     /// build stopped. The test run cannot be the validator for a reply
     /// that deletes the code the tests were going to run.
     #[test]
-    fn a_reply_that_would_delete_the_production_file_is_not_staged() {
+    fn a_reply_that_would_delete_the_production_file_is_not_written() {
         let production = SourceFile {
             path: "src/main/java/Kata.java".into(),
             content: "public class Kata {\n  int add(String in) { return 0; }\n}".into(),
@@ -546,15 +545,15 @@ mod tests {
             )
             .unwrap();
         assert!(report.targets.is_empty());
-        assert!(!report.staged);
+        assert!(!report.written);
         assert_eq!(
-            service.store.content("src/main/java/Kata.java").unwrap(),
+            service.store.read("src/main/java/Kata.java").unwrap(),
             None,
-            "nothing reached the staging area"
+            "nothing reached the file"
         );
         let warning = report.warning.expect("the refusal is reported");
         assert!(warning.contains("Kata"), "{warning}");
-        assert!(warning.contains("not staged"), "{warning}");
+        assert!(warning.contains("not written"), "{warning}");
         assert!(
             !warning.contains("left every file as it found it"),
             "a refusal is not the model leaving the file alone: {warning}"
@@ -594,7 +593,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(report.targets, vec!["src/main/java/Kata.java"]);
-        assert!(report.staged);
+        assert!(report.written);
         let warning = report.warning.expect("the refused file is reported");
         assert!(warning.contains("src/test/java/Steps.java"), "{warning}");
     }
@@ -628,9 +627,9 @@ mod tests {
             .unwrap();
         let warning = report.warning.expect("the scope warning");
         assert!(warning.contains("also satisfies REQ-002"), "{warning}");
-        assert!(warning.contains("spec changes show"), "{warning}");
-        // A warning, not a gate: the work is still staged.
-        assert!(report.staged);
+        assert!(warning.contains("git diff"), "{warning}");
+        // A warning, not a gate: the work is on disk.
+        assert!(report.written);
     }
 
     #[test]
@@ -690,15 +689,15 @@ mod tests {
             report.targets,
             vec!["src/main/java/Kata.java", "src/test/java/Steps.java"]
         );
-        assert!(report.staged);
+        assert!(report.written);
         assert_eq!(report.source, "llm");
         let production = service
             .store
-            .content("src/main/java/Kata.java")
+            .read("src/main/java/Kata.java")
             .unwrap()
             .unwrap();
         assert_eq!(production, "public class Kata {}");
-        assert!(service.store.content("/etc/passwd").unwrap().is_none());
+        assert!(service.store.read("/etc/passwd").unwrap().is_none());
         let prompts = service.llm.as_ref().unwrap().chat().prompts.borrow();
         assert!(prompts[0].contains("Req001Test: TODO: assert"));
         assert!(prompts[0].contains("--- src/test/java/Steps.java ---"));
@@ -756,10 +755,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(report.warning, None);
-        assert_eq!(
-            report.next_step,
-            "Apply with spec changes commit, then spec test - the run decides."
-        );
+        assert_eq!(report.next_step, "Run spec test - the run decides.");
     }
 
     #[test]

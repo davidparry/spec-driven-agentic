@@ -197,27 +197,27 @@ fn the_tool_facing_wording_is_not_rewritten_for_the_agent() {
 /// nothing. It still warns that prompts come from the pipe, which is
 /// true of every command that prompts.
 #[test]
-fn a_command_that_stages_is_not_warned_that_it_stages_nothing() {
+fn a_command_that_writes_is_not_warned_that_it_writes_nothing() {
     let dir = project(VALID);
     // The command surveys the project before it prompts.
     fs::write(dir.path().join("pom.xml"), "<project/>").unwrap();
     let output = spec_run(dir.path(), &["unittest", "generate", "REQ-001"]);
     let warning = String::from_utf8(output.stderr).unwrap();
     assert!(warning.contains("stdin is not a terminal"), "{warning}");
-    assert!(!warning.contains("stages nothing"), "{warning}");
+    assert!(!warning.contains("writes nothing"), "{warning}");
 }
 
 /// The wizard warning is still earned where it is true: `spec reword`
-/// asks "Stage this?" last, and a spent pipe answers no - which is
+/// asks "Write this?" last, and a spent pipe answers no - which is
 /// exactly what happens here, so the reply confirms the warning.
 #[test]
-fn a_wizard_is_still_warned_that_it_will_stage_nothing() {
+fn a_wizard_is_still_warned_that_it_will_write_nothing() {
     let dir = project(VALID);
     let output = spec_run(dir.path(), &["reword", "REQ-001"]);
     let reply = stdout(&output);
     let warning = String::from_utf8(output.stderr).unwrap();
-    assert!(warning.contains("stages nothing"), "{warning}");
-    assert!(reply.contains("\"staged\": false"), "{reply}");
+    assert!(warning.contains("writes nothing"), "{warning}");
+    assert!(reply.contains("\"written\": false"), "{reply}");
 }
 
 /// The hang: with a model configured, `spec reword` read the end of
@@ -231,10 +231,10 @@ fn a_wizard_on_a_closed_stdin_declines_instead_of_asking_forever() {
     let output = spec_run(dir.path(), &["reword", "REQ-001"]);
     assert!(output.status.success(), "a declined wizard is not an error");
     let reply = stdout(&output);
-    assert!(reply.contains("\"staged\": false"), "{reply}");
+    assert!(reply.contains("\"written\": false"), "{reply}");
     assert!(
         reply.contains(
-            "\"nextStep\": \"Nothing was staged. Run spec reword REQ-001 \
+            "\"nextStep\": \"Nothing was written. Run spec reword REQ-001 \
              again when the wording is ready.\""
         ),
         "{reply}"
@@ -250,9 +250,9 @@ fn a_different_wizard_declines_on_a_closed_stdin_too() {
     let output = spec_run(dir.path(), &["draft"]);
     assert!(output.status.success(), "a declined wizard is not an error");
     let reply = stdout(&output);
-    assert!(reply.contains("\"staged\": false"), "{reply}");
+    assert!(reply.contains("\"written\": false"), "{reply}");
     assert!(
-        reply.contains("Nothing was staged. Run spec draft again"),
+        reply.contains("Nothing was written. Run spec draft again"),
         "{reply}"
     );
 }
@@ -265,35 +265,35 @@ fn the_end_of_the_input_is_explained_on_stderr() {
     let output = spec_run(dir.path(), &["reword", "REQ-001"]);
     let explanation = String::from_utf8(output.stderr).unwrap();
     assert!(explanation.contains("end of input"), "{explanation}");
-    assert!(explanation.contains("nothing is staged"), "{explanation}");
+    assert!(explanation.contains("nothing is written"), "{explanation}");
     // The non-TTY warning still leads, and still earns its wizard
     // sentence here.
-    assert!(explanation.contains("stages nothing"), "{explanation}");
+    assert!(explanation.contains("writes nothing"), "{explanation}");
 }
 
 /// A pipe that answers some prompts and then runs out is the case the
 /// guide warns about: it declines rather than guessing at the rest.
 #[test]
-fn a_pipe_that_runs_out_part_way_declines_and_stages_nothing() {
+fn a_pipe_that_runs_out_part_way_declines_and_writes_nothing() {
     let dir = project(VALID);
     let output = spec_piped(dir.path(), &["reword", "REQ-001"], "\n\n");
     assert!(output.status.success());
     let reply = stdout(&output);
-    assert!(reply.contains("\"staged\": false"), "{reply}");
-    assert!(reply.contains("Nothing was staged."), "{reply}");
+    assert!(reply.contains("\"written\": false"), "{reply}");
+    assert!(reply.contains("Nothing was written."), "{reply}");
 }
 
 /// And the documented recipe still works: answer every prompt,
-/// including the confirmation, and the wizard stages.
+/// including the confirmation, and the wizard writes.
 #[test]
-fn a_pipe_that_answers_every_prompt_still_stages() {
+fn a_pipe_that_answers_every_prompt_still_writes() {
     let dir = project(CLEAN_WORDING);
     // title, story, criterion 1, criterion 2, the blank that ends the
     // list, then the confirmation.
     let output = spec_piped(dir.path(), &["reword", "REQ-001"], "\n\n\n\n\ny\n");
     assert!(output.status.success());
     let reply = stdout(&output);
-    assert!(reply.contains("\"staged\": true"), "{reply}");
+    assert!(reply.contains("\"written\": true"), "{reply}");
     let explanation = String::from_utf8(output.stderr).unwrap();
     assert!(
         !explanation.contains("end of input"),

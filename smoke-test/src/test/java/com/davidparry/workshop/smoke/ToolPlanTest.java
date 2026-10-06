@@ -15,8 +15,8 @@ class ToolPlanTest {
     @Test
     @DisplayName("the plan names exactly the tools the server may serve, and no extras")
     void planIsExactlyTwentyFive() {
-        assertThat(ToolPlan.size()).isEqualTo(25);
-        assertThat(ToolPlan.names()).hasSize(25);
+        assertThat(ToolPlan.size()).isEqualTo(21);
+        assertThat(ToolPlan.names()).hasSize(21);
         assertThat(ToolPlan.all()).extracting(ToolPlan.PlannedTool::name).doesNotHaveDuplicates();
         assertThat(ToolPlan.names()).contains(
                 "list_requirements",
@@ -45,15 +45,15 @@ class ToolSweepTest {
         ToolSweep.SweepReport report = new ToolSweep().run(client, null, false);
         assertThat(report.missing()).isEmpty();
         assertThat(report.unexpected()).isEmpty();
-        assertThat(report.discovered()).hasSize(25);
-        assertThat(report.called()).contains("list_requirements", "validate_spec", "changes_show");
+        assertThat(report.discovered()).hasSize(21);
+        assertThat(report.called()).contains("list_requirements", "validate_spec", "feature_list");
         assertThat(report.called())
-                .doesNotContain("scenario_add", "command_run", "changes_commit", "requirement_reword");
+                .doesNotContain("scenario_add", "command_run", "requirement_reword");
         assertThat(report.failures()).isEmpty();
     }
 
     @Test
-    @DisplayName("mutating mode also calls staging and gated tools")
+    @DisplayName("mutating mode also calls the writing and gated tools")
     void mutatingCallsTheRest() {
         Scripted client = new Scripted();
         ToolPlan.all().forEach(row -> client.tools.add(new DiscoveredTool(row.name(), row.name())));
@@ -61,7 +61,7 @@ class ToolSweepTest {
         Narrator narrator = new Narrator(line -> {
         });
         ToolSweep.SweepReport report = new ToolSweep().run(client, narrator, true);
-        assertThat(report.called()).hasSize(25);
+        assertThat(report.called()).hasSize(21);
         assertThat(report.failures()).isEmpty();
     }
 

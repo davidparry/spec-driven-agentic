@@ -205,7 +205,7 @@ pub fn parse_layout_checked(reply: &str, candidates: &[String]) -> Result<String
 
 /// `None` for a path that resolves to the project root itself, which is
 /// how the layout says "here" without inventing a `.` or an empty string
-/// that would then be joined into a staging path.
+/// that would then be joined into a write path.
 fn at_root(path: &str) -> Option<String> {
     (!path.is_empty()).then(|| path.to_string())
 }

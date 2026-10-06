@@ -14,8 +14,9 @@ production class is deliberately the *last* file to exist.
 The harness's own files are a third group, and they are not in the
 diagram. They all live under `.spec/` in the project root: `config.toml`
 (tracked configuration), `state.json` (TDD phase), `memory.json`
-(discovered layout), `history`, `cache/`, `log/`, and `staged/`
-(mutations waiting to be committed). Only `config.toml` is committed.
+(discovered layout), `history`, `.lock` (the advisory lock that
+serializes writes), `cache/`, and `log/`. Only `config.toml` is
+committed.
 
 ```mermaid
 flowchart TD

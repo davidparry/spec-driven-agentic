@@ -19,6 +19,7 @@ Usage: spec deliver [OPTIONS] [TARGET]...
 | `--fail-fast` | Stop at the first requirement that falls short instead of carrying on. |
 | `--no-refactor` | Skip the refactor step even on a green bar. |
 | `--file <FILE>` | Draft new requirements into this included spec file. Omitted, the drafted requirement lands in the catalog document covering the working directory — see [`spec draft`](spec.md#spec-draft). |
+| `--no-branch` | Skip [the branch gate](../branch-gate.md) entirely: git is not consulted and no branch is created. |
 
 Requirements drafted from a description are numbered the way
 [`spec draft`](spec.md#how-the-id-is-chosen) numbers anything: the
@@ -108,7 +109,16 @@ A step that loops on its own is called once and its loop is trusted:
 drafting's validate-and-reword rounds, `spec implement`'s attempts,
 and `spec refactor`'s rounds are not wrapped in a second loop here.
 
-## It never stops to ask
+## It stops once, before it writes anything
+
+A run that delivers a backlog writes a lot of files. So before the first
+one, it asks a single question: a branch name for this run, Enter for a
+generated one, or `n` to stay where you are. That is
+[the branch gate](../branch-gate.md), and `--no-branch` removes it. A
+run outside a git repository, or one whose stdin has nothing left to
+read, takes the no-branch path and says so.
+
+## After that it never stops to ask
 
 A run either completes or tells you why it could not. It does neither
 halfway through a question, because an orchestrator that waits at a
@@ -122,7 +132,7 @@ for you and which wording landed:
 
 ```text
 REQ-001 title [Empty string returns zero] (Enter keeps it): kept (spec deliver never stops to ask)
-The wording reads clean. Stage this requirement? yes (spec deliver never stops to ask)
+The wording reads clean. Write this requirement? yes (spec deliver never stops to ask)
 ```
 
 The generated unit test is still printed before it runs — the assertions
@@ -157,7 +167,7 @@ backlog:
 Plan: 2 requirement(s) - REQ-001, REQ-002.
 [1 of 2] REQ-001
 ...
-REQ-001 stopped: The generated tests were declined and the staging area is clear. Author them by hand, then run spec deliver again.
+REQ-001 stopped: The generated tests were declined. Author them by hand, then run spec deliver again.
 [2 of 2] REQ-002
 ```
 

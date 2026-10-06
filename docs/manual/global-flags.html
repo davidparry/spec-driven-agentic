@@ -35,10 +35,10 @@
             const path_to_root = "";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "searchindex-bb14de4e.js";
+            window.path_to_searchindex_js = "searchindex-d84b362c.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-2ab172c3.js"></script>
+        <script src="toc-0006eac3.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -292,6 +292,19 @@ prints the resolved keys and their source.</p>
 <h2 id="--max-rounds-n"><a class="header" href="#--max-rounds-n"><code>--max-rounds &lt;N&gt;</code></a></h2>
 <p>Override <code>[tools] max_rounds</code> for one run: how many tool-call rounds
 <code>Agent::ask</code> may take before it must return a parsed reply.</p>
+<h2 id="--no-branch"><a class="header" href="#--no-branch"><code>--no-branch</code></a></h2>
+<p>Skip <a href="branch-gate.html">the branch gate</a>. <code>spec greenfield</code> and
+<code>spec deliver</code> normally stop once, before they write anything, to offer
+the run a branch of its own; with this flag they ask nothing and start
+immediately.</p>
+<p>Git is not consulted at all, which is the point of the flag rather than
+a side effect of it. A project deliberately kept outside version
+control should not be asked about a branch, and a CI job that already
+made its own should not pay for the probe or risk a question nothing is
+there to answer.</p>
+<pre><code class="language-bash">spec --no-branch deliver "sum comma-separated numbers"
+</code></pre>
+<p>Every other command ignores the flag, because no other command asks.</p>
 <h2 id="-v---version"><a class="header" href="#-v---version"><code>-V</code>, <code>--version</code></a></h2>
 <p>Prints the version compiled into the binary (from <code>Cargo.toml</code> at
 build time).</p>

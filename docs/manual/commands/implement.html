@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-bb14de4e.js";
+            window.path_to_searchindex_js = "../searchindex-d84b362c.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-2ab172c3.js"></script>
+        <script src="../toc-0006eac3.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -189,8 +189,8 @@ practices (package naming for Java, snake_case modules for Rust, and
 so on), and must reply with complete files:
 the production code plus real bodies for the TODO placeholders in the
 generated tests and step definitions. Everything it writes lands in
-the staging area — you review before anything touches the working
-tree, and the next test run is the real validator.</p>
+the working tree as it goes — read it with <code>git diff</code>, undo it with
+<code>git restore</code>, and let the next test run be the real validator.</p>
 <pre><code class="language-text">Usage: spec implement [OPTIONS] &lt;REQ_ID&gt;
 
 Options:
@@ -224,7 +224,7 @@ gets the single static line instead:</p>
   unit test: src/test/java/Req001Test.java - present
   production code (the attempt creates it when missing): src/main/java/StringCalculator.java - missing
 Sending the sources, the failures, and the attempt history to the model - working ...
-  staged: src/main/java/StringCalculator.java
+  wrote: src/main/java/StringCalculator.java
 </code></pre>
 <pre><code class="language-json">{
   "targets": [
@@ -232,27 +232,28 @@ Sending the sources, the failures, and the attempt history to the model - workin
     "src/test/java/Req001Test.java",
     "src/test/java/GeneratedSteps.java"
   ],
-  "staged": true,
+  "written": true,
   "source": "llm",
-  "nextStep": "Apply with spec changes commit, then spec test - the run decides."
+  "nextStep": "Run spec test - the run decides."
 }
 </code></pre>
 <h2 id="the-follow-up-offer"><a class="header" href="#the-follow-up-offer">The follow-up offer</a></h2>
-<p>When files were staged and you are on a terminal, the command closes
+<p>When files were written and you are on a terminal, the command closes
 the loop itself:</p>
-<pre><code class="language-text">Apply the staged files and run the tests now? [y/N]
+<pre><code class="language-text">Run the tests now? [y/N]
 </code></pre>
-<p>Answering <code>y</code> runs <code>changes commit</code> and <code>test</code> in one go and prints
-both reports, ending with the verdict in color — green
-<code>GREEN - next: refactor (optional), then spec mark-implemented REQ-001 &amp;&amp; changes commit.</code>
+<p>Answering <code>y</code> runs <code>test</code> and prints the report, ending with the
+verdict in color — green
+<code>GREEN - next: refactor (optional), then mark-implemented REQ-001.</code>
 or red
 <code>Still RED - the fresh failures are recorded; run implement REQ-001 for another model attempt, or implement by hand and rerun test.</code></p>
 <p>Pressing <kbd>Enter</kbd> (or piping the output, where no question is
 asked) declines and prints the next command in plain words instead:</p>
-<pre><code class="language-text">Next: changes commit &amp;&amp; test - then implement REQ-001 again if the bar stays RED.
+<pre><code class="language-text">Next: test - then implement REQ-001 again if the bar stays RED.
 </code></pre>
-<p>In every one of these lines the command itself — <code>changes commit &amp;&amp; test</code>, <code>implement REQ-001</code>, <code>spec mark-implemented REQ-001 &amp;&amp; changes commit</code> — is printed in green, the harness’s marker for text meant to be
-copied and pasted.</p>
+<p>In every one of these lines the command itself — <code>test</code>,
+<code>implement REQ-001</code>, <code>mark-implemented REQ-001</code> — is printed in green,
+the harness’s marker for text meant to be copied and pasted.</p>
 <h2 id="the-preflight"><a class="header" href="#the-preflight">The preflight</a></h2>
 <p>Before anything goes to the model, the command surveys the
 prerequisites of an implementation attempt:</p>
@@ -277,7 +278,7 @@ and the JSON reply is the readiness report:</p>
   ],
   "findings": [
     "No RED test run is recorded - run spec test first so its failures brief the model.",
-    "No scenario is tagged @REQ-001 - add one with spec scenario add, then spec changes commit."
+    "No scenario is tagged @REQ-001 - add one with spec scenario add."
   ],
   "nextStep": "No RED test run is recorded - run spec test first so its failures brief the model."
 }
@@ -295,7 +296,7 @@ updates. Only two kinds of path are accepted: files already in the
 project’s sources (the generated unit test and step definitions it
 needs to wire up), and the production file described below. Anything
 else in the reply is dropped. A reply with no usable update fails with
-<code>The model's reply held no usable file update.</code> — nothing is staged,
+<code>The model's reply held no usable file update.</code> — nothing is written,
 and you implement by hand instead.</p>
 <p>A reply that would <em>destroy</em> a file it replaces is dropped too, and
 reported. Two things disqualify it: no longer declaring a name the
@@ -303,7 +304,7 @@ file declares today, or braces that never close. Both describe a
 truncated or junk reply rather than a wrong one — the test run is what
 decides whether an attempt is any good, and it never gets to run when
 the reply deletes the code the tests were going to call. The refusal
-is per file, so the rest of an otherwise fine attempt is still staged.</p>
+is per file, so the rest of an otherwise fine attempt is still written.</p>
 <h2 id="where-the-work-lands"><a class="header" href="#where-the-work-lands">Where the work lands</a></h2>
 <p>The production file is resolved in this order, and the first answer
 wins:</p>
@@ -363,17 +364,17 @@ reason. Either write a step body or two against the real types, or pass
 <pre><code class="language-text">production code (the attempt creates it when missing): unknown - pass --into &lt;path&gt; - missing
 </code></pre>
 <h2 id="when-an-attempt-reaches-past-its-requirement"><a class="header" href="#when-an-attempt-reaches-past-its-requirement">When an attempt reaches past its requirement</a></h2>
-<p>The report’s <code>warning</code> also calls out staged code that looks like it
+<p>The report’s <code>warning</code> also calls out written code that looks like it
 satisfies a <em>different</em> requirement still marked <code>pending</code>:</p>
-<pre><code class="language-text">The staged code also satisfies REQ-005, still pending - REQ-006 was the
-requirement asked for. Review the diff with spec changes show and drop what
+<pre><code class="language-text">The code written also satisfies REQ-005, still pending - REQ-006 was the
+requirement asked for. Review the diff with git diff and drop what
 REQ-006 does not need, so each requirement keeps its own RED bar.
 </code></pre>
 <p>It is a literal match — the code feeds in the same quoted inputs the other
 requirement’s criteria name and lands on the same expected numbers — so it
 warns and never blocks. A criterion worded without literals is invisible to
 it, and a literal two requirements share can raise it when nothing is wrong.
-Read the staged diff and decide; that is the check this is a prompt for, not
+Read the diff and decide; that is the check this is a prompt for, not
 a replacement of.</p>
 <p>The implementation prompt is the largest call the harness makes, and
 against a real project it is slow: attempts on this repository’s own
@@ -392,9 +393,8 @@ the same requirement is always a fresh call.</p>
 implementation attempt — the same behavior <kbd>Enter</kbd> triggers
 on a RED bar inside the loop. Use it to continue a paused run:</p>
 <pre><code class="language-bash">spec test                 # confirm RED, record the failures
-spec implement REQ-001    # stage the model's attempt
-spec changes show         # review what it wrote
-spec changes commit
+spec implement REQ-001    # the model's attempt, written into the tree
+git diff                  # review what it wrote
 spec test                 # GREEN? then spec refactor / spec mark-implemented
 </code></pre>
 <p>If the bar stays RED, run <code>spec implement</code> again — the fresh failure
@@ -419,14 +419,14 @@ stays on disk for humans; it is not sent to the model.</p>
 <p>The attempt log is scoped to the requirement and cleared the moment a
 test run goes GREEN — a closed loop leaves no history for the next
 requirement to inherit.</p>
-<p><code>run_tests</code> during this command sees the <strong>working tree</strong>, not the
-unstaged patch sitting in <code>.spec/staged/</code>. Commit (or apply) before you
-trust the bar. If the model requests <code>command_run</code>, the harness asks you to
-confirm first; piped or CI stdin declines and never hangs.</p>
+<p><code>run_tests</code> during this command sees the <strong>working tree</strong> — which is
+where the attempt just wrote, so the bar is measured against exactly
+the files the model produced. If the model requests <code>command_run</code>, the
+harness asks you to confirm first; piped or CI stdin declines and never
+hangs.</p>
 <h2 id="see-also"><a class="header" href="#see-also">See also</a></h2>
 <ul>
 <li><a href="greenfield.html"><code>spec greenfield</code></a> — the orchestrated loop with the same attempt built in.</li>
-<li><a href="changes.html"><code>spec changes</code></a> — review and apply the staged files.</li>
 <li><a href="test.html"><code>spec test</code></a> — the run that decides.</li>
 <li><a href="tools.html"><code>spec tools</code></a> — the implement profile (includes <code>command_run</code>).</li>
 </ul>

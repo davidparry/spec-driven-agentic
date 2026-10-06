@@ -47,8 +47,9 @@ wording survives a review that rejects ambiguity like *should*, *handles*, and
 *properly*, the accepted criteria become a tagged Gherkin scenario and a JUnit
 test **through those tools**, the suite goes red, and only then is production
 code written. Per-command profiles hand a generating command three to seven
-tools and nothing else. Every write lands in a staging area a human reviews as a
-diff. On stage that sequence is driven a step at a time, with the room as the
+tools and nothing else. Every write lands in the project's real files, on a
+branch the run asks for up front, so `git diff` is the review and `git restore`
+is the undo. On stage that sequence is driven a step at a time, with the room as the
 orchestrator, because a command that collapses the steps also collapses the
 checks — and the checks are the session. Each step is verified rather than
 trusted: the asset survey is re-read between them, so a step that claims to
@@ -79,7 +80,7 @@ writing code on your laptop with no account, no key, and no network. That
 on-ramp is genuinely good, and it is also, by its author's explicit design,
 *loose*: pi ships eight built-in tools — including `bash`, `write`, and `edit` —
 and its README states the philosophy in four words, **"No permission popups."**
-There is no plan mode, no phase gate, no staging area. On a frontier model you
+There is no plan mode, no phase gate, no branch gate. On a frontier model you
 can live with that, because you are the review. On a local model you watch it
 fix a failing build by deleting the assertion. So we take the tools away: pi
 deliberately has no MCP in core, so we install the extension, register the same
@@ -159,9 +160,9 @@ failure the project actually hit; each is now caught by a deterministic check.
 | Refactoring on red | Offered to "clean up" while tests were failing | The TDD state machine refuses the transition from any phase but GREEN |
 | Premature completion | Marked a requirement implemented with nothing proving it | `requirement_mark_implemented` requires GREEN plus a scenario tagged with the requirement ID |
 | Right process, wrong requirement | Asked for "the next pending id", took the requirement it had just drafted to green instead — correct discipline, every gate satisfied, an hour spent on work nobody asked for | Nothing in the loop, and that is the point: the phase gates police *how* the agent works, never *what it works on*. The prompt names the id, and the end-of-run verifier grades that id by name |
-| Tool-calling drift | Local model invented a tool, skipped staging, or called `command_run` without waiting | Per-command profiles (`spec tools profiles`) hand the generating commands 3–7 tools and the read-only `spec ask` 12; `[tool_rules]` in `harness/prompts/prompts.toml`; the harness's `command_run` asks the human to confirm |
-| Fixing the test instead of the code | Given a shell and a writable test file, the local model made the bar green by deleting the assertion | Nothing in a loose host — pi has no permission popups by design. In the harness the model never gets a shell or a free-hand write: an implementation attempt lands in staging as a reviewable diff, and `run_tests` is the only thing that can report a bar |
-| Implementing more than was asked | Asked to implement REQ-006, the local model also quietly implemented REQ-005 — the bar went green, both behaviors worked, and the spec still called REQ-005 pending | The mirror image of premature completion: the code runs ahead of the spec instead of behind it. `spec implement` now matches the staged diff against the other pending requirements and warns when it satisfies one. Literal matching — same quoted inputs, same expected value — so it warns and never blocks; reading the staged diff is still the real defense |
+| Tool-calling drift | Local model invented a tool, skipped the authoring tools, or called `command_run` without waiting | Per-command profiles (`spec tools profiles`) hand the generating commands 3–7 tools and the read-only `spec ask` 12; `[tool_rules]` in `harness/prompts/prompts.toml`; the harness's `command_run` asks the human to confirm |
+| Fixing the test instead of the code | Given a shell and a writable test file, the local model made the bar green by deleting the assertion | Nothing in a loose host — pi has no permission popups by design. In the harness the model never gets a shell or a free-hand write: an implementation attempt lands in the named files as a reviewable diff, and `run_tests` is the only thing that can report a bar |
+| Implementing more than was asked | Asked to implement REQ-006, the local model also quietly implemented REQ-005 — the bar went green, both behaviors worked, and the spec still called REQ-005 pending | The mirror image of premature completion: the code runs ahead of the spec instead of behind it. `spec implement` now matches the diff it wrote against the other pending requirements and warns when it satisfies one. Literal matching — same quoted inputs, same expected value — so it warns and never blocks; reading the diff is still the real defense |
 
 Where a frontier model is still the better call, and where a human still has to
 be on the review, is stated plainly rather than skipped.
@@ -287,8 +288,11 @@ Then the whole morning runs again with nobody watching. `spec deliver` takes a
 sentence — or the entire backlog — and drives the identical nine stages the room
 just watched by hand, answering every prompt itself. Everything the factory
 gives up is a *human judgement*; everything it keeps is a *state machine*. It
-still cannot refactor on red, still cannot mark work implemented without a green
-bar and a tagged scenario, and still refuses to start while anything is staged.
+still cannot refactor on red and still cannot mark work implemented without a
+green bar and a tagged scenario. And it stops exactly once, before it writes
+anything, to offer the run a branch of its own — three unread diffs on a branch
+you can delete is a reviewable pull request; the same three in your working
+tree are a mess.
 
 That sets up the close. Run autonomously from the same sentence, the factory
 would have passed every one of those gates and built the function — correctly,
@@ -303,8 +307,9 @@ The morning's work grades itself.
 
 Throughout, "human in the loop" is given a precise meaning: **three moments**.
 The wording, because an ambiguous requirement produces a meaningless test. The
-staged diff, because every write lands in a staging area rather than the working
-tree. The implementation, because that is the design you will live with.
+diff, because every write lands in your real files and `git diff` is what shows
+you what landed. The implementation, because that is the design you will live
+with.
 Everything between those three is turning the crank — and the autonomous segment
 shows exactly what a morning costs when you hand all three to the machine.
 

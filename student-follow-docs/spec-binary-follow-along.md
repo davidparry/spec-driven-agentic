@@ -17,14 +17,14 @@ Three companion pages, and it is worth knowing which is which:
   for the fully offline route.
 
 All of them call one MCP server. What changes is who supplies the
-workflow. On this page nobody prompts anything: you type commands, the
-runner encodes the sequence and the phase gates, and every write lands in
-a staging area you review before it touches the working tree.
+workflow. On this page nobody prompts anything: you type commands, and
+the runner encodes the sequence and the phase gates.
 
-**The one thing to carry through the whole run:** `spec` stages, you
-approve. No authoring command writes to your files. `spec changes show`
-tells you what is waiting and `spec changes commit` applies it. The two
-human checkpoints in Step 3 are the whole point of the exercise.
+**The one thing to carry through the whole run:** `spec` writes your
+real files, and `git` is the review. Every authoring command edits the
+file and says so; `git diff` is how you read it and `git restore` is how
+you undo it. The two human checkpoints in Step 3 are those two diffs,
+and they are the whole point of the exercise. Work on a branch.
 
 ---
 
@@ -67,11 +67,11 @@ list of bare commands, one per step.
 
 You need:
 
-- **`spec` on PATH.** Check with `spec --version`; you want **0.7.4 or
+- **`spec` on PATH.** Check with `spec --version`; you want **0.8.0 or
   newer**. 0.5.5 was the first release that prints its `nextStep` advice as
   commands you can paste rather than as the tool names the MCP server uses
   — which is the dialect every reply on this page is quoted in — but the
-  floor is 0.7.4, because this page reads and writes `.spec/config.toml`
+  floor is 0.8.0, because this page reads and writes `.spec/config.toml`
   and the `.spec/` directory replaced the flat `.spec.toml` in 0.6.0.
   Install with
   `cargo install --path harness` from the repository root, or use a GitHub
@@ -131,7 +131,7 @@ Ctrl-C.
 | --- | --- | --- |
 | `spec validate`, `spec list`, `spec show`, `spec refine`, `spec test` | No | instant |
 | `spec draft` with all flags, `spec scenario add`, `spec include add` | No | instant |
-| `spec changes show` / `commit` / `discard`, `spec refactor --manual`, `spec mark-implemented` | No | instant |
+| `spec refactor --manual`, `spec mark-implemented`, `spec include add` | No | instant |
 | `spec steps missing` | No | instant |
 | `spec draft` with no flags — the Step 2 wizard | Yes — one call to split your description, plus a retry for each reply that comes back unusable or without an edge case, then one per finding | about 59 s in the observed run |
 | `spec scenario generate` | Yes — one call, falling back to a literal reading of the criteria | about 12 s in the observed run |
@@ -298,7 +298,7 @@ calling list_requirements ...
 The model reply was invalid (requirement "Custom delimiter declared on the first line" covers only happy paths - add at least one edge case to each (empty, invalid, or error input)) - asking again (2 of 3)
 The description holds 1 requirement(s):
   1. Custom delimiter declared on the first line
-Accepted requirements are staged for requirements/requirements.json as pending - nothing reaches the working spec until spec changes commit:
+Accepted requirements were written to requirements/requirements.json as pending:
   REQ-007 Custom delimiter declared on the first line
 Walking through REQ-007. Each prompt shows the proposal - Enter accepts it, or type your own wording.
 ```
@@ -347,10 +347,11 @@ instead of twice.
 Your run may show that line, or two of them, or none, depending on what
 the model answers first. Each one costs a few seconds.
 
-Fourth: accepted proposals are staged **immediately**, as `pending`, under
-sequential ids — before you review anything. Nothing reaches your working
-tree until `spec changes commit`, so this is safe, but it does mean
-`spec changes show` has something in it from this moment on.
+Fourth: accepted proposals are written **immediately**, as `pending`,
+under sequential ids — before you review anything. They are in
+`requirements.json` from this moment on, so if you decline the wizard at
+the end, the batch stays there under the model's wording and `git
+restore requirements/` is what takes it back. The reply says so.
 
 Then the wizard walks the proposal field by field, pre-filled. Enter
 keeps each one; type over it to use your own wording:
@@ -391,7 +392,7 @@ handed back. There is an edge case in there already, so they find nothing
 and the loop ends where you decide:
 
 ```text
-The wording reads clean. Stage this requirement? [y/N]
+The wording reads clean. Write this requirement? [y/N]
 ```
 
 Answer `y`. At a terminal the whole run is: paste the prompt, Enter
@@ -408,16 +409,15 @@ requirement broken on purpose.
 {
   "id": "REQ-007",
   "title": "Custom delimiter declared on the first line",
-  "staged": true,
-  "nextStep": "Review with spec changes show and apply with spec changes commit, then add the @REQ-007 scenario with scenario add."
+  "written": true,
+  "nextStep": "Add the @REQ-007 scenario with scenario add."
 }
 ```
 
-One footnote on that reply. `scenario add` at the end is missing its
-`spec ` prefix: the rewriter that turns the services' advice into
-commands only prefixes phrases it cannot mistake for English, and
-`scenario add` is not on that list. Paste `spec scenario add`, not what it
-says.
+One footnote on that reply. `scenario add` is missing its `spec `
+prefix: the rewriter that turns the services' advice into commands only
+prefixes phrases it cannot mistake for English, and `scenario add` is
+not on that list. Paste `spec scenario add`, not what it says.
 
 Note the two characters `\n` in the prompt and in every criterion the
 model gave back. The spec writes an input newline as the literal
@@ -431,7 +431,7 @@ Several later steps depend on it.
 describes a single behaviour, so you get a single proposal and go straight
 to the review pass. Describe two and the splitter takes you at your word:
 appending `, and an empty delimiter declaration is rejected` produced
-**two** proposals and staged both, under REQ-007 and REQ-008. That opens
+**two** proposals and wrote both, under REQ-007 and REQ-008. That opens
 an extra prompt, where you can take only the first:
 
 ```text
@@ -462,55 +462,28 @@ spec draft \
 
 With those supplied, `spec draft` is fully non-interactive: no wizard,
 no prompts, no terminal, no model. It assigns the next id, checks the
-structure, and stages. That makes it the one authoring command you can
+structure, and writes. That makes it the one authoring command you can
 safely put in a script — and it is also how this page used to open, which
 is worth knowing only so you understand what it costs. Pasting a finished
 requirement is transcription. The wizard above is the exercise.
 
-**Do this** — review, then apply:
+**Do this** — read what landed:
 
 ```bash
-spec changes show
-spec changes commit
+git diff requirements/
 ```
 
-You get one JSON reply per command. `spec changes show` is the review
-surface. It lists the staged manifest — one entry per file, with the
-action and a summary of the edits that produced it:
+Two edits went into `requirements/requirements.json` while you were in
+the wizard, and the diff carries both: the splitter writing its accepted
+proposals, and the wording you confirmed at the end being written back
+over them. You get that second write whether or not the findings round
+ran — even if you pressed Enter through every prompt unchanged. It is
+the wizard recording the wording you approved, not evidence that
+anything was repaired.
 
-```json
-{
-  "changes": [
-    {
-      "path": "requirements/requirements.json",
-      "action": "modify",
-      "summary": "draft REQ-007 from the description; reword REQ-007"
-    }
-  ],
-  "nextStep": "Review the staged files, run spec validate, then apply with spec changes commit or drop with spec changes discard."
-}
-```
-
-That summary is the whole wizard in one line: `draft REQ-007 from the
-description` is the splitter staging its proposals, and `reword REQ-007`
-is the wording you confirmed at the end being written back over them. Two
-edits, one file, one entry.
-
-You get that second half whether or not the findings round ran — even if
-you pressed Enter through every prompt unchanged. It is the wizard
-recording the wording you approved, not evidence that anything was
-repaired.
-
-`spec changes commit` echoes that same manifest back — it is telling you
-what it just applied, not showing you a second batch. The `nextStep` is
-what tells the two replies apart: `Staged changes applied to the working
-tree.` means the edit is now in your files.
-
-The staged **bytes** live beside the manifest, under
-`.spec/staged/files/` mirroring the project layout — so the file above is
-at `.spec/staged/files/requirements/requirements.json`. Open it when you
-want to read the exact content before approving it. Your working tree is
-untouched until `spec changes commit`.
+This is the review surface for every authoring command on this page.
+There is no staging area to inspect and nothing to apply: the bytes are
+in the file, and `git restore requirements/` is the undo.
 
 **Do this** — have the wording reviewed:
 
@@ -526,16 +499,14 @@ spec list
   "id": "REQ-007",
   "clean": true,
   "findings": [],
-  "source": "working tree",
   "nextStep": "The wording reads clean. Confirm it with the developer, then write the Gherkin scenario from the acceptance criteria."
 }
 ```
 
 It is clean because the wizard already drove it there — the findings
-round you watched inside `spec draft` was this same reviewer, run against
-the staged wording. This call is you confirming that from outside the
-wizard, on the committed file, which is what `"source": "working tree"`
-is telling you.
+round you watched inside `spec draft` was this same reviewer. This call
+is you confirming that from outside the wizard, against the file as it
+now stands.
 
 `spec list` now shows seven ids, with REQ-007 `pending`.
 
@@ -617,9 +588,9 @@ took **12 seconds**:
     "Two larger numbers separated by a comma are summed"
   ],
   "criteria": 2,
-  "staged": true,
+  "written": true,
   "source": "llm",
-  "nextStep": "Read the steps against the acceptance criteria, apply with spec changes commit, then run spec steps missing."
+  "nextStep": "Read the steps against the acceptance criteria, then run spec steps missing."
 }
 ```
 
@@ -629,7 +600,7 @@ answer, and it tells you which one you got.
 A literal reading of the criteria is always available and needs no model
 at all — `Given "1,2"` / `When add is called` / `Then the result is 3`,
 straight off the criterion's own words. That is the **template**, and
-`"source": "template"` means it is what got staged. Correct, and slightly
+`"source": "template"` means it is what got written. Correct, and slightly
 foreign: it has no way of knowing that every scenario already in this
 file opens on `Given a string calculator`.
 
@@ -676,7 +647,7 @@ Its reply is only used when it holds **exactly one scenario per
 criterion**, every step opens with a Gherkin keyword, every scenario has a
 `When` and a `Then`, and no name collides with one already in the file.
 Miss any of those and it is asked again with the reason; run out of
-retries and the template is staged instead. **Coverage cannot be lost to
+retries and the template is written instead. **Coverage cannot be lost to
 a chatty model** — which matters, because `verify-workshop-run.sh` grades
 REQ-003 on exactly that: one tagged scenario per acceptance criterion.
 
@@ -709,8 +680,8 @@ spec scenario add --feature kata/src/test/resources/features/string_calculator.f
   "feature": "kata/src/test/resources/features/string_calculator.feature",
   "scenario": "Two numbers separated by a comma are summed",
   "action": "add",
-  "staged": true,
-  "nextStep": "Review with spec changes show, run spec validate, then apply with spec changes commit."
+  "written": true,
+  "nextStep": "kata/src/test/resources/features/string_calculator.feature updated. Run spec validate, then spec test."
 }
 ```
 
@@ -722,39 +693,19 @@ exercise.
 **Do this** — checkpoint 1, and it is yours:
 
 ```bash
-spec changes show
+git diff kata/src/test/resources/features/string_calculator.feature
 ```
 
-Both scenarios landed on one feature file, so they produce **one** staged
-entry — one file is one entry — and its summary names **both** edits,
-joined with `"; "`. `spec scenario generate` stages through the same
-`scenario add` underneath, once per scenario, which is why the summary
-reads as two appends rather than one generation:
-
-```json
-{
-  "changes": [
-    {
-      "path": "kata/src/test/resources/features/string_calculator.feature",
-      "action": "modify",
-      "summary": "add scenario \"Two numbers separated by a comma are summed\" for REQ-003; add scenario \"Two larger numbers separated by a comma are summed\" for REQ-003"
-    }
-  ],
-  "nextStep": "Review the staged files, run spec validate, then apply with spec changes commit or drop with spec changes discard."
-}
-```
-
-That cumulative summary is the point of the checkpoint: it tells you you
-are approving two scenarios, not one. Open
-`.spec/staged/files/kata/src/test/resources/features/string_calculator.feature`
-and read the Gherkin itself before you commit. Is that the behavior you
-want? This is the spec review, and it is the cheapest place in the whole
-loop to change your mind.
+Both scenarios went into the one feature file, each through the same
+`scenario add` underneath, so the diff shows two appends rather than one
+generation. Read the Gherkin itself. Is that the behavior you want? This
+is the spec review, and it is the cheapest place in the whole loop to
+change your mind — `git restore` on that path takes both scenarios back.
 
 While you are in there, notice what the scenario add did *not* disturb:
 the feature file's header comment block and the
-`As a / I want / So that` narrative under the `Feature:` line come through
-staging untouched. Authoring commands append; they do not rewrite.
+`As a / I want / So that` narrative under the `Feature:` line are
+untouched. Authoring commands append; they do not rewrite.
 
 ### The TDD altitude: a failing unit test
 
@@ -766,16 +717,16 @@ spec unittest generate REQ-003
 
 This one calls the model. Give it 30 to 45 seconds.
 
-**Expect** a staged addition to the existing `StringCalculatorTest.java` —
+**Expect** an addition to the existing `StringCalculatorTest.java` —
 not a new `Req003Test` class:
 
 ```json
 {
   "target": "kata/src/test/java/com/davidparry/workshop/kata/StringCalculatorTest.java",
-  "staged": true,
+  "written": true,
   "source": "llm",
   "summary": "generate failing unit test for REQ-003 (2 criteria, llm)",
-  "nextStep": "Review the assertions (they are yours to sharpen), apply with spec changes commit, then run spec test (expect RED)."
+  "nextStep": "Sharpen the assertions (they are yours), then run spec test (expect RED)."
 }
 ```
 
@@ -797,7 +748,7 @@ fail("TODO: assert - Given \"1,2\", when add is called, then the result is 3")
 
 Those are deliberate. The criterion is copied into the test as a
 `@DisplayName` and a comment, and the assertion is left for you — that is
-what "the assertions are yours to sharpen" means in the `nextStep`.
+what "the assertions are yours" means in the `nextStep`.
 
 **The command stays inside the requirement you name.** Five runs of
 `spec unittest generate REQ-005` each produced REQ-005's two tests and
@@ -822,7 +773,6 @@ rehearsed.
 **Do this**
 
 ```bash
-spec changes commit
 spec test
 ```
 
@@ -854,9 +804,9 @@ legitimate RED:
 
 Both will go green from the same change.
 
-`spec test` runs Maven against your **working tree**, not the staging
-area. That is why `spec changes commit` comes first. Commit before you
-trust the bar.
+`spec test` runs Maven against your **working tree** — which is where
+every command above wrote, so the bar measures exactly the Gherkin and
+tests you just read.
 
 ### Implement
 
@@ -888,13 +838,13 @@ prior attempt on this requirement — a second `spec implement REQ-003`
 after a still-red bar tells the model what it already tried and why the
 bar stayed red.
 
-**Expect** three staged files, first as plain lines and then as the JSON
-report:
+**Expect** three written files, first as plain lines and then as the
+JSON report:
 
 ```text
-  staged: kata/src/main/java/com/davidparry/workshop/kata/StringCalculator.java
-  staged: kata/src/test/java/com/davidparry/workshop/kata/StringCalculatorTest.java
-  staged: kata/src/test/java/com/davidparry/workshop/kata/StringCalculatorSteps.java
+  wrote: kata/src/main/java/com/davidparry/workshop/kata/StringCalculator.java
+  wrote: kata/src/test/java/com/davidparry/workshop/kata/StringCalculatorTest.java
+  wrote: kata/src/test/java/com/davidparry/workshop/kata/StringCalculatorSteps.java
 ```
 
 ```json
@@ -904,9 +854,9 @@ report:
     "kata/src/test/java/com/davidparry/workshop/kata/StringCalculatorTest.java",
     "kata/src/test/java/com/davidparry/workshop/kata/StringCalculatorSteps.java"
   ],
-  "staged": true,
+  "written": true,
   "source": "llm",
-  "nextStep": "Apply with spec changes commit, then spec test - the run decides."
+  "nextStep": "Run spec test - the run decides."
 }
 ```
 
@@ -924,8 +874,8 @@ knowing:
   Run command_run(command=["cat","kata/src/main/java/com/davidparry/workshop/kata/StringCalculator.java"])? [y/N]
   ```
 
-  Answer `y` or `N`; either way `spec implement` still stages. On piped or
-  CI stdin the prompt declines automatically and never hangs.
+  Answer `y` or `N`; either way `spec implement` still writes. On piped
+  or CI stdin the prompt declines automatically and never hangs.
   `command_run` is the only mutation a harness-side model may even
   request, and it is confined to the implement profile.
 
@@ -935,29 +885,28 @@ After it prints the JSON, `spec implement` offers to finish the loop for
 you:
 
 ```text
-Apply the staged files and run the tests now? [y/N]
+Run the tests now? [y/N]
 ```
 
-**Answer `N`.** Saying `y` commits the staged files and runs the tests
-immediately, which is convenient on the fifth requirement and skips
-exactly the review you came here to practice. Declining prints the two
-commands in plain words:
+**Answer `N`.** Saying `y` runs the tests immediately, which is
+convenient on the fifth requirement and skips exactly the review you
+came here to practice. Declining prints the next command in plain words:
 
 ```text
-Next: changes commit && test - then implement REQ-003 again if the bar stays RED.
+Next: test - then implement REQ-003 again if the bar stays RED.
 ```
 
 On piped stdin the prompt is skipped and you get that same line. Once you
-trust the loop, `y` is a real time-saver: it prints the commit, then the
-test run, and then either `GREEN - next: refactor (optional), then
-mark-implemented REQ-003 && changes commit.` or `Still RED - the fresh
-failures are recorded; run implement REQ-003 for another model attempt, or
-implement by hand and rerun test.`
+trust the loop, `y` is a real time-saver: it prints the test run, and
+then either `GREEN - next: refactor (optional), then
+mark-implemented REQ-003.` or `Still RED - the fresh failures are
+recorded; run implement REQ-003 for another model attempt, or implement
+by hand and rerun test.`
 
 **Do this** — checkpoint 2, and it is yours:
 
 ```bash
-spec changes show
+git diff kata/src/main kata/src/test
 ```
 
 Read the production diff. The observed implementation kept the
@@ -965,17 +914,17 @@ empty-string guard from REQ-001 and replaced the single `Integer.parseInt`
 with a split-on-comma loop behind a `COMMA` constant — the simplest thing
 that could pass, which is exactly right. If yours reaches for a regex
 engine or a stream pipeline on the first pass, that is a conversation
-worth having with yourself before you commit it.
+worth having with yourself before you run the bar.
 
-`spec changes discard` drops the whole batch if you would rather write it
-yourself. The working tree is untouched either way.
+`git restore kata/` throws the whole attempt away if you would rather
+write it yourself.
 
 ### GREEN, refactor, mark implemented
 
 **Do this**
 
 ```bash
-spec changes commit && spec test
+spec test
 ```
 
 **Expect** GREEN at the same total: nine tests, zero failures. Same bar,
@@ -1004,10 +953,8 @@ and the brief. Expect a round or two, about a minute each, then:
 }
 ```
 
-`"applied": true` means it is already in your working tree — this is the
-one command that writes there without staging first, because the only
-thing that can tell a refactor from a rewrite is the suite, and the suite
-runs against files on disk. It earns that by never writing a test and by
+`"applied": true` means the cleanup is in your working tree, like
+everything else on this page. It earns that by never writing a test and by
 restoring every file it touched if it cannot get green. If your run comes
 back `"reverted": true`, the model could not clean this up without
 breaking something and your code is exactly as you left it.
@@ -1036,22 +983,20 @@ could refactor. You then clean up and run `spec test` yourself.
 
 ```bash
 spec mark-implemented REQ-003
-spec changes commit
 ```
 
 ```json
 {
   "id": "REQ-003",
   "status": "implemented",
-  "staged": true,
-  "nextStep": "Review with spec changes show, run spec validate (it checks the @REQ-003 scenario exists), then spec changes commit."
+  "written": true,
+  "nextStep": "Run validate - it checks the @REQ-003 scenario exists."
 }
 ```
 
-Notice this stages too. Even the status flip goes through review. And
-notice what it recorded while it was there: `mark-implemented` writes the
-`featureFile` of the `@REQ-003`-tagged feature back into the requirement,
-which is what makes the staged spec validate.
+Notice what it recorded while it was there: `mark-implemented` writes
+the `featureFile` of the `@REQ-003`-tagged feature back into the
+requirement, which is what keeps the spec validating.
 
 That is the loop. Everything left is repetition — so go score it in
 [Step 4](#step-4--check-your-work), which is where the workshop ends. It
@@ -1118,18 +1063,16 @@ spec scenario generate REQ-00N     # one scenario per acceptance criterion
 
 spec steps missing                 # empty? good. otherwise: spec steps generate
 spec unittest generate REQ-00N
-spec changes show                  # checkpoint 1
-spec changes commit
+git diff                           # checkpoint 1
 spec test                          # expect RED
 
 spec implement REQ-00N             # or edit StringCalculator.java by hand
-spec changes show                  # checkpoint 2
-spec changes commit && spec test   # expect GREEN
+git diff                           # checkpoint 2
+spec test                          # expect GREEN
 
 spec refactor --note "<what>" --req REQ-00N    # optional, GREEN only
 git diff && spec test                          # read it, then record the run
 spec mark-implemented REQ-00N
-spec changes commit
 ```
 
 The scenarios used in the verified run, and the bar at each stage:
@@ -1233,8 +1176,8 @@ moved, once to `thenIllegalArgumentExceptionIsThrown`. The part that has
 to be exact is exact; the part that is taste is where the model earns its
 35 seconds.
 
-Commit it and run the suite: 25 tests, 1 error — the `PendingException`
-you just staged — and the other 24 still green.
+Run the suite: 25 tests, 1 error — the `PendingException` just
+written — and the other 24 still green.
 
 Three replies are refused outright, and all three fall back to the
 deterministic version of the same new method — you will see
@@ -1245,7 +1188,7 @@ deterministic version of the same new method — you will see
   unbind the scenario the definition was generated for,
 - a reply that drops one of the definitions it was given.
 
-On top of that, the assembled file is re-checked before staging: every
+On top of that, the assembled file is re-checked before it is written: every
 step pattern the file already declared has to still be there, along with
 its package and its class. A passing scenario cannot be unbound by a
 polish pass.
@@ -1257,8 +1200,8 @@ recorded run, adding this one step also renamed two fields (`result` to
 `lastResult`, `thrown` to `lastThrown`), renamed an existing step method,
 added constants, and introduced an inner class, for about forty-five
 changed lines. If your diff looks like that, you are on an older build.
-Either way the habit is the same: read it with `spec changes show`, open
-the staged file, and commit deliberately.
+Either way the habit is the same: read the file with `git diff` before
+you run the bar.
 
 **`+` is a regex metacharacter.** A naive `"1+2".split("+")` throws
 `PatternSyntaxException: Dangling meta character '+'`. Let the RED bar
@@ -1425,23 +1368,21 @@ yours either way — the model is proposing, not deciding.
 Pass 2 ends with a single confirmation:
 
 ```text
-The wording reads clean. Stage this requirement? [y/N]
+The wording reads clean. Write this requirement? [y/N]
 ```
 
 Answer `y`. At a terminal the whole run is: Enter through pass 1, Enter
 through pass 2, then `y`.
 
-**Expect** `"staged": true` in the reply.
+**Expect** `"written": true` in the reply.
 
-**Do this** — apply it and re-validate:
+**Do this** — re-validate:
 
 ```bash
-spec changes commit
 spec validate
 ```
 
-The commit summary reads `reword REQ-007`, and `spec validate` is back to
-`"valid": true`.
+`spec validate` is back to `"valid": true`.
 
 One aside worth noticing: in the observed run the repaired criterion came
 back as exactly
@@ -1480,14 +1421,14 @@ printf '\n\n\n\n\n\n\n\n\n\ny\n' | spec reword REQ-007
 ```
 
 Get the count wrong in either direction and the confirmation reads a blank
-line, declines, and stages nothing — with exit code 0:
+line, declines, and writes nothing — with exit code 0:
 
 ```json
 {
   "id": "REQ-007",
   "title": "Custom delimiter declared on the first line",
-  "staged": false,
-  "nextStep": "Nothing was staged. Run spec reword REQ-007 again when the wording is ready."
+  "written": false,
+  "nextStep": "Nothing was written. Run spec reword REQ-007 again when the wording is ready."
 }
 ```
 
@@ -1551,11 +1492,10 @@ for byte:
 Note that `spec validate` would still pass on this story. Structure and
 wording are two separate gates, and this is why.
 
-**Do this** — repair, apply, re-check:
+**Do this** — repair, then re-check:
 
 ```bash
 spec reword REQ-007
-spec changes commit
 spec refine REQ-007
 ```
 
@@ -1661,25 +1601,22 @@ spec include add requirements/newlines.json
   "file": "requirements/newlines.json",
   "parent": "requirements/requirements.json",
   "created": true,
-  "staged": true,
-  "nextStep": "Review with spec changes show, apply with spec changes commit, then draft into it with spec draft --file."
+  "written": true,
+  "nextStep": "Draft into it with spec draft --file."
 }
 ```
 
-Two staged files: the include line added to the parent, and a new empty
+Two files written: the include line added to the parent, and a new empty
 child.
 
-**Do this** — apply them, then draft into the child:
+**Do this** — draft into the child:
 
 ```bash
-spec changes commit
-
 spec draft --file requirements/newlines.json \
   --title "Trailing newline in the input is ignored" \
   --story "As a calculator user, I want a trailing newline in the input to be ignored so that copy-pasted input still sums correctly." \
   --criterion 'Given "1,2\n", when add is called, then the result is 3'
 
-spec changes commit
 spec list
 spec validate
 ```
@@ -1745,7 +1682,7 @@ spec mark-implemented REQ-003
 ```
 
 ```text
-No scenario is tagged @REQ-003 - implemented requirements need an executable scenario. Add one with spec scenario add, apply it with spec changes commit, then mark REQ-003 implemented.
+No scenario is tagged @REQ-003 - implemented requirements need an executable scenario. Add one with spec scenario add, then mark REQ-003 implemented.
 ```
 
 That one is the interesting gate. A green bar plus a `pending` status is
@@ -1968,8 +1905,8 @@ findings keep their place above them, and nothing is ever edited or
 dropped: `findings` gains entries, it does not change meaning.
 
 And a judgment still cannot approve anything. It has exactly one
-power — refusing a wording review — and none at all over the test bar,
-a requirement's status, or the staging area.
+power — refusing a wording review — and none at all over the test bar
+or a requirement's status.
 
 Now the false alarm matters. A criterion like `then the verdict is
 "covered"` would block this command, and you would be right and the
@@ -2039,7 +1976,6 @@ Then *you* approve the wording. That gate never moved.
 Everything the exercises touched lives in `kata/` and `requirements/`:
 
 ```bash
-spec changes discard                  # drop anything still staged
 git checkout -- kata requirements     # rewind this branch to the start state
 git clean -fd requirements            # drop spec files you added (delimiters.json, newlines.json)
 ```
@@ -2060,12 +1996,11 @@ The harness keeps its own files in one directory, `.spec/`, next to
 .spec/history        interactive-shell history
 .spec/cache/         cached model replies and tool catalogs
 .spec/log/           daily diagnostic logs
-.spec/staged/        mutations waiting for spec changes commit
+.spec/.lock          advisory lock serializing concurrent writes
 ```
 
 Everything there except `config.toml` is gitignored. Deleting
-`.spec/cache/` or `.spec/log/` is always safe. Deleting `.spec/staged/`
-throws away mutations that have not been committed. Deleting
+`.spec/cache/` or `.spec/log/` is always safe. Deleting
 `.spec/state.json` resets the phase to `START`, which means
 `spec refactor` and `spec mark-implemented` will refuse until you run
 `spec test` once. That is not a bug; it is the same gate as everything
@@ -2086,11 +2021,12 @@ has to keep passing there.
   three minutes. Confirm Ollama is up with `ollama list`, and that
   `spec model use` recorded your model (`spec config` prints the resolved
   configuration and where each value came from).
-- **A command says nothing was staged** — you were probably on piped
-  stdin. Look for the warning on stderr, and run it in a terminal or use
-  the flag form.
+- **A command says nothing was written** — you were probably on piped
+  stdin, where a wizard's final confirmation declines. Look for the
+  warning on stderr, and run it in a terminal or use the flag form.
 - **The bar is not what you expected** — `spec test` reads the working
-  tree, so `spec changes commit` first. `spec state` shows the current
-  phase and last run without touching anything.
+  tree, which is where every command wrote; `git diff` shows what the
+  bar is measuring. `spec state` shows the current phase and last run
+  without touching anything.
 - **A refusal you did not expect** — read it. Every one of them names the
   command that gets you unstuck.

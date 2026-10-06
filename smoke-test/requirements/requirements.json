@@ -88,11 +88,11 @@
     },
     {
       "id": "CLI-009",
-      "title": "The tool plan names exactly the 25 served tools",
+      "title": "The tool plan names exactly the 21 served tools",
       "status": "implemented",
-      "story": "As a maintainer, I want a 26th MCP tool to fail the Java build until it is planned so that the smoke test cannot silently skip new surface area.",
+      "story": "As a maintainer, I want a 22nd MCP tool to fail the Java build until it is planned so that the smoke test cannot silently skip new surface area.",
       "acceptanceCriteria": [
-        "Given the ToolPlan, when it is listed, then it names exactly 25 tools",
+        "Given the ToolPlan, when it is listed, then it names exactly 21 tools",
         "Given a discovered tool that is not in the plan, when the sweep runs, then that tool is reported as unexpected"
       ],
       "featureFile": "smoke-test/src/test/resources/features/tool_sweep.feature"
@@ -101,9 +101,9 @@
       "id": "CLI-010",
       "title": "A read-only sweep calls every planned read tool and skips mutations",
       "status": "implemented",
-      "story": "As a workshop attendee, I want a default sweep that does not stage files so that I can prove discovery without mutating the kata.",
+      "story": "As a workshop attendee, I want a default sweep that writes no files so that I can prove discovery without mutating the kata.",
       "acceptanceCriteria": [
-        "Given a server that exposes every planned tool, when a read-only sweep runs, then staging and gated tools are not called"
+        "Given a server that exposes every planned tool, when a read-only sweep runs, then the writing and gated tools are not called"
       ],
       "featureFile": "smoke-test/src/test/resources/features/tool_sweep.feature"
     },
@@ -119,11 +119,11 @@
     },
     {
       "id": "CLI-012",
-      "title": "The walkthrough calls remaining read-only tools without staging",
+      "title": "The walkthrough calls remaining read-only tools without writing",
       "status": "implemented",
-      "story": "As a workshop attendee, I want the default smoke walkthrough to call validate, inspect, Gherkin, and staging-area reads so that those tools are proven live without mutating the kata.",
+      "story": "As a workshop attendee, I want the default smoke walkthrough to call validate, inspect, Gherkin, and state reads so that those tools are proven live without mutating the kata.",
       "acceptanceCriteria": [
-        "Given a walkthrough run, when the narration is read, then it includes validate_spec, refine_requirement for REQ-001, project_root, project_inspect, feature_list, feature_read of the workshop kata feature, changes_show, changes_validate, and step_definitions_find",
+        "Given a walkthrough run, when the narration is read, then it includes validate_spec, refine_requirement for REQ-001, project_root, project_inspect, feature_list, feature_read of the workshop kata feature, get_tdd_state, and step_definitions_find",
         "Given a walkthrough run, when feature_read is called, then its path is the workshop kata feature and not the live-test seeded features/calc.feature"
       ],
       "featureFile": "smoke-test/src/test/resources/features/tdd_workshop_agent.feature"

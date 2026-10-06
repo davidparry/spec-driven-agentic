@@ -35,10 +35,10 @@
             const path_to_root = "";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "searchindex-bb14de4e.js";
+            window.path_to_searchindex_js = "searchindex-d84b362c.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-2ab172c3.js"></script>
+        <script src="toc-0006eac3.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -245,17 +245,15 @@ spec scenario add --feature features/calculator.feature \
     --step 'Given the input "1,2"' \
     --step 'When add is called' \
     --step 'Then the result is 3'
-spec changes commit           # apply the staged scenario
 spec steps missing            # any undefined steps?
-spec steps generate &amp;&amp; spec changes commit
+spec steps generate
 spec test                     # RED: the scenario fails honestly
 # ...implement the production code...
 spec test                     # GREEN
 spec refactor --note "tidy the parser" &amp;&amp; spec test
 spec status                   # confirm REQ-002 is ready to mark
 spec mark-implemented REQ-002   # flips the status, records the featureFile
-spec changes validate                 # checks the @REQ-002 scenario exists
-spec changes commit
+spec validate                   # structure still holds
 </code></pre>
 <p><a href="commands/greenfield.html"><code>spec greenfield</code></a> automates exactly this
 rhythm, pausing only at the two human gates.

@@ -3,8 +3,10 @@
 Run the full orchestrated loop from an empty directory to an
 implemented requirement, with exactly **two human gates**: approving
 the spec wording, and approving the generated tests before they run.
-Everything else — scaffolding, validation, scenario authoring, step
-generation, test execution, phase tracking — is automated.
+Before either of them, the run asks once whether to work on a branch
+of its own — see [the branch gate](../branch-gate.md). Everything else
+— scaffolding, validation, scenario authoring, step generation, test
+execution, phase tracking — is automated.
 
 ```text
 Usage: spec greenfield [OPTIONS]
@@ -17,31 +19,35 @@ Usage: spec greenfield [OPTIONS]
 | `--root <ROOT>` | Project root. Defaults to `.`. |
 | `--model <MODEL>` | LLM model for the generation steps, this run only. |
 | `--retry <N>` | Max attempts when a model reply fails validation. Default 3. |
+| `--no-branch` | Skip [the branch gate](../branch-gate.md) entirely: git is not consulted and no branch is created. |
 
 ## The orchestrated flow
 
 ```text
  1. inspect / init      scaffold if the root is empty (asks for language)
                         and records the choice in .spec/memory.json
- 2. describe            you describe what to build in plain words; the
+ 2. branch gate         one question: a branch name for this run, Enter
+                        for a generated one, or n to stay put. Skipped
+                        by --no-branch and outside a git repository
+ 3. describe            you describe what to build in plain words; the
                         model splits it into requirement proposals
- 3. accept + wizard     you accept all listed proposals, or a
+ 4. accept + wizard     you accept all listed proposals, or a
                         comma-separated subset; accepted ones are
                         stored in the spec under sequential REQ-###
                         ids. You then pick which stored one to review
                         first; every field arrives pre-filled -
                         Enter accepts, typing replaces
- 4. spec validate       structure gate; findings loop back to rewording
- 5. spec refine         wording gate; each finding comes with a "try:" fix
+ 5. spec validate       structure gate; findings loop back to rewording
+ 6. spec refine         wording gate; each finding comes with a "try:" fix
     ── HUMAN GATE 1 ──  approve the requirement's wording
- 6. scenario + steps    Gherkin scenario tagged @REQ-...; step definitions
+ 7. scenario + steps    Gherkin scenario tagged @REQ-...; step definitions
     ── HUMAN GATE 2 ──  approve the generated tests
- 7. test → RED          the scenario fails honestly
- 8. implement           Enter lets the model attempt the implementation;
+ 8. test → RED          the scenario fails honestly
+ 9. implement           Enter lets the model attempt the implementation;
                         a number, e.g. 5, buys that many hands-off attempts
- 9. test → GREEN        loop back to 8 while failing
-10. refactor            optional; only offered on GREEN
-11. mark implemented    Saving status spinner until requirements.json
+10. test → GREEN        loop back to 9 while failing
+11. refactor            optional; only offered on GREEN
+12. mark implemented    Saving status spinner until requirements.json
                         is written; then the spec> prompt for the next
                         command
 ```
@@ -61,7 +67,7 @@ The description holds 2 requirement(s):
   2. Empty string returns zero
 Accept [Enter for all, or comma-separated numbers]:
 
-Accepted requirements are staged for requirements/requirements.json as pending - nothing reaches the working spec until spec changes commit:
+Accepted requirements were written to requirements/requirements.json as pending:
   REQ-001 Comma separated numbers are summed
   REQ-002 Empty string returns zero
 Which requirement first to review and refine? [1-2, Enter for 1]:
@@ -76,15 +82,15 @@ REQ-002 criterion 2 (leave blank to finish the criteria):
 The model must deliver each proposal complete — title, story, and at
 least one Given/When/Then criterion — or the proposal is dropped.
 The list is shown so you can accept all of them, or a comma-separated
-subset (for example `1,3,5`). Only the accepted proposals are staged
-for `requirements.json` (the root of the
+subset (for example `1,3,5`). Only the accepted proposals are written
+to `requirements.json` (the root of the
 [spec catalog](../spec-format.md)), each under its own sequential
-`REQ-###` id — read them with `spec changes show` at any point in the
-wizard. Like every other mutation they reach the working spec only on
-`spec changes commit`, so declining the last prompt leaves the batch in
-staging for `spec changes show` or `spec changes discard` rather than
-on disk.
-You then pick which staged requirement to review and refine first.
+`REQ-###` id — read them with `spec list` at any point in the wizard.
+They are on disk from that moment, so declining the rewording at the
+end leaves the accepted batch in the file under the model's wording
+rather than taking it back; the reply says so, and `git restore` is
+the undo.
+You then pick which of them to review and refine first.
 The others wait as pending requirements — reword them any time with
 `spec reword`.
 Nothing is accepted silently: every field passes through your hands,
@@ -95,8 +101,8 @@ description is left blank, no model is resolved, the model is
 unreachable, or its reply holds no complete requirement.
 
 At each gate you can approve, decline (the run stops cleanly), or
-pause to resume later — the phase state and staged changes survive
-between invocations.
+pause to resume later — the phase state and everything written so far
+survive between invocations.
 
 ## The implementation attempt
 
@@ -156,7 +162,7 @@ standalone [`spec implement`](implement.md) command, which runs the
 same attempt from the persisted failure details:
 
 ```bash
-spec implement REQ-001 && spec changes commit && spec test
+spec implement REQ-001 && spec test
 ```
 
 ## Rewording loop details

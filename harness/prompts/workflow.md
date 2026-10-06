@@ -19,10 +19,10 @@ TDD phases, recorded in .spec/state.json by spec test and spec refactor:
 Requirement statuses: "pending" (not done yet) and "implemented" (done -
 the spec names its featureFile and a scenario tagged @REQ-XXX exists).
 
-The staging area: every authoring command stages its edits instead of
-writing the working tree. Review with spec changes show, apply with spec
-changes commit, drop with spec changes discard. Staged changes always come
-first - nothing else moves until they are committed or discarded.
+Writes: every authoring command writes the project's real files. Review
+what landed with git diff; git restore is the undo. spec greenfield and
+spec deliver offer to put the run on a branch of its own before they
+start, unless --no-branch is passed or the project is not under git.
 
 TWO TEST ALTITUDES, ONE BAR
 
@@ -36,25 +36,24 @@ THE LOOP FOR ONE REQUIREMENT
 
 1. spec draft - word the requirement (title, story, Given/When/Then
    acceptance criteria); validate and refine findings drive rewording
-   until clean; then spec changes commit.
+   until clean.
 2. spec scenario add --feature <file> --req REQ-XXX --name <name> --step
    ... - formulate the acceptance criteria as a Gherkin scenario tagged
    @REQ-XXX (spec feature create first if the feature file does not
-   exist); then spec changes commit.
-3. spec steps generate - scaffold step definitions for undefined steps;
-   then spec changes commit.
+   exist).
+3. spec steps generate - scaffold step definitions for undefined steps.
 4. spec unittest generate REQ-XXX - scaffold the failing unit test from
-   the acceptance criteria; then spec changes commit.
+   the acceptance criteria.
 5. spec test - expect RED: the new scenario and unit test fail because
    the behavior is not implemented.
 6. spec implement REQ-XXX - the model writes production code (or
-   implement by hand); then spec changes commit and spec test again.
-   Repeat while the bar stays RED.
+   implement by hand); then spec test again. Repeat while the bar stays
+   RED.
 7. On GREEN, optionally spec refactor --note <what> - clean up, then
    spec test to prove the bar stayed green.
 8. spec mark-implemented REQ-XXX - flips the status and records the
-   featureFile (only allowed on GREEN); then spec changes validate (it checks the
-   @REQ-XXX scenario exists), then spec changes commit.
+   featureFile (only allowed on GREEN); then spec validate (it checks the
+   @REQ-XXX scenario exists).
 9. Back to step 1 for the next pending requirement, or done.
 
 COMMANDS
@@ -68,13 +67,11 @@ COMMANDS
   [--from <parent>]: the requirements spec tools. spec list names the
   file each requirement lives in; include add grows the catalog.
 - spec feature list | show <path> | create: feature files.
-- spec scenario add | update | delete: tagged scenarios (staged).
+- spec scenario add | update | delete: tagged scenarios.
 - spec steps missing | generate: step definitions.
 - spec unittest generate REQ-XXX: the unit test scaffold.
-- spec implement REQ-XXX: a model implementation attempt (staged).
+- spec implement REQ-XXX: a model implementation attempt.
 - spec refactor --note <what>: begin a refactor (GREEN only).
-- spec changes show | commit | discard: the staging area.
-- spec changes validate: parse staged Gherkin and validate the effective spec.
 - spec deliver [REQ-XXX | "<what to build>"]: the whole loop above for
   one requirement, for the requirements a description is split into, or
   for the whole pending backlog. Verifies each step and reports which
@@ -112,10 +109,9 @@ INVARIANTS
 
 - Never refactor on RED - make the tests pass first.
 - Never mark a requirement implemented off GREEN.
-- Every mutation is staged and reviewed before it touches the working
-  tree; run spec changes validate before spec changes commit.
-- One requirement in flight at a time; staged changes are handled before
-  anything else.
+- Every mutation writes the real file; run spec validate before you
+  trust the spec, and read git diff before you trust the code.
+- One requirement in flight at a time.
 - The loop for a requirement closes only when it is marked implemented,
   validated, and committed.
 - A judgment from the decision model never substitutes for a test run,

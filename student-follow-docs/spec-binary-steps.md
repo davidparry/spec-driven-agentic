@@ -55,118 +55,82 @@ Add a new requirement to requirements/requirements.json: a custom delimiter may 
 Step 9
 
 ```text
-spec changes show
+spec refine REQ-007
 ```
 
 Step 10
 
 ```text
-spec changes commit
+spec list
 ```
 
 Step 11
 
 ```text
-spec refine REQ-007
+spec show REQ-003
 ```
 
 Step 12
 
 ```text
-spec list
+spec scenario generate REQ-003
 ```
 
 Step 13
 
 ```text
-spec show REQ-003
+spec steps missing
 ```
 
 Step 14
 
 ```text
-spec scenario generate REQ-003
+spec unittest generate REQ-003
 ```
 
 Step 15
 
 ```text
-spec steps missing
+spec test
 ```
 
 Step 16
 
 ```text
-spec unittest generate REQ-003
+spec implement REQ-003
 ```
 
 Step 17
 
 ```text
-spec changes show
+spec test
 ```
 
 Step 18
 
 ```text
-spec changes commit
+spec refactor --note "extract comma delimiter constant" --req REQ-003
 ```
 
 Step 19
 
 ```text
-spec test
+git diff
 ```
 
 Step 20
 
 ```text
-spec implement REQ-003
+spec test
 ```
 
 Step 21
 
 ```text
-spec changes show
-```
-
-Step 22
-
-```text
-spec changes commit && spec test
-```
-
-Step 23
-
-```text
-spec refactor --note "extract comma delimiter constant" --req REQ-003
-```
-
-Step 24
-
-```text
-git diff
-```
-
-Step 25
-
-```text
-spec test
-```
-
-Step 26
-
-```text
 spec mark-implemented REQ-003
 ```
 
-Step 27
-
-```text
-spec changes commit
-```
-
-Step 28
+Step 22
 
 ```text
 scripts/verify-workshop-run.sh check
@@ -174,391 +138,295 @@ scripts/verify-workshop-run.sh check
 
 ## Homework
 
-Step 29
+Step 23
 
 ```text
 spec show REQ-004
 ```
 
-Step 30
+Step 24
 
 ```text
 spec scenario generate REQ-004
 ```
 
-Step 31
+Step 25
 
 ```text
 spec steps missing
 ```
 
-Step 32
+Step 26
 
 ```text
 spec unittest generate REQ-004
 ```
 
-Step 33
-
-```text
-spec changes show
-```
-
-Step 34
-
-```text
-spec changes commit
-```
-
-Step 35
+Step 27
 
 ```text
 spec test
 ```
 
-Step 36
+Step 28
 
 ```text
 spec implement REQ-004
 ```
 
-Step 37
+Step 29
 
 ```text
-spec changes show
+spec test
 ```
 
-Step 38
-
-```text
-spec changes commit && spec test
-```
-
-Step 39
+Step 30
 
 ```text
 spec refactor --note "<what>" --req REQ-004
 ```
 
-Step 40
+Step 31
 
 ```text
 git diff
 ```
 
-Step 41
+Step 32
 
 ```text
 spec test
 ```
 
-Step 42
+Step 33
 
 ```text
 spec mark-implemented REQ-004
 ```
 
-Step 43
-
-```text
-spec changes commit
-```
-
-Step 44
+Step 34
 
 ```text
 spec show REQ-005
 ```
 
-Step 45
+Step 35
 
 ```text
 spec scenario generate REQ-005
 ```
 
-Step 46
+Step 36
 
 ```text
 spec steps missing
 ```
 
-Step 47
+Step 37
 
 ```text
 spec unittest generate REQ-005
 ```
 
-Step 48
-
-```text
-spec changes show
-```
-
-Step 49
-
-```text
-spec changes commit
-```
-
-Step 50
+Step 38
 
 ```text
 spec test
 ```
 
-Step 51
+Step 39
 
 ```text
 spec implement REQ-005
 ```
 
-Step 52
+Step 40
 
 ```text
-spec changes show
+spec test
 ```
 
-Step 53
-
-```text
-spec changes commit && spec test
-```
-
-Step 54
+Step 41
 
 ```text
 spec refactor --note "<what>" --req REQ-005
 ```
 
-Step 55
+Step 42
 
 ```text
 git diff
 ```
 
-Step 56
+Step 43
 
 ```text
 spec test
 ```
 
-Step 57
+Step 44
 
 ```text
 spec mark-implemented REQ-005
 ```
 
-Step 58
-
-```text
-spec changes commit
-```
-
-Step 59
+Step 45
 
 ```text
 spec show REQ-006
 ```
 
-Step 60
+Step 46
 
 ```text
 spec scenario generate REQ-006
 ```
 
-Step 61
+Step 47
 
 ```text
 spec steps missing
 ```
 
-Step 62
+Step 48
 
 ```text
 spec unittest generate REQ-006
 ```
 
-Step 63
-
-```text
-spec changes show
-```
-
-Step 64
-
-```text
-spec changes commit
-```
-
-Step 65
+Step 49
 
 ```text
 spec test
 ```
 
-Step 66
+Step 50
 
 ```text
 spec implement REQ-006
 ```
 
-Step 67
+Step 51
 
 ```text
-spec changes show
+spec test
 ```
 
-Step 68
-
-```text
-spec changes commit && spec test
-```
-
-Step 69
+Step 52
 
 ```text
 spec refactor --note "<what>" --req REQ-006
 ```
 
-Step 70
+Step 53
 
 ```text
 git diff
 ```
 
-Step 71
+Step 54
 
 ```text
 spec test
 ```
 
-Step 72
+Step 55
 
 ```text
 spec mark-implemented REQ-006
 ```
 
-Step 73
-
-```text
-spec changes commit
-```
-
-Step 74
+Step 56
 
 ```text
 spec show REQ-007
 ```
 
-Step 75
+Step 57
 
 ```text
 spec scenario generate REQ-007
 ```
 
-Step 76
+Step 58
 
 ```text
 spec steps missing
 ```
 
-Step 77
+Step 59
 
 ```text
 spec steps generate
 ```
 
-Step 78
+Step 60
 
 ```text
 spec unittest generate REQ-007
 ```
 
-Step 79
-
-```text
-spec changes show
-```
-
-Step 80
-
-```text
-spec changes commit
-```
-
-Step 81
+Step 61
 
 ```text
 spec test
 ```
 
-Step 82
+Step 62
 
 ```text
 spec implement REQ-007
 ```
 
-Step 83
+Step 63
 
 ```text
-spec changes show
+spec test
 ```
 
-Step 84
-
-```text
-spec changes commit && spec test
-```
-
-Step 85
+Step 64
 
 ```text
 spec refactor --note "<what>" --req REQ-007
 ```
 
-Step 86
+Step 65
 
 ```text
 git diff
 ```
 
-Step 87
+Step 66
 
 ```text
 spec test
 ```
 
-Step 88
+Step 67
 
 ```text
 spec mark-implemented REQ-007
 ```
 
-Step 89
-
-```text
-spec changes commit
-```
-
-Step 90
+Step 68
 
 ```text
 spec list
 ```
 
-Step 91
+Step 69
 
 ```text
 spec validate
 ```
 
-Step 92
+Step 70
 
 ```text
 spec test
 ```
 
-Step 93
+Step 71
 
 ```text
 mvn -f kata/pom.xml test
@@ -571,49 +439,49 @@ Needs Ollama 0.35 or newer, and a `spec` built from this repository
 was tagged and is in no published binary yet. Nothing above depends on
 it.
 
-Step 94
+Step 72
 
 ```text
 ollama pull nimble
 ```
 
-Step 95
+Step 73
 
 ```text
 spec judge models
 ```
 
-Step 96
+Step 74
 
 ```text
 spec judge use nimble:latest
 ```
 
-Step 97
+Step 75
 
 ```text
 spec config | grep -E "llm.model|decision.model"
 ```
 
-Step 98
+Step 76
 
 ```text
 spec judge criterion --text "Given the refactored module, when the suite runs, then code quality is improved by at least 20%"
 ```
 
-Step 99
+Step 77
 
 ```text
 spec judge criterion --text "Given a production-grade request payload, when the handler executes, then the system achieves 99.9% correctness across all code paths"
 ```
 
-Step 100
+Step 78
 
 ```text
 spec refine REQ-007
 ```
 
-Step 101
+Step 79
 
 ```text
 git checkout -- .spec/config.toml

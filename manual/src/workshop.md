@@ -20,6 +20,7 @@ classes):
 - `kata/src/test/java/com/davidparry/workshop/kata/StringCalculatorTest.java`
 - `kata/src/main/java/com/davidparry/workshop/kata/StringCalculator.java`
 
-Commit staged files **before** [`spec test`](commands/test.md). The
-runner executes Maven on the working tree. [`spec mark-implemented`](commands/spec.md)
+Everything the harness writes is already on disk when
+[`spec test`](commands/test.md) runs — the runner executes Maven on the
+working tree it just wrote. [`spec mark-implemented`](commands/spec.md)
 stays GREEN-gated.

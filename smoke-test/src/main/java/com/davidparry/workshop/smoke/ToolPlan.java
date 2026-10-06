@@ -6,14 +6,14 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
- * The complete catalog the Java smoke test is willing to call. A 26th tool
+ * The complete catalog the Java smoke test is willing to call. A 22nd tool
  * on the server fails the build until it is planned here.
  */
 public final class ToolPlan {
 
     public enum Kind {
         READ,
-        STAGES,
+        WRITES,
         GATED
     }
 
@@ -29,16 +29,16 @@ public final class ToolPlan {
             read("validate_spec"),
             read("refine_requirement", Map.of("id", "REQ-001")),
             read("get_tdd_state"),
-            stages("run_tests", Map.of()),
+            writes("run_tests", Map.of()),
             gated("start_refactor", Map.of()),
             read("project_root"),
             read("project_inspect"),
             read("feature_list"),
             read("feature_read", Map.of("path", "features/calc.feature")),
-            stages("feature_create", Map.of(
+            writes("feature_create", Map.of(
                     "path", "features/extra.feature",
                     "name", "Extra")),
-            stages("scenario_add", Map.of(
+            writes("scenario_add", Map.of(
                     "feature", "features/calc.feature",
                     "req", "REQ-001",
                     "name", "Adds from the sweep",
@@ -46,25 +46,21 @@ public final class ToolPlan {
                             "Given a calculator",
                             "When I add 1 and 2",
                             "Then the result is 3"))),
-            stages("scenario_update", Map.of(
+            writes("scenario_update", Map.of(
                     "feature", "features/calc.feature",
                     "name", "Adds from the sweep",
                     "req", "REQ-001")),
-            stages("scenario_delete", Map.of(
+            writes("scenario_delete", Map.of(
                     "feature", "features/calc.feature",
                     "name", "Adds from the sweep")),
-            read("changes_show"),
-            read("changes_validate"),
-            gated("changes_commit", Map.of()),
-            stages("changes_discard", Map.of()),
             gated("command_run", Map.of("command", List.of("true"))),
-            stages("requirement_reword", Map.of(
+            writes("requirement_reword", Map.of(
                     "id", "REQ-001",
                     "title", "Adds two numbers from the sweep")),
             gated("requirement_mark_implemented", Map.of("id", "REQ-001")),
             read("step_definitions_find"),
-            stages("step_definition_create", Map.of()),
-            stages("unit_test_create", Map.of("req_id", "REQ-001")));
+            writes("step_definition_create", Map.of()),
+            writes("unit_test_create", Map.of("req_id", "REQ-001")));
 
     private ToolPlan() {
     }
@@ -89,8 +85,8 @@ public final class ToolPlan {
         return new PlannedTool(name, Kind.READ, arguments);
     }
 
-    private static PlannedTool stages(String name, Map<String, Object> arguments) {
-        return new PlannedTool(name, Kind.STAGES, arguments);
+    private static PlannedTool writes(String name, Map<String, Object> arguments) {
+        return new PlannedTool(name, Kind.WRITES, arguments);
     }
 
     private static PlannedTool gated(String name, Map<String, Object> arguments) {

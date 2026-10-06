@@ -2,7 +2,7 @@
 //!
 //! Observed live: `spec implement` was asked to add one tool to a
 //! 1124-line module and replied with the single word `placeholder`. It
-//! was staged, `changes commit` applied it, and the next `spec test`
+//! was written to disk and the next `spec test`
 //! reported a build failure - the whole server gone, in a step whose
 //! whole point is that the test run decides. The run is the validator
 //! for whether code is *right*; it never gets the chance when the reply
@@ -27,7 +27,7 @@ use super::neighborhood::declared_symbols;
 /// How many dropped names to name before the message stops being one.
 const NAMED_LOSSES: usize = 5;
 
-/// Why a replacement may not be staged over the file it replaces.
+/// Why a replacement may not be written over the file it replaces.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Damage {
     /// Names the file declares today that the replacement does not, in
@@ -42,13 +42,13 @@ impl Damage {
     pub fn describe(&self, path: &str) -> String {
         match self {
             Self::Drops(names) => format!(
-                "The reply for {path} was not staged: it drops {}, which {path} \
+                "The reply for {path} was not written: it drops {}, which {path} \
                  declares today. A reply that deletes what it was not asked to \
                  touch is a bad reply, not a refactor. Run spec implement again.",
                 naming(names),
             ),
             Self::Truncated => format!(
-                "The reply for {path} was not staged: its braces never close, which \
+                "The reply for {path} was not written: its braces never close, which \
                  is what a reply cut off part-way through looks like. Run spec \
                  implement again, or raise timeout_seconds under [llm] if the model \
                  is running out of time."
@@ -328,7 +328,7 @@ mod tests {
         let told = Damage::Drops(vec!["WorkflowServer".to_string()]).describe("src/mcp.rs");
         assert!(told.contains("src/mcp.rs"), "{told}");
         assert!(told.contains("WorkflowServer"), "{told}");
-        assert!(told.contains("not staged"), "{told}");
+        assert!(told.contains("not written"), "{told}");
         assert!(told.contains("spec implement"), "{told}");
     }
 

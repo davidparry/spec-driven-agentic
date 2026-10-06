@@ -15,7 +15,7 @@
 //!
 //! - `transcript.log` - the full ANSI-stripped session
 //! - `steps.jsonl` - one timestamped JSON event per prompt, answer, and
-//!   milestone (scaffold, staged files, attempts, RED/GREEN bars)
+//!   milestone (scaffold, written files, attempts, RED/GREEN bars)
 //! - `summary.md` - the verdict; on failure it is a root-cause analysis
 //!   (attempts used, error hotspots, files the model touched, the likely
 //!   cause)
@@ -183,11 +183,11 @@ fn milestone_kind(line: &str) -> Option<&'static str> {
     if line.contains("committed to the spec") {
         return Some("spec-committed");
     }
-    if line.starts_with("Scenarios committed") {
-        return Some("scenarios-committed");
+    if line.starts_with("Scenarios written") {
+        return Some("scenarios-written");
     }
-    if line.starts_with("Staged ") {
-        return Some("staged");
+    if line.starts_with("Wrote ") {
+        return Some("wrote");
     }
     if line.starts_with("Updated ") && line.ends_with("(llm).") {
         return Some("implement-update");
@@ -288,7 +288,7 @@ fn analyze(transcript: &str, reason: &str) -> String {
     let updated_files: BTreeSet<String> = transcript
         .lines()
         .filter(|line| {
-            (line.starts_with("Updated ") || line.starts_with("Staged ")) && line.contains("(llm).")
+            (line.starts_with("Updated ") || line.starts_with("Wrote ")) && line.contains("(llm).")
         })
         .filter_map(|line| file_name.captures(line).map(|c| c[1].to_string()))
         .collect();
@@ -770,12 +770,12 @@ mod driver_unit {
             ("Scaffolded 5 files for Java (Cucumber-JVM).", "scaffold"),
             ("REQ-001 committed to the spec.", "spec-committed"),
             (
-                "Scenarios committed to features/add-two-numbers.feature.",
-                "scenarios-committed",
+                "Scenarios written to features/add-two-numbers.feature.",
+                "scenarios-written",
             ),
             (
-                "Staged src/test/java/steps/GeneratedSteps.java (llm).",
-                "staged",
+                "Wrote src/test/java/steps/GeneratedSteps.java (llm).",
+                "wrote",
             ),
             (
                 "Updated src/main/java/StringCalculator.java (llm).",

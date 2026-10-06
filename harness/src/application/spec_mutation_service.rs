@@ -1,12 +1,12 @@
 //! Spec mutations: interactive drafting (the human words the spec, the
 //! validate → refine findings drive rewording until clean) and the
-//! GREEN-gated `mark-implemented`. Every mutation lands in the staging
-//! area, never directly in the working tree.
+//! GREEN-gated `mark-implemented`. Every mutation writes the project's
+//! files directly; git is the review gate.
 
 use serde::Serialize;
 
 use crate::application::agent_service::{Agent, AgentConfig, DEFAULT_MAX_ROUNDS, NullBroker};
-use crate::application::assets::{feature_tagged, load_effective_catalog};
+use crate::application::assets::{feature_tagged, load_catalog};
 use crate::application::spec_service::ServiceError;
 use crate::application::{DEFAULT_LLM_ATTEMPTS, LlmReplyError};
 use crate::domain::model::{Requirement, Spec, SpecCatalog, SpecFile};
@@ -21,8 +21,8 @@ use crate::domain::spec_validator::SpecValidator;
 use crate::domain::tdd::TddPhase;
 use crate::domain::tools::ToolDefinition;
 use crate::ports::{
-    ChangeStore, FeatureCatalog, FeatureFiles, LlmConversation, Prompter, SpecRepository,
-    StateStore, ToolBroker,
+    FeatureCatalog, FeatureFiles, LlmConversation, Prompter, SpecRepository, StateStore,
+    ToolBroker, WorkTree,
 };
 
 /// A resolved model to call: name + conversation.
@@ -67,9 +67,9 @@ struct DraftTarget {
 pub struct DraftReport {
     pub id: String,
     pub title: String,
-    pub staged: bool,
+    pub written: bool,
     /// Wording findings that were still open when the requirement was
-    /// staged, empty when the review came back clean.
+    /// written, empty when the review came back clean.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub findings: Vec<String>,
     #[serde(rename = "nextStep")]
@@ -105,12 +105,12 @@ enum StalledChoice {
     Reword,
     /// Take over by hand for the remaining passes.
     Manual,
-    /// The wording stands; stage it with its open findings.
+    /// The wording stands; write it with its open findings.
     Accept,
 }
 
 /// The findings a wording earns, split by who owns them. `structural`
-/// issues come from [`SpecValidator`] and must be fixed before staging -
+/// issues come from [`SpecValidator`] and must be fixed before writing -
 /// a spec that fails them is not usable. `advisory` findings come from
 /// [`RequirementRefiner`]: wording quality the developer may accept
 /// as-is.
@@ -125,7 +125,7 @@ impl Findings {
         self.structural.is_empty() && self.advisory.is_empty()
     }
 
-    /// Every finding, structural ones first - they gate staging.
+    /// Every finding, structural ones first - they gate the write.
     fn all(&self) -> Vec<String> {
         let mut all = self.structural.clone();
         all.extend(self.advisory.iter().cloned());
@@ -138,7 +138,7 @@ pub struct SetFeatureReport {
     pub id: String,
     #[serde(rename = "featureFile")]
     pub feature_file: String,
-    pub staged: bool,
+    pub written: bool,
     #[serde(rename = "nextStep")]
     pub next_step: String,
 }
@@ -151,8 +151,6 @@ pub struct ListedRequirement {
     /// The spec file declaring this requirement, relative to the
     /// project root.
     pub file: String,
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
-    pub staged: bool,
 }
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
@@ -161,9 +159,9 @@ pub struct IncludeReport {
     pub file: String,
     /// The catalog document that lists the include.
     pub parent: String,
-    /// Whether a fresh (empty) spec file was staged for the include.
+    /// Whether a fresh (empty) spec file was written for the include.
     pub created: bool,
-    pub staged: bool,
+    pub written: bool,
     #[serde(rename = "nextStep")]
     pub next_step: String,
 }
@@ -172,7 +170,7 @@ pub struct IncludeReport {
 pub struct MarkReport {
     pub id: String,
     pub status: String,
-    pub staged: bool,
+    pub written: bool,
     #[serde(rename = "nextStep")]
     pub next_step: String,
 }
@@ -180,7 +178,7 @@ pub struct MarkReport {
 pub struct SpecMutationService<
     R: SpecRepository,
     G: FeatureCatalog + FeatureFiles,
-    C: ChangeStore,
+    C: WorkTree,
     S: StateStore,
 > {
     repository: R,
@@ -204,7 +202,7 @@ pub struct SpecMutationService<
 /// the developer how to continue.
 pub const DEFAULT_MAX_REWORD_PASSES: u32 = 3;
 
-impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: StateStore>
+impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: WorkTree, S: StateStore>
     SpecMutationService<R, G, C, S>
 {
     pub fn new(repository: R, catalog: G, store: C, state: S, spec_path: String) -> Self {
@@ -261,7 +259,7 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
 
     /// Draft a new requirement interactively. The human words the spec;
     /// the loop reruns validate + refine on every wording until there
-    /// are no findings, then asks for approval before staging. On
+    /// are no findings, then asks for approval before writing. On
     /// rewording passes every prompt carries the prior answer, which
     /// Enter keeps as-is.
     pub fn draft(&self, prompter: &mut dyn Prompter) -> Result<DraftReport, ServiceError> {
@@ -275,7 +273,7 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
         prompter: &mut dyn Prompter,
         file: Option<&str>,
     ) -> Result<DraftReport, ServiceError> {
-        let catalog = self.effective_catalog()?;
+        let catalog = self.spec_catalog()?;
         let file = self.target_file(&catalog, file)?;
         let id = next_id(&catalog, &file);
         self.manual_draft(prompter, DraftTarget { catalog, file }, id, None)
@@ -338,7 +336,7 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
         file: Option<&str>,
         given: Option<&str>,
     ) -> Result<DraftReport, ServiceError> {
-        let mut catalog = self.effective_catalog()?;
+        let mut catalog = self.spec_catalog()?;
         let target = self.target_file(&catalog, file)?;
         let mut merged = catalog.merged();
         let id = next_id(&catalog, &target);
@@ -474,15 +472,14 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
             stored.push(requirement);
         }
         let ids: Vec<String> = stored.iter().map(|r| r.id.clone()).collect();
-        self.stage_file(
+        self.write_file(
             &catalog,
             &target,
             &format!("draft {} from the description", ids.join(", ")),
         )?;
-        let staged_path = self.project_path(&target);
+        let written_path = self.project_path(&target);
         prompter.tell(&format!(
-            "Accepted requirements are staged for {staged_path} as pending - nothing \
-             reaches the working spec until spec changes commit:"
+            "Accepted requirements were written to {written_path} as pending:"
         ));
         for requirement in &stored {
             prompter.tell(&format!("  {} {}", requirement.id, requirement.title));
@@ -505,20 +502,19 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
             Some((model, llm)),
             true,
         )?;
-        if report.staged {
+        if report.written {
             return Ok(report);
         }
-        // Declining the reworded wording does not un-stage the rows the
-        // developer already accepted - they are still in the staging area
-        // under the model's wording, so the report has to say so rather
-        // than claiming nothing was staged.
+        // Declining the reworded wording does not undo the rows the
+        // developer already accepted - they are on disk under the model's
+        // wording, so the report has to say so rather than claiming
+        // nothing was written.
         Ok(DraftReport {
-            staged: true,
+            written: true,
             next_step: format!(
-                "The reworded wording was declined, but {} still staged for \
-                 {staged_path} under the model's wording. Review with spec changes \
-                 show, apply with spec changes commit, or drop with spec changes \
-                 discard.",
+                "The reworded wording was declined, but {} already in \
+                 {written_path} under the model's wording. Read it with git diff, \
+                 or undo it with git restore.",
                 match ids.as_slice() {
                     [one] => format!("{one} is"),
                     many => format!("{} are", many.join(", ")),
@@ -618,7 +614,7 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
         id: &str,
         llm: ModelAid,
     ) -> Result<DraftReport, ServiceError> {
-        let catalog = self.effective_catalog()?;
+        let catalog = self.spec_catalog()?;
         let existing = catalog
             .merged()
             .requirements
@@ -672,7 +668,7 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
         // the catalog already holds, so two of these running at once
         // would hand out the same id and one would overwrite the other.
         let _claim = self.store.claim()?;
-        let mut catalog = self.effective_catalog()?;
+        let mut catalog = self.spec_catalog()?;
         let target = self.target_file(&catalog, file)?;
         let id = next_id(&catalog, &target);
         let candidate = Requirement {
@@ -695,7 +691,7 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
         criteria: Vec<String>,
     ) -> Result<DraftReport, ServiceError> {
         let _claim = self.store.claim()?;
-        let mut catalog = self.effective_catalog()?;
+        let mut catalog = self.spec_catalog()?;
         let mut candidate = catalog
             .merged()
             .requirements
@@ -752,15 +748,12 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
             if let Some(slot) = doc.requirements.iter_mut().find(|r| r.id == id) {
                 *slot = candidate;
             }
-            self.stage_file(catalog, target, &format!("reword {id}"))?;
+            self.write_file(catalog, target, &format!("reword {id}"))?;
         } else {
             doc.requirements.push(candidate);
-            self.stage_file(catalog, target, &format!("draft {id}: {title}"))?;
+            self.write_file(catalog, target, &format!("draft {id}: {title}"))?;
         }
-        let mut next_step = format!(
-            "Review with spec changes show and apply with spec changes commit, then add \
-             the @{id} scenario with spec scenario add."
-        );
+        let mut next_step = format!("Add the @{id} scenario with spec scenario add.");
         let refine: Vec<String> = findings
             .into_iter()
             .filter(|issue| {
@@ -768,10 +761,8 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
             })
             .collect();
         if !refine.is_empty() {
-            next_step = format!(
-                "Staged {id} with refine findings. Run spec reword {id} to address \
-                 them, then spec changes commit."
-            );
+            next_step =
+                format!("Wrote {id} with refine findings. Run spec reword {id} to address them.");
         }
         if let Some(warning) = warning {
             next_step = format!("{warning} {next_step}");
@@ -779,17 +770,17 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
         Ok(DraftReport {
             id,
             title,
-            staged: true,
+            written: true,
             findings: refine,
             next_step,
         })
     }
 
     /// Point a requirement at the feature file that was actually written.
-    /// No-op (and unstaged) when the path is already recorded.
+    /// No-op (nothing written) when the path is already recorded.
     pub fn set_feature(&self, id: &str, path: &str) -> Result<SetFeatureReport, ServiceError> {
         let _claim = self.store.claim()?;
-        let mut catalog = self.effective_catalog()?;
+        let mut catalog = self.spec_catalog()?;
         let target = catalog.source_of(id).map(str::to_string).ok_or_else(|| {
             ServiceError(format!(
                 "No requirement with id '{id}'. Call spec list to see valid ids."
@@ -800,12 +791,12 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
             return Ok(SetFeatureReport {
                 id: id.to_string(),
                 feature_file: path.to_string(),
-                staged: false,
+                written: false,
                 next_step: format!("{id} already names {path}."),
             });
         }
         requirement.feature_file = Some(path.to_string());
-        self.stage_file(
+        self.write_file(
             &catalog,
             &target,
             &format!("set {id} featureFile to {path}"),
@@ -813,23 +804,15 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
         Ok(SetFeatureReport {
             id: id.to_string(),
             feature_file: path.to_string(),
-            staged: true,
-            next_step: "Review with spec changes show, then apply with spec changes commit."
-                .to_string(),
+            written: true,
+            next_step: format!("{id} now names {path}. Add its scenario with spec scenario add."),
         })
     }
 
-    /// Every requirement on the effective (staged-wins) spec, each
-    /// naming the catalog file it lives in. New ids that exist only in
-    /// staging are labelled `staged`.
+    /// Every requirement on the spec, each naming the catalog file it
+    /// lives in.
     pub fn list_requirements(&self) -> Result<Vec<ListedRequirement>, ServiceError> {
-        let disk_ids: std::collections::HashSet<String> = self
-            .repository
-            .load()
-            .map(|spec| spec.requirements.into_iter().map(|r| r.id).collect())
-            .unwrap_or_default();
-        let catalog = self.effective_catalog()?;
-        let disk_ids = &disk_ids;
+        let catalog = self.spec_catalog()?;
         Ok(catalog
             .files()
             .iter()
@@ -839,7 +822,6 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
                     .requirements
                     .iter()
                     .map(move |r| ListedRequirement {
-                        staged: !disk_ids.contains(&r.id),
                         id: r.id.clone(),
                         title: r.title.clone(),
                         status: r.status.clone(),
@@ -849,7 +831,7 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
             .collect())
     }
 
-    /// Add an include to the catalog: stages the parent document with
+    /// Add an include to the catalog: writes the parent document with
     /// the new entry and, when the included file does not exist anywhere
     /// yet, an empty spec skeleton for it.
     pub fn include_add(
@@ -857,9 +839,9 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
         path: &str,
         from: Option<&str>,
     ) -> Result<IncludeReport, ServiceError> {
-        // Two staged files, parent and child, have to land together.
+        // Two files, parent and child, have to land together.
         let _claim = self.store.claim()?;
-        let mut catalog = self.effective_catalog()?;
+        let mut catalog = self.spec_catalog()?;
         let child = crate::domain::model::resolve_include("", &self.catalog_relative(path))
             .ok_or_else(|| {
                 ServiceError(format!(
@@ -889,7 +871,7 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
                 file: self.project_path(&child),
                 parent: self.project_path(&parent),
                 created: false,
-                staged: false,
+                written: false,
                 next_step: format!(
                     "{} is already part of the spec catalog.",
                     self.project_path(&child)
@@ -897,10 +879,9 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
             });
         }
         let child_project = self.project_path(&child);
-        let created = self.store.content(&child_project)?.is_none()
-            && self.repository.read_raw(&child).is_err();
+        let created = self.repository.read_raw(&child).is_err();
         if created {
-            self.store.stage(
+            self.store.write(
                 &child_project,
                 "{\n  \"requirements\": []\n}\n",
                 &format!("create the spec file {child_project}"),
@@ -911,7 +892,7 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
         file_mut_or_err(&mut catalog, &parent)?
             .includes
             .push(entry.clone());
-        self.stage_file(
+        self.write_file(
             &catalog,
             &parent,
             &format!("include {entry} in {}", self.project_path(&parent)),
@@ -920,10 +901,8 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
             file: child_project,
             parent: self.project_path(&parent),
             created,
-            staged: true,
-            next_step: "Review with spec changes show, apply with spec changes commit, \
-                        then draft into it with spec draft --file."
-                .to_string(),
+            written: true,
+            next_step: "Draft into it with spec draft --file.".to_string(),
         })
     }
 
@@ -1048,59 +1027,55 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
             Ok(Gathered::Wording(requirement, title, unresolved)) => {
                 (requirement, title, unresolved)
             }
-            // Rewording is going nowhere. Nothing is staged on a wording
+            // Rewording is going nowhere. Nothing is written on a wording
             // the review rejected, and the findings go back with it so
             // whoever reads them knows what to fix.
             Ok(Gathered::NotConverging(title, findings)) => {
-                return Ok(nothing_staged(id, title, replace, findings));
+                return Ok(nothing_written(id, title, replace, findings));
             }
             // The answers ran out. Declining is the safe end - the
             // developer piped in what they had and nothing should be
-            // staged on a guess - and it is the outcome this wizard
+            // written on a guess - and it is the outcome this wizard
             // already knows how to report, so report that one.
             Err(error) if error.is_end_of_input() => {
-                return Ok(nothing_staged(id, established_title, replace, Vec::new()));
+                return Ok(nothing_written(id, established_title, replace, Vec::new()));
             }
             Err(error) => return Err(error),
         };
         let question = if unresolved.is_empty() {
-            "The wording reads clean. Stage this requirement?".to_string()
+            "The wording reads clean. Write this requirement?".to_string()
         } else {
             format!(
-                "{} wording finding(s) stay open. Stage this requirement anyway?",
+                "{} wording finding(s) stay open. Write this requirement anyway?",
                 unresolved.len()
             )
         };
         if !self.confirm(prompter, &question)? {
-            return Ok(nothing_staged(id, title, replace, unresolved));
+            return Ok(nothing_written(id, title, replace, unresolved));
         }
         let doc = file_mut_or_err(&mut catalog, &file)?;
         if replace {
             if let Some(slot) = doc.requirements.iter_mut().find(|r| r.id == id) {
                 *slot = requirement;
             }
-            self.stage_file(&catalog, &file, &format!("reword {id}"))?;
+            self.write_file(&catalog, &file, &format!("reword {id}"))?;
         } else {
             doc.requirements.push(requirement);
-            self.stage_file(&catalog, &file, &format!("draft {id}: {title}"))?;
+            self.write_file(&catalog, &file, &format!("draft {id}: {title}"))?;
         }
         let next_step = if unresolved.is_empty() {
-            format!(
-                "Review with changes show and apply with changes commit, then add \
-                 the @{id} scenario with scenario add."
-            )
+            format!("Add the @{id} scenario with scenario add.")
         } else {
             format!(
-                "Staged {id} with {} wording finding(s) you accepted. Run spec reword \
-                 {id} to revisit them, or review with changes show and apply with \
-                 changes commit, then add the @{id} scenario with scenario add.",
+                "Wrote {id} with {} wording finding(s) you accepted. Run spec reword \
+                 {id} to revisit them, or add the @{id} scenario with scenario add.",
                 unresolved.len()
             )
         };
         Ok(DraftReport {
             id: id.clone(),
             title,
-            staged: true,
+            written: true,
             findings: unresolved,
             next_step,
         })
@@ -1260,7 +1235,7 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
 
     /// Flip a requirement to implemented and record its featureFile from
     /// the `@REQ-ID`-tagged feature - the validator demands both, so the
-    /// staged spec validates. Refused off GREEN (the status change is the
+    /// spec still validates. Refused off GREEN (the status change is the
     /// last step of a passing loop, never a promise) and refused without
     /// a tagged scenario (an implemented requirement needs its executable
     /// scenario). Re-running on an already-implemented requirement
@@ -1275,7 +1250,7 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
             )));
         }
         let _claim = self.store.claim()?;
-        let mut catalog = self.effective_catalog()?;
+        let mut catalog = self.spec_catalog()?;
         let target = catalog.source_of(id).map(str::to_string).ok_or_else(|| {
             ServiceError(format!(
                 "No requirement with id '{id}'. Call list_requirements to see valid ids."
@@ -1284,30 +1259,25 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
         let feature = feature_tagged(&self.catalog, &format!("@{id}"))?.ok_or_else(|| {
             ServiceError(format!(
                 "No scenario is tagged @{id} - implemented requirements need an \
-                 executable scenario. Add one with spec scenario add, apply it with \
-                 spec changes commit, then mark {id} implemented."
+                 executable scenario. Add one with spec scenario add, then mark \
+                 {id} implemented."
             ))
         })?;
         let requirement = requirement_mut_or_err(&mut catalog, &target, id)?;
         requirement.status = "implemented".into();
         requirement.feature_file = Some(feature);
-        self.stage_file(&catalog, &target, &format!("mark {id} implemented"))?;
+        self.write_file(&catalog, &target, &format!("mark {id} implemented"))?;
         Ok(MarkReport {
             id: id.to_string(),
             status: "implemented".into(),
-            staged: true,
-            next_step: format!(
-                "Review with changes show, run validate (it checks the @{id} \
-                 scenario exists), then changes commit."
-            ),
+            written: true,
+            next_step: format!("Run validate - it checks the @{id} scenario exists."),
         })
     }
 
-    /// The spec tree as it would look after commit: staged content wins
-    /// over the working tree file by file, so consecutive drafts stack
-    /// and staged includes resolve.
-    fn effective_catalog(&self) -> Result<SpecCatalog, ServiceError> {
-        load_effective_catalog(&self.repository, &self.store, &self.spec_path)
+    /// The spec tree as it stands on disk.
+    fn spec_catalog(&self) -> Result<SpecCatalog, ServiceError> {
+        load_catalog(&self.repository)
     }
 
     /// The catalog document new requirements land in: the `--file`
@@ -1328,7 +1298,7 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
         } else {
             Err(ServiceError(format!(
                 "{file} is not part of the spec catalog. Include it with spec \
-                 include add {file}, apply with spec changes commit, then draft into it."
+                 include add {file}, then draft into it."
             )))
         }
     }
@@ -1420,7 +1390,7 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
 
     /// Stage one catalog document at its project-relative path — the
     /// file the mutation touched, never the whole merged spec.
-    fn stage_file(
+    fn write_file(
         &self,
         catalog: &SpecCatalog,
         target: &str,
@@ -1430,7 +1400,7 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
         let json = crate::domain::model::render(doc)
             .map_err(|e| ServiceError(format!("The spec could not be serialized - {e}")))?;
         self.store
-            .stage(&self.project_path(target), &json, summary)?;
+            .write(&self.project_path(target), &json, summary)?;
         Ok(())
     }
 
@@ -1507,22 +1477,22 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: ChangeStore, S: Sta
     }
 }
 
-/// The reply for a wizard that ended without staging, whether the
+/// The reply for a wizard that ended without writing, whether the
 /// developer declined the confirmation or the answers ran out before
 /// it was reached. One shape for both, because from the caller's side
 /// they are the same outcome: nothing was written, run it again.
-fn nothing_staged(id: String, title: String, replace: bool, findings: Vec<String>) -> DraftReport {
+fn nothing_written(id: String, title: String, replace: bool, findings: Vec<String>) -> DraftReport {
     // Name the command the developer actually ran - reword reaches
     // here too, and telling them to draft sends them the wrong way.
     let next_step = if replace {
-        format!("Nothing was staged. Run spec reword {id} again when the wording is ready.")
+        format!("Nothing was written. Run spec reword {id} again when the wording is ready.")
     } else {
-        "Nothing was staged. Run spec draft again when the wording is ready.".to_string()
+        "Nothing was written. Run spec draft again when the wording is ready.".to_string()
     };
     DraftReport {
         id,
         title,
-        staged: false,
+        written: false,
         findings,
         next_step,
     }
@@ -1580,23 +1550,20 @@ fn parse_accept_selection(answer: &str, count: usize) -> Result<Vec<usize>, Stri
 
 /// A catalog inconsistency: a path or id the caller already resolved
 /// through the same catalog no longer looks up. That means the in-memory
-/// catalog and what it was built from disagree — a half-written
-/// `.spec/staged`, a hand-edited manifest, an include tree that changed
-/// underfoot. It is a state the developer can clear, so it is reported
-/// rather than panicked on.
+/// catalog and what it was built from disagree — a half-written spec
+/// file, an include tree that changed underfoot. It is a state the
+/// developer can inspect, so it is reported rather than panicked on.
 fn inconsistent_file(target: &str) -> ServiceError {
     ServiceError(format!(
         "The spec catalog is inconsistent: '{target}' is not one of its files. \
-         Run spec changes show to inspect the staging area, or spec changes \
-         discard to clear it."
+         Run spec validate, or undo the recent spec edits with git restore."
     ))
 }
 
 fn inconsistent_requirement(id: &str, target: &str) -> ServiceError {
     ServiceError(format!(
         "The spec catalog is inconsistent: '{id}' is not declared in '{target}'. \
-         Run spec changes show to inspect the staging area, or spec changes \
-         discard to clear it."
+         Run spec validate, or undo the recent spec edits with git restore."
     ))
 }
 
@@ -1622,8 +1589,8 @@ fn source_of_or_err(catalog: &SpecCatalog, id: &str) -> Result<String, ServiceEr
     catalog.source_of(id).map(str::to_string).ok_or_else(|| {
         ServiceError(format!(
             "The spec catalog is inconsistent: '{id}' is in the merged spec but no \
-             file declares it. Run spec changes show to inspect the staging area, \
-             or spec changes discard to clear it."
+             file declares it. Run spec validate, or undo the recent spec edits \
+             with git restore."
         ))
     })
 }
@@ -1706,7 +1673,7 @@ mod tests {
     use crate::domain::tdd::TddSnapshot;
     use crate::ports::{LlmConversation, PromptError, SpecError};
     use crate::test_support::{
-        FixedStateStore, InMemoryChangeStore, InMemoryFeatureCatalog, InMemorySpecRepository,
+        FixedStateStore, InMemoryFeatureCatalog, SharedSpecRepository, SharedTree,
         calculator_catalog,
     };
     use std::collections::VecDeque;
@@ -1762,6 +1729,12 @@ mod tests {
 
     const SPEC_PATH: &str = "requirements/requirements.json";
 
+    /// The root document exactly as [`service`] seeded it, so a test
+    /// that refuses an edit can say the file was left alone.
+    fn unchanged_spec() -> String {
+        crate::domain::model::render(&spec()).unwrap()
+    }
+
     fn requirement(id: &str) -> Requirement {
         Requirement {
             id: id.into(),
@@ -1787,21 +1760,31 @@ mod tests {
         FixedStateStore::holding(TddSnapshot::at(TddPhase::Green))
     }
 
+    /// The spec repository and the work tree are one tree, as they are
+    /// on disk: what a mutation writes is what the next read sees.
     fn service(
         spec: Result<Spec, SpecError>,
         state: FixedStateStore,
     ) -> SpecMutationService<
-        InMemorySpecRepository,
+        SharedSpecRepository,
         InMemoryFeatureCatalog,
-        InMemoryChangeStore,
+        SharedTree,
         FixedStateStore,
     > {
+        let tree = SharedTree::default();
+        let repository = match spec {
+            Ok(spec) => {
+                tree.put(SPEC_PATH, &crate::domain::model::render(&spec).unwrap());
+                SharedSpecRepository::new(tree.clone(), SPEC_PATH)
+            }
+            Err(error) => SharedSpecRepository::failing(error),
+        };
         // The catalog carries the @REQ-001 tag in features/calc.feature;
         // REQ-007 has no tagged scenario anywhere.
         SpecMutationService::new(
-            InMemorySpecRepository(spec),
+            repository,
             calculator_catalog(),
-            InMemoryChangeStore::default(),
+            tree,
             state,
             SPEC_PATH.into(),
         )
@@ -1815,7 +1798,7 @@ mod tests {
         "Given an empty string \"\", when add is called, then the result is 0";
 
     #[test]
-    fn a_clean_draft_is_staged_with_the_next_free_id() {
+    fn a_clean_draft_is_written_with_the_next_free_id() {
         let service = service(Ok(spec()), green());
         let mut prompter = ScriptedPrompter::answering(&[
             "Comma sums",
@@ -1827,13 +1810,13 @@ mod tests {
         ]);
         let report = service.draft(&mut prompter).unwrap();
         assert_eq!(report.id, "REQ-008");
-        assert!(report.staged);
+        assert!(report.written);
         assert!(report.next_step.contains("scenario add"));
-        let staged = service.store.content(SPEC_PATH).unwrap().unwrap();
-        let staged_spec: Spec = serde_json::from_str(&staged).unwrap();
-        assert_eq!(staged_spec.requirements.len(), 3);
-        assert_eq!(staged_spec.requirements[2].id, "REQ-008");
-        assert_eq!(staged_spec.requirements[2].status, "pending");
+        let written = service.store.get(SPEC_PATH).unwrap();
+        let written_spec: Spec = serde_json::from_str(&written).unwrap();
+        assert_eq!(written_spec.requirements.len(), 3);
+        assert_eq!(written_spec.requirements[2].id, "REQ-008");
+        assert_eq!(written_spec.requirements[2].status, "pending");
         assert_eq!(service.store.summaries()[0], "draft REQ-008: Comma sums");
     }
 
@@ -1855,7 +1838,7 @@ mod tests {
             "y",
         ]);
         let report = service.draft(&mut prompter).unwrap();
-        assert!(report.staged);
+        assert!(report.written);
         assert!(
             prompter
                 .transcript
@@ -1900,7 +1883,7 @@ mod tests {
             "y",
         ]);
         let report = service.draft(&mut prompter).unwrap();
-        assert!(report.staged, "report: {report:?}");
+        assert!(report.written, "report: {report:?}");
         let asked = |question: &str| {
             assert!(
                 prompter.transcript.iter().any(|l| l == question),
@@ -1915,9 +1898,8 @@ mod tests {
         ));
         asked("REQ-008 criterion 3 (leave blank to finish the criteria):");
         // Enter kept the prior title, story was replaced, both criteria kept.
-        let staged: Spec =
-            serde_json::from_str(&service.store.content(SPEC_PATH).unwrap().unwrap()).unwrap();
-        let drafted = &staged.requirements[2];
+        let written: Spec = serde_json::from_str(&service.store.get(SPEC_PATH).unwrap()).unwrap();
+        let drafted = &written.requirements[2];
         assert_eq!(drafted.title, "Comma sums");
         assert_eq!(drafted.story, CLEAN_STORY);
         assert_eq!(
@@ -1947,11 +1929,10 @@ mod tests {
             "y",
         ]);
         let report = service.draft(&mut prompter).unwrap();
-        assert!(report.staged, "report: {report:?}");
-        let staged: Spec =
-            serde_json::from_str(&service.store.content(SPEC_PATH).unwrap().unwrap()).unwrap();
+        assert!(report.written, "report: {report:?}");
+        let written: Spec = serde_json::from_str(&service.store.get(SPEC_PATH).unwrap()).unwrap();
         assert_eq!(
-            staged.requirements[2].acceptance_criteria,
+            written.requirements[2].acceptance_criteria,
             vec![EDGE_CRITERION.to_string(), CLEAN_CRITERION.to_string()]
         );
     }
@@ -1998,7 +1979,7 @@ mod tests {
         let report = service
             .draft_assisted(&mut prompter, "test-model", &llm)
             .unwrap();
-        assert!(report.staged, "report: {report:?}");
+        assert!(report.written, "report: {report:?}");
         assert!(
             !prompter.transcript.iter().any(|l| l.contains("working")),
             "transcript: {:#?}",
@@ -2037,7 +2018,7 @@ mod tests {
         let report = service
             .draft_assisted(&mut prompter, "test-model", &llm)
             .unwrap();
-        assert!(report.staged, "report: {report:?}");
+        assert!(report.written, "report: {report:?}");
         assert_eq!(report.title, "Comma separated numbers are summed");
         let told = |line: &str| {
             assert!(
@@ -2053,9 +2034,8 @@ mod tests {
         );
         // The rewording prompt carries the model's title, not the raw prior.
         told("REQ-008 title [Comma separated numbers are summed] (Enter keeps it):");
-        let staged: Spec =
-            serde_json::from_str(&service.store.content(SPEC_PATH).unwrap().unwrap()).unwrap();
-        let drafted = staged.requirements.last().unwrap();
+        let written: Spec = serde_json::from_str(&service.store.get(SPEC_PATH).unwrap()).unwrap();
+        let drafted = written.requirements.last().unwrap();
         assert_eq!(drafted.acceptance_criteria.len(), 2);
         assert_eq!(drafted.acceptance_criteria[1], EDGE_CRITERION);
     }
@@ -2122,7 +2102,7 @@ mod tests {
         let report = service
             .draft_assisted(&mut prompter, "test-model", &llm)
             .unwrap();
-        assert!(report.staged, "report: {report:?}");
+        assert!(report.written, "report: {report:?}");
         let prompts = llm.prompts.borrow();
         assert_eq!(prompts.len(), 2, "two rewording passes ran");
         assert!(
@@ -2163,7 +2143,7 @@ mod tests {
         let report = service
             .draft_assisted(&mut prompter, "test-model", &llm)
             .unwrap();
-        assert!(report.staged, "report: {report:?}");
+        assert!(report.written, "report: {report:?}");
         let prompts = llm.prompts.borrow();
         assert_eq!(prompts.len(), 2, "one call per finding");
         assert!(
@@ -2245,7 +2225,7 @@ mod tests {
         let report = service
             .draft_assisted(&mut prompter, "test-model", &llm)
             .unwrap();
-        assert!(report.staged, "report: {report:?}");
+        assert!(report.written, "report: {report:?}");
         let told = |line: &str| {
             assert!(
                 prompter.transcript.iter().any(|l| l == line),
@@ -2281,7 +2261,7 @@ mod tests {
         let report = service
             .draft_assisted(&mut prompter, "test-model", &llm)
             .unwrap();
-        assert!(report.staged, "report: {report:?}");
+        assert!(report.written, "report: {report:?}");
         assert!(
             prompter.transcript.iter().any(|l| l
                 == "The model's rewording for finding 1 was unusable - it stays \
@@ -2318,7 +2298,7 @@ mod tests {
         let report = service
             .draft_assisted(&mut prompter, "test-model", &llm)
             .unwrap();
-        assert!(report.staged, "report: {report:?}");
+        assert!(report.written, "report: {report:?}");
         assert!(
             prompter
                 .transcript
@@ -2345,7 +2325,7 @@ mod tests {
         let report = service
             .draft_assisted(&mut prompter, "test-model", &llm)
             .unwrap();
-        assert!(report.staged, "report: {report:?}");
+        assert!(report.written, "report: {report:?}");
         let told = |fragment: &str| {
             assert!(
                 prompter.transcript.iter().any(|l| l.contains(fragment)),
@@ -2373,7 +2353,7 @@ mod tests {
         let report = service
             .draft_assisted(&mut prompter, "test-model", &llm)
             .unwrap();
-        assert!(report.staged, "report: {report:?}");
+        assert!(report.written, "report: {report:?}");
         assert!(
             prompter
                 .transcript
@@ -2472,7 +2452,7 @@ mod tests {
         let report = service
             .draft_assisted(&mut prompter, "test-model", &llm)
             .unwrap();
-        assert!(report.staged, "report: {report:?}");
+        assert!(report.written, "report: {report:?}");
         assert_eq!(llm.calls.get(), 2, "one retry, then the edge case arrives");
         assert!(
             prompter.transcript.iter().any(|l| l.contains(
@@ -2491,10 +2471,9 @@ mod tests {
             "transcript: {:#?}",
             prompter.transcript
         );
-        let staged: Spec =
-            serde_json::from_str(&service.store.content(SPEC_PATH).unwrap().unwrap()).unwrap();
+        let written: Spec = serde_json::from_str(&service.store.get(SPEC_PATH).unwrap()).unwrap();
         assert_eq!(
-            staged.requirements.last().unwrap().acceptance_criteria,
+            written.requirements.last().unwrap().acceptance_criteria,
             vec![CLEAN_CRITERION.to_string(), EDGE_CRITERION.to_string()]
         );
     }
@@ -2512,7 +2491,7 @@ mod tests {
         let report = service
             .draft_assisted(&mut prompter, "test-model", &llm)
             .unwrap();
-        assert!(report.staged, "report: {report:?}");
+        assert!(report.written, "report: {report:?}");
         assert_eq!(report.title, "Comma separated numbers are summed");
         assert_eq!(
             llm.calls.get(),
@@ -2541,7 +2520,7 @@ mod tests {
         let report = service
             .draft_assisted(&mut prompter, "test-model", &llm)
             .unwrap();
-        assert!(report.staged, "report: {report:?}");
+        assert!(report.written, "report: {report:?}");
         assert_eq!(report.title, "Empty string returns zero");
         assert!(
             !prompter
@@ -2586,7 +2565,7 @@ mod tests {
         let report = service
             .draft_assisted(&mut prompter, "test-model", &llm)
             .unwrap();
-        assert!(report.staged, "report: {report:?}");
+        assert!(report.written, "report: {report:?}");
         // Accept-all stores both; the pick decides which stored
         // requirement the wizard walks through first - here the
         // second, stored as REQ-009.
@@ -2606,23 +2585,22 @@ mod tests {
         told("The description holds 2 requirement(s):");
         told("1. Comma separated numbers are summed");
         told("2. Empty string returns zero");
-        told("Accepted requirements are staged for requirements/requirements.json as pending");
+        told("Accepted requirements were written to requirements/requirements.json as pending");
         told("REQ-008 Comma separated numbers are summed");
         told("REQ-009 Empty string returns zero");
         told("Which requirement first to review and refine?");
-        // Both accepted proposals sit in the staged spec.
-        let staged: Spec =
-            serde_json::from_str(&service.store.content(SPEC_PATH).unwrap().unwrap()).unwrap();
-        assert_eq!(staged.requirements.len(), 4);
-        assert_eq!(staged.requirements[2].id, "REQ-008");
+        // Both accepted proposals sit in the spec on disk.
+        let written: Spec = serde_json::from_str(&service.store.get(SPEC_PATH).unwrap()).unwrap();
+        assert_eq!(written.requirements.len(), 4);
+        assert_eq!(written.requirements[2].id, "REQ-008");
         assert_eq!(
-            staged.requirements[2].title,
+            written.requirements[2].title,
             "Comma separated numbers are summed"
         );
-        assert_eq!(staged.requirements[2].status, "pending");
-        assert_eq!(staged.requirements[3].id, "REQ-009");
-        assert_eq!(staged.requirements[3].title, "Empty string returns zero");
-        assert_eq!(staged.requirements[3].status, "pending");
+        assert_eq!(written.requirements[2].status, "pending");
+        assert_eq!(written.requirements[3].id, "REQ-009");
+        assert_eq!(written.requirements[3].title, "Empty string returns zero");
+        assert_eq!(written.requirements[3].status, "pending");
         assert_eq!(
             service.store.summaries()[0],
             "draft REQ-008, REQ-009 from the description"
@@ -2645,7 +2623,7 @@ mod tests {
         let report = service
             .draft_assisted(&mut prompter, "test-model", &llm)
             .unwrap();
-        assert!(report.staged, "report: {report:?}");
+        assert!(report.written, "report: {report:?}");
         assert_eq!(report.id, "REQ-008");
         assert_eq!(report.title, "Empty string returns zero");
         assert!(
@@ -2656,11 +2634,10 @@ mod tests {
             "a single accepted proposal skips the which-first question: {:#?}",
             prompter.transcript
         );
-        let staged: Spec =
-            serde_json::from_str(&service.store.content(SPEC_PATH).unwrap().unwrap()).unwrap();
-        assert_eq!(staged.requirements.len(), 3);
-        assert_eq!(staged.requirements[2].id, "REQ-008");
-        assert_eq!(staged.requirements[2].title, "Empty string returns zero");
+        let written: Spec = serde_json::from_str(&service.store.get(SPEC_PATH).unwrap()).unwrap();
+        assert_eq!(written.requirements.len(), 3);
+        assert_eq!(written.requirements[2].id, "REQ-008");
+        assert_eq!(written.requirements[2].title, "Empty string returns zero");
         assert_eq!(
             service.store.summaries()[0],
             "draft REQ-008 from the description"
@@ -2686,7 +2663,7 @@ mod tests {
         let report = service
             .draft_assisted(&mut prompter, "test-model", &llm)
             .unwrap();
-        assert!(report.staged, "report: {report:?}");
+        assert!(report.written, "report: {report:?}");
         assert_eq!(report.title, "Empty string returns zero");
         assert_eq!(
             prompter
@@ -2719,7 +2696,7 @@ mod tests {
         let report = service
             .draft_assisted(&mut prompter, "test-model", &llm)
             .unwrap();
-        assert!(report.staged, "report: {report:?}");
+        assert!(report.written, "report: {report:?}");
         assert_eq!(report.title, "Empty string returns zero");
         assert_eq!(
             prompter
@@ -2751,7 +2728,7 @@ mod tests {
         let report = service
             .draft_assisted(&mut prompter, "test-model", &llm)
             .unwrap();
-        assert!(report.staged, "report: {report:?}");
+        assert!(report.written, "report: {report:?}");
         assert_eq!(report.title, "Comma separated numbers are summed");
     }
 
@@ -2818,9 +2795,12 @@ mod tests {
             "n",
         ]);
         let report = service.draft(&mut prompter).unwrap();
-        assert!(!report.staged);
-        assert!(report.next_step.starts_with("Nothing was staged."));
-        assert_eq!(service.store.content(SPEC_PATH).unwrap(), None);
+        assert!(!report.written);
+        assert!(report.next_step.starts_with("Nothing was written."));
+        assert_eq!(
+            service.store.get(SPEC_PATH).as_deref(),
+            Some(unchanged_spec().as_str())
+        );
     }
 
     /// An exhausted pipe is not an answer. The wizard used to read it
@@ -2831,15 +2811,18 @@ mod tests {
         let service = service(Ok(spec()), green());
         let mut prompter = ScriptedPrompter::piping(&[]);
         let report = service.reword(&mut prompter, "REQ-007").unwrap();
-        assert!(!report.staged);
+        assert!(!report.written);
         assert_eq!(
             report.next_step,
-            "Nothing was staged. Run spec reword REQ-007 again when the wording is ready."
+            "Nothing was written. Run spec reword REQ-007 again when the wording is ready."
         );
         // The requirement's own title, not a blank one: the reply has
         // always carried it and the student guide quotes it.
         assert_eq!(report.title, "A title");
-        assert_eq!(service.store.content(SPEC_PATH).unwrap(), None);
+        assert_eq!(
+            service.store.get(SPEC_PATH).as_deref(),
+            Some(unchanged_spec().as_str())
+        );
         // One question was put to the pipe; the rest were not asked.
         assert_eq!(
             prompter
@@ -2860,8 +2843,8 @@ mod tests {
         let service = service(Ok(spec()), green());
         let mut prompter = ScriptedPrompter::piping(&["Comma sums"]);
         let report = service.reword(&mut prompter, "REQ-007").unwrap();
-        assert!(!report.staged);
-        assert!(report.next_step.starts_with("Nothing was staged."));
+        assert!(!report.written);
+        assert!(report.next_step.starts_with("Nothing was written."));
     }
 
     /// A script that is simply too short is a broken test, not a user
@@ -2874,11 +2857,11 @@ mod tests {
     }
 
     #[test]
-    fn drafting_stacks_on_a_previously_staged_spec() {
+    fn drafting_stacks_on_a_previously_written_spec() {
         let service = service(Ok(spec()), green());
         service
             .store
-            .stage(
+            .write(
                 SPEC_PATH,
                 &serde_json::to_string(&Spec {
                     project: "Kata".into(),
@@ -2911,7 +2894,7 @@ mod tests {
         let service = service(Ok(spec()), green());
         let mut prompter = AlwaysEnter::default();
         let report = service.draft(&mut prompter).unwrap();
-        assert!(!report.staged, "{report:?}");
+        assert!(!report.written, "{report:?}");
         assert!(!report.findings.is_empty(), "{report:?}");
         assert!(
             prompter.asks < 200,
@@ -3002,21 +2985,6 @@ mod tests {
     }
 
     #[test]
-    fn a_malformed_staged_spec_is_a_structured_error() {
-        let service = service(Ok(spec()), green());
-        service.store.stage(SPEC_PATH, "not json", "oops").unwrap();
-        let mut prompter = ScriptedPrompter::default();
-        let error = service.draft(&mut prompter).unwrap_err();
-        assert!(
-            error
-                .0
-                .starts_with("spec: staged requirements/requirements.json is not readable JSON -"),
-            "got: {}",
-            error.0
-        );
-    }
-
-    #[test]
     fn the_first_draft_of_an_empty_spec_gets_req_001() {
         let service = service(
             Ok(Spec {
@@ -3046,21 +3014,19 @@ mod tests {
             MarkReport {
                 id: "REQ-001".into(),
                 status: "implemented".into(),
-                staged: true,
-                next_step: "Review with changes show, run validate (it checks the \
-                            @REQ-001 scenario exists), then changes commit."
-                    .into(),
+                written: true,
+                next_step: "Run validate - it checks the @REQ-001 scenario exists.".into(),
             }
         );
-        let staged = service.store.content(SPEC_PATH).unwrap().unwrap();
-        let staged_spec: Spec = serde_json::from_str(&staged).unwrap();
-        assert_eq!(staged_spec.requirements[0].status, "implemented");
+        let written = service.store.get(SPEC_PATH).unwrap();
+        let written_spec: Spec = serde_json::from_str(&written).unwrap();
+        assert_eq!(written_spec.requirements[0].status, "implemented");
         assert_eq!(
-            staged_spec.requirements[0].feature_file.as_deref(),
+            written_spec.requirements[0].feature_file.as_deref(),
             Some("features/calc.feature"),
             "the tagged feature is recorded so the spec validates"
         );
-        assert_eq!(staged_spec.requirements[1].status, "pending");
+        assert_eq!(written_spec.requirements[1].status, "pending");
     }
 
     #[test]
@@ -3070,10 +3036,13 @@ mod tests {
         assert_eq!(
             error.0,
             "No scenario is tagged @REQ-007 - implemented requirements need an \
-             executable scenario. Add one with spec scenario add, apply it with \
-             spec changes commit, then mark REQ-007 implemented."
+             executable scenario. Add one with spec scenario add, then mark \
+             REQ-007 implemented."
         );
-        assert_eq!(service.store.content(SPEC_PATH).unwrap(), None);
+        assert_eq!(
+            service.store.get(SPEC_PATH).as_deref(),
+            Some(unchanged_spec().as_str())
+        );
     }
 
     #[test]
@@ -3084,12 +3053,11 @@ mod tests {
         broken.requirements[0].feature_file = None;
         let service = service(Ok(broken), green());
         let report = service.mark_implemented("REQ-001").unwrap();
-        assert!(report.staged);
-        let staged: Spec =
-            serde_json::from_str(&service.store.content(SPEC_PATH).unwrap().unwrap()).unwrap();
-        assert_eq!(staged.requirements[0].status, "implemented");
+        assert!(report.written);
+        let written: Spec = serde_json::from_str(&service.store.get(SPEC_PATH).unwrap()).unwrap();
+        assert_eq!(written.requirements[0].status, "implemented");
         assert_eq!(
-            staged.requirements[0].feature_file.as_deref(),
+            written.requirements[0].feature_file.as_deref(),
             Some("features/calc.feature")
         );
     }
@@ -3133,7 +3101,7 @@ mod tests {
     }
 
     #[test]
-    fn a_flag_draft_stages_the_next_id_without_a_tty() {
+    fn a_flag_draft_writes_the_next_id_without_a_tty() {
         let service = service(Ok(spec()), green());
         let report = service
             .draft_direct(
@@ -3146,13 +3114,12 @@ mod tests {
             )
             .unwrap();
         assert_eq!(report.id, "REQ-008");
-        assert!(report.staged);
+        assert!(report.written);
         let listed = service.list_requirements().unwrap();
         assert!(
-            listed.iter().any(|r| r.id == "REQ-008" && r.staged),
+            listed.iter().any(|r| r.id == "REQ-008"),
             "listed: {listed:?}"
         );
-        assert!(listed.iter().any(|r| r.id == "REQ-001" && !r.staged));
     }
 
     #[test]
@@ -3173,12 +3140,12 @@ mod tests {
     }
 
     #[test]
-    fn set_feature_stages_a_path_rewrite() {
+    fn set_feature_writes_a_path_rewrite() {
         let service = service(Ok(spec()), green());
         let report = service
             .set_feature("REQ-001", "src/test/resources/features/calc.feature")
             .unwrap();
-        assert!(report.staged);
+        assert!(report.written);
         assert_eq!(
             report.feature_file,
             "src/test/resources/features/calc.feature"
@@ -3186,7 +3153,7 @@ mod tests {
         let noop = service
             .set_feature("REQ-001", "src/test/resources/features/calc.feature")
             .unwrap();
-        assert!(!noop.staged);
+        assert!(!noop.written);
     }
 
     #[test]
@@ -3201,20 +3168,19 @@ mod tests {
             )
             .unwrap();
         assert_eq!(report.id, "REQ-001");
-        let staged: Spec =
-            serde_json::from_str(&service.store.content(SPEC_PATH).unwrap().unwrap()).unwrap();
-        assert_eq!(staged.requirements[0].title, "Comma sums");
-        assert_eq!(staged.requirements.len(), 2);
+        let written: Spec = serde_json::from_str(&service.store.get(SPEC_PATH).unwrap()).unwrap();
+        assert_eq!(written.requirements[0].title, "Comma sums");
+        assert_eq!(written.requirements.len(), 2);
     }
 
     /// Every path that writes a spec document ends it in a newline.
-    /// Staging is where the bytes are decided - `changes commit` copies
-    /// the staged file verbatim - so this is also what lands on disk.
+    /// This is where the bytes are decided, so it is what lands on
+    /// disk.
     /// Without it the student's next `git diff` carries a
     /// `\ No newline at end of file` marker for a change they did not
     /// make, on a file no tool lets them fix by hand.
     #[test]
-    fn every_staged_spec_document_ends_in_a_newline() {
+    fn every_written_spec_document_ends_in_a_newline() {
         let ends_in_newline = |label: &str, content: String| {
             assert_eq!(
                 content.as_bytes().last(),
@@ -3223,19 +3189,19 @@ mod tests {
             );
             assert!(!content.ends_with("\n\n"), "{label}: {content:?}");
         };
-        let staged = |service: &SpecMutationService<_, _, InMemoryChangeStore, _>, path: &str| {
-            service.store.content(path).unwrap().unwrap()
+        let written = |service: &SpecMutationService<_, _, SharedTree, _>, path: &str| {
+            service.store.get(path).unwrap()
         };
 
         let reworded = service(Ok(spec()), green());
         reworded
             .reword_direct("REQ-001", Some("Comma sums".into()), None, Vec::new())
             .unwrap();
-        ends_in_newline("reword", staged(&reworded, SPEC_PATH));
+        ends_in_newline("reword", written(&reworded, SPEC_PATH));
 
         let marked = service(Ok(spec()), green());
         marked.mark_implemented("REQ-001").unwrap();
-        ends_in_newline("mark-implemented", staged(&marked, SPEC_PATH));
+        ends_in_newline("mark-implemented", written(&marked, SPEC_PATH));
 
         let drafted = service(Ok(spec()), green());
         drafted
@@ -3245,13 +3211,13 @@ mod tests {
                 vec![CLEAN_CRITERION.into(), EDGE_CRITERION.into()],
             )
             .unwrap();
-        ends_in_newline("draft", staged(&drafted, SPEC_PATH));
+        ends_in_newline("draft", written(&drafted, SPEC_PATH));
 
         let pointed = service(Ok(spec()), green());
         pointed
             .set_feature("REQ-007", "features/calc.feature")
             .unwrap();
-        ends_in_newline("set-feature", staged(&pointed, SPEC_PATH));
+        ends_in_newline("set-feature", written(&pointed, SPEC_PATH));
 
         // include add writes two documents: the parent it edits and the
         // empty child it creates.
@@ -3259,10 +3225,10 @@ mod tests {
         included
             .include_add("requirements/core/math.json", None)
             .unwrap();
-        ends_in_newline("include add (parent)", staged(&included, SPEC_PATH));
+        ends_in_newline("include add (parent)", written(&included, SPEC_PATH));
         ends_in_newline(
             "include add (child)",
-            staged(&included, "requirements/core/math.json"),
+            written(&included, "requirements/core/math.json"),
         );
     }
 
@@ -3272,15 +3238,15 @@ mod tests {
     /// holds REQ-001 (tagged in the feature catalog) and REQ-007.
     fn stage_split_spec(
         service: &SpecMutationService<
-            InMemorySpecRepository,
+            SharedSpecRepository,
             InMemoryFeatureCatalog,
-            InMemoryChangeStore,
+            SharedTree,
             FixedStateStore,
         >,
     ) {
         service
             .store
-            .stage(
+            .write(
                 SPEC_PATH,
                 r#"{"project":"Kata","includes":["core.json"],"requirements":[]}"#,
                 "split the spec",
@@ -3288,7 +3254,7 @@ mod tests {
             .unwrap();
         service
             .store
-            .stage(
+            .write(
                 "requirements/core.json",
                 &serde_json::to_string(&Spec {
                     requirements: vec![requirement("REQ-001"), requirement("REQ-007")],
@@ -3313,18 +3279,11 @@ mod tests {
             )
             .unwrap();
         assert_eq!(report.id, "REQ-008", "ids count across the whole catalog");
-        let child: Spec = serde_json::from_str(
-            &service
-                .store
-                .content("requirements/core.json")
-                .unwrap()
-                .unwrap(),
-        )
-        .unwrap();
+        let child: Spec =
+            serde_json::from_str(&service.store.get("requirements/core.json").unwrap()).unwrap();
         assert_eq!(child.requirements.len(), 3);
         assert_eq!(child.requirements[2].id, "REQ-008");
-        let root: Spec =
-            serde_json::from_str(&service.store.content(SPEC_PATH).unwrap().unwrap()).unwrap();
+        let root: Spec = serde_json::from_str(&service.store.get(SPEC_PATH).unwrap()).unwrap();
         assert!(
             root.requirements.is_empty(),
             "the root document was left alone"
@@ -3339,7 +3298,7 @@ mod tests {
         let service = service(Ok(spec()), green()).with_working_dir(Some("core".into()));
         service
             .store
-            .stage(
+            .write(
                 SPEC_PATH,
                 r#"{"project":"Kata","includes":["core/math.json"],"requirements":[]}"#,
                 "split the spec",
@@ -3347,7 +3306,7 @@ mod tests {
             .unwrap();
         service
             .store
-            .stage(
+            .write(
                 "requirements/core/math.json",
                 &serde_json::to_string(&Spec {
                     requirements: vec![requirement("MATH-001")],
@@ -3369,14 +3328,9 @@ mod tests {
 
         // The prefix came from the file it landed in, not the root.
         assert_eq!(report.id, "MATH-002");
-        let child: Spec = serde_json::from_str(
-            &service
-                .store
-                .content("requirements/core/math.json")
-                .unwrap()
-                .unwrap(),
-        )
-        .unwrap();
+        let child: Spec =
+            serde_json::from_str(&service.store.get("requirements/core/math.json").unwrap())
+                .unwrap();
         assert_eq!(child.requirements.len(), 2);
     }
 
@@ -3397,8 +3351,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(report.id, "REQ-008");
-        let root: Spec =
-            serde_json::from_str(&service.store.content(SPEC_PATH).unwrap().unwrap()).unwrap();
+        let root: Spec = serde_json::from_str(&service.store.get(SPEC_PATH).unwrap()).unwrap();
         assert_eq!(root.requirements.len(), 1, "the root document took it");
     }
 
@@ -3419,8 +3372,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(report.id, "REQ-008");
-        let root: Spec =
-            serde_json::from_str(&service.store.content(SPEC_PATH).unwrap().unwrap()).unwrap();
+        let root: Spec = serde_json::from_str(&service.store.get(SPEC_PATH).unwrap()).unwrap();
         assert_eq!(root.requirements.len(), 1);
     }
 
@@ -3456,22 +3408,15 @@ mod tests {
         let service = service(Ok(spec()), green());
         stage_split_spec(&service);
         let report = service.mark_implemented("REQ-001").unwrap();
-        assert!(report.staged);
-        let child: Spec = serde_json::from_str(
-            &service
-                .store
-                .content("requirements/core.json")
-                .unwrap()
-                .unwrap(),
-        )
-        .unwrap();
+        assert!(report.written);
+        let child: Spec =
+            serde_json::from_str(&service.store.get("requirements/core.json").unwrap()).unwrap();
         assert_eq!(child.requirements[0].status, "implemented");
         assert_eq!(
             child.requirements[0].feature_file.as_deref(),
             Some("features/calc.feature")
         );
-        let root: Spec =
-            serde_json::from_str(&service.store.content(SPEC_PATH).unwrap().unwrap()).unwrap();
+        let root: Spec = serde_json::from_str(&service.store.get(SPEC_PATH).unwrap()).unwrap();
         assert!(root.requirements.is_empty());
     }
 
@@ -3488,14 +3433,8 @@ mod tests {
             )
             .unwrap();
         assert_eq!(report.id, "REQ-007");
-        let child: Spec = serde_json::from_str(
-            &service
-                .store
-                .content("requirements/core.json")
-                .unwrap()
-                .unwrap(),
-        )
-        .unwrap();
+        let child: Spec =
+            serde_json::from_str(&service.store.get("requirements/core.json").unwrap()).unwrap();
         assert_eq!(child.requirements[1].title, "Comma sums");
     }
 
@@ -3517,27 +3456,21 @@ mod tests {
         let report = service
             .include_add("requirements/core/math.json", None)
             .unwrap();
-        assert!(report.staged);
+        assert!(report.written);
         assert!(report.created);
         assert_eq!(report.file, "requirements/core/math.json");
         assert_eq!(report.parent, "requirements/requirements.json");
-        let root: Spec =
-            serde_json::from_str(&service.store.content(SPEC_PATH).unwrap().unwrap()).unwrap();
+        let root: Spec = serde_json::from_str(&service.store.get(SPEC_PATH).unwrap()).unwrap();
         assert_eq!(root.includes, vec!["core/math.json"]);
         assert_eq!(root.requirements.len(), 2, "existing rows survive");
-        let child: Spec = serde_json::from_str(
-            &service
-                .store
-                .content("requirements/core/math.json")
-                .unwrap()
-                .unwrap(),
-        )
-        .unwrap();
+        let child: Spec =
+            serde_json::from_str(&service.store.get("requirements/core/math.json").unwrap())
+                .unwrap();
         assert!(child.requirements.is_empty());
     }
 
     #[test]
-    fn a_staged_include_is_immediately_draftable_into() {
+    fn a_new_include_is_immediately_draftable_into() {
         let service = service(Ok(spec()), green());
         service
             .include_add("requirements/core/math.json", None)
@@ -3551,14 +3484,9 @@ mod tests {
             )
             .unwrap();
         assert_eq!(report.id, "REQ-008");
-        let child: Spec = serde_json::from_str(
-            &service
-                .store
-                .content("requirements/core/math.json")
-                .unwrap()
-                .unwrap(),
-        )
-        .unwrap();
+        let child: Spec =
+            serde_json::from_str(&service.store.get("requirements/core/math.json").unwrap())
+                .unwrap();
         assert_eq!(child.requirements[0].id, "REQ-008");
     }
 
@@ -3571,7 +3499,7 @@ mod tests {
         let report = service
             .include_add("requirements/core/math.json", None)
             .unwrap();
-        assert!(!report.staged);
+        assert!(!report.written);
         assert!(!report.created);
         assert!(
             report
@@ -3592,16 +3520,11 @@ mod tests {
                 Some("requirements/core/math.json"),
             )
             .unwrap();
-        assert!(report.staged);
+        assert!(report.written);
         assert_eq!(report.parent, "requirements/core/math.json");
-        let parent: Spec = serde_json::from_str(
-            &service
-                .store
-                .content("requirements/core/math.json")
-                .unwrap()
-                .unwrap(),
-        )
-        .unwrap();
+        let parent: Spec =
+            serde_json::from_str(&service.store.get("requirements/core/math.json").unwrap())
+                .unwrap();
         assert_eq!(parent.includes, vec!["edge.json"]);
     }
 
@@ -3702,7 +3625,7 @@ mod tests {
                 vec![CLEAN_CRITERION.into(), EDGE_CRITERION.into()],
             )
             .unwrap();
-        assert!(report.staged);
+        assert!(report.written);
         assert!(
             report.next_step.contains("refine findings") || report.next_step.contains("reword"),
             "next step: {}",
@@ -3712,10 +3635,15 @@ mod tests {
 
     #[test]
     fn list_requirements_with_a_bare_spec_path_keeps_catalog_paths() {
+        let tree = SharedTree::default();
+        tree.put(
+            "requirements.json",
+            &crate::domain::model::render(&spec()).unwrap(),
+        );
         let service = SpecMutationService::new(
-            InMemorySpecRepository(Ok(spec())),
+            SharedSpecRepository::new(tree.clone(), "requirements.json"),
             calculator_catalog(),
-            InMemoryChangeStore::default(),
+            tree,
             green(),
             "requirements.json".into(),
         );
@@ -3736,7 +3664,7 @@ mod tests {
         let service = service(Ok(spec), green());
         let mut prompter = ScriptedPrompter::answering(&["", "", "", "", "", "y"]);
         let report = service.reword(&mut prompter, "REQ-001").unwrap();
-        assert!(report.staged);
+        assert!(report.written);
         assert_eq!(report.id, "REQ-001");
     }
 }

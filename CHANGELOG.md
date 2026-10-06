@@ -2,6 +2,71 @@
 
 ## Unreleased
 
+- **Every command writes the project's real files, and git is the
+  review.** The staging area is gone: `.spec/staged/`, the overlay that
+  made a staged edit readable before it was applied, and the four
+  `changes_*` MCP tools along with `spec changes show|commit|discard|
+  validate`. The server now lists 21 tools rather than 25.
+
+  The staging area was a review gate that nobody could use outside the
+  harness. It asked a developer to read a diff through a bespoke command,
+  in a format no editor could render, against a copy of a file that did
+  not exist on disk — and then to apply it with a second command that
+  every page in this repository had to keep reminding them to run. The
+  cost was paid everywhere: `validate_spec` had to disclose that it had
+  judged a file the caller had already moved past, `refine_requirement`
+  grew a `source` field so the reword loop could say which copy it had
+  read, `spec test` ran against a working tree that the preceding six
+  commands had deliberately not touched, and `spec deliver` refused to
+  start at all while anything was waiting, because an earlier session's
+  leftovers would have ridden along on its first commit.
+
+  A diff tool that every developer already has, already trusts, and
+  already has an undo for does the same job better. `git diff` is the
+  review, `git restore` is the discard, and a commit is the apply.
+  Reply shapes follow: the `staged` field is now `written`, and every
+  `nextStep` that used to say "apply with `changes commit`" names the
+  next real step instead.
+
+  Writes are atomic. Each one lands in a scratch file alongside the
+  target and is renamed over it, so a concurrent reader sees either the
+  old bytes or the new ones and never a half-written file. An advisory
+  lock on `.spec/.lock` serializes them across processes, which is what
+  the staging lock did before. Paths are canonicalized and confined to
+  the project root, and `.spec/` itself is refused — a write tool cannot
+  reach the harness's own state.
+
+- **`spec greenfield` and `spec deliver` offer the run a branch of its
+  own.** Writing real files is only safe because the result can be
+  thrown away, so the two orchestrators that generate at scale stop
+  once, before they write anything, and ask:
+
+  ```text
+  This run writes the project's files directly. You are on main.
+  Branch name for this run (Enter for spec/2026-10-05-amber-kite, or n to stay on main)
+  ```
+
+  One question, three answers, no wrong one: a name, an empty line to
+  take the generated one, or `n` to write where you stand. A typed name
+  is cleaned into a usable ref — lowercased, spaces to hyphens, prefixed
+  `spec/` — and a name git refuses is a warning and a run that continues,
+  never a failure. Uncommitted work is called out before the question
+  rather than after, because a branch made over it carries it along,
+  which is the thing that decides the answer.
+
+  It does not ask when there is nothing to ask about. Outside a git
+  repository it says so once — there is no undo here — and goes on. With
+  the new global `--no-branch` flag git is never consulted at all, which
+  is the point of the flag: a project deliberately not under version
+  control, or a CI job that manages its own refs, should not pay for a
+  probe or be asked a question nobody will answer. On a pipe with
+  nothing left to read, staying put is the answer. The MCP server never
+  asks and never creates a branch; a host drives the branch itself.
+
+  `spec inspect` reports what it found, so the layout survey a project
+  already does now includes whether it is a repository, which branch is
+  checked out, and whether the tree is dirty.
+
 - `spec judge` is a new command group for a *decision model*: a second,
   separate local model that writes nothing and instead answers one
   bounded question about supplied evidence with a typed value and a

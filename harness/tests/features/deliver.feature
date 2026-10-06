@@ -153,7 +153,7 @@ Feature: Deliver mode
     When the delivery runs for "empty input means zero"
     Then the delivery completes
     And the delivery delivered "REQ-001"
-    And the developer was told a finding containing "Stage this requirement? yes (spec deliver never stops to ask)"
+    And the developer was told a finding containing "Write this requirement? yes (spec deliver never stops to ask)"
     And the working tree file "requirements/requirements.json" contains "Empty string returns zero"
 
   Scenario: An empty directory is refused rather than asked which language to scaffold
@@ -169,7 +169,7 @@ Feature: Deliver mode
     When the delivery runs
     Then the delivery error contains "nothing was described"
     And the delivery error contains "spec greenfield"
-    And nothing is staged at the spec path
+    And the spec file is unchanged
 
   Scenario: A description with no model to break it down is handed back
     Given a Java project marker
@@ -177,7 +177,7 @@ Feature: Deliver mode
     When the delivery runs for "empty input means zero"
     Then the delivery error contains "needs a model, and none is resolved"
     And the delivery error contains "spec model use"
-    And nothing is staged at the spec path
+    And the spec file is unchanged
 
   Scenario: One word reaching for a requirement id is refused, not drafted
     Given a Java project marker
@@ -185,7 +185,7 @@ Feature: Deliver mode
     When the delivery runs for "req7"
     Then the delivery error contains "req7 is not a requirement id"
     And the delivery error contains "spec list"
-    And nothing is staged at the spec path
+    And the spec file is unchanged
 
   # "R-003" reads as an id - an uppercase prefix, a dash, a number - so
   # the catalog is what decides, not the shape. A prefix the catalog does
@@ -196,7 +196,7 @@ Feature: Deliver mode
     When the delivery runs for "R-003"
     Then the delivery error contains "No requirement with id R-003"
     And the delivery error contains "spec list"
-    And nothing is staged at the spec path
+    And the spec file is unchanged
 
   # The prefix belongs to the catalog: this crate's own spec numbers
   # HARNESS-014, and the same command has to reach it.
@@ -369,15 +369,6 @@ Feature: Deliver mode
     And the delivery leaves "REQ-001" outstanding because "no supported build tool found"
     And the working tree file "features/kata.feature" contains "@REQ-001"
 
-  Scenario: Work left in staging from an earlier session is the author's to settle
-    Given a Java project marker
-    And a working spec with the pending requirements "REQ-001"
-    And the delivery skips the refactor
-    And a staged feature file "features/kata.feature" named "Kata"
-    When the delivery runs for "REQ-001"
-    Then the delivery is not completed
-    And the delivery leaves "REQ-001" outstanding because "already staged"
-
   Scenario: Scenarios and tests that are already in place are not written twice
     Given a Java project marker
     And a working spec with the pending requirements "REQ-001"
@@ -478,4 +469,4 @@ Feature: Deliver mode
     Then the delivery is not completed
     And the delivery leaves "REQ-001" outstanding because "is Given/When/Then shaped"
     And the developer was told a finding containing "Skipping criterion"
-    And nothing is staged at the spec path
+    And the spec file is unchanged

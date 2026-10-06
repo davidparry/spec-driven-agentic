@@ -145,18 +145,11 @@ Attempting it off GREEN is refused with exit status 1:
    140|Error: Refactoring is only allowed from GREEN (current phase: RED). Make the tests pass first.
 ```
 
-So is starting with work already staged, since the loop applies each
-round in order to test it:
+## It writes to your working tree
 
-```text
-Error: 1 change(s) are already staged, and the refactor loop applies each round to run the tests - review them with spec changes show, then spec changes commit or spec changes discard before refactoring.
-```
-
-   150|## It writes to your working tree
-
-Every other authoring command stages its work for you to read before it
-lands. This one cannot: the only thing that can tell a refactor from a
-rewrite is the test suite, and the suite runs against files on disk.
+Like every other authoring command, this one writes the real file — and
+it has to: the only thing that can tell a refactor from a rewrite is the
+test suite, and the suite runs against files on disk.
 
 So a successful refactor is already applied when the command returns.
 Read it with `git diff`, and run `spec test` to record the run in the

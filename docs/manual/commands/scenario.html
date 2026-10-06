@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-bb14de4e.js";
+            window.path_to_searchindex_js = "../searchindex-d84b362c.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-2ab172c3.js"></script>
+        <script src="../toc-0006eac3.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -183,7 +183,8 @@
                         <h1 id="spec-scenario"><a class="header" href="#spec-scenario">spec scenario</a></h1>
 <p>Scenario mutations. Every scenario is tied to a requirement by a
 <code>@REQ-...</code> tag, keeping the feature files traceable back to the spec.
-All four subcommands write to the <a href="../staged-changes.html">staging area</a>.</p>
+All four subcommands write the feature file itself — see
+<a href="../direct-writes.html">direct writes</a>.</p>
 <pre><code class="language-text">Usage: spec scenario [OPTIONS] &lt;COMMAND&gt;
 
 Commands: generate, add, update, delete
@@ -217,16 +218,16 @@ scenario per criterion, in order.</p>
     "Two larger numbers separated by a comma are summed"
   ],
   "criteria": 2,
-  "staged": true,
+  "written": true,
   "source": "llm",
-  "nextStep": "Read the steps against the acceptance criteria, apply with spec changes commit, then run spec steps missing."
+  "nextStep": "Read the steps against the acceptance criteria, then run spec steps missing."
 }
 </code></pre>
 <h3 id="where-the-wording-comes-from"><a class="header" href="#where-the-wording-comes-from">Where the wording comes from</a></h3>
 <p>Acceptance criteria are already <code>Given …, when …, then …</code>, so a literal
 reading of them is always available and needs no model. That literal
 reading is the <strong>template</strong>, and <code>source</code> reports <code>template</code> when it is
-what got staged.</p>
+what got written.</p>
 <p>It is correct but rarely idiomatic: it cannot know that the feature file
 it is joining opens every scenario on <code>Given a string calculator</code>. So
 when a model is resolved it is asked to say the same thing in the file’s
@@ -252,7 +253,7 @@ undefined steps.</p>
 criterion</strong>, every step opens with a Gherkin keyword, every scenario has
 a <code>When</code> and a <code>Then</code>, and no name collides with one already in the file
 or with another in the reply. A reply failing any of those is retried
-with the reason, and the template is staged if the retries run out —
+with the reason, and the template is written if the retries run out —
 coverage is never quietly lost to a chatty model.</p>
 <p>The command itself refuses two situations outright:</p>
 <ul>
@@ -292,7 +293,7 @@ passing <code>--feature</code> also points the requirement at that file, exactly
   --step 'When add is called' \
   --step 'Then the result is 3'
 </code></pre>
-<p>The staged result appended to the feature:</p>
+<p>The result appended to the feature:</p>
 <pre><code class="language-gherkin">  @REQ-003
   Scenario: Two numbers separated by a comma are summed
     Given the input "1,2"
@@ -348,8 +349,7 @@ found by feature path + scenario name; omitted parts are kept.</p>
 names the feature searched.</p>
 <h2 id="the-full-rhythm"><a class="header" href="#the-full-rhythm">The full rhythm</a></h2>
 <pre><code class="language-bash">spec scenario generate REQ-002   # or scenario add, to write them yourself
-spec changes show      # review the staged modify
-spec changes commit    # apply
+git diff               # review what landed
 spec steps missing     # any steps without definitions?
 spec test              # expect RED
 </code></pre>
@@ -357,7 +357,7 @@ spec test              # expect RED
 <ul>
 <li><a href="steps.html"><code>spec steps</code></a> — find and generate the step definitions
 behind these scenarios.</li>
-<li><a href="changes.html"><code>spec changes</code></a> — review, apply, or discard the staged mutation.</li>
+<li><a href="spec.html#spec-validate"><code>spec validate</code></a> — check the scenarios against the spec.</li>
 </ul>
 
                     </main>

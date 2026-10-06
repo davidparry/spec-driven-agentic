@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-bb14de4e.js";
+            window.path_to_searchindex_js = "../searchindex-d84b362c.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-2ab172c3.js"></script>
+        <script src="../toc-0006eac3.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -200,6 +200,7 @@ there.</p>
 <tr><td><code>--fail-fast</code></td><td>Stop at the first requirement that falls short instead of carrying on.</td></tr>
 <tr><td><code>--no-refactor</code></td><td>Skip the refactor step even on a green bar.</td></tr>
 <tr><td><code>--file &lt;FILE&gt;</code></td><td>Draft new requirements into this included spec file. Omitted, the drafted requirement lands in the catalog document covering the working directory — see <a href="spec.html#spec-draft"><code>spec draft</code></a>.</td></tr>
+<tr><td><code>--no-branch</code></td><td>Skip <a href="../branch-gate.html">the branch gate</a> entirely: git is not consulted and no branch is created.</td></tr>
 </tbody>
 </table>
 </div>
@@ -277,7 +278,14 @@ Running the tests - working ...
 <p>A step that loops on its own is called once and its loop is trusted:
 drafting’s validate-and-reword rounds, <code>spec implement</code>’s attempts,
 and <code>spec refactor</code>’s rounds are not wrapped in a second loop here.</p>
-<h2 id="it-never-stops-to-ask"><a class="header" href="#it-never-stops-to-ask">It never stops to ask</a></h2>
+<h2 id="it-stops-once-before-it-writes-anything"><a class="header" href="#it-stops-once-before-it-writes-anything">It stops once, before it writes anything</a></h2>
+<p>A run that delivers a backlog writes a lot of files. So before the first
+one, it asks a single question: a branch name for this run, Enter for a
+generated one, or <code>n</code> to stay where you are. That is
+<a href="../branch-gate.html">the branch gate</a>, and <code>--no-branch</code> removes it. A
+run outside a git repository, or one whose stdin has nothing left to
+read, takes the no-branch path and says so.</p>
+<h2 id="after-that-it-never-stops-to-ask"><a class="header" href="#after-that-it-never-stops-to-ask">After that it never stops to ask</a></h2>
 <p>A run either completes or tells you why it could not. It does neither
 halfway through a question, because an orchestrator that waits at a
 prompt is not running.</p>
@@ -287,7 +295,7 @@ treats <kbd>Enter</kbd> as “accept what is in front of you”, and this is
 that path. Each one is echoed, so the transcript shows what was decided
 for you and which wording landed:</p>
 <pre><code class="language-text">REQ-001 title [Empty string returns zero] (Enter keeps it): kept (spec deliver never stops to ask)
-The wording reads clean. Stage this requirement? yes (spec deliver never stops to ask)
+The wording reads clean. Write this requirement? yes (spec deliver never stops to ask)
 </code></pre>
 <p>The generated unit test is still printed before it runs — the assertions
 are the one thing here you will want to sharpen afterwards — but it is
@@ -320,7 +328,7 @@ backlog:</p>
 <pre><code class="language-text">Plan: 2 requirement(s) - REQ-001, REQ-002.
 [1 of 2] REQ-001
 ...
-REQ-001 stopped: The generated tests were declined and the staging area is clear. Author them by hand, then run spec deliver again.
+REQ-001 stopped: The generated tests were declined. Author them by hand, then run spec deliver again.
 [2 of 2] REQ-002
 </code></pre>
 <p><code>--fail-fast</code> stops instead, and the requirements after it are counted

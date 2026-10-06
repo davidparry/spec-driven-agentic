@@ -11,7 +11,7 @@
 use serde::Serialize;
 
 use crate::application::LlmReplyError;
-use crate::application::assets::{find_requirement, load_effective_spec, production_path};
+use crate::application::assets::{find_requirement, load_spec, production_path};
 use crate::application::generation_service::ResolvedLlm;
 use crate::application::spec_service::ServiceError;
 use crate::domain::generation::implementation_target_path;
@@ -24,8 +24,8 @@ use crate::domain::refactor::{
 };
 use crate::domain::steps::source_extension;
 use crate::ports::{
-    ChangeStore, LlmConversation, Prompter, RunnerError, SourceFiles, SpecRepository, TestFilter,
-    TestRunner, ToolBroker,
+    LlmConversation, Prompter, RunnerError, SourceFiles, SpecRepository, TestFilter, TestRunner,
+    ToolBroker, WorkTree,
 };
 
 /// What one `spec refactor` run did: how much of its budget it spent,
@@ -55,7 +55,7 @@ pub struct RefactorReport {
 pub struct RefactorService<S, C, R, L, B = crate::application::agent_service::NullBroker>
 where
     S: SourceFiles,
-    C: ChangeStore,
+    C: WorkTree,
     R: SpecRepository,
     L: LlmConversation,
     B: ToolBroker,
@@ -72,7 +72,7 @@ where
 impl<S, C, R, L, B> RefactorService<S, C, R, L, B>
 where
     S: SourceFiles,
-    C: ChangeStore,
+    C: WorkTree,
     R: SpecRepository,
     L: LlmConversation,
     B: ToolBroker,
@@ -116,19 +116,7 @@ where
                 "No model resolved - refactor by hand and rerun spec test.".into(),
             ));
         };
-        // The loop commits to apply each round. Anything already staged
-        // would ride along on the first commit and then be restored to
-        // something it never was, so it is the author's to settle first.
-        let staged = self.store.changes()?;
-        if !staged.is_empty() {
-            return Err(ServiceError(format!(
-                "{} change(s) are already staged, and the refactor loop applies each round to \
-                 run the tests - review them with spec changes show, then spec changes commit or \
-                 spec changes discard before refactoring.",
-                staged.len()
-            )));
-        }
-        let spec = load_effective_spec(&self.spec, &self.store)?;
+        let spec = load_spec(&self.spec)?;
         let requirement: Option<Requirement> = match req_id {
             Some(id) => Some(find_requirement(&spec, id)?.clone()),
             None => None,
@@ -258,9 +246,8 @@ where
                 goal.map(|g| format!(": {g}")).unwrap_or_default()
             );
             for update in &changed {
-                self.store.stage(&update.path, &update.content, &summary)?;
+                self.store.write(&update.path, &update.content, &summary)?;
             }
-            self.store.commit()?;
             prompter.tell(&format!("  round {round} rewrote: {}", targets.join(", ")));
             // The model is never handed a test path, and a reply naming
             // one is rejected before it reaches here - but "the tests did
@@ -373,11 +360,8 @@ where
                 continue;
             }
             self.store
-                .stage(path, original, "restore the code the refactor started from")?;
+                .write(path, original, "restore the code the refactor started from")?;
             restored = true;
-        }
-        if restored {
-            self.store.commit()?;
         }
         Ok(restored)
     }
@@ -454,7 +438,7 @@ where
 mod tests {
     use super::*;
     use crate::domain::model::Spec;
-    use crate::ports::{PromptError, SourceError, SourceFile, StageError, StagedChange};
+    use crate::ports::{FileChange, PromptError, SourceError, SourceFile, WriteError};
     use std::cell::{Cell, RefCell};
     use std::collections::BTreeMap;
     use std::rc::Rc;
@@ -465,13 +449,11 @@ mod tests {
     const CLEANED: &str = "class StringCalculator { static final String COMMA = \",\"; int add(String s) { return 0; } }";
     const BREAKS: &str = "class StringCalculator { int add(String s) { return 1; } }";
 
-    /// A working tree with a staging area in front of it, which is the
-    /// pair the loop actually depends on: it stages, commits, and then
-    /// expects to read its own write back.
+    /// A working tree the loop writes to and then expects to read its
+    /// own write back from.
     #[derive(Default)]
     struct Tree {
         applied: RefCell<BTreeMap<String, String>>,
-        staged: RefCell<BTreeMap<String, String>>,
         summaries: RefCell<Vec<String>>,
     }
 
@@ -486,59 +468,33 @@ mod tests {
             Rc::new(tree)
         }
 
-        /// What the working tree holds, which is only what has been
-        /// committed - the staging area in front of it is separate.
+        /// What the working tree holds.
         fn on_disk(&self, path: &str) -> String {
             self.applied.borrow().get(path).cloned().unwrap_or_default()
         }
     }
 
-    impl ChangeStore for Rc<Tree> {
-        fn stage(
+    impl WorkTree for Rc<Tree> {
+        fn write(
             &self,
             path: &str,
             content: &str,
             summary: &str,
-        ) -> Result<StagedChange, StageError> {
-            self.staged
+        ) -> Result<FileChange, WriteError> {
+            let existed = self.applied.borrow().contains_key(path);
+            self.applied
                 .borrow_mut()
                 .insert(path.to_string(), content.to_string());
             self.summaries.borrow_mut().push(summary.to_string());
-            Ok(StagedChange {
+            Ok(FileChange {
                 path: path.into(),
-                action: "modify".into(),
+                action: if existed { "modify" } else { "create" }.into(),
                 summary: summary.into(),
             })
         }
 
-        fn changes(&self) -> Result<Vec<StagedChange>, StageError> {
-            Ok(self
-                .staged
-                .borrow()
-                .keys()
-                .map(|path| StagedChange {
-                    path: path.clone(),
-                    action: "modify".into(),
-                    summary: String::new(),
-                })
-                .collect())
-        }
-
-        fn content(&self, path: &str) -> Result<Option<String>, StageError> {
-            Ok(self.staged.borrow().get(path).cloned())
-        }
-
-        fn commit(&self) -> Result<Vec<StagedChange>, StageError> {
-            let changes = self.changes()?;
-            let staged = std::mem::take(&mut *self.staged.borrow_mut());
-            self.applied.borrow_mut().extend(staged);
-            Ok(changes)
-        }
-
-        fn discard(&self) -> Result<Vec<StagedChange>, StageError> {
-            let changes = self.changes()?;
-            self.staged.borrow_mut().clear();
-            Ok(changes)
+        fn read(&self, path: &str) -> Result<Option<String>, WriteError> {
+            Ok(self.applied.borrow().get(path).cloned())
         }
     }
 
@@ -913,23 +869,6 @@ mod tests {
                 .borrow()
                 .is_empty(),
             "a red bar has nothing to preserve, so nothing is asked"
-        );
-    }
-
-    #[test]
-    fn work_already_staged_is_refused_rather_than_swept_into_the_loop() {
-        let tree = kata();
-        tree.stage("notes.md", "mine", "my own edit").unwrap();
-        let service = service(&tree, &[&rewrite(PRODUCTION, CLEANED)], 10);
-        let suite = suite(&tree, always_green);
-        let error = service
-            .run(&mut Quiet::default(), &suite, None, None)
-            .unwrap_err();
-        assert!(error.0.contains("already staged"), "error: {}", error.0);
-        assert_eq!(
-            tree.on_disk("notes.md"),
-            "",
-            "the author's staged work is left staged, not applied"
         );
     }
 

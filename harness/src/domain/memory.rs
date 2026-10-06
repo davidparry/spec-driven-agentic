@@ -96,6 +96,11 @@ pub struct ProjectMemory {
     pub libraries: Vec<Library>,
     #[serde(default)]
     pub structure: ProjectStructure,
+    /// Where version control stands, as of the last scan. Recorded so
+    /// the branch gate and `spec inspect` read one answer rather than
+    /// each shelling out to git.
+    #[serde(default)]
+    pub git: crate::ports::GitState,
     #[serde(default, rename = "refreshedAt")]
     pub refreshed_at: String,
 }
@@ -132,6 +137,9 @@ pub struct ScanInput<'a> {
     /// Feature files the spec's requirements name, which decide the
     /// module root when a tree holds several buildable modules.
     pub spec_features: &'a [String],
+    /// Where version control stands, probed by the caller so scanning
+    /// stays IO-free.
+    pub git: crate::ports::GitState,
     pub now: &'a str,
 }
 
@@ -165,6 +173,7 @@ pub fn scan_memory(input: &ScanInput<'_>) -> MemoryScan {
             build_tool: infer_build_tool(language, input.manifests),
             libraries,
             structure,
+            git: input.git.clone(),
             refreshed_at: input.now.to_string(),
         },
         module_candidates: candidates,
@@ -467,6 +476,7 @@ mod tests {
             manifests: &manifests,
             tree: &tree,
             spec_features: &[],
+            git: Default::default(),
             now: "2026-08-21T01:00:00Z",
         })
         .memory
@@ -480,6 +490,7 @@ mod tests {
             manifests: &Manifests::default(),
             tree: &[],
             spec_features: &[],
+            git: Default::default(),
             now: "2026-08-21T01:00:00Z",
         })
         .memory;
@@ -496,6 +507,7 @@ mod tests {
             manifests: &Manifests::default(),
             tree: &[],
             spec_features: &[],
+            git: Default::default(),
             now: "2026-08-21T01:00:00Z",
         })
         .memory;
@@ -660,6 +672,7 @@ cucumber = { version = "0.23", features = ["libtest"] }
             manifests: &manifests,
             tree: &tree,
             spec_features: &[],
+            git: Default::default(),
             now: "2026-08-21T01:00:00Z",
         })
         .memory

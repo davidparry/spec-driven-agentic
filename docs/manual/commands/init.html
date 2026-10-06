@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-bb14de4e.js";
+            window.path_to_searchindex_js = "../searchindex-d84b362c.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-2ab172c3.js"></script>
+        <script src="../toc-0006eac3.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -215,7 +215,7 @@ for reference). Other keys are commented with their defaults.</li>
 <p>After scaffolding, <code>init</code> scans the new files into <code>.spec/memory.json</code>
 (language, BDD framework, libraries, layout). That file is generated
 state inside <code>.spec/</code> and is gitignored, like <code>state.json</code>, <code>history</code>,
-<code>cache/</code>, <code>log/</code>, and <code>staged/</code>. Only <code>.spec/config.toml</code> is written to
+<code>cache/</code>, and <code>log/</code>. Only <code>.spec/config.toml</code> is written to
 be committed. Memory is refreshed again when a shell, MCP server, or
 LLM command starts. Every model system prompt then opens with that
 brief.</p>
@@ -276,9 +276,8 @@ spec init --language rust --name "String Calculator"
 unrecognized answer re-prompts.</p>
 <h2 id="notes"><a class="header" href="#notes">Notes</a></h2>
 <ul>
-<li><code>init</code> writes directly to the working tree (there is nothing to
-protect in an empty project); everything after <code>init</code> goes through
-<a href="../staged-changes.html">staged changes</a>.</li>
+<li><code>init</code> writes directly to the working tree, as does everything after
+it — see <a href="../direct-writes.html">direct writes</a>.</li>
 <li><code>init</code> does not install runtimes. Run
 <a href="inspect.html"><code>spec inspect</code></a> to see whether the language’s runtime is
 present before expecting <code>spec test</code> to execute.</li>
@@ -293,7 +292,7 @@ present before expecting <code>spec test</code> to execute.</li>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../staged-changes.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../branch-gate.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
@@ -307,7 +306,7 @@ present before expecting <code>spec test</code> to execute.</li>
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../staged-changes.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../branch-gate.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 

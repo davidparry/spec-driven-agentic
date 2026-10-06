@@ -15,7 +15,7 @@ pub const RECOMMENDED_MODEL: &str = "qwen3.8-flash-next:125b-mlx";
 /// [`ModelCatalog::capabilities`](crate::ports::ModelCatalog::capabilities).
 pub const RECOMMENDED_DECISION_MODEL: &str = "nimble";
 
-/// Hidden parent for configuration, state, cache, logs, and staging.
+/// Hidden parent for configuration, state, cache, and logs.
 pub const SPEC_DIR: &str = ".spec";
 
 /// Project configuration written by `spec init` and `spec model use`.
@@ -26,9 +26,6 @@ pub const STATE_FILE: &str = "state.json";
 
 /// Durable project identity.
 pub const MEMORY_FILE: &str = "memory.json";
-
-/// Staging area holding mutations until `spec changes commit`.
-pub const STAGED_DIR: &str = "staged";
 
 /// Cached LLM responses and discovered tool catalogs; safe to delete.
 pub const CACHE_DIR: &str = "cache";
@@ -44,6 +41,7 @@ pub fn spec_rel(name: &str) -> String {
     format!("{SPEC_DIR}/{name}")
 }
 
+pub mod branch;
 pub mod command_policy;
 pub mod config_report;
 pub mod coverage;

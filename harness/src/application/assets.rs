@@ -12,13 +12,13 @@ use crate::domain::generation::{
 use crate::domain::language::Language;
 use crate::domain::layout::{in_production_root, in_test_root};
 use crate::domain::memory::ProjectStructure;
-use crate::domain::model::{Requirement, Spec, SpecCatalog, resolve_catalog};
+use crate::domain::model::{Requirement, Spec, SpecCatalog};
 use crate::domain::neighborhood;
 use crate::domain::steps::{
     MissingStep, extract_definitions, extract_patterns, find_missing, pattern_matches,
     source_extension, split_step,
 };
-use crate::ports::{ChangeStore, FeatureCatalog, SourceFiles, SpecRepository};
+use crate::ports::{FeatureCatalog, SourceFiles, SpecRepository};
 
 /// The requirement with `req_id`, or the refusal naming the recovery
 /// command.
@@ -91,8 +91,7 @@ pub(crate) fn asset_survey(
     let tagged_feature = feature_tagged(features, &tag)?;
     if tagged_feature.is_none() {
         findings.push(format!(
-            "No scenario is tagged {tag} - add one with spec scenario add, \
-             then spec changes commit."
+            "No scenario is tagged {tag} - add one with spec scenario add."
         ));
     }
     assets.push(ImplementAsset {
@@ -111,8 +110,7 @@ pub(crate) fn asset_survey(
     let missing_steps = find_missing_steps(features, sources, language)?;
     if !missing_steps.is_empty() {
         findings.push(format!(
-            "{} step(s) have no definition - run spec steps generate, \
-             then spec changes commit.",
+            "{} step(s) have no definition - run spec steps generate.",
             missing_steps.len()
         ));
     }
@@ -132,7 +130,7 @@ pub(crate) fn asset_survey(
     if !unit_test_present {
         findings.push(format!(
             "The unit test {unit_path} does not exist - run spec unittest \
-             generate {req_id}, then spec changes commit."
+             generate {req_id}."
         ));
     }
     assets.push(ImplementAsset {
@@ -452,44 +450,14 @@ pub(crate) fn production_type_name(path: &str) -> Option<String> {
     (!stem.is_empty()).then(|| stem.to_string())
 }
 
-/// The spec as it would look after commit: staged content wins so a
-/// just-drafted requirement is visible to list, status, and generation.
-pub(crate) fn load_effective_spec(
-    repository: &impl SpecRepository,
-    store: &impl ChangeStore,
-) -> Result<Spec, ServiceError> {
-    load_effective_catalog(repository, store, crate::workspace::SPEC_PATH)
-        .map(|catalog| catalog.merged())
+/// The spec, in the error type the services speak.
+pub(crate) fn load_spec(repository: &impl SpecRepository) -> Result<Spec, ServiceError> {
+    repository.load().map_err(|e| ServiceError(e.0))
 }
 
-/// The spec tree as it would look after commit: every file of the
-/// catalog resolves staged-first, so a staged include (or a staged
-/// child file that is not in the working tree yet) is already part of
-/// the effective view.
-pub(crate) fn load_effective_catalog(
-    repository: &impl SpecRepository,
-    store: &impl ChangeStore,
-    spec_path: &str,
-) -> Result<SpecCatalog, ServiceError> {
-    let (dir, root) = match spec_path.rfind('/') {
-        Some(cut) => (&spec_path[..cut], &spec_path[cut + 1..]),
-        None => ("", spec_path),
-    };
-    resolve_catalog(root, &mut |path| {
-        let project_path = if dir.is_empty() {
-            path.to_string()
-        } else {
-            format!("{dir}/{path}")
-        };
-        match store.content(&project_path).map_err(|e| e.0)? {
-            Some(text) => Ok((text, format!("staged {project_path}"))),
-            None => repository
-                .read_raw(path)
-                .map(|text| (text, path.to_string()))
-                .map_err(|e| e.0),
-        }
-    })
-    .map_err(ServiceError)
+/// The spec tree file by file, in the error type the services speak.
+pub(crate) fn load_catalog(repository: &impl SpecRepository) -> Result<SpecCatalog, ServiceError> {
+    repository.load_catalog().map_err(|e| ServiceError(e.0))
 }
 
 #[cfg(test)]

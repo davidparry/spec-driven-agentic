@@ -72,17 +72,15 @@ spec scenario add --feature features/calculator.feature \
     --step 'Given the input "1,2"' \
     --step 'When add is called' \
     --step 'Then the result is 3'
-spec changes commit           # apply the staged scenario
 spec steps missing            # any undefined steps?
-spec steps generate && spec changes commit
+spec steps generate
 spec test                     # RED: the scenario fails honestly
 # ...implement the production code...
 spec test                     # GREEN
 spec refactor --note "tidy the parser" && spec test
 spec status                   # confirm REQ-002 is ready to mark
 spec mark-implemented REQ-002   # flips the status, records the featureFile
-spec changes validate                 # checks the @REQ-002 scenario exists
-spec changes commit
+spec validate                   # structure still holds
 ```
 
 [`spec greenfield`](commands/greenfield.md) automates exactly this

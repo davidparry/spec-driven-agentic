@@ -1,21 +1,21 @@
-//! Concurrent staging, end to end.
+//! Concurrent writes, end to end.
 //!
 //! Six `spec scenario add` invocations against one feature file used to
-//! produce five `"staged": true` replies, one hard crash reading a
-//! half-written manifest, and three surviving scenarios. Two callers
-//! were told they had staged and had not.
+//! produce five `"written": true` replies and three surviving
+//! scenarios. Two callers were told their scenario had been added and
+//! it had not.
 //!
 //! Threads alone cannot prove the fix, because every thread in one
 //! process shares the in-process half of the claim. These tests use
 //! real `spec` child processes for exactly that reason: separate
-//! processes share nothing but the advisory lock on the staging
-//! directory, which is the thing under test.
+//! processes share nothing but the advisory lock on `.spec/`, which is
+//! the thing under test.
 
 use std::fs;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-use spec_harness::ports::ChangeStore;
+use spec_harness::ports::WorkTree;
 
 const SPEC: &str = env!("CARGO_BIN_EXE_spec");
 
@@ -72,16 +72,16 @@ fn add(root: &Path, req: &str, name: &str) -> std::process::Child {
         .expect("spec is built")
 }
 
-fn staged_feature(root: &Path) -> String {
-    spec_harness::wiring::change_store(root)
-        .content(FEATURE)
-        .expect("the manifest is readable")
-        .expect("the feature is staged")
+fn feature_on_disk(root: &Path) -> String {
+    spec_harness::wiring::work_tree(root)
+        .read(FEATURE)
+        .expect("the feature file is readable")
+        .expect("the feature file exists")
 }
 
-/// Every caller that was told it staged has to be in the staged file,
-/// and every caller that was not has to have said so. Nothing may be
-/// reported as staged and then quietly dropped.
+/// Every caller that was told its scenario was written has to be in
+/// the file, and every caller that was not has to have said so.
+/// Nothing may be reported as written and then quietly dropped.
 #[test]
 fn concurrent_processes_all_land_or_all_say_they_did_not() {
     let dir = project();
@@ -99,10 +99,10 @@ fn concurrent_processes_all_land_or_all_say_they_did_not() {
         let stdout = String::from_utf8_lossy(&out.stdout);
         let stderr = String::from_utf8_lossy(&out.stderr);
         assert!(
-            !stderr.contains("not valid JSON"),
-            "{name} read a half-written manifest: {stderr}"
+            !stderr.contains("not valid Gherkin"),
+            "{name} read a half-written feature file: {stderr}"
         );
-        if out.status.success() && stdout.contains("\"staged\": true") {
+        if out.status.success() && stdout.contains("\"written\": true") {
             claimed.push(name.clone());
         } else {
             refused.push((name.clone(), format!("{stdout}{stderr}")));
@@ -113,14 +113,14 @@ fn concurrent_processes_all_land_or_all_say_they_did_not() {
         "an invocation failed outright: {refused:?}"
     );
 
-    let staged = staged_feature(dir.path());
+    let written = feature_on_disk(dir.path());
     let missing: Vec<&String> = claimed
         .iter()
-        .filter(|name| !staged.contains(*name))
+        .filter(|name| !written.contains(*name))
         .collect();
     assert!(
         missing.is_empty(),
-        "these were told they staged and were then lost: {missing:?}\n{staged}"
+        "these were told they were written and were then lost: {missing:?}\n{written}"
     );
     assert_eq!(claimed.len(), names.len());
 }
@@ -136,38 +136,39 @@ fn concurrent_processes_do_not_destroy_the_note_that_closes_the_file() {
     for child in running {
         assert!(child.wait_with_output().unwrap().status.success());
     }
-    let staged = staged_feature(dir.path());
+    let written = feature_on_disk(dir.path());
     assert_eq!(
-        staged.matches("# REQ-003+").count(),
+        written.matches("# REQ-003+").count(),
         1,
-        "the closing note was dropped or duplicated:\n{staged}"
+        "the closing note was dropped or duplicated:\n{written}"
     );
     assert!(
-        staged.find("Scenario: S4").unwrap() < staged.find("# REQ-003+").unwrap(),
-        "a scenario landed below the closing note:\n{staged}"
+        written.find("Scenario: S4").unwrap() < written.find("# REQ-003+").unwrap(),
+        "a scenario landed below the closing note:\n{written}"
     );
 }
 
-/// A reader running alongside the writers must never see a manifest
-/// mid-write. It used to: `spec scenario add` died with "staging
-/// manifest is not valid JSON - EOF while parsing a value at line 1
-/// column 0".
+/// A reader running alongside the writers must never see a torn file.
+/// Each write lands by renaming a complete scratch file over the
+/// target, so every read gets the old bytes or the new ones.
 #[test]
-fn a_reader_never_sees_a_half_written_manifest() {
+fn a_reader_never_sees_a_half_written_file() {
     let dir = project();
     let mut running: Vec<_> = (1..=6)
         .map(|i| add(dir.path(), &format!("REQ-{:03}", i + 30), &format!("R{i}")))
         .collect();
 
-    let store = spec_harness::wiring::change_store(dir.path());
+    let store = spec_harness::wiring::work_tree(dir.path());
     let mut reads = 0u32;
     loop {
-        if let Err(e) = store.changes() {
-            panic!(
-                "a reader caught the manifest mid-write after {reads} reads - {}",
-                e.0
-            );
-        }
+        let seen = store
+            .read(FEATURE)
+            .unwrap_or_else(|e| panic!("a reader failed after {reads} reads - {}", e.0))
+            .expect("the feature file is always there");
+        assert!(
+            seen.starts_with("# The executable behavior spec"),
+            "a reader caught the file mid-write after {reads} reads:\n{seen}"
+        );
         reads += 1;
         let all_done = running
             .iter_mut()

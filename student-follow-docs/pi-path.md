@@ -128,7 +128,7 @@ This repo already ships the server registration at
 There is no `--root` in those args, so `spec` uses the current directory.
 **Launch pi from the repository root** or the server will serve the wrong
 project. `spec` must be on PATH (`cargo install --path harness`) and must
-report **0.7.4 or newer** — check with `spec --version`.
+report **0.8.0 or newer** — check with `spec --version`.
 
 Now start pi with its own tools switched off:
 
@@ -166,13 +166,13 @@ model.
 Using the spec-driven-server tools only: call
 mcp_spec_driven_server_validate_spec, then
 mcp_spec_driven_server_get_requirement for REQ-003. Add its Gherkin with
-scenario_add, tagged with the requirement id. Show me changes_show and wait
-for my approval before changes_commit. Then run_tests — I expect RED.
+scenario_add, tagged with the requirement id. Stop and show me what you
+wrote before you go on. Then run_tests — I expect RED.
 ```
 
 From there the loop is the one in
-[student-follow-along.md](student-follow-along.md): review the staged
-Gherkin, commit, RED, implement, GREEN, refactor, mark implemented.
+[student-follow-along.md](student-follow-along.md): read the Gherkin in
+`git diff`, RED, implement, GREEN, refactor, mark implemented.
 
 ### Two steps need an editor, so plan for them
 
@@ -215,8 +215,8 @@ Nothing is broken; let it.
 processes it, and exits — but it cannot carry this hour. Under a strict
 `-nbt` there is no MCP tool that adds a requirement, so Exercise 1 has no
 path to completion however you invoke it; and the rest of the loop is built
-on you reading `changes_show` before you allow `changes_commit`, which is
-the exercise rather than an obstacle to it. Drive it interactively and
+on you reading each diff before you let it go on, which is the exercise
+rather than an obstacle to it. Drive it interactively and
 change flags between steps, which is what the rest of this page assumes.
 (The flag is `--print` / `-p`. There is no `--prompt`, and
 `--prompt-template` is a different thing.)
@@ -242,7 +242,7 @@ Continue with [harness-path.md](harness-path.md).
 | Symptom | Cause |
 | --- | --- |
 | `/mcp` shows no servers | pi was started outside the repo root, or the project was not trusted — restart with `--approve` |
-| Tools listed but every call errors | `spec` is not on PATH; check `spec --version` reports 0.7.4 or newer |
+| Tools listed but every call errors | `spec` is not on PATH; check `spec --version` reports 0.8.0 or newer |
 | Model missing from `/model` | No auth configured for the provider — keep the placeholder `apiKey` in `models.json` |
 | Tool calls vanish mid-stream | Ollama's OpenAI-compat shim drops `tool_calls` when streaming; use a tool-capable model and a current Ollama |
 | Server serves the wrong project | No `--root` in `.pi/mcp.json`; `cd` to the repository root first |

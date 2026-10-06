@@ -428,10 +428,10 @@ requirements/
     <!-- ============ 21-25 min: THE PLUMBING (pre-built) ============ -->
     <section data-track="both tdd">
       <h2>The server — already built</h2>
-      <p class="small">One binary: <code>spec mcp serve --root ${workspaceFolder}</code>. Twenty-five tools in three groups:</p>
+      <p class="small">One binary: <code>spec mcp serve --root ${workspaceFolder}</code>. Twenty-one tools in three groups:</p>
       <ul class="small">
         <li><strong>Frozen seven</strong> — <code>list_requirements</code>, <code>get_requirement</code>, <code>validate_spec</code>, <code>refine_requirement</code>, <code>run_tests</code>, <code>get_tdd_state</code>, <code>start_refactor</code></li>
-        <li><strong>Authoring / staging</strong> — features, scenarios, <code>changes_*</code>, <code>requirement_mark_implemented</code>, template-only <code>step_definition_create</code> / <code>unit_test_create</code></li>
+        <li><strong>Authoring</strong> — features, scenarios, <code>requirement_reword</code>, <code>requirement_mark_implemented</code>, template-only <code>step_definition_create</code> / <code>unit_test_create</code></li>
         <li><strong>Inspect</strong> — <code>project_root</code>, <code>project_inspect</code>, <code>command_run</code> (allowlisted, RED-gated)</li>
       </ul>
       <p class="small">A stdio server must <strong>never print to stdout</strong> — that corrupts the JSON-RPC stream. Diagnostics go to stderr.</p>
@@ -445,8 +445,8 @@ requirements/
         <tr><th>When</th><th>What you are deciding</th><th>What stops the agent without you</th></tr>
         <tr><td><strong>The wording</strong></td><td>Is this requirement unambiguous enough to generate a test from?</td>
             <td>A deterministic wording review — <code>refine_requirement</code>. A decision model can advise here; it cannot approve</td></tr>
-        <tr><td><strong>The staged diff</strong></td><td>Does this edit belong in my repository?</td>
-            <td>Every write lands in staging, never the working tree</td></tr>
+        <tr><td><strong>The diff</strong></td><td>Does this edit belong in my repository?</td>
+            <td>Every write lands in your files, on a branch the run asked for — <code>git diff</code> is the review and <code>git restore</code> is the undo</td></tr>
         <tr><td><strong>The implementation</strong></td><td>Is this the design I want to live with?</td>
             <td>No shell, no free-hand write — a diff, or nothing</td></tr>
       </table>
@@ -481,7 +481,7 @@ The model reply was invalid (… cover only happy paths — add at least one
 edge case to each) — asking again (2 of 3)        ← the harness rejects its own model
       </code></pre>
       <ul class="small">
-        <li>The wording review fires <strong>before anything is staged</strong>. The deterministic gate is not at the end of the pipeline, it is inside the draft</li>
+        <li>The wording review fires <strong>before anything is written</strong>. The deterministic gate is not at the end of the pipeline, it is inside the draft</li>
         <li><strong>Nobody typed <code>HARNESS</code>.</strong> The highest id here is <code>HARNESS-017</code>, so the next is <code>HARNESS-018</code> — prefix read off the neighbours, number <code>max + 1</code> across the merged catalog</li>
         <li>The same binary at the repo root would have said <code>REQ-007</code>; in the Java module, <code>CLI-010</code>. Nothing configured, nothing guessed</li>
       </ul>
@@ -563,12 +563,11 @@ spec status      # same catalog, found by walking up
       <pre><code class="language-bash" data-trim>
 spec scenario generate HARNESS-018 --feature tests/features/tool_coverage.feature
 spec unittest generate HARNESS-018
-spec changes show     # ← yours: read it before it lands
-spec changes commit
+git diff              # ← yours: read what landed
       </code></pre>
       <ul class="small">
         <li>The scenario is written <strong>from the acceptance criteria</strong> and tagged <code>@HARNESS-018</code> — nobody re-typed the requirement into a test</li>
-        <li>Both edits are <strong>staged</strong>. The working tree has not changed yet</li>
+        <li>Both edits are <strong>in your files</strong>. <code>git restore</code> is the undo</li>
       </ul>
       <p class="small muted">This is the step the abstract promises: requirements driving executable tests. It is also the step where a human reads a diff.</p>
     </section>
@@ -590,8 +589,7 @@ spec refactor --note "tidy the coverage module"
       <h2>10:15 — the developer agent writes the code</h2>
       <pre><code class="language-bash" data-trim>
 spec implement HARNESS-018
-spec changes show     # ← yours: the third and last moment
-spec changes commit
+git diff              # ← yours: the third and last moment
 spec test             # GREEN
       </code></pre>
       <ul class="small">
@@ -640,7 +638,7 @@ spec mcp call criteria_coverage --arg id=HARNESS-018
       <p class="small">Nine stages. You ran all of them by hand this morning; <code>spec deliver</code> runs the identical sequence.</p>
       <table class="small">
         <tr><th>You typed</th><th><code>deliver</code>'s stage</th></tr>
-        <tr><td><code>spec draft</code> + <code>changes commit</code></td><td><code>draft_plan</code> — drafts, commits, reads back what reached the catalog</td></tr>
+        <tr><td><code>spec draft</code></td><td><code>draft_plan</code> — drafts, reads back what reached the catalog</td></tr>
         <tr><td><code>feature create</code> + <code>scenario generate</code></td><td><code>author_scenarios</code> — <em>deterministic</em>: one <code>add_scenario</code> per criterion, no model call</td></tr>
         <tr><td><code>steps missing</code> + <code>steps generate</code></td><td><code>author_steps</code> — and it <strong>re-checks</strong>, looping until nothing is undefined</td></tr>
         <tr><td><code>unittest generate</code></td><td><code>author_unit_test</code></td></tr>
@@ -655,20 +653,22 @@ spec mcp call criteria_coverage --arg id=HARNESS-018
     <section data-track="tdd">
       <h2>Manual override, or the factory</h2>
       <pre><code class="language-bash" data-trim>
-spec changes show                  # must be empty — it will not start on staged work
 spec deliver "every requirement should report which of its criteria no test proves"
+# ← it stops once, before it writes anything:
+#   Branch name for this run (Enter for spec/2026-10-05-amber-kite, or n to stay on main)
 
 spec deliver                       # or: the entire pending backlog
 spec deliver --attempts 5          # RED-to-GREEN tries before it gives up
 spec deliver --fail-fast           # stop at the first one that falls short
+spec deliver --no-branch           # already on a throwaway branch: do not ask
       </code></pre>
       <table class="small">
         <tr><th>The moment</th><th>Manual</th><th><code>spec deliver</code></th></tr>
         <tr><td>The wording</td><td>You rewrote it</td><td>The model's draft stands</td></tr>
-        <tr><td>The staged diff</td><td>You read it</td><td>Committed unread</td></tr>
-        <tr><td>The implementation</td><td>You reviewed it</td><td>Committed on a green bar alone</td></tr>
+        <tr><td>The diff</td><td>You read it</td><td>Written unread</td></tr>
+        <tr><td>The implementation</td><td>You reviewed it</td><td>Accepted on a green bar alone</td></tr>
       </table>
-      <p class="small">Every gate it gives up is <strong>a human judgement</strong>. Every gate it keeps is <strong>a state machine</strong>: no refactor on red, no <code>implemented</code> without a green bar and a tagged scenario, no start while anything is staged. <code>AutoPrompter</code> answers each prompt with <code>(spec deliver never stops to ask)</code>.</p>
+      <p class="small">Every gate it gives up is <strong>a human judgement</strong>. Every gate it keeps is <strong>a state machine</strong>: no refactor on red, no <code>implemented</code> without a green bar and a tagged scenario. And it keeps the undo — the branch it asked for is what makes three unread diffs reviewable. <code>AutoPrompter</code> answers every later prompt with <code>(spec deliver never stops to ask)</code>.</p>
       <blockquote>The gates are not there to slow the human down. They are what makes it safe to remove the human.</blockquote>
     </section>
 
@@ -795,8 +795,8 @@ spec ask "what is pending?"
     <!-- ============ DEMO — 30-MINUTE TRACK ============ -->
     <section data-track="30">
       <h2>Spec to green, Wi-Fi off</h2>
-      <p class="small">REQ-003, approved requirement to green bar — every mutation staged and reviewed.</p>
-      <blockquote class="small">"Using the spec-driven-server tools: <code>validate_spec</code> first, then <code>get_requirement</code> for REQ-003 &mdash; not the REQ-007 we just drafted. Add its Gherkin with <code>scenario_add</code> (tag the requirement id), add missing steps with <code>step_definition_create</code> if <code>step_definitions_find</code> reports any, add a unit test with <code>unit_test_create</code>. Show <code>changes_show</code> and wait before <code>changes_commit</code>. Then <code>run_tests</code> (expect RED). Implement the simplest production code in <code>StringCalculator</code>. <code>run_tests</code> (GREEN). <code>start_refactor</code> if I agree. On GREEN, <code>requirement_mark_implemented</code>."</blockquote>
+      <p class="small">REQ-003, approved requirement to green bar — every write in your files, every diff reviewed.</p>
+      <blockquote class="small">"Using the spec-driven-server tools: <code>validate_spec</code> first, then <code>get_requirement</code> for REQ-003 &mdash; not the REQ-007 we just drafted. Add its Gherkin with <code>scenario_add</code> (tag the requirement id), add missing steps with <code>step_definition_create</code> if <code>step_definitions_find</code> reports any, add a unit test with <code>unit_test_create</code>. Stop and show me what you wrote before you go on. Then <code>run_tests</code> (expect RED). Implement the simplest production code in <code>StringCalculator</code>. <code>run_tests</code> (GREEN). <code>start_refactor</code> if I agree. On GREEN, <code>requirement_mark_implemented</code>."</blockquote>
       <ul class="small">
         <li><span class="badge red">RED</span> Cucumber and JUnit come back as <strong>one bar</strong> — the agent does not get to guess</li>
         <li><span class="badge green">GREEN</span> the simplest passing implementation, then <code>start_refactor</code></li>
@@ -820,7 +820,7 @@ spec ask "what is pending?"
 }
       </code></pre>
       <p class="small">Then prompt the agent:</p>
-      <blockquote class="small">"Using the spec-driven-server tools: validate the spec first, then <code>get_requirement</code> for REQ-003 &mdash; not the REQ-007 you just drafted, which stays pending until homework. Add its Gherkin with <code>scenario_add</code> (tag the requirement id), add missing steps with <code>step_definition_create</code> if <code>step_definitions_find</code> reports any, add a unit test with <code>unit_test_create</code>. Show <code>changes_show</code> and ask me before <code>changes_commit</code>. Then <code>run_tests</code> (expect RED). Implement the simplest production code in <code>StringCalculator</code>. <code>run_tests</code> (GREEN). <code>start_refactor</code> if I agree. On GREEN, <code>requirement_mark_implemented</code>. Ask me before each phase change."</blockquote>
+      <blockquote class="small">"Using the spec-driven-server tools: validate the spec first, then <code>get_requirement</code> for REQ-003 &mdash; not the REQ-007 you just drafted, which stays pending until homework. Add its Gherkin with <code>scenario_add</code> (tag the requirement id), add missing steps with <code>step_definition_create</code> if <code>step_definitions_find</code> reports any, add a unit test with <code>unit_test_create</code>. Stop and show me what you wrote before you go on. Then <code>run_tests</code> (expect RED). Implement the simplest production code in <code>StringCalculator</code>. <code>run_tests</code> (GREEN). <code>start_refactor</code> if I agree. On GREEN, <code>requirement_mark_implemented</code>. Ask me before each phase change."</blockquote>
     </section>
 
     <!-- ============ THE SAME LOOP IN THE HARNESS — BOTH TRACKS ============ -->
@@ -829,20 +829,19 @@ spec ask "what is pending?"
       <p class="small">That contract, driven by hand. No one-command orchestrator on stage — <strong>we are the orchestrator</strong>, so every check is one you watch fire.</p>
       <pre><code class="language-bash" data-trim>
 spec status                       # asset survey: what REQ-003 lacks, and the next step
-spec scenario add --req REQ-003 … # staged, tagged @REQ-003
+spec scenario add --req REQ-003 … # written, tagged @REQ-003
 spec steps missing                # [] — every wording is already bound
-spec unittest generate REQ-003    # staged
-spec changes show                 # checkpoint 1 — the staged Gherkin and test
-spec changes commit
+spec unittest generate REQ-003    # written
+git diff                          # checkpoint 1 — the Gherkin and the test
 spec test                         # RED: 9 tests, 4 failures
-spec implement REQ-003            # the model attempts; the diff is staged
-spec changes show                 # checkpoint 2 — the production diff
-spec changes commit && spec test  # GREEN: 9 tests, 0 failures
+spec implement REQ-003            # the model attempts; it writes the files
+git diff                          # checkpoint 2 — the production diff
+spec test                         # GREEN: 9 tests, 0 failures
 spec mark-implemented REQ-003     # refuses off GREEN, or with no tagged scenario
       </code></pre>
       <ul class="small">
         <li><strong>Checked, not trusted</strong>: <code>spec status</code> re-reads the assets on disk between steps — the step says it wrote a scenario, the survey says whether one is there</li>
-        <li>Two human checkpoints, both a diff: nothing reaches the working tree unreviewed</li>
+        <li>Two human checkpoints, both a <code>git diff</code>: nothing goes to the bar unread</li>
         <li>An IDE agent calling the tools lands in the same place — same gates, same bar, same checks next</li>
       </ul>
     </section>
@@ -876,7 +875,7 @@ scripts/verify-workshop-run.sh check
         <li><strong>Portable</strong>: one server, any host</li>
       </ul>
       <blockquote class="small">The model supplies System 1. The tools and the human supply System 2.</blockquote>
-      <p class="small muted">A model that answers with a probability instead of prose has not crossed that line. It is a faster, typed System 1 — which is why its answer is reported, and the bar, the staging gate, and the human stay where they are.</p>
+      <p class="small muted">A model that answers with a probability instead of prose has not crossed that line. It is a faster, typed System 1 — which is why its answer is reported, and the bar, the branch, and the human stay where they are.</p>
     </section>
 
     <!-- ============ 52-57 min: MORNINGS THAT GO WRONG (TDD TRACK) ============ -->
@@ -886,13 +885,13 @@ scripts/verify-workshop-run.sh check
       <table class="small">
         <tr><th>What the agent did</th><th>What catches it now</th></tr>
         <tr><td>Made the bar green by <strong>deleting the assertion</strong></td>
-            <td>It never gets a shell or a writable test file — an attempt is a staged diff, and only <code>run_tests</code> reports a bar</td></tr>
+            <td>It never gets a shell or a writable test file — an attempt is a diff you can read, and only <code>run_tests</code> reports a bar</td></tr>
         <tr><td>Offered to "clean up" <strong>while tests were failing</strong></td>
             <td>The state machine refuses REFACTOR from any phase but GREEN</td></tr>
         <tr><td>Marked a requirement <strong>implemented with nothing proving it</strong></td>
             <td>Gated on GREEN plus a scenario tagged with the requirement id</td></tr>
         <tr><td>Asked to implement one requirement, <strong>quietly implemented two</strong></td>
-            <td>The staged diff is matched against the other pending requirements — it warns, and never blocks</td></tr>
+            <td>The diff it wrote is matched against the other pending requirements — it warns, and never blocks</td></tr>
         <tr><td>Rewrote the production class while the real bug was a <strong>step expression</strong></td>
             <td>The failure output is scanned for implicated files; the reply must name them</td></tr>
         <tr><td>Did the process perfectly on <strong>the wrong requirement</strong></td>
@@ -973,7 +972,7 @@ pi install npm:pi-mcp-extension     # pi has no MCP in core — this adds it
 pi -nbt          # built-ins off, extension tools stay on
                  # tools arrive as mcp_spec_driven_server_&lt;tool&gt;
       </code></pre>
-      <p class="small">No <code>bash</code>. No <code>write</code>. No <code>edit</code>. The same twenty-five tools the runner drives — and <strong>nothing about the model changed</strong>.</p>
+      <p class="small">No <code>bash</code>. No <code>write</code>. No <code>edit</code>. The same twenty-one tools the runner drives — and <strong>nothing about the model changed</strong>.</p>
       <p class="small muted">The server is the constant: <code>spec</code>, Cursor, and <code>pi -nbt</code> all call <em>these</em> tools.</p>
     </section>
 
@@ -985,7 +984,7 @@ pi -nbt          # built-ins off, extension tools stay on
           <h3><code>spec</code> — spec-specific runner</h3>
           <ul class="small">
             <li>Does one job: spec → Gherkin → RED → GREEN → REFACTOR</li>
-            <li>The workflow is <strong>already encoded</strong>: per-command profiles, staging, phase gates</li>
+            <li>The workflow is <strong>already encoded</strong>: per-command profiles, the branch gate, phase gates</li>
             <li>Prompts live in one auditable file, not in your head</li>
           </ul>
         </div>

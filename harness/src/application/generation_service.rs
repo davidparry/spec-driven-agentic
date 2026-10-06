@@ -2,14 +2,14 @@
 //! hybrid template + LLM generation flow. The deterministic template from
 //! the domain always works; when a model is resolved its output is
 //! preferred after validation, otherwise the template is used silently.
-//! Everything generated lands in the staging area, never in working files.
+//! Everything generated is written straight to the project's files.
 
 use serde::Serialize;
 
 use crate::application::agent_service::{Agent, AgentConfig, DEFAULT_MAX_ROUNDS, NullBroker};
 use crate::application::assets::{
-    find_missing_steps, find_requirement, load_effective_spec, production_path,
-    production_type_name, steps_path, unit_test_path,
+    find_missing_steps, find_requirement, load_spec, production_path, production_type_name,
+    steps_path, unit_test_path,
 };
 use crate::application::scenario_service::ScenarioService;
 use crate::application::spec_service::ServiceError;
@@ -30,7 +30,7 @@ use crate::domain::scenario::{
 };
 use crate::domain::steps::{MissingStep, extract_patterns, source_extension};
 use crate::ports::{
-    ChangeStore, FeatureCatalog, LlmConversation, Prompter, SourceFiles, SpecRepository, ToolBroker,
+    FeatureCatalog, LlmConversation, Prompter, SourceFiles, SpecRepository, ToolBroker, WorkTree,
 };
 
 /// Reply of `spec steps missing`.
@@ -47,7 +47,7 @@ pub struct MissingStepsReport {
 #[derive(Debug, Serialize, PartialEq, Eq)]
 pub struct GenerationReport {
     pub target: String,
-    pub staged: bool,
+    pub written: bool,
     /// "template" for the deterministic output, "llm" when a model's
     /// polished version passed validation.
     pub source: String,
@@ -60,12 +60,12 @@ pub struct GenerationReport {
 #[derive(Debug, Serialize, PartialEq, Eq)]
 pub struct ScenarioGenerationReport {
     pub feature: String,
-    /// The scenario names staged, in the order the criteria gave them.
+    /// The scenario names written, in the order the criteria gave them.
     pub scenarios: Vec<String>,
     /// The requirement's criteria count, so a reader can see at a glance
     /// that every one of them got a scenario.
     pub criteria: usize,
-    pub staged: bool,
+    pub written: bool,
     /// "template" for the literal reading of the criteria, "llm" when a
     /// model's version passed validation.
     pub source: String,
@@ -135,7 +135,7 @@ pub struct GenerationService<F, S, C, R, L, B = NullBroker>
 where
     F: FeatureCatalog,
     S: SourceFiles,
-    C: ChangeStore,
+    C: WorkTree,
     R: SpecRepository,
     L: LlmConversation,
     B: ToolBroker,
@@ -153,7 +153,7 @@ impl<F, S, C, R, L, B> GenerationService<F, S, C, R, L, B>
 where
     F: FeatureCatalog,
     S: SourceFiles,
-    C: ChangeStore,
+    C: WorkTree,
     R: SpecRepository,
     L: LlmConversation,
     B: ToolBroker,
@@ -280,13 +280,13 @@ where
             "{verb} pending step definitions for {} missing step(s) ({source})",
             missing.len()
         );
-        self.store.stage(&target, &content, &summary)?;
+        self.store.write(&target, &content, &summary)?;
         Ok(GenerationReport {
             target,
-            staged: true,
+            written: true,
             source,
             summary,
-            next_step: "Review with spec changes show, apply with spec changes commit, then run spec test (expect RED)."
+            next_step: "Read it against the acceptance criteria, then run spec test (expect RED)."
                 .into(),
         })
     }
@@ -300,7 +300,7 @@ where
         prompter: &mut dyn Prompter,
         req_id: &str,
     ) -> Result<GenerationReport, ServiceError> {
-        let spec = load_effective_spec(&self.spec, &self.store)?;
+        let spec = load_spec(&self.spec)?;
         let requirement = find_requirement(&spec, req_id)?;
         let sources = self
             .sources
@@ -365,19 +365,19 @@ where
             "generate failing unit test for {req_id} ({} criteria, {source})",
             requirement.acceptance_criteria.len()
         );
-        self.store.stage(&target, &content, &summary)?;
+        self.store.write(&target, &content, &summary)?;
         Ok(GenerationReport {
             target,
-            staged: true,
+            written: true,
             source,
             summary,
-            next_step: "Review the assertions (they are yours to sharpen), apply with spec changes commit, then run spec test (expect RED)."
+            next_step: "Sharpen the assertions (they are yours), then run spec test (expect RED)."
                 .into(),
         })
     }
 
     /// One requirement's acceptance criteria, as tagged scenarios in its
-    /// feature file (staged).
+    /// feature file.
     ///
     /// The deterministic template reads each criterion literally and is
     /// always available; a model, when one is resolved, is asked to say
@@ -392,10 +392,10 @@ where
         feature_override: Option<&str>,
     ) -> Result<ScenarioGenerationReport, ServiceError>
     where
-        SC: ChangeStore,
+        SC: WorkTree,
         SF: FeatureCatalog,
     {
-        let spec = load_effective_spec(&self.spec, &self.store)?;
+        let spec = load_spec(&self.spec)?;
         let requirement = find_requirement(&spec, req_id)?;
         let feature_path = feature_override
             .map(str::to_string)
@@ -445,10 +445,11 @@ where
             feature: feature_path,
             scenarios: added,
             criteria: requirement.acceptance_criteria.len(),
-            staged: true,
+            written: true,
             source,
-            next_step: "Read the steps against the acceptance criteria, apply with spec changes commit, then run spec steps missing."
-                .into(),
+            next_step:
+                "Read the steps against the acceptance criteria, then run spec steps missing."
+                    .into(),
         })
     }
 
@@ -671,10 +672,10 @@ fn ending_in_newline(mut code: String) -> String {
 mod tests {
     use super::*;
     use crate::domain::model::Spec;
-    use crate::ports::StagedChange;
+    use crate::ports::FileChange;
     use crate::test_support::{
-        FailingSources, FakeLlm, FakeSources, InMemoryChangeStore, InMemoryFeatureCatalog,
-        InMemorySpecRepository, calculator_catalog, calculator_spec, flat_layout,
+        FailingSources, FakeLlm, FakeSources, InMemoryFeatureCatalog, InMemorySpecRepository,
+        InMemoryWorkTree, calculator_catalog, calculator_spec, flat_layout,
     };
 
     fn service(
@@ -683,14 +684,14 @@ mod tests {
     ) -> GenerationService<
         InMemoryFeatureCatalog,
         FakeSources,
-        InMemoryChangeStore,
+        InMemoryWorkTree,
         InMemorySpecRepository,
         FakeLlm,
     > {
         GenerationService::new(
             calculator_catalog(),
             FakeSources(sources),
-            InMemoryChangeStore::default(),
+            InMemoryWorkTree::default(),
             InMemorySpecRepository(Ok(calculator_spec())),
             Language::Java,
             flat_layout(Language::Java),
@@ -707,18 +708,6 @@ mod tests {
             path: "src/test/java/Steps.java".into(),
             content: body,
         }]
-    }
-
-    fn staged(
-        service: &GenerationService<
-            InMemoryFeatureCatalog,
-            FakeSources,
-            InMemoryChangeStore,
-            InMemorySpecRepository,
-            FakeLlm,
-        >,
-    ) -> Vec<StagedChange> {
-        service.store.changes().unwrap()
     }
 
     #[test]
@@ -756,11 +745,9 @@ mod tests {
             .unwrap();
         assert_eq!(report.source, "template");
         assert_eq!(report.target, "src/test/java/GeneratedSteps.java");
-        assert!(report.staged);
-        let changes = staged(&service);
-        assert_eq!(changes.len(), 1);
-        assert_eq!(changes[0].path, "src/test/java/GeneratedSteps.java");
-        let content = service.store.content(&report.target).unwrap().unwrap();
+        assert!(report.written);
+        assert_eq!(service.store.paths(), ["src/test/java/GeneratedSteps.java"]);
+        let content = service.store.read(&report.target).unwrap().unwrap();
         assert!(content.contains("@Given(\"a calculator\")"));
         assert!(content.contains("PendingException"));
     }
@@ -790,7 +777,7 @@ mod tests {
             .steps_generate(&mut crate::application::agent_service::NullPrompter)
             .unwrap();
         assert_eq!(report.source, "llm");
-        let content = service.store.content(&report.target).unwrap().unwrap();
+        let content = service.store.read(&report.target).unwrap().unwrap();
         // The model's reply, given the final newline a source file needs.
         assert_eq!(content, format!("{reply}\n"));
         let prompts = service.llm.as_ref().unwrap().chat().prompts.borrow();
@@ -917,7 +904,7 @@ mod tests {
             .steps_generate(&mut crate::application::agent_service::NullPrompter)
             .unwrap();
         assert_eq!(report.source, "llm");
-        let content = service.store.content(&report.target).unwrap().unwrap();
+        let content = service.store.read(&report.target).unwrap().unwrap();
 
         // The result is the untouched file with the reply spliced in -
         // byte for byte, not a model's retyping of it.
@@ -962,7 +949,7 @@ mod tests {
             .steps_generate(&mut crate::application::agent_service::NullPrompter)
             .unwrap();
         assert_eq!(report.source, "template");
-        let content = service.store.content(&report.target).unwrap().unwrap();
+        let content = service.store.read(&report.target).unwrap().unwrap();
         assert!(
             content.contains("@When(\"add is called with {string}\")"),
             "{content}"
@@ -983,7 +970,7 @@ mod tests {
             .steps_generate(&mut crate::application::agent_service::NullPrompter)
             .unwrap();
         assert_eq!(report.source, "template");
-        let content = service.store.content(&report.target).unwrap().unwrap();
+        let content = service.store.read(&report.target).unwrap().unwrap();
         assert!(
             content.contains("@Then(\"the result is {int}\")"),
             "the dropped definition is back from the template: {content}"
@@ -1005,7 +992,7 @@ mod tests {
             .steps_generate(&mut crate::application::agent_service::NullPrompter)
             .unwrap();
         assert_eq!(report.source, "template");
-        let content = service.store.content(&report.target).unwrap().unwrap();
+        let content = service.store.read(&report.target).unwrap().unwrap();
         assert!(
             content.contains("public void aCalculator() {}"),
             "the original method name survived the rewrite attempt: {content}"
@@ -1047,7 +1034,7 @@ mod tests {
             .steps_generate(&mut crate::application::agent_service::NullPrompter)
             .unwrap();
         assert_eq!(report.source, "template");
-        let content = service.store.content(&report.target).unwrap().unwrap();
+        let content = service.store.read(&report.target).unwrap().unwrap();
         assert!(content.contains("PendingException"));
     }
 
@@ -1061,7 +1048,7 @@ mod tests {
     }
 
     #[test]
-    fn a_unit_test_is_staged_from_the_requirements_criteria() {
+    fn a_unit_test_is_written_from_the_requirements_criteria() {
         let service = service(vec![], None);
         let report = service
             .unittest_generate(
@@ -1072,7 +1059,7 @@ mod tests {
         assert_eq!(report.target, "src/test/java/Req001Test.java");
         assert_eq!(report.source, "template");
         assert!(report.summary.contains("1 criteria"));
-        let content = service.store.content(&report.target).unwrap().unwrap();
+        let content = service.store.read(&report.target).unwrap().unwrap();
         assert!(content.contains("Generated from REQ-001: Adds two numbers"));
         assert!(content.contains("fail(\"TODO: assert -"));
     }
@@ -1102,7 +1089,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(report.source, "llm");
-        let content = service.store.content(&report.target).unwrap().unwrap();
+        let content = service.store.read(&report.target).unwrap().unwrap();
         assert_eq!(content, "@Test void polished() {}\n");
     }
 
@@ -1123,7 +1110,7 @@ mod tests {
             report.target,
             "src/test/java/com/example/StringCalculatorTest.java"
         );
-        let content = service.store.content(&report.target).unwrap().unwrap();
+        let content = service.store.read(&report.target).unwrap().unwrap();
         assert!(content.contains("package com.example;"));
         assert!(content.contains("class StringCalculatorTest"));
         assert!(content.contains("REQ-001"));
@@ -1148,7 +1135,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(report.source, "template");
-        let content = service.store.content(&report.target).unwrap().unwrap();
+        let content = service.store.read(&report.target).unwrap().unwrap();
         assert!(content.contains("package com.example;"));
         assert!(!content.contains("package com.wrong;"));
     }
@@ -1181,7 +1168,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(report.source, "llm");
-        let content = service.store.content(&report.target).unwrap().unwrap();
+        let content = service.store.read(&report.target).unwrap().unwrap();
         assert!(content.contains("addsOneAndTwo"), "{content}");
         assert!(
             content.contains("private final StringCalculator calculator"),
@@ -1211,7 +1198,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(report.source, "template");
-        let content = service.store.content(&report.target).unwrap().unwrap();
+        let content = service.store.read(&report.target).unwrap().unwrap();
         assert!(content.contains("fail(\"TODO: assert -"), "{content}");
         assert!(!content.contains("assertEquals(3"), "{content}");
     }
@@ -1231,7 +1218,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(report.source, "template");
-        let content = service.store.content(&report.target).unwrap().unwrap();
+        let content = service.store.read(&report.target).unwrap().unwrap();
         assert_eq!(
             content.matches("class StringCalculatorTest").count(),
             1,
@@ -1245,11 +1232,11 @@ mod tests {
 
     #[test]
     fn source_scan_failures_become_service_errors() {
-        let service: GenerationService<_, _, InMemoryChangeStore, InMemorySpecRepository, FakeLlm> =
+        let service: GenerationService<_, _, InMemoryWorkTree, InMemorySpecRepository, FakeLlm> =
             GenerationService::new(
                 calculator_catalog(),
                 FailingSources,
-                InMemoryChangeStore::default(),
+                InMemoryWorkTree::default(),
                 InMemorySpecRepository(Ok(Spec::default())),
                 Language::Java,
                 flat_layout(Language::Java),
@@ -1260,31 +1247,22 @@ mod tests {
 
     // --- scenario generate -------------------------------------------------
 
-    /// A second handle onto one store, so a test can read what the
-    /// service staged while the service still owns the store.
+    /// A second handle onto one work tree, so a test can read what the
+    /// service wrote while the service still owns the tree.
     #[derive(Clone, Default)]
-    struct SharedStore(std::rc::Rc<InMemoryChangeStore>);
+    struct SharedStore(std::rc::Rc<InMemoryWorkTree>);
 
-    impl ChangeStore for SharedStore {
-        fn stage(
+    impl WorkTree for SharedStore {
+        fn write(
             &self,
             path: &str,
             content: &str,
             summary: &str,
-        ) -> Result<StagedChange, crate::ports::StageError> {
-            self.0.stage(path, content, summary)
+        ) -> Result<FileChange, crate::ports::WriteError> {
+            self.0.write(path, content, summary)
         }
-        fn changes(&self) -> Result<Vec<StagedChange>, crate::ports::StageError> {
-            self.0.changes()
-        }
-        fn content(&self, path: &str) -> Result<Option<String>, crate::ports::StageError> {
-            self.0.content(path)
-        }
-        fn commit(&self) -> Result<Vec<StagedChange>, crate::ports::StageError> {
-            self.0.commit()
-        }
-        fn discard(&self) -> Result<Vec<StagedChange>, crate::ports::StageError> {
-            self.0.discard()
+        fn read(&self, path: &str) -> Result<Option<String>, crate::ports::WriteError> {
+            self.0.read(path)
         }
     }
 
@@ -1298,11 +1276,11 @@ mod tests {
         )
     }
 
-    fn staged_feature(store: &SharedStore) -> String {
+    fn written_feature(store: &SharedStore) -> String {
         store
-            .content("features/calc.feature")
+            .read("features/calc.feature")
             .unwrap()
-            .expect("the feature file was staged")
+            .expect("the feature file was written")
     }
 
     /// REQ-001's one criterion, read literally: the criterion's own words
@@ -1318,16 +1296,16 @@ mod tests {
         assert_eq!(report.source, "template");
         assert_eq!(report.criteria, 1);
         assert_eq!(report.scenarios, vec!["Adds two numbers case 1"]);
-        assert!(report.staged);
-        let staged = staged_feature(&store);
-        assert!(staged.contains("@REQ-001"), "{staged}");
+        assert!(report.written);
+        let written = written_feature(&store);
+        assert!(written.contains("@REQ-001"), "{written}");
         assert!(
-            staged.contains("Scenario: Adds two numbers case 1"),
-            "{staged}"
+            written.contains("Scenario: Adds two numbers case 1"),
+            "{written}"
         );
-        assert!(staged.contains("When add is called"), "{staged}");
+        assert!(written.contains("When add is called"), "{written}");
         // The scenario already in the file is carried over, not replaced.
-        assert!(staged.contains("Scenario: Adds\n"), "{staged}");
+        assert!(written.contains("Scenario: Adds\n"), "{written}");
     }
 
     #[test]
@@ -1341,14 +1319,14 @@ mod tests {
             .unwrap();
         assert_eq!(report.source, "llm");
         assert_eq!(report.scenarios, vec!["Two numbers are summed"]);
-        let staged = staged_feature(&store);
+        let written = written_feature(&store);
         assert!(
-            staged.contains("When add is called with \"1,2\""),
-            "{staged}"
+            written.contains("When add is called with \"1,2\""),
+            "{written}"
         );
         assert!(
-            !staged.contains("Adds two numbers case 1"),
-            "the template should not also be staged: {staged}"
+            !written.contains("Adds two numbers case 1"),
+            "the template should not also be written: {written}"
         );
     }
 
@@ -1415,7 +1393,7 @@ mod tests {
         let service = GenerationService::new(
             catalog,
             FakeSources(vec![]),
-            InMemoryChangeStore::default(),
+            InMemoryWorkTree::default(),
             InMemorySpecRepository(Ok(calculator_spec())),
             Language::Java,
             flat_layout(Language::Java),
@@ -1473,7 +1451,7 @@ mod tests {
         let service = GenerationService::new(
             calculator_catalog(),
             FakeSources(vec![]),
-            InMemoryChangeStore::default(),
+            InMemoryWorkTree::default(),
             InMemorySpecRepository(Ok(spec)),
             Language::Java,
             flat_layout(Language::Java),

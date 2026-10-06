@@ -7,7 +7,7 @@
 
 One native binary for the whole spec-driven loop (spec → Gherkin → RED →
 GREEN → REFACTOR) **and** the workshop MCP server: `spec mcp serve` exposes
-25 tools (wire identity `spec-driven-server` / `1.0.0`, title
+21 tools (wire identity `spec-driven-server` / `1.0.0`, title
 `Spec Driven`, website
 https://davidparry.github.io/spec-driven-agentic/). Frozen seven-tool
 reply shapes stay; the source of truth is `tests/mcp_conformance.rs` plus
@@ -23,7 +23,7 @@ GitHub Pages serves it.
 
 ## Where the files live
 
-Every project file the harness owns sits in `.spec/` under the project root (the directory `--root` names, next to `requirements/requirements.json`). A concrete `--root` wins. An empty value or an unexpanded `${...}` template is ignored; `SPEC_PROJECT_DIR` is used when it names a real path, and otherwise the process stays in the directory it was launched in. `spec init` creates the directory. On startup, `spec` also creates it and moves a leftover root-level artifact into the new path when that new path does not already exist: `.spec.toml`, `.spec-state.json`, `.spec-memory.json`, `.spec-history`, `.spec-cache/`, `.spec-log/`, and `.spec-staged/`.
+Every project file the harness owns sits in `.spec/` under the project root (the directory `--root` names, next to `requirements/requirements.json`). A concrete `--root` wins. An empty value or an unexpanded `${...}` template is ignored; `SPEC_PROJECT_DIR` is used when it names a real path, and otherwise the process stays in the directory it was launched in. `spec init` creates the directory. On startup, `spec` also creates it and moves a leftover root-level artifact into the new path when that new path does not already exist: `.spec.toml`, `.spec-state.json`, `.spec-memory.json`, `.spec-history`, `.spec-cache/`, and `.spec-log/`.
 
 ```text
 .spec/
@@ -33,7 +33,7 @@ Every project file the harness owns sits in `.spec/` under the project root (the
   history        interactive-shell history, reloaded on the next session
   cache/         LLM response cache and .spec/cache/tools/ catalogs
   log/           daily diagnostics: spec.log.YYYY-MM-DD
-  staged/        staged mutations until spec changes commit
+  .lock          advisory lock serializing concurrent writes
 ```
 
 `spec init` gitignores `.spec/*` and re-includes `.spec/config.toml`, so configuration is shared and the generated children are not. Deleting `cache/` or `log/` is always safe. Deleting `state.json` resets the phase machine to START.
@@ -68,7 +68,7 @@ development with BDD and TDD. The class lives in
 [../talks/WORKSHOP.md](../talks/WORKSHOP.md); students follow
 [../student-follow-docs/student-follow-along.md](../student-follow-docs/student-follow-along.md).
 The class walks students through the loop in Cursor against **this binary**
-(`spec mcp serve`, 25 tools). To finish the same kata from the terminal
+(`spec mcp serve`, 21 tools). To finish the same kata from the terminal
 with scoped profiles (Wi-Fi off), follow
 [../student-follow-docs/harness-path.md](../student-follow-docs/harness-path.md).
 
@@ -85,9 +85,9 @@ Stated as facts about what each tool does and does not do:
   templates, and extensions, all of which work and all of which you then
   maintain. `spec` is the opposite trade: a *spec-specific runner* that
   knows exactly one workflow and can therefore enforce it — per-command
-  tool profiles, staged mutations, phase gates. **This is not an
+  tool profiles, confined direct writes, phase gates. **This is not an
   either/or.** Point pi at `spec mcp serve` (`pi -nbt`) and it drives the
-  same 25 tools; the server is the constant, the runner is the opinion.
+  same 21 tools; the server is the constant, the runner is the opinion.
 - **GitHub Spec Kit** — a phase workflow (specify, plan, tasks,
   implement) for AI agents over markdown specs. Its specs are prose for
   agents to interpret, not executable Gherkin; it has no test-state
@@ -114,7 +114,7 @@ contract, and a local-only LLM — in one native binary. That combination
 is why this exists.
 
 The embedded server is deliberately not exclusive to the runner: any MCP
-host can call those 25 tools, and the workshop expects you to try at least
+host can call those 21 tools, and the workshop expects you to try at least
 two. See [../student-follow-docs/pi-path.md](../student-follow-docs/pi-path.md)
 for the general-agent side of the comparison.
 
@@ -138,14 +138,10 @@ architecture and full test coverage throughout:
   backfills a missing `featureFile`.
 - `spec feature list | show | create` and
   `spec scenario add | update | delete` — typed Gherkin reads and
-  mutations, parsed back before they are staged so broken syntax can
-  never land.
-- `spec changes show | commit | discard` and `spec changes validate` — every
-  mutation goes to a staging area (`.spec/staged/`) first; the human
-  reviews and applies, and `validate` checks spec plus staged Gherkin
-  together before commit. After applying, `commit` re-validates the
-  working tree and carries any open issues in its reply as a warning,
-  so an invalid spec never lands silently.
+  mutations, parsed back before they are written so broken syntax can
+  never land. Each write goes to a scratch file and is renamed over the
+  target, so a reader never sees a torn file, and concurrent `spec`
+  processes serialize on an advisory lock at `.spec/.lock`.
 - `spec test | state | refactor` — the Red/Green/Refactor state machine,
   persisted as a timestamped log in `.spec/state.json` across invocations
   (interpretation instructions in the file; model briefs get only the
@@ -155,7 +151,7 @@ architecture and full test coverage throughout:
 - `spec steps missing | generate` and `spec unittest generate` — step
   discovery per framework and hybrid generation: deterministic templates
   always work, a resolved Ollama model's output is preferred when it
-  validates, and everything lands in staging. Every code-producing
+  validates, and everything lands in the working tree. Every code-producing
   prompt pins the session language's best practices — package naming
   for Java, snake_case modules for Rust, and their kin for JS/TS and
   .NET — so generated code follows the ecosystem's conventions.
@@ -164,28 +160,27 @@ architecture and full test coverage throughout:
   by the last run's full failure details (stack traces included) and
   the logged history of every prior attempt — what it wrote, what it
   was fixing, and what the build/test run after it actually reported —
-  staged for review. A
+  written straight into the tree for `git diff` to review. A
   preflight surveys the prerequisites first — tagged scenario, step
   definitions, unit test, a recorded RED bar — and when one is missing
   it names the step to take instead (with a model advice call when one
-  is resolved). After staging, a terminal gets the follow-up offer
-  `Apply the staged files and run the tests now? [y/N]` — `y` runs
-  `changes commit` and `test` in one go and reports the verdict, a
-  decline prints the next command in plain words. The same attempt
+  is resolved). After writing, a terminal gets the follow-up offer
+  `Run the tests now? [y/N]` — `y` runs `test` and reports the verdict,
+  a decline prints the next command in plain words. The same attempt
   runs inside the greenfield loop when Enter is pressed on RED — and
   answering with a number there, e.g. `5`, lets the model attempt and
   rerun up to that many times without asking again, stopping early on
   GREEN.
 - `spec status` — where every requirement stands on the road to
-  implemented: the phase, what waits in staging, each requirement's
-  open gaps, and the one next step that moves the loop forward. With a
+  implemented: the phase, each requirement's open gaps, and the one
+  next step that moves the loop forward. With a
   resolved model the report is followed by workflow-aware advice: the
   model is briefed with the whole process document (states, commands,
   loop, invariants) plus the full project state, and names the next
   command in plain words.
-- `spec mcp serve` — the workshop MCP stdio server: 25 tools (frozen seven
-  plus authoring/staging/inspect). Conformance-tested over real JSON-RPC.
-  Cursor sees all 25; harness LLM commands attach a scoped profile.
+- `spec mcp serve` — the workshop MCP stdio server: 21 tools (frozen seven
+  plus authoring/inspect). Conformance-tested over real JSON-RPC.
+  Cursor sees all 21; harness LLM commands attach a scoped profile.
 - `spec mcp tools | call` — list or invoke one tool over a throwaway
   session (loopback or `--stdio`).
 - `spec tools list | profiles | show | enable | disable | refresh | servers`
@@ -309,7 +304,7 @@ judgment asks whether the number *is* the assertion.
 
 What it is allowed to do is deliberately narrow: it can refuse work,
 and it can never approve any. A judgment never turns a red bar green,
-marks a requirement implemented, bypasses staging, waives the human
+marks a requirement implemented, bypasses the branch gate, waives the human
 wording gate, or edits a deterministic finding. What it does do, by
 default, is append its own labelled finding to a wording review, make
 `clean` false, and exit nonzero — the same three signals a
@@ -572,9 +567,9 @@ one service two ways:
 | Layer | Module | Contents |
 | --- | --- | --- |
 | Domain | `src/domain/` | Requirement model, spec validator, wording refiner, TDD state machine, language detection, project memory scan, Gherkin feature model, step discovery, generation templates, scaffolds. Pure logic, no IO. |
-| Ports | `src/ports.rs` | Traits the inner layers depend on: `SpecRepository`, `FeatureFiles`, `FeatureCatalog`, `ChangeStore`, `Prompter`, `StateStore`, `TestRunner`, `LlmConversation`, `ToolBroker`, `ModelCatalog`, `ModelStore`, `ProjectFiles`, `ProjectInventory`, `MemoryStore`, `SourceFiles`, `ScaffoldWriter`, `RuntimeProbe`, `InteractiveShell`. |
-| Application | `src/application/` | Use-case services (`SpecService`, `SpecMutationService`, `ScenarioService`, `ChangeService`, `TddService`, `GenerationService`, `InitService`, `ModelService`, `InspectService`, `MemoryService`) composed via constructor injection. The interactive shell loop lives in `src/repl.rs`. |
-| Adapters | `src/adapters/` | Filesystem spec/feature/staging/state/source/memory access, the four test runners (Maven, cucumber-js, dotnet, cargo), Ollama HTTP catalog and `/api/chat`, MCP loopback/stdio broker, TOML config store, console prompter, rustyline shell with the persistent `.spec/history`, runtime probe. |
+| Ports | `src/ports.rs` | Traits the inner layers depend on: `SpecRepository`, `FeatureFiles`, `FeatureCatalog`, `WorkTree`, `Vcs`, `Prompter`, `StateStore`, `TestRunner`, `LlmConversation`, `ToolBroker`, `ModelCatalog`, `ModelStore`, `ProjectFiles`, `ProjectInventory`, `MemoryStore`, `SourceFiles`, `ScaffoldWriter`, `RuntimeProbe`, `InteractiveShell`. |
+| Application | `src/application/` | Use-case services (`SpecService`, `SpecMutationService`, `ScenarioService`, `TddService`, `GenerationService`, `InitService`, `ModelService`, `InspectService`, `MemoryService`) composed via constructor injection. The interactive shell loop lives in `src/repl.rs`. |
+| Adapters | `src/adapters/` | Filesystem spec/feature/work-tree/state/source/memory access, the git CLI probe, the four test runners (Maven, cucumber-js, dotnet, cargo), Ollama HTTP catalog and `/api/chat`, MCP loopback/stdio broker, TOML config store, console prompter, rustyline shell with the persistent `.spec/history`, runtime probe. |
 
 ## Building
 
@@ -701,7 +696,7 @@ cargo test --test cucumber   # spec-driven cucumber scenarios only
 - Spec-driven Cucumber tests in `tests/features/*.feature` (run by the
   `tests/cucumber.rs` harness via cucumber-rs) describe every behavior
   in Gherkin: spec reading, validation, and refinement, project
-  initialization, feature reads, staged changes, spec and scenario
+  initialization, feature reads, direct writes, the branch gate, spec and scenario
   mutations, the test runners and filters, TDD persistence, step
   discovery, hybrid generation, greenfield mode, LLM model listing and
   selection, project inspection, and the interactive shell.
@@ -835,7 +830,7 @@ Every run — pass or fail — writes an artifacts directory:
 | File | Contents |
 | --- | --- |
 | `transcript.log` | The full ANSI-stripped session, every command and output |
-| `steps.jsonl` | One timestamped JSON event per prompt, answer, and milestone (scaffold, staged files, attempts, RED/GREEN bars) |
+| `steps.jsonl` | One timestamped JSON event per prompt, answer, and milestone (scaffold, written files, attempts, RED/GREEN bars) |
 | `summary.md` | The verdict; on failure, an automated root-cause analysis |
 | `project/` | The generated Maven project itself — the run scaffolds, builds, and tests directly here, pass or fail |
 
@@ -870,7 +865,7 @@ test-first:
    `refine_requirement`, `run_tests`, `get_tdd_state`, `start_refactor`)
    must keep their reply shapes. The source of truth is
    `tests/mcp_conformance.rs` plus smoke-test `ToolPlan` (exactly 25
-   names; a 26th tool fails that Java build). Backup Inspector:
+   names; a 22nd tool fails that Java build). Backup Inspector:
    `npx @modelcontextprotocol/inspector spec mcp serve --root $PWD`.
 4. **Never expose escape hatches.** No `write_file`, `run_shell`,
    `install_dependency`, or arbitrary-path tools. Mutations go through
@@ -882,7 +877,7 @@ cargo test && cargo clippy --all-targets && cargo fmt --check
 ```
 
 The roadmap phases through greenfield mode — foundation (read tools,
-MCP transport) → controlled authoring (staged mutations) → Java support
+MCP transport) → controlled authoring (confined direct writes) → Java support
 + TDD state → JavaScript/TypeScript → .NET → Rust → greenfield mode —
 have all landed; hardening (security, packaging) is the open phase.
 

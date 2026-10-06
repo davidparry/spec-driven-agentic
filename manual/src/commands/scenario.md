@@ -2,7 +2,8 @@
 
 Scenario mutations. Every scenario is tied to a requirement by a
 `@REQ-...` tag, keeping the feature files traceable back to the spec.
-All four subcommands write to the [staging area](../staged-changes.md).
+All four subcommands write the feature file itself — see
+[direct writes](../direct-writes.md).
 
 ```text
 Usage: spec scenario [OPTIONS] <COMMAND>
@@ -42,9 +43,9 @@ spec scenario generate REQ-003
     "Two larger numbers separated by a comma are summed"
   ],
   "criteria": 2,
-  "staged": true,
+  "written": true,
   "source": "llm",
-  "nextStep": "Read the steps against the acceptance criteria, apply with spec changes commit, then run spec steps missing."
+  "nextStep": "Read the steps against the acceptance criteria, then run spec steps missing."
 }
 ```
 
@@ -53,7 +54,7 @@ spec scenario generate REQ-003
 Acceptance criteria are already `Given …, when …, then …`, so a literal
 reading of them is always available and needs no model. That literal
 reading is the **template**, and `source` reports `template` when it is
-what got staged.
+what got written.
 
 It is correct but rarely idiomatic: it cannot know that the feature file
 it is joining opens every scenario on `Given a string calculator`. So
@@ -77,7 +78,7 @@ The model's reply is only used when it holds **exactly one scenario per
 criterion**, every step opens with a Gherkin keyword, every scenario has
 a `When` and a `Then`, and no name collides with one already in the file
 or with another in the reply. A reply failing any of those is retried
-with the reason, and the template is staged if the retries run out —
+with the reason, and the template is written if the retries run out —
 coverage is never quietly lost to a chatty model.
 
 The command itself refuses two situations outright:
@@ -120,7 +121,7 @@ spec scenario add \
   --step 'Then the result is 3'
 ```
 
-The staged result appended to the feature:
+The result appended to the feature:
 
 ```gherkin
   @REQ-003
@@ -195,8 +196,7 @@ names the feature searched.
 
 ```bash
 spec scenario generate REQ-002   # or scenario add, to write them yourself
-spec changes show      # review the staged modify
-spec changes commit    # apply
+git diff               # review what landed
 spec steps missing     # any steps without definitions?
 spec test              # expect RED
 ```
@@ -205,4 +205,4 @@ spec test              # expect RED
 
 - [`spec steps`](steps.md) — find and generate the step definitions
   behind these scenarios.
-- [`spec changes`](changes.md) — review, apply, or discard the staged mutation.
+- [`spec validate`](spec.md#spec-validate) — check the scenarios against the spec.

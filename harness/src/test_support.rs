@@ -10,25 +10,25 @@ use crate::domain::feature::{self, FeatureDoc, FeatureSummary};
 use crate::domain::language::Language;
 use crate::domain::layout::{LayoutInput, resolve_layout};
 use crate::domain::memory::ProjectStructure;
-use crate::domain::model::{Requirement, Spec};
+use crate::domain::model::{Requirement, Spec, SpecCatalog, resolve_catalog};
 use crate::domain::tdd::TddSnapshot;
 use crate::domain::tools::{ChatMessage, ChatTurn, ToolDefinition, text_turn};
 use crate::ports::{
-    ChangeStore, FeatureCatalog, FeatureError, FeatureFiles, LlmConversation, LlmError,
-    RuntimeProbe, SourceError, SourceFile, SourceFiles, SpecError, SpecRepository, StageError,
-    StagedChange, StateError, StateStore,
+    FeatureCatalog, FeatureError, FeatureFiles, FileChange, LlmConversation, LlmError,
+    RuntimeProbe, SourceError, SourceFile, SourceFiles, SpecError, SpecRepository, StateError,
+    StateStore, WorkTree, WriteError,
 };
 
-/// [`ChangeStore`] over a map. `failing` makes every listing operation
-/// fail, for error-propagation tests.
+/// [`WorkTree`] over a map. `failing` makes every write fail, for
+/// error-propagation tests.
 #[derive(Default)]
-pub struct InMemoryChangeStore {
+pub struct InMemoryWorkTree {
     files: RefCell<HashMap<String, String>>,
     summaries: RefCell<Vec<String>>,
     fail_with: Option<String>,
 }
 
-impl InMemoryChangeStore {
+impl InMemoryWorkTree {
     pub fn failing(message: &str) -> Self {
         Self {
             fail_with: Some(message.to_string()),
@@ -39,51 +39,200 @@ impl InMemoryChangeStore {
     pub fn summaries(&self) -> Vec<String> {
         self.summaries.borrow().clone()
     }
+
+    /// Every path written, in sorted order.
+    pub fn paths(&self) -> Vec<String> {
+        let mut paths: Vec<String> = self.files.borrow().keys().cloned().collect();
+        paths.sort();
+        paths
+    }
 }
 
-impl ChangeStore for InMemoryChangeStore {
-    fn stage(&self, path: &str, content: &str, summary: &str) -> Result<StagedChange, StageError> {
+impl WorkTree for InMemoryWorkTree {
+    fn write(&self, path: &str, content: &str, summary: &str) -> Result<FileChange, WriteError> {
+        if let Some(message) = &self.fail_with {
+            return Err(WriteError(message.clone()));
+        }
+        let existed = self.files.borrow().contains_key(path);
         self.files.borrow_mut().insert(path.into(), content.into());
         self.summaries.borrow_mut().push(summary.into());
-        Ok(StagedChange {
+        Ok(FileChange {
             path: path.into(),
-            action: "create".into(),
+            action: if existed { "modify" } else { "create" }.into(),
             summary: summary.into(),
         })
     }
 
-    fn changes(&self) -> Result<Vec<StagedChange>, StageError> {
+    fn read(&self, path: &str) -> Result<Option<String>, WriteError> {
         if let Some(message) = &self.fail_with {
-            return Err(StageError(message.clone()));
+            return Err(WriteError(message.clone()));
         }
-        let mut changes: Vec<StagedChange> = self
-            .files
-            .borrow()
-            .keys()
-            .map(|path| StagedChange {
-                path: path.clone(),
-                action: "create".into(),
-                summary: String::new(),
-            })
-            .collect();
-        changes.sort_by(|a, b| a.path.cmp(&b.path));
-        Ok(changes)
-    }
-
-    fn content(&self, path: &str) -> Result<Option<String>, StageError> {
         Ok(self.files.borrow().get(path).cloned())
     }
+}
 
-    fn commit(&self) -> Result<Vec<StagedChange>, StageError> {
-        let changes = self.changes()?;
-        self.files.borrow_mut().clear();
-        Ok(changes)
+/// One in-memory file tree behind several ports, the way the real
+/// filesystem sits behind them: what a [`WorkTree`] write puts in is
+/// what the next [`FeatureCatalog`] or [`SpecRepository`] read gets
+/// back. Cheap to clone - every handle is the same tree.
+#[derive(Clone, Default)]
+pub struct SharedTree {
+    files: std::rc::Rc<RefCell<HashMap<String, String>>>,
+    summaries: std::rc::Rc<RefCell<Vec<String>>>,
+}
+
+impl SharedTree {
+    pub fn holding(files: &[(&str, &str)]) -> Self {
+        let tree = Self::default();
+        for (path, content) in files {
+            tree.put(path, content);
+        }
+        tree
     }
 
-    fn discard(&self) -> Result<Vec<StagedChange>, StageError> {
-        let changes = self.changes()?;
-        self.files.borrow_mut().clear();
-        Ok(changes)
+    pub fn put(&self, path: &str, content: &str) {
+        self.files.borrow_mut().insert(path.into(), content.into());
+    }
+
+    /// One file's bytes. Named `get` rather than `read` because both
+    /// ports this type implements already have a `read`.
+    pub fn get(&self, path: &str) -> Option<String> {
+        self.files.borrow().get(path).cloned()
+    }
+
+    /// Every path in the tree, in sorted order.
+    pub fn paths(&self) -> Vec<String> {
+        let mut paths: Vec<String> = self.files.borrow().keys().cloned().collect();
+        paths.sort();
+        paths
+    }
+
+    /// The summary each write carried, in write order.
+    pub fn summaries(&self) -> Vec<String> {
+        self.summaries.borrow().clone()
+    }
+}
+
+impl WorkTree for SharedTree {
+    fn write(&self, path: &str, content: &str, summary: &str) -> Result<FileChange, WriteError> {
+        let existed = self.files.borrow().contains_key(path);
+        self.put(path, content);
+        self.summaries.borrow_mut().push(summary.into());
+        Ok(FileChange {
+            path: path.into(),
+            action: if existed { "modify" } else { "create" }.into(),
+            summary: summary.into(),
+        })
+    }
+
+    fn read(&self, path: &str) -> Result<Option<String>, WriteError> {
+        Ok(self.get(path))
+    }
+}
+
+impl FeatureCatalog for SharedTree {
+    fn list(&self) -> Result<Vec<FeatureSummary>, FeatureError> {
+        self.paths()
+            .into_iter()
+            .filter(|path| path.ends_with(".feature"))
+            .map(|path| FeatureCatalog::read(self, &path).map(|doc| doc.summary()))
+            .collect()
+    }
+
+    fn read(&self, path: &str) -> Result<FeatureDoc, FeatureError> {
+        let content = self.get(path).ok_or_else(|| {
+            FeatureError(format!(
+                "{path}: no such feature file. Call feature list to see valid paths."
+            ))
+        })?;
+        feature::parse(path, &content).map_err(FeatureError)
+    }
+
+    fn exists(&self, path: &str) -> bool {
+        self.files.borrow().contains_key(path)
+    }
+}
+
+/// [`SpecRepository`] over a [`SharedTree`], resolving includes the way
+/// the filesystem one does. Paired with the same tree as a [`WorkTree`]
+/// it gives a mutation test the real contract: what the service writes
+/// is what it reads back, includes and all.
+///
+/// `root` is the project path of the root document (e.g.
+/// `requirements/requirements.json`); catalog-relative paths resolve
+/// against its directory.
+pub struct SharedSpecRepository {
+    tree: SharedTree,
+    root: String,
+    /// A load failure to answer with instead of reading, for
+    /// error-propagation tests.
+    broken: Option<SpecError>,
+}
+
+impl SharedSpecRepository {
+    pub fn new(tree: SharedTree, root: &str) -> Self {
+        Self {
+            tree,
+            root: root.to_string(),
+            broken: None,
+        }
+    }
+
+    pub fn failing(error: SpecError) -> Self {
+        Self {
+            tree: SharedTree::default(),
+            root: String::new(),
+            broken: Some(error),
+        }
+    }
+
+    /// The root document's name inside the catalog, mirroring
+    /// `FsSpecRepository::root_label`.
+    fn root_label(&self) -> String {
+        self.root
+            .rsplit('/')
+            .next()
+            .unwrap_or(&self.root)
+            .to_string()
+    }
+
+    /// The project path of a catalog-relative path.
+    fn project_path(&self, catalog_path: &str) -> String {
+        if catalog_path == self.root_label() {
+            return self.root.clone();
+        }
+        match self.root.rsplit_once('/') {
+            Some((dir, _)) => format!("{dir}/{catalog_path}"),
+            None => catalog_path.to_string(),
+        }
+    }
+}
+
+impl SpecRepository for SharedSpecRepository {
+    fn load(&self) -> Result<Spec, SpecError> {
+        self.load_catalog().map(|catalog| catalog.merged())
+    }
+
+    fn load_catalog(&self) -> Result<SpecCatalog, SpecError> {
+        if let Some(error) = &self.broken {
+            return Err(error.clone());
+        }
+        resolve_catalog(&self.root_label(), &mut |path| {
+            self.tree
+                .get(&self.project_path(path))
+                .map(|content| (content, path.to_string()))
+                .ok_or_else(|| format!("spec: {path} is not readable - no such file"))
+        })
+        .map_err(SpecError)
+    }
+
+    fn read_raw(&self, path: &str) -> Result<String, SpecError> {
+        if let Some(error) = &self.broken {
+            return Err(error.clone());
+        }
+        self.tree
+            .get(&self.project_path(path))
+            .ok_or_else(|| SpecError(format!("spec: {path} is not readable - no such file")))
     }
 }
 
@@ -359,28 +508,31 @@ mod tests {
     use crate::domain::tdd::TddPhase;
 
     #[test]
-    fn the_change_store_fake_honors_the_port_contract() {
-        let store = InMemoryChangeStore::default();
-        store.stage("b.txt", "two", "second").unwrap();
-        store.stage("a.txt", "one", "first").unwrap();
+    fn the_work_tree_fake_honors_the_port_contract() {
+        let store = InMemoryWorkTree::default();
+        assert_eq!(
+            store.write("b.txt", "two", "second").unwrap().action,
+            "create"
+        );
+        store.write("a.txt", "one", "first").unwrap();
         assert_eq!(store.summaries(), ["second", "first"]);
-        assert_eq!(store.content("a.txt").unwrap().as_deref(), Some("one"));
-        assert_eq!(store.content("missing").unwrap(), None);
-        let changes = store.changes().unwrap();
-        assert_eq!(changes[0].path, "a.txt");
-        assert_eq!(store.commit().unwrap().len(), 2);
-        assert_eq!(store.changes().unwrap(), vec![]);
-        store.stage("c.txt", "three", "third").unwrap();
-        assert_eq!(store.discard().unwrap().len(), 1);
-        assert_eq!(store.changes().unwrap(), vec![]);
+        assert_eq!(store.read("a.txt").unwrap().as_deref(), Some("one"));
+        assert_eq!(store.read("missing").unwrap(), None);
+        assert_eq!(store.paths(), ["a.txt", "b.txt"]);
+        // A second write to one path replaces it and reads as a modify.
+        let again = store.write("a.txt", "ONE", "again").unwrap();
+        assert_eq!(again.action, "modify");
+        assert_eq!(store.read("a.txt").unwrap().as_deref(), Some("ONE"));
     }
 
     #[test]
-    fn the_failing_change_store_fails_listing_commit_and_discard() {
-        let store = InMemoryChangeStore::failing("boom");
-        assert_eq!(store.changes().unwrap_err(), StageError("boom".into()));
-        assert_eq!(store.commit().unwrap_err(), StageError("boom".into()));
-        assert_eq!(store.discard().unwrap_err(), StageError("boom".into()));
+    fn the_failing_work_tree_fails_reads_and_writes() {
+        let store = InMemoryWorkTree::failing("boom");
+        assert_eq!(
+            store.write("a.txt", "x", "s").unwrap_err(),
+            WriteError("boom".into())
+        );
+        assert_eq!(store.read("a.txt").unwrap_err(), WriteError("boom".into()));
     }
 
     #[test]

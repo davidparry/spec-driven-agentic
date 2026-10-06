@@ -31,9 +31,9 @@ pub trait SpecRepository {
         self.load().map(SpecCatalog::single_root)
     }
 
-    /// Raw JSON of one spec file by catalog-relative path, so overlay
-    /// readers can resolve include trees that mix staged and working-tree
-    /// files. Errors are fully formatted `spec: ...` messages.
+    /// Raw JSON of one spec file by catalog-relative path, for a caller
+    /// that needs to know whether a particular file in the include tree
+    /// exists. Errors are fully formatted `spec: ...` messages.
     fn read_raw(&self, path: &str) -> Result<String, SpecError> {
         if path == ROOT_SPEC_FILE {
             self.load().map(|spec| {
@@ -371,69 +371,102 @@ pub trait ScaffoldWriter {
 pub struct ScaffoldError(pub String);
 string_error!(ScaffoldError);
 
-/// One file change waiting in the staging area.
+/// One file the harness wrote.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct StagedChange {
+pub struct FileChange {
     pub path: String,
-    /// "create" (file does not exist in the working tree) or "modify".
+    /// "create" (the file did not exist) or "modify".
     pub action: String,
     pub summary: String,
 }
 
-/// Exclusive use of the staging area, held for one read-modify-write
-/// cycle. Dropping it gives the area back - on a normal return, on an
+/// Exclusive use of the working tree, held for one read-modify-write
+/// cycle. Dropping it gives the tree back - on a normal return, on an
 /// error, and on a panic.
-pub trait Staging {}
+pub trait Exclusive {}
 
-/// The inert claim: a store no other process can reach has nothing to
+/// The inert claim: a tree no other process can reach has nothing to
 /// exclude.
 pub struct Unshared;
 
-impl Staging for Unshared {}
+impl Exclusive for Unshared {}
 
-/// The staging area: every mutation the harness authors lands here first,
-/// never directly in working files. The human reviews with
-/// `changes show` and applies with `changes commit`.
-pub trait ChangeStore {
-    /// Claim the area for the whole of one read-modify-write cycle:
-    /// read what is staged, decide the new content, stage it.
+/// The project's files. Every mutation the harness authors lands here
+/// directly, in the file the developer already has open; git is what
+/// holds the before-picture.
+pub trait WorkTree {
+    /// Claim the tree for the whole of one read-modify-write cycle:
+    /// read the file, decide the new content, write it.
     ///
-    /// Staging is only safe if that whole cycle is exclusive. Two
+    /// Writing is only safe if that whole cycle is exclusive. Two
     /// `spec` processes doing it at once against one feature file read
     /// the same base and wrote over each other, and the loser was told
-    /// it had staged - a silent lost update in the one subsystem whose
-    /// whole promise is "spec stages, you approve". Claims nest, so a
-    /// service may hold one across calls that claim it again.
-    fn claim(&self) -> Result<Box<dyn Staging>, StageError> {
+    /// its scenario had been added - a silent lost update. Claims nest,
+    /// so a service may hold one across calls that claim it again.
+    fn claim(&self) -> Result<Box<dyn Exclusive>, WriteError> {
         Ok(Box::new(Unshared))
     }
 
-    /// Stage `content` for `path`; re-staging the same path replaces it.
-    fn stage(&self, path: &str, content: &str, summary: &str) -> Result<StagedChange, StageError>;
-    fn changes(&self) -> Result<Vec<StagedChange>, StageError>;
-    /// The staged content for a path, if that path is staged.
-    fn content(&self, path: &str) -> Result<Option<String>, StageError>;
-    /// Apply every staged change to the working tree and clear the area.
-    fn commit(&self) -> Result<Vec<StagedChange>, StageError>;
-    /// Drop every staged change without applying it.
-    fn discard(&self) -> Result<Vec<StagedChange>, StageError>;
+    /// Write `content` to `path`, creating parent directories as needed.
+    fn write(&self, path: &str, content: &str, summary: &str) -> Result<FileChange, WriteError>;
+    /// The file's content, or `None` when there is no such file.
+    fn read(&self, path: &str) -> Result<Option<String>, WriteError>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StageError(pub String);
-string_error!(StageError);
+pub struct WriteError(pub String);
+string_error!(WriteError);
 
-impl From<StageError> for FeatureError {
-    fn from(error: StageError) -> Self {
+impl From<WriteError> for FeatureError {
+    fn from(error: WriteError) -> Self {
         Self(error.0)
     }
 }
 
-impl From<StageError> for SourceError {
-    fn from(error: StageError) -> Self {
+impl From<WriteError> for SourceError {
+    fn from(error: WriteError) -> Self {
         Self(error.0)
     }
 }
+
+/// Where version control stands in the project directory. Recorded in
+/// project memory so the branch gate, and anything else that wants to
+/// know whether an edit is undoable, can read one answer.
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub struct GitState {
+    /// Whether the project directory is inside a git work tree.
+    pub repository: bool,
+    /// The checked-out branch, `None` on a detached HEAD or a repository
+    /// with no commits yet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    /// Whether anything is uncommitted - tracked edits or untracked
+    /// files. A branch created over a dirty tree carries that work with
+    /// it, which is worth saying out loud before offering one.
+    #[serde(default)]
+    pub dirty: bool,
+}
+
+/// The project's version control, as much of it as the harness needs:
+/// is this a repository, and can it be put on a branch of its own.
+///
+/// An absent or broken git is not an error - it is a project the
+/// harness writes to in place - so the probe answers with a state
+/// rather than failing. Only [`Vcs::create_branch`] can fail, because
+/// by then the developer has asked for something specific.
+pub trait Vcs {
+    /// Where version control stands. Never fails: no git, no
+    /// repository, and a git that will not run all read as
+    /// [`GitState::default`].
+    fn state(&self) -> GitState;
+
+    /// Create `name` and check it out.
+    fn create_branch(&self, name: &str) -> Result<(), VcsError>;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VcsError(pub String);
+string_error!(VcsError);
 
 /// A long-running step in progress. Hold it while the work runs and
 /// drop it when the work is done; an interactive implementation

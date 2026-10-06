@@ -6,7 +6,7 @@
 use serde::Serialize;
 
 use crate::domain::language::{Language, detect_languages};
-use crate::ports::{ProjectFiles, RuntimeProbe};
+use crate::ports::{GitState, ProjectFiles, RuntimeProbe, Vcs};
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
 pub struct LanguageReport {
@@ -25,18 +25,24 @@ pub struct LanguageReport {
 #[derive(Debug, Serialize, PartialEq, Eq)]
 pub struct InspectionReport {
     pub languages: Vec<LanguageReport>,
+    /// Where version control stands. Part of the project's layout as
+    /// much as its source roots are: it decides whether `spec
+    /// greenfield` and `spec deliver` can offer a branch, and whether
+    /// what they write is undoable at all.
+    pub git: GitState,
     #[serde(rename = "nextStep")]
     pub next_step: String,
 }
 
-pub struct InspectService<P: ProjectFiles, R: RuntimeProbe> {
+pub struct InspectService<P: ProjectFiles, R: RuntimeProbe, V: Vcs> {
     files: P,
     probe: R,
+    vcs: V,
 }
 
-impl<P: ProjectFiles, R: RuntimeProbe> InspectService<P, R> {
-    pub fn new(files: P, probe: R) -> Self {
-        Self { files, probe }
+impl<P: ProjectFiles, R: RuntimeProbe, V: Vcs> InspectService<P, R, V> {
+    pub fn new(files: P, probe: R, vcs: V) -> Self {
+        Self { files, probe, vcs }
     }
 
     pub fn inspect(&self) -> InspectionReport {
@@ -53,9 +59,11 @@ impl<P: ProjectFiles, R: RuntimeProbe> InspectService<P, R> {
             .into_iter()
             .map(|language| self.report_for(language))
             .collect();
-        let next_step = next_step(&languages, copy);
+        let git = self.vcs.state();
+        let next_step = next_step(&languages, &git, copy);
         InspectionReport {
             languages,
+            git,
             next_step,
         }
     }
@@ -106,7 +114,14 @@ enum InspectCopy {
     Mcp,
 }
 
-fn next_step(languages: &[LanguageReport], copy: InspectCopy) -> String {
+fn next_step(languages: &[LanguageReport], git: &GitState, copy: InspectCopy) -> String {
+    if !git.repository {
+        // Said first because it changes what every later step means:
+        // outside a repository the harness's writes have no undo.
+        return "This project is not a git repository, so nothing the harness writes \
+                can be undone with git. Run git init first, or keep your own backup."
+            .to_string();
+    }
     if languages.is_empty() {
         let supported: Vec<String> = Language::ALL
             .iter()
@@ -155,6 +170,37 @@ mod tests {
     #[derive(Default)]
     struct FakeProbe(HashMap<&'static str, &'static str>);
 
+    /// A repository on a branch: the ordinary case, so the runtime
+    /// assertions below are about runtimes.
+    struct OnABranch;
+
+    impl Vcs for OnABranch {
+        fn state(&self) -> GitState {
+            GitState {
+                repository: true,
+                branch: Some("main".into()),
+                dirty: false,
+            }
+        }
+
+        fn create_branch(&self, _: &str) -> Result<(), crate::ports::VcsError> {
+            unimplemented!("inspect never creates a branch")
+        }
+    }
+
+    /// No git at all.
+    struct NoRepository;
+
+    impl Vcs for NoRepository {
+        fn state(&self) -> GitState {
+            GitState::default()
+        }
+
+        fn create_branch(&self, _: &str) -> Result<(), crate::ports::VcsError> {
+            unimplemented!("inspect never creates a branch")
+        }
+    }
+
     impl RuntimeProbe for FakeProbe {
         fn version(&self, command: &str) -> Option<String> {
             self.0.get(command).map(|v| v.to_string())
@@ -166,6 +212,7 @@ mod tests {
         let service = InspectService::new(
             FakeFiles(["pom.xml"].into(), HashSet::new()),
             FakeProbe([("mvn", "Apache Maven 3.9.9"), ("java", "openjdk 21.0.2")].into()),
+            OnABranch,
         );
         let report = service.inspect();
         assert_eq!(
@@ -198,6 +245,7 @@ mod tests {
         let service = InspectService::new(
             FakeFiles(["pom.xml"].into(), HashSet::new()),
             FakeProbe([("mvn", "Apache Maven 3.9.9")].into()),
+            OnABranch,
         );
         let report = service.inspect();
         assert_eq!(report.languages.len(), 1);
@@ -218,6 +266,7 @@ mod tests {
         let service = InspectService::new(
             FakeFiles(["build.gradle"].into(), HashSet::new()),
             FakeProbe([("gradle", "Gradle 8.14"), ("java", "21")].into()),
+            OnABranch,
         );
         let report = service.inspect();
         assert_eq!(report.languages[0].runtime, "gradle");
@@ -229,6 +278,7 @@ mod tests {
         let service = InspectService::new(
             FakeFiles(HashSet::new(), ["csproj"].into()),
             FakeProbe::default(),
+            OnABranch,
         );
         let report = service.inspect();
         let dotnet = &report.languages[0];
@@ -249,7 +299,7 @@ mod tests {
 
     #[test]
     fn an_empty_directory_lists_every_supported_ecosystem() {
-        let service = InspectService::new(FakeFiles::default(), FakeProbe::default());
+        let service = InspectService::new(FakeFiles::default(), FakeProbe::default(), OnABranch);
         let report = service.inspect();
         assert!(report.languages.is_empty());
         assert_eq!(
@@ -268,6 +318,7 @@ mod tests {
                 HashSet::new(),
             ),
             FakeProbe([("cargo", "cargo 1.97.0")].into()),
+            OnABranch,
         );
         let report = service.inspect();
         assert_eq!(report.languages.len(), 2);
@@ -283,11 +334,47 @@ mod tests {
         let service = InspectService::new(
             FakeFiles(["package.json"].into(), HashSet::new()),
             FakeProbe([("node", "v22.1.0")].into()),
+            OnABranch,
         );
         let json = serde_json::to_string(&service.inspect()).unwrap();
         assert!(json.contains("bddFramework"));
         assert!(json.contains("runtimePresent"));
         assert!(json.contains("runtimeVersion"));
         assert!(json.contains("nextStep"));
+    }
+
+    /// Outside a repository the harness's writes have no undo, and
+    /// that outranks whichever runtime happens to be installed.
+    #[test]
+    fn a_project_outside_a_repository_is_told_so_before_anything_else() {
+        let service = InspectService::new(
+            FakeFiles(["pom.xml"].into(), HashSet::new()),
+            FakeProbe([("mvn", "3.9.9"), ("java", "21")].into()),
+            NoRepository,
+        );
+        let report = service.inspect();
+        assert!(!report.git.repository);
+        assert_eq!(report.git.branch, None);
+        assert!(
+            report
+                .next_step
+                .starts_with("This project is not a git repository"),
+            "{}",
+            report.next_step
+        );
+        assert!(report.next_step.contains("git init"));
+    }
+
+    #[test]
+    fn a_repository_is_reported_with_the_branch_it_is_on() {
+        let service = InspectService::new(
+            FakeFiles(["pom.xml"].into(), HashSet::new()),
+            FakeProbe([("mvn", "3.9.9"), ("java", "21")].into()),
+            OnABranch,
+        );
+        let report = service.inspect();
+        assert!(report.git.repository);
+        assert_eq!(report.git.branch.as_deref(), Some("main"));
+        assert!(report.next_step.contains("spec validate"));
     }
 }

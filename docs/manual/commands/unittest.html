@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-bb14de4e.js";
+            window.path_to_searchindex_js = "../searchindex-d84b362c.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-2ab172c3.js"></script>
+        <script src="../toc-0006eac3.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -201,10 +201,10 @@ assertion.</p>
 </code></pre>
 <pre><code class="language-json">{
   "target": "src/test/java/StringCalculatorTest.java",
-  "staged": true,
+  "written": true,
   "source": "template",
   "summary": "Unit test for REQ-003 with 2 cases from its acceptance criteria.",
-  "nextStep": "Review with 'spec changes show', apply with 'spec changes commit', then 'spec test' to see RED."
+  "nextStep": "Sharpen the assertions (they are yours), then run spec test (expect RED)."
 }
 </code></pre>
 <p>The target file and framework follow the detected language:</p>
@@ -230,9 +230,8 @@ in the prompt. Generated assertions fail honestly until the
 production code exists — the point is a real RED.</p>
 <p>An unknown requirement id fails with exit status 1.</p>
 <h2 id="where-it-fits"><a class="header" href="#where-it-fits">Where it fits</a></h2>
-<pre><code class="language-bash">spec show REQ-003          # read the criteria
-spec unittest generate REQ-003  # stage the test
-spec changes commit
+<pre><code class="language-bash">spec show REQ-003               # read the criteria
+spec unittest generate REQ-003  # write the test
 spec test                       # RED at both altitudes
 </code></pre>
 <h2 id="see-also"><a class="header" href="#see-also">See also</a></h2>

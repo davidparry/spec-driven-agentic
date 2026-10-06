@@ -1,6 +1,6 @@
 //! The embedded MCP server: `spec mcp serve` exposes the workflow over
 //! stdio. Frozen seven-tool reply shapes stay (`harness/tests/mcp_conformance.rs`);
-//! the additive typed tools expose inspection and staged mutation. This
+//! the additive typed tools expose inspection and direct mutation. This
 //! module is a delivery mechanism like `main.rs`: it wires the same
 //! application services onto a transport, so it is allowed to name
 //! concrete adapters. The test-runner factory is injectable so every
@@ -21,8 +21,8 @@ use serde::Deserialize;
 
 use crate::adapters::fs_project::FsProjectFiles;
 use crate::adapters::fs_spec::FsSpecRepository;
-use crate::adapters::fs_staging::FsChangeStore;
 use crate::adapters::fs_state::FsStateStore;
+use crate::adapters::fs_worktree::FsWorkTree;
 use crate::adapters::noop_llm::NoLlm;
 use crate::adapters::process_exec::ProcessCommandExecutor;
 use crate::adapters::process_runtime::ProcessRuntimeProbe;
@@ -41,9 +41,9 @@ use crate::workspace::{primary_language, workshop_layout};
 
 type RunnerFactory = Arc<dyn Fn(&Path) -> Result<Box<dyn TestRunner>, String> + Send + Sync>;
 type McpGenerationService = GenerationService<
-    wiring::OverlayFeatures,
-    wiring::OverlayTree,
-    FsChangeStore,
+    wiring::ProjectFeatures,
+    wiring::ProjectTree,
+    FsWorkTree,
     FsSpecRepository,
     NoLlm,
 >;
@@ -153,7 +153,7 @@ pub struct RequirementRewordParams {
 pub struct WorkflowServer {
     root: PathBuf,
     runner_factory: RunnerFactory,
-    staging: StagingLock,
+    writes: WriteLock,
     // Read by the `#[tool_handler]`-generated `ServerHandler` impl.
     #[allow(dead_code)]
     tool_router: ToolRouter<Self>,
@@ -164,23 +164,23 @@ impl Clone for WorkflowServer {
         Self {
             root: self.root.clone(),
             runner_factory: self.runner_factory.clone(),
-            // Every clone guards the same staging area, so the lock has to
+            // Every clone guards the same working tree, so the lock has to
             // be shared rather than rebuilt.
-            staging: Arc::clone(&self.staging),
+            writes: Arc::clone(&self.writes),
             tool_router: Self::tool_router(),
         }
     }
 }
 
-/// Serializes the staging area's read-modify-write cycle.
+/// Serializes a mutation's read-modify-write cycle.
 ///
-/// Staging a mutation is three steps — read the effective content, apply
-/// the edit, write the file and the manifest — spread across a service and
-/// an adapter. Hosts are free to dispatch a batch of tool calls
-/// concurrently, and two interleaved cycles silently lose one edit: both
-/// callers read the same base, and the second write wins. Tools that touch
-/// the staging area take this lock for the whole cycle.
-type StagingLock = Arc<tokio::sync::Mutex<()>>;
+/// A mutation is three steps — read the file, apply the edit, write it
+/// back — spread across a service and an adapter. Hosts are free to
+/// dispatch a batch of tool calls concurrently, and two interleaved
+/// cycles silently lose one edit: both callers read the same base, and
+/// the second write wins. Every mutating tool takes this lock for the
+/// whole cycle.
+type WriteLock = Arc<tokio::sync::Mutex<()>>;
 
 /// JSON Schema `type: ["string","null"]` is legal but several MCP clients
 /// read `type` as a single string and drop the constraint. `anyOf` with one
@@ -269,14 +269,14 @@ impl WorkflowServer {
         Self {
             root: std::path::absolute(&root).unwrap_or(root),
             runner_factory,
-            staging: StagingLock::default(),
+            writes: WriteLock::default(),
             tool_router: Self::tool_router(),
         }
     }
 
-    /// Hold for the whole read-modify-write cycle of a staging mutation.
-    async fn staging_guard(&self) -> tokio::sync::MutexGuard<'_, ()> {
-        self.staging.lock().await
+    /// Hold for the whole read-modify-write cycle of a mutation.
+    async fn write_guard(&self) -> tokio::sync::MutexGuard<'_, ()> {
+        self.writes.lock().await
     }
 
     fn spec_repository(&self) -> FsSpecRepository {
@@ -288,7 +288,6 @@ impl WorkflowServer {
     ) -> crate::application::spec_service::SpecService<
         FsSpecRepository,
         crate::adapters::fs_spec::FsFeatureFiles,
-        FsChangeStore,
     > {
         wiring::spec_service(&self.root, workshop_layout())
     }
@@ -314,10 +313,10 @@ impl WorkflowServer {
         id: &str,
         report: &mut crate::application::spec_service::RefinementReport,
     ) -> Option<CallToolResult> {
-        // Staged-first, matching the wording `refine_requirement` just
+        // On-disk wording, matching what `refine_requirement` just
         // reviewed: the tool is most often called on a draft, which the
         // committed spec does not hold yet.
-        let criteria = self.spec_service().effective_criteria(id).ok()?;
+        let criteria = self.spec_service().criteria(id).ok()?;
         // A config read and nothing else, so it is safe on the runtime
         // thread. Held for the panicked-task arm below, which has to
         // refuse on the mode the project configured rather than on a
@@ -371,19 +370,9 @@ impl WorkflowServer {
 
     fn scenario_service(
         &self,
-    ) -> crate::application::scenario_service::ScenarioService<FsChangeStore, wiring::OverlayFeatures>
+    ) -> crate::application::scenario_service::ScenarioService<FsWorkTree, wiring::ProjectFeatures>
     {
         wiring::scenario_service(&self.root)
-    }
-
-    fn change_service(
-        &self,
-    ) -> crate::application::change_service::ChangeService<
-        FsChangeStore,
-        FsSpecRepository,
-        wiring::OverlayFeatures,
-    > {
-        wiring::change_service(&self.root)
     }
 
     fn tdd_service(&self) -> TddService<FsStateStore> {
@@ -392,22 +381,22 @@ impl WorkflowServer {
 
     fn mutation_service(
         &self,
-    ) -> SpecMutationService<FsSpecRepository, wiring::OverlayFeatures, FsChangeStore, FsStateStore>
+    ) -> SpecMutationService<FsSpecRepository, wiring::ProjectFeatures, FsWorkTree, FsStateStore>
     {
         wiring::mutation_service(&self.root, crate::application::DEFAULT_LLM_ATTEMPTS)
     }
 
-    fn overlay_catalog(&self) -> wiring::OverlayFeatures {
-        wiring::overlay_catalog(&self.root)
+    fn feature_catalog(&self) -> wiring::ProjectFeatures {
+        wiring::feature_catalog(&self.root)
     }
 
     fn generation_service(&self) -> Result<McpGenerationService, String> {
         let language = primary_language(&self.root)?;
         let layout = crate::workspace::project_layout(&self.root);
         Ok(GenerationService::new(
-            wiring::overlay_catalog(&self.root),
-            wiring::overlay_sources(&self.root, layout.module_root.as_deref()),
-            wiring::change_store(&self.root),
+            wiring::feature_catalog(&self.root),
+            wiring::source_tree(&self.root, layout.module_root.as_deref()),
+            wiring::work_tree(&self.root),
             self.spec_repository(),
             language,
             layout,
@@ -586,43 +575,42 @@ impl WorkflowServer {
     )]
     async fn project_inspect(&self) -> Result<CallToolResult, McpError> {
         let _span = tool_call("project_inspect");
-        let service =
-            InspectService::new(FsProjectFiles::new(self.root.clone()), ProcessRuntimeProbe);
+        let service = InspectService::new(
+            FsProjectFiles::new(self.root.clone()),
+            ProcessRuntimeProbe,
+            wiring::vcs(&self.root),
+        );
         Ok(json_result(&service.inspect_mcp()))
     }
 
-    #[tool(
-        description = "List every Gherkin feature file with its name and scenario count. Staged files are included as if already committed."
-    )]
+    #[tool(description = "List every Gherkin feature file with its name and scenario count.")]
     async fn feature_list(&self) -> Result<CallToolResult, McpError> {
         let _span = tool_call("feature_list");
-        Ok(match self.overlay_catalog().list() {
+        Ok(match self.feature_catalog().list() {
             Ok(summaries) => json_result(&summaries),
             Err(e) => error_result(e),
         })
     }
 
-    #[tool(
-        description = "Read one parsed feature file: tags, scenarios, and steps. Staged content wins over the working tree."
-    )]
+    #[tool(description = "Read one parsed feature file: tags, scenarios, and steps.")]
     async fn feature_read(
         &self,
         Parameters(params): Parameters<FeaturePathParam>,
     ) -> Result<CallToolResult, McpError> {
         let _span = tool_call("feature_read");
         tracing::debug!(path = %params.path, "tool arguments");
-        Ok(match self.overlay_catalog().read(&params.path) {
+        Ok(match self.feature_catalog().read(&params.path) {
             Ok(doc) => json_result(&doc),
             Err(e) => error_result(e),
         })
     }
 
-    #[tool(description = "Create an empty feature file (staged; apply with changes_commit).")]
+    #[tool(description = "Create an empty feature file.")]
     async fn feature_create(
         &self,
         Parameters(params): Parameters<FeatureCreateParams>,
     ) -> Result<CallToolResult, McpError> {
-        let _staging = self.staging_guard().await;
+        let _writing = self.write_guard().await;
         let _span = tool_call("feature_create");
         tracing::debug!(path = %params.path, name = %params.name, "tool arguments");
         Ok(
@@ -636,15 +624,13 @@ impl WorkflowServer {
         )
     }
 
-    #[tool(
-        description = "Append a scenario tagged @REQ-... to a feature file (staged; \
-        apply with changes_commit). Steps must be full Gherkin lines."
-    )]
+    #[tool(description = "Append a scenario tagged @REQ-... to a feature file. \
+        Steps must be full Gherkin lines.")]
     async fn scenario_add(
         &self,
         Parameters(params): Parameters<ScenarioAddParams>,
     ) -> Result<CallToolResult, McpError> {
-        let _staging = self.staging_guard().await;
+        let _writing = self.write_guard().await;
         let _span = tool_call("scenario_add");
         tracing::debug!(feature = %params.feature, name = %params.name, "tool arguments");
         Ok(
@@ -660,15 +646,12 @@ impl WorkflowServer {
         )
     }
 
-    #[tool(
-        description = "Replace a scenario's steps and/or requirement tag (staged; apply \
-        with changes_commit)."
-    )]
+    #[tool(description = "Replace a scenario's steps and/or requirement tag.")]
     async fn scenario_update(
         &self,
         Parameters(params): Parameters<ScenarioUpdateParams>,
     ) -> Result<CallToolResult, McpError> {
-        let _staging = self.staging_guard().await;
+        let _writing = self.write_guard().await;
         let _span = tool_call("scenario_update");
         tracing::debug!(feature = %params.feature, name = %params.name, "tool arguments");
         Ok(
@@ -684,15 +667,12 @@ impl WorkflowServer {
         )
     }
 
-    #[tool(
-        description = "Remove a scenario from a feature file (staged; apply with \
-        changes_commit)."
-    )]
+    #[tool(description = "Remove a scenario from a feature file.")]
     async fn scenario_delete(
         &self,
         Parameters(params): Parameters<ScenarioDeleteParams>,
     ) -> Result<CallToolResult, McpError> {
-        let _staging = self.staging_guard().await;
+        let _writing = self.write_guard().await;
         let _span = tool_call("scenario_delete");
         tracing::debug!(feature = %params.feature, name = %params.name, "tool arguments");
         Ok(
@@ -704,50 +684,6 @@ impl WorkflowServer {
                 Err(e) => error_result(e),
             },
         )
-    }
-
-    #[tool(description = "Show every staged change waiting for review.")]
-    async fn changes_show(&self) -> Result<CallToolResult, McpError> {
-        let _staging = self.staging_guard().await;
-        let _span = tool_call("changes_show");
-        Ok(match self.change_service().show() {
-            Ok(report) => json_result(&report),
-            Err(e) => error_result(e),
-        })
-    }
-
-    #[tool(
-        description = "Validate the effective spec and staged Gherkin together — staged \
-        content wins over the working tree. Frozen validate_spec still reads the \
-        committed spec on disk; call this after staging and before changes_commit."
-    )]
-    async fn changes_validate(&self) -> Result<CallToolResult, McpError> {
-        let _staging = self.staging_guard().await;
-        let _span = tool_call("changes_validate");
-        Ok(match self.change_service().validate() {
-            Ok(report) => json_result(&report),
-            Err(e) => error_result(e),
-        })
-    }
-
-    #[tool(description = "Apply every staged change to the working tree and clear the area.")]
-    async fn changes_commit(&self) -> Result<CallToolResult, McpError> {
-        let _staging = self.staging_guard().await;
-        let _span = tool_call("changes_commit");
-        Ok(match self.change_service().commit() {
-            Ok(report) => json_result(&report),
-            Err(e) => error_result(e),
-        })
-    }
-
-    #[tool(description = "Drop every staged change without applying it.")]
-    async fn changes_discard(&self) -> Result<CallToolResult, McpError> {
-        let _staging = self.staging_guard().await;
-        let _span = tool_call("changes_discard");
-        Ok(match self.change_service().discard() {
-            Ok(report) => json_result(&report),
-            Err(e) => error_result(e),
-        })
     }
 
     #[tool(
@@ -776,8 +712,8 @@ impl WorkflowServer {
     }
 
     #[tool(
-        description = "Reword one requirement's title, story, or acceptance criteria \
-        (staged; apply with changes_commit). Use this to repair the wording issues \
+        description = "Reword one requirement's title, story, or acceptance criteria. \
+        Use this to repair the wording issues \
         validate_spec or refine_requirement reported - never hand-edit the requirements \
         file for those, since its JSON escaping and indentation differ from what the \
         read tools return. It cannot repair catalog structure (a duplicate id, a file \
@@ -788,7 +724,7 @@ impl WorkflowServer {
         &self,
         Parameters(params): Parameters<RequirementRewordParams>,
     ) -> Result<CallToolResult, McpError> {
-        let _staging = self.staging_guard().await;
+        let _writing = self.write_guard().await;
         let _span = tool_call("requirement_reword");
         tracing::debug!(
             id = %params.id,
@@ -808,14 +744,13 @@ impl WorkflowServer {
                 // `validate_spec`.
                 Ok(mut report) => {
                     report.next_step = if report.findings.is_empty() {
-                        "Review with changes_show, check it with changes_validate, then \
-                         apply with changes_commit."
+                        "Check it with validate_spec, then add its scenario with \
+                         scenario_add."
                             .to_string()
                     } else {
                         format!(
-                            "Staged {} with open wording findings. Call \
-                             requirement_reword again to address them, then \
-                             changes_commit.",
+                            "Wrote {} with open wording findings. Call \
+                             requirement_reword again to address them.",
                             report.id
                         )
                     };
@@ -826,15 +761,13 @@ impl WorkflowServer {
         )
     }
 
-    #[tool(
-        description = "Flip a requirement's status to implemented (staged). Only \
-        allowed on GREEN when a scenario tagged with the requirement id exists."
-    )]
+    #[tool(description = "Flip a requirement's status to implemented. Only \
+        allowed on GREEN when a scenario tagged with the requirement id exists.")]
     async fn requirement_mark_implemented(
         &self,
         Parameters(params): Parameters<IdParam>,
     ) -> Result<CallToolResult, McpError> {
-        let _staging = self.staging_guard().await;
+        let _writing = self.write_guard().await;
         let _span = tool_call("requirement_mark_implemented");
         tracing::debug!(id = %params.id, "tool arguments");
         Ok(match self.mutation_service().mark_implemented(&params.id) {
@@ -856,11 +789,11 @@ impl WorkflowServer {
     }
 
     #[tool(
-        description = "Stage pending step definitions for every undefined step \
-        (template only over MCP; apply with changes_commit)."
+        description = "Write pending step definitions for every undefined step \
+        (template only over MCP)."
     )]
     async fn step_definition_create(&self) -> Result<CallToolResult, McpError> {
-        let _staging = self.staging_guard().await;
+        let _writing = self.write_guard().await;
         let _span = tool_call("step_definition_create");
         Ok(match self.generation_service() {
             Err(message) => error_result(message),
@@ -872,14 +805,14 @@ impl WorkflowServer {
     }
 
     #[tool(
-        description = "Stage a failing unit test for one requirement (template \
-        only over MCP; apply with changes_commit)."
+        description = "Write a failing unit test for one requirement (template \
+        only over MCP)."
     )]
     async fn unit_test_create(
         &self,
         Parameters(params): Parameters<ReqIdParam>,
     ) -> Result<CallToolResult, McpError> {
-        let _staging = self.staging_guard().await;
+        let _writing = self.write_guard().await;
         let _span = tool_call("unit_test_create");
         tracing::debug!(req_id = %params.req_id, "tool arguments");
         Ok(match self.generation_service() {
@@ -961,7 +894,7 @@ mod tests {
     use crate::ports::ToolBroker;
 
     /// A project the server can stage a feature mutation into.
-    fn staging_project() -> (tempfile::TempDir, WorkflowServer) {
+    fn write_project() -> (tempfile::TempDir, WorkflowServer) {
         let dir = tempfile::tempdir().unwrap();
         let features = dir.path().join("kata/src/test/resources/features");
         fs::create_dir_all(&features).unwrap();
@@ -983,10 +916,11 @@ mod tests {
         })
     }
 
-    fn staged_scenarios(dir: &tempfile::TempDir) -> Vec<String> {
-        let staged = crate::adapters::spec_home::spec_file(dir.path(), crate::domain::STAGED_DIR)
-            .join("files/kata/src/test/resources/features/calc.feature");
-        fs::read_to_string(staged)
+    fn written_scenarios(dir: &tempfile::TempDir) -> Vec<String> {
+        let feature = dir
+            .path()
+            .join("kata/src/test/resources/features/calc.feature");
+        fs::read_to_string(feature)
             .unwrap_or_default()
             .lines()
             .filter_map(|line| line.trim().strip_prefix("Scenario: ").map(String::from))
@@ -995,11 +929,11 @@ mod tests {
 
     /// A host is free to dispatch a batch of tool calls concurrently, and
     /// each one lands on its own task. Two interleaved read-modify-write
-    /// cycles used to lose one edit while both replies still said
-    /// `staged: true`.
+    /// cycles used to lose one edit while both replies still said the
+    /// scenario had been added.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn a_parallel_staging_batch_keeps_every_edit() {
-        let (dir, server) = staging_project();
+    async fn a_parallel_write_batch_keeps_every_edit() {
+        let (dir, server) = write_project();
         let names: Vec<String> = (0..8).map(|i| format!("Scenario{i}")).collect();
         let batch: Vec<_> = names
             .iter()
@@ -1019,20 +953,20 @@ mod tests {
                 reply.content[0].as_text().unwrap().text
             );
         }
-        let mut staged = staged_scenarios(&dir);
-        staged.sort();
+        let mut written = written_scenarios(&dir);
+        written.sort();
         let mut expected = names;
         expected.push("Base".into());
         expected.sort();
-        assert_eq!(staged, expected, "a parallel staging batch dropped an edit");
+        assert_eq!(written, expected, "a parallel write batch dropped an edit");
     }
 
     /// The guard is what serializes those cycles: while it is held, a
-    /// staging mutation has to wait rather than read a stale base.
+    /// mutation has to wait rather than read a stale base.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn a_staging_mutation_waits_for_the_staging_lock() {
-        let (_dir, server) = staging_project();
-        let held = server.staging_guard().await;
+    async fn a_mutation_waits_for_the_write_lock() {
+        let (_dir, server) = write_project();
+        let held = server.write_guard().await;
         let blocked = tokio::spawn({
             let server = server.clone();
             async move { server.scenario_add(add_scenario_params("Blocked")).await }
@@ -1040,7 +974,7 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(250)).await;
         assert!(
             !blocked.is_finished(),
-            "the mutation ran while the staging lock was held"
+            "the mutation ran while the write lock was held"
         );
         drop(held);
         let reply = blocked.await.unwrap().unwrap();
@@ -1048,9 +982,9 @@ mod tests {
     }
 
     #[test]
-    fn every_clone_guards_the_same_staging_area() {
-        let (_dir, server) = staging_project();
-        assert!(Arc::ptr_eq(&server.staging, &server.clone().staging));
+    fn every_clone_guards_the_same_working_tree() {
+        let (_dir, server) = write_project();
+        assert!(Arc::ptr_eq(&server.writes, &server.clone().writes));
     }
 
     #[test]

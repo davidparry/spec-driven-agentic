@@ -25,7 +25,7 @@ class LiveSpecServerTest {
         try (SdkToolClient client = new SdkToolClient(project, spec)) {
             ToolSweep.SweepReport report = new ToolSweep().run(client, new Narrator(line -> {
             }), false);
-            assertThat(report.discovered()).hasSize(25);
+            assertThat(report.discovered()).hasSize(21);
             assertThat(report.missing()).isEmpty();
             assertThat(report.unexpected()).isEmpty();
             assertThat(report.failures()).isEmpty();

@@ -15,10 +15,10 @@ use crate::domain::proposal::escape_controls;
 use crate::domain::steps::{MissingStep, extract_patterns, step_to_expression};
 use crate::domain::tdd::{ImplementAttempt, StateEntry};
 
-/// Where generated step definitions are staged, by ecosystem convention.
+/// Where generated step definitions are written, by ecosystem convention.
 pub fn steps_target_path(language: Language) -> &'static str {
     match language {
-        // Default package on purpose: the production class is staged at
+        // Default package on purpose: the production class is written at
         // the default-package path src/main/java/<Project>.java, and Java
         // forbids a named package from referencing a default-package
         // class - steps in a "steps" package could never compile against
@@ -44,7 +44,7 @@ pub fn unit_test_file_name(language: Language, req_id: &str) -> String {
     }
 }
 
-/// Where a generated unit test for one requirement is staged in a
+/// Where a generated unit test for one requirement is written in a
 /// project with no layout of its own yet.
 pub fn unit_test_target_path(language: Language, req_id: &str) -> String {
     let name = unit_test_file_name(language, req_id);

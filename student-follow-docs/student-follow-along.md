@@ -10,7 +10,7 @@ local agent if you take the [pi path](pi-path.md). Your
 hour is the workflow it enables: draft a requirement *with* an agent, let the
 server critique it (structure first, wording second), then drive it
 spec → Gherkin → RED → GREEN → REFACTOR through **tools**, with you
-reviewing staged changes before they land.
+reading every diff the agent writes.
 
 Curious what order all these files would be created in if you started from
 zero? See the greenfield build order, first file to last:
@@ -35,7 +35,7 @@ Java.
 
 You need:
 
-- **`spec` on PATH** (`spec --version`) — GitHub release, `cargo install --path harness`, or `harness/target/release/spec`. Cursor will not connect without it, and it must report **0.7.4 or newer** — the tool replies quoted on this page were captured from 0.7.0 and still read the same, the `.spec/` directory this page uses replaced the flat `.spec.toml` in 0.6.0, and both the refinement loop in Step 4 and the homework's account of `spec steps generate` behave differently below it.
+- **`spec` on PATH** (`spec --version`) — GitHub release, `cargo install --path harness`, or `harness/target/release/spec`. Cursor will not connect without it, and it must report **0.8.0 or newer** — the tool replies quoted on this page were captured from 0.7.0 and still read the same, the `.spec/` directory this page uses replaced the flat `.spec.toml` in 0.6.0, and both the refinement loop in Step 4 and the homework's account of `spec steps generate` behave differently below it.
 - **Java 21+** (`java -version`)
 - **Maven 3.9+** (`mvn -version`)
 - **Cursor** (or any MCP-capable agent — Claude Desktop works with the same JSON)
@@ -136,18 +136,18 @@ and the absolute repo paths in the log will differ on your machine.)
 - **STEP 1** — **every planned tool** discovered. The frozen seven you already know
   (`list_requirements`, `get_requirement`, `validate_spec`,
   `refine_requirement`, `run_tests`, `get_tdd_state`, `start_refactor`) plus
-  authoring/staging (`scenario_add`, `unit_test_create`, `changes_show`,
-  `changes_commit`, `requirement_reword`, `requirement_mark_implemented`, …) and inspect
+  authoring (`scenario_add`, `unit_test_create`, `requirement_reword`,
+  `requirement_mark_implemented`, …) and inspect
   (`project_root`, `project_inspect`, `command_run`). Exercise 1 uses the structure/wording
-  pair; Exercise 2 uses staging.
+  pair; Exercise 2 uses the authoring tools.
 - **STEP 4** — `run_tests` returns `"phase": "GREEN", "tests": 5`
   (2 JUnit tests + 3 Cucumber scenarios — one bar, two altitudes).
 - **STEP 5** — `get_requirement` for the first pending id (REQ-003 on
   `trunk`).
-- **STEP 6** — operational reads (no staging): `validate_spec`,
+- **STEP 6** — operational reads (nothing is written): `validate_spec`,
   `refine_requirement` (REQ-001), `project_root`, `project_inspect`, `feature_list`,
   `feature_read` of `kata/src/test/resources/features/string_calculator.feature`,
-  `changes_show`, `changes_validate`, `step_definitions_find`. Mutating
+  `step_definitions_find`. Mutating
   tools stay behind
   `java -jar smoke-test/target/smoke-test.jar --sweep --include-mutating`.
 
@@ -272,12 +272,9 @@ spec.
    }
    ```
 
-   `validate_spec` reads the **committed** spec on disk, so once the agent
-   has staged a reword it says so, appending this to the `nextStep`: *"This
-   read the committed spec on disk, and a spec edit is staged - call
-   changes_validate to check the staged spec before changes_commit."*
-   That sentence is the tool telling you it just judged a file you have
-   already moved past. `changes_validate` is its staged-aware twin.
+   `validate_spec` reads the spec file on disk, which is the only copy
+   there is — every authoring tool writes straight into it, so what the
+   validator judged is what you will read in `git diff`.
 
 3. `refine_requirement` → findings in the **tool reply**. **Expect
    findings.** A first draft coming back with something to fix is the
@@ -293,23 +290,15 @@ spec.
      "findings": [
        "criteria: only happy paths - add at least one edge case (empty, invalid, or error input)"
      ],
-     "source": "working tree",
      "nextStep": "Call requirement_reword to address each finding - never edit the requirements file by hand - then run validate_spec and call refine_requirement again. Iterate until there are no findings."
    }
    ```
 
-   `source` is the field to read first. It says **which copy of the
-   wording** was just judged: `"working tree"` for the committed spec on
-   disk, `"staged"` for an uncommitted edit. The agent drafted REQ-007
-   straight into the file, so the first pass reads the working tree.
-
 4. **The refine loop — this is its own step, and it usually runs more than
-   once.** `requirement_reword` *stages* its edit rather than writing it,
-   and `refine_requirement` reads staged-first, so the next pass judges the
-   new wording immediately. **No `changes_commit` between passes.** Reword,
-   refine, reword, refine until the findings are gone, then commit once.
-   From the second pass on, `source` flips and the `nextStep` says the same
-   thing out loud:
+   once.** `requirement_reword` writes its edit into
+   `requirements/requirements.json`, and `refine_requirement` reads the
+   same file, so the next pass judges the new wording immediately. Reword,
+   refine, reword, refine until the findings are gone:
 
    ```json
    {
@@ -318,8 +307,7 @@ spec.
      "findings": [
        "story: 'handle' is ambiguous - describe the observable behavior instead"
      ],
-     "source": "staged",
-     "nextStep": "Call requirement_reword to address each finding - never edit the requirements file by hand - then call refine_requirement again. It reviews your staged edit, so there is no need to commit between passes. Iterate until there are no findings."
+     "nextStep": "Call requirement_reword to address each finding - never edit the requirements file by hand - then run validate_spec and call refine_requirement again. Iterate until there are no findings."
    }
    ```
 
@@ -330,31 +318,23 @@ spec.
      "id": "REQ-007",
      "clean": true,
      "findings": [],
-     "source": "staged",
-     "nextStep": "The staged wording reads clean. Confirm it with the developer, apply it with changes_commit, then write the Gherkin scenario from the acceptance criteria."
+     "nextStep": "The wording reads clean. Confirm it with the developer, then write the Gherkin scenario from the acceptance criteria."
    }
    ```
 
-   If the loop never ran — the agent's first draft already had an edge case
-   and nothing was staged — the same reply comes back with
-   `"source": "working tree"` and a `nextStep` of *"The wording reads
-   clean. Confirm it with the developer, then write the Gherkin scenario
-   from the acceptance criteria."* No `changes_commit` to do in that case,
-   because nothing was staged. Demo B below shows you the findings loop on
-   demand.
+   If the loop never ran — the agent's first draft already had an edge
+   case — that clean reply is the first thing you see. Demo B below shows
+   you the findings loop on demand.
 
-   On a `spec` older than the floor above, this loop does not converge: refinement
-   read the committed spec, so rewording changed nothing the next pass
-   could see and the identical findings came back forever unless something
-   committed in between. Worse, a deliberately vague story staged over a
-   clean one came back `clean: true` — the tool passing judgement on text
-   you had already replaced. Any account of this loop that tells you to
-   commit between passes is describing that older binary.
+   On a `spec` older than the floor above, this loop went through a
+   review area that `refine_requirement` had to be taught to read, and
+   accounts of it talk about committing between passes. There is nothing
+   to commit now: every pass reads the file as it stands.
 
 5. **Your checkpoint:** read the story and criteria aloud. Is this what we
    meant? You own the intent — approve it or redirect the agent with one
    sentence. Approving does **not** change `status`; leave it `pending`.
-   `changes_commit` the staged wording if the refine loop staged one.
+   `git diff requirements/` shows you everything the loop wrote.
 
 For both demos below, **you** make the breaking edit by hand — don't ask
 the agent to do it. An agent asked to write bad wording tends to fix it on
@@ -396,11 +376,9 @@ tool catches it, agent repairs it.
    round-trip. That is the convention working, not a mangling.
 
 4. Now let the agent off the leash: ask it to repair the criterion with
-   `requirement_reword` and call `validate_spec` again until `"valid": true`.
-   Because reword stages, the `validate_spec` that follows it will append
-   the staged-edit sentence to its `nextStep` and point at
-   `changes_validate`; the `"valid": true` you are waiting for arrives
-   after `changes_commit`.
+   `requirement_reword` and call `validate_spec` again until
+   `"valid": true`. Reword writes into the file the validator reads, so
+   the `"valid": true` arrives on the very next call.
 
 **Optional demo B — wording loop (`refine_requirement`)**
 
@@ -433,19 +411,18 @@ tool catches it, agent repairs it.
        "story: 'handle' is ambiguous - describe the observable behavior instead",
        "story: 'quickly' is ambiguous - describe the observable behavior instead"
      ],
-     "source": "working tree",
      "nextStep": "Call requirement_reword to address each finding - never edit the requirements file by hand - then run validate_spec and call refine_requirement again. Iterate until there are no findings."
    }
    ```
 
-   `"source": "working tree"` is the proof that the tool read *your* hand
-   edit rather than something stale. That is the whole point of this demo:
-   you broke it, the tool saw what you broke.
+   Those findings are proof that the tool read *your* hand edit rather
+   than something stale. That is the whole point of this demo: you broke
+   it, the tool saw what you broke.
 
 4. Now let the agent reword from the findings with `requirement_reword`,
-   then re-run `refine_requirement` until `"clean": true`. Watch `source`
-   turn to `"staged"` on the second pass — the loop converges without a
-   commit in the middle. The failure is the lesson.
+   then re-run `refine_requirement` until `"clean": true`. Each pass
+   reads the file the previous reword wrote, so the loop converges with
+   nothing in the middle. The failure is the lesson.
 
 **Optional demo C — the spec is a catalog (includes)**
 
@@ -543,8 +520,8 @@ Using the spec-driven-server tools: validate the spec first, then
 stays pending until homework. Add its Gherkin with
 `scenario_add` (tag the requirement id), add missing steps with
 `step_definition_create` if `step_definitions_find` reports any, add a
-unit test with `unit_test_create`. Show `changes_show` and ask me before
-`changes_commit`. Then `run_tests` (expect RED). Implement the simplest
+unit test with `unit_test_create`. Stop and show me what you wrote
+before you go on. Then `run_tests` (expect RED). Implement the simplest
 production code in `StringCalculator`. `run_tests` (GREEN).
 `start_refactor` if I agree. On GREEN, `requirement_mark_implemented`.
 Ask me before each phase change.
@@ -581,11 +558,11 @@ their edits differently):
    }
    ```
 
-2. The agent stages two `@REQ-003` scenarios with `scenario_add` (and a
-   unit test with `unit_test_create`). **Your checkpoint 1:** call
-   `changes_show` (or have the agent show it) and read the staged Gherkin
-   before you allow `changes_commit`. This is the spec review — is this the
-   behavior you want?
+2. The agent writes two `@REQ-003` scenarios with `scenario_add` (and a
+   unit test with `unit_test_create`). **Your checkpoint 1:** run
+   `git diff kata/` and read the Gherkin that landed. This is the spec
+   review — is this the behavior you want? `git restore kata/` takes it
+   back if it is not.
 
    Four things about that review, all of which used to bite:
 
@@ -597,25 +574,19 @@ their edits differently):
      built from are not. A new scenario implying new steps is the
      exception. If the agent skips `step_definition_create` because
      `step_definitions_find` came back empty, it is right.
-   - **`changes_show` states its own totals.** When more than five edits
-     are waiting it names five and prefixes the line
-     `(9 edits in all, 4 not shown); ...`, so you always know the size of
-     what you are approving rather than having to add a prefix to a list.
-     Two `scenario_add` calls on the same feature file accumulate into one
-     entry naming both scenarios.
    - **`scenario_add` leaves the rest of the file alone.** The header
      comment block above `Feature:`, the `As a / I want / So that`
      narrative under it, and any trailing comment after the last scenario
      all survive the append. A diff that shows any of them disappearing is
      an old binary, not your agent.
-   - **A batched turn stages everything it says it staged.** Hosts like
+   - **A batched turn writes everything it says it wrote.** Hosts like
      Cursor and `pi` fire tool calls in parallel, and two `scenario_add`
-     calls in one turn used to interleave: both replied `"staged": true`,
-     one scenario reached disk, and `changes_show` agreed with the lie. The
-     staging area serialises now, in-process and across processes both, so
-     the count in `changes_show` is the count you get. Still read it —
-     that is the checkpoint — but you are reading it to review the
-     behavior, not to audit the tool.
+     calls in one turn used to interleave: both replied `"written": true`
+     and only one scenario reached disk. Writes serialise now, in-process
+     and across processes both, through an advisory lock on `.spec/.lock`,
+     so the diff is the whole of what the turn did. Still read it — that
+     is the checkpoint — but you are reading it to review the behavior,
+     not to audit the tool.
 
    And one non-finding: spec JSON files end with a newline, so a diff that
    reports `\ No newline at end of file` on `requirements.json` is stale
@@ -739,8 +710,8 @@ their edits differently):
    tagged `@REQ-003` scenario — premature completion is a live refusal, not
    a prompt hope. If the agent edits the JSON by hand instead, send it back
    to the tool.
-   **Your checkpoint 2:** approve the final diff. Two checkpoints, both
-   yours — the staged scenario and the production code.
+   **Your checkpoint 2:** read the final `git diff`. Two checkpoints,
+   both yours — the scenario and the production code.
 
 ---
 
@@ -820,7 +791,7 @@ and leave REQ-007 for the homework it was always meant to be.
 
 REQ-003 carries two acceptance criteria, and the agent wrote a scenario
 for one of them. Everything downstream still went green: Cucumber ran the
-scenario that exists, `spec changes validate` passed, and
+scenario that exists, `spec validate` passed, and
 `requirement_mark_implemented` accepted REQ-003 — that gate requires *a*
 scenario tagged `@REQ-003`, not one per criterion. So the spec says
 `implemented` while half the behavior the spec asks for is only asserted
@@ -835,7 +806,7 @@ spec scenario add --feature kata/src/test/resources/features/string_calculator.f
   --step 'Given a string calculator' \
   --step 'When I add "1,2"' \
   --step 'Then the result is 3'
-spec changes commit && spec test
+spec test
 ```
 
 ---
@@ -863,13 +834,13 @@ graded, and Step 6 reads the same 7/7 before and after it.
   method and nothing else — it cannot rename a field or an existing step
   method on the way past. A reply that hands back a whole file, alters a
   generated step expression, or drops a definition is refused, and the
-  deterministic version of the same method is staged instead
+  deterministic version of the same method is written instead
   (`"source": "template"`). On top of that, no step *pattern* the file
   already declared may disappear — that would unbind a passing scenario.
-  It stages like everything else, so read it with `spec changes show`
-  before committing. (Older `spec` builds did hand the model the whole
-  file and got a much larger diff back; if yours renames things you did
-  not ask it to, you are on one of those.)
+  It lands in the file like everything else, so read it with `git diff`
+  before you run the bar. (Older `spec` builds did hand the model the
+  whole file and got a much larger diff back; if yours renames things you
+  did not ask it to, you are on one of those.)
 - `git diff complete` shows one worked ending for REQ-004, REQ-005, and
   REQ-006. Do **not** compare REQ-007 against it: the `complete` branch
   predates this exercise and its REQ-007 is a newline-delimiter duplicate
@@ -955,8 +926,8 @@ this exercise, with every output, is *Extra F* in
 Everything the exercises touched lives in `kata/` and `requirements/`.
 The harness's own files are separate, under `.spec/` (`config.toml` is
 the tracked configuration; `state.json`, `memory.json`, `history`,
-`cache/`, `log/`, and `staged/` are gitignored). Deleting `.spec/state.json`
-resets the TDD phase to START.
+`.lock`, `cache/`, and `log/` are gitignored). Deleting
+`.spec/state.json` resets the TDD phase to START.
 
 ```bash
 git checkout -- kata requirements     # rewind this branch to the start state
@@ -976,7 +947,7 @@ git checkout trunk && git branch -D workshop && git checkout -b workshop trunk
 - **Build red:** pair with a neighbor first; the presenter won't debug from
   stage.
 - **Cursor MCP connection red:** `spec --version` must work and must report
-  0.7.4 or newer. Launch Cursor from that terminal or put the absolute path
+  0.8.0 or newer. Launch Cursor from that terminal or put the absolute path
   to `spec` in `command`, then toggle the server off/on in Cursor's MCP
   settings. Note: a server restart resets the TDD phase — have the agent
   call `run_tests` once before any `start_refactor`, or the server will

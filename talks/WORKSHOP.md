@@ -16,7 +16,7 @@ bundled `smoke-test.jar` all drive that binary over stdio. What you drive is a
 agent draft requirements together and iterate them through two server feedback
 loops — `validate_spec` for structure, `refine_requirement` for wording quality
 — until the spec is valid and clean; requirements become executable Gherkin
-scenarios and unit tests (via staging tools); and the agent collaborates with
+scenarios and unit tests (via authoring tools); and the agent collaborates with
 you through the Red/Green/Refactor cycle — with the human in control of every
 engineering decision. The conference / Wi-Fi-off path is the **same server**
 with narrower per-command tool profiles (`spec tools profiles`), not a second
@@ -75,7 +75,7 @@ kept with the presenter, not in the repo.)
 | --- | --- |
 | `kata/` | A **standalone** Maven project — the String Calculator kata. It has its own `pom.xml` (no parent). Two requirements are implemented; the rest are driven agentically during the workshop. Gherkin feature files (`src/test/resources/features/`) are the executable behavior spec, run by Cucumber alongside the JUnit tests. Copy the folder and it still builds: `mvn -f kata/pom.xml test`. |
 | [`harness/`](../harness/README.md) | The `spec` harness **and** the workshop MCP server. `spec mcp serve` exposes the workflow's tools over stdio (wire identity `spec-driven-server` / `1.0.0`, title `Spec Driven`, website [spec-driven-agentic](https://davidparry.github.io/spec-driven-agentic/)). Frozen seven-tool reply shapes are gated by `harness/tests/mcp_conformance.rs`. The same binary automates the spec-driven loop with per-command tool profiles (3–7 tools for a generating command, 12 for the read-only `ask`) and a local Ollama model (`qwen3.8-flash-next:125b-mlx`). See [`harness/README.md`](../harness/README.md) and the searchable [command manual](https://davidparry.github.io/spec-driven-agentic/manual/). |
-| `smoke-test/` | A narrated **smoke test** of `spec mcp serve` (`smoke-test.jar`) plus an automated sweep of every planned tool. It launches **only** that server as a child process — discovery, baseline `run_tests`, then remaining read-only tools (`validate_spec`, `project_root`, `project_inspect`, `feature_list` / `feature_read`, `changes_show` / `changes_validate`, `step_definitions_find`; the narration starts at `tools/list`, since the server does not require an `initialize` handshake). Mutating tools stay behind `--sweep --include-mutating`. Own spec (`smoke-test/requirements/requirements.json`), tagged Cucumber scenarios, `SpecCompletenessTest`, 100% instruction/branch coverage (JaCoCo-enforced; excludes `TddAgent` and `SdkToolClient` only), SpotBugs + PMD gating `mvn -pl smoke-test verify`. |
+| `smoke-test/` | A narrated **smoke test** of `spec mcp serve` (`smoke-test.jar`) plus an automated sweep of every planned tool. It launches **only** that server as a child process — discovery, baseline `run_tests`, then remaining read-only tools (`validate_spec`, `project_root`, `project_inspect`, `feature_list` / `feature_read`, `step_definitions_find`; the narration starts at `tools/list`, since the server does not require an `initialize` handshake). Mutating tools stay behind `--sweep --include-mutating`. Own spec (`smoke-test/requirements/requirements.json`), tagged Cucumber scenarios, `SpecCompletenessTest`, 100% instruction/branch coverage (JaCoCo-enforced; excludes `TddAgent` and `SdkToolClient` only), SpotBugs + PMD gating `mvn -pl smoke-test verify`. |
 | `requirements/requirements.json` | The SDD spec: the requirements backlog, and the root of the **spec catalog** — it holds requirements of its own and may `include` child spec files (which may include further files, N levels deep); the tooling merges the tree into one backlog. Each requirement carries acceptance criteria (already phrased Given/When/Then) that agents turn into executable Gherkin scenarios and failing tests, plus a `featureFile` pointer to where its scenarios live. Full field-by-field reference: [The requirements format](https://davidparry.github.io/spec-driven-agentic/manual/spec-format.html). |
 | `talks/slides/index.html` | The reveal.js slide deck (self-contained, CDN-based). **One file, two cuts:** every top-level `<section>` carries `data-track="60"`, `"30"`, or `"both"`, and a script strips the other track before reveal initializes. Plain URL gives the 60-minute workshop (30 slides); `?30` — or the published `/talk30/` path — gives the 30-minute demo-driven session (20 slides, the harness only — `pi` is 60-minute material). Both cuts walk the same requirement through the same steps and end on the same seven graded checks. Facts live in one place, so the two cuts cannot drift apart. |
 | [`student-follow-docs/student-follow-along.md`](../student-follow-docs/student-follow-along.md) | The attendee's step-by-step companion: commands, prompts, expected output, self-check, homework. |
@@ -110,7 +110,7 @@ the branches apart.
 
 ## Prerequisites
 
-Install `spec` first — [published installer](../README.md#install-spec), **0.7.4 or newer** (the `.spec/` directory these exercises use replaced the flat `.spec.toml` in 0.6.0).
+Install `spec` first — [published installer](../README.md#install-spec), **0.8.0 or newer** (the `.spec/` directory these exercises use replaced the flat `.spec.toml` in 0.6.0).
 
 - Java 21+
 - Maven 3.9+
@@ -122,7 +122,7 @@ Install `spec` first — [published installer](../README.md#install-spec), **0.7
 
 ```bash
 git clone <this repo> && cd spec-driven-agentic
-spec --version                     # must succeed, and report 0.7.4 or newer
+spec --version                     # must succeed, and report 0.8.0 or newer
 mvn -q -pl smoke-test package     # MCP-server smoke-test jar
 mvn -q -f kata/pom.xml test       # standalone kata: JUnit + Cucumber
 ```
@@ -146,7 +146,7 @@ read-only `spec ask`.
 There is no `spec_draft` or `implement` MCP tool: a **new** requirement is
 still drafted by the human (`spec draft`), and Cursor writes production
 Java. Rewording an existing requirement, Gherkin, steps, unit-test
-scaffolds, mark-implemented, and staging all go through tools. Generation
+scaffolds, and mark-implemented all go through tools. Generation
 over MCP is template-only.
 
 **Frozen seven** (reply shapes stay; conformance is `harness/tests/mcp_conformance.rs`
@@ -156,15 +156,14 @@ plus smoke-test `ToolPlan`):
 | --- | --- |
 | `list_requirements` | Every requirement with its id, title, status, and the spec `file` it lives in — find pending work, and know which document holds it once the catalog is split across includes. Re-reads the spec fresh on every call, so requirements an agent just drafted show up immediately. |
 | `get_requirement` | One requirement's user story, acceptance criteria, and `featureLocation` — the raw material for Gherkin scenarios and failing tests, plus a `workflowHint` telling the agent what to do next. |
-| `validate_spec` | Validates the requirements file **on disk**: well-formed unique ids, stories, Given/When/Then acceptance criteria, and tagged scenarios for implemented requirements. It reads the committed spec, so when a spec edit is waiting in staging its `nextStep` says so and names `changes_validate`, the staged-aware twin. During `spec draft` these lookups do not critique the in-flight proposal; `parse_proposals_checked` is that gate. `spec validate` exits non-zero on an invalid spec, so a CI gate can be scripted on it. |
-| `refine_requirement` | Deterministic quality feedback on one requirement's wording: ambiguous words ("should", "handle", "quickly"), stories missing their actor or their why, outcomes with no concrete expected value, criteria covering more than one action, and happy-path-only coverage. Reads the staged edit when there is one and names which copy it judged in a `source` field, so the reword/refine loop converges without a `changes_commit` between passes. Configure a **decision model** (`spec judge use`, Ollama 0.35+, and a `spec` built from this repository — the decision plane landed after `v0.7.0` was tagged) and the reply additionally carries a typed judgment per criterion — *is this measurable* — under keys that are absent until you opt in. `findings` and `clean` stay deterministic; the judgment sits beside them and gates nothing. |
-| `run_tests` | Runs the project tests (Maven on this kata), aggregating Cucumber (BDD) and JUnit (TDD) into one bar color: failures → **RED**, all passing → **GREEN**. On `spec implement` this sees the **working tree**, not an unstaged patch. |
+| `validate_spec` | Validates the requirements file **on disk**, which is the only copy there is: well-formed unique ids, stories, Given/When/Then acceptance criteria, and tagged scenarios for implemented requirements. During `spec draft` these lookups do not critique the in-flight proposal; `parse_proposals_checked` is that gate. `spec validate` exits non-zero on an invalid spec, so a CI gate can be scripted on it. |
+| `refine_requirement` | Deterministic quality feedback on one requirement's wording: ambiguous words ("should", "handle", "quickly"), stories missing their actor or their why, outcomes with no concrete expected value, criteria covering more than one action, and happy-path-only coverage. Reads the file as it stands, which is what `requirement_reword` just wrote, so the reword/refine loop converges with nothing in between. Configure a **decision model** (`spec judge use`, Ollama 0.35+, and a `spec` built from this repository — the decision plane landed after `v0.7.0` was tagged) and the reply additionally carries a typed judgment per criterion — *is this measurable* — under keys that are absent until you opt in. `findings` and `clean` stay deterministic; the judgment sits beside them and gates nothing. |
+| `run_tests` | Runs the project tests (Maven on this kata), aggregating Cucumber (BDD) and JUnit (TDD) into one bar color: failures → **RED**, all passing → **GREEN**. It sees the **working tree**, which is where every authoring tool wrote. |
 | `get_tdd_state` | Current Red/Green/Refactor phase, last run summary, and a suggested next step. The reply leads with `phase`; the `instructions` guide to reading the phase log comes last. |
 | `start_refactor` | Begins a refactor. Refuses unless the bar is GREEN, and words the refusal for the phase you are in — "never refactor on a red bar" on RED, "no tests have been run yet" at START, "a refactor is already in progress" in REFACTOR. |
 
-**Authoring / staging:** `feature_list`, `feature_read`, `feature_create`,
-`scenario_add`, `scenario_update`, `scenario_delete`, `changes_show`,
-`changes_validate`, `changes_commit`, `changes_discard`, `requirement_reword`
+**Authoring:** `feature_list`, `feature_read`, `feature_create`,
+`scenario_add`, `scenario_update`, `scenario_delete`, `requirement_reword`
 (the repair path `validate_spec` and `refine_requirement` point at for
 **wording** — agents must never hand-edit `requirements.json`, whose JSON
 escaping and indentation differ from what the read tools return),
@@ -175,7 +174,7 @@ escaping and indentation differ from what the read tools return),
 Catalog **structure** is the written-down exception to that prohibition. A
 duplicate id needs a requirement object deleted and a repeated `includes`
 entry needs removing, and no tool performs either edit, so `validate_spec`
-and `changes_validate` answer those two classes by naming the file edit and
+answers those two classes by naming the file edit and
 saying that the hand-editing rule covers wording, not structure.
 
 **Inspect:** `project_root` (the absolute `--root` this process was started with), `project_inspect`, `command_run` (allowlisted, path-jailed,
@@ -210,7 +209,7 @@ server answers it normally.
 Default smoke is read-only plus the baseline `run_tests`: after
 `get_requirement` it also calls `validate_spec`, `refine_requirement`,
 `project_root`, `project_inspect`, `feature_list`, `feature_read` (workshop kata path),
-`changes_show`, `changes_validate`, and `step_definitions_find`.
+and `step_definitions_find`.
 Mutating tools stay behind `--sweep --include-mutating`.
 
 ```bash
@@ -267,7 +266,7 @@ the server owns the critique.
 With a valid spec, prompt your agent to **use MCP tools** (not hand-edits of
 Gherkin, tests, or spec status):
 
-> Using the spec-driven-server tools: validate the spec first, then `get_requirement` for REQ-003 — not the REQ-007 you just drafted, which stays pending until homework. Add its Gherkin with `scenario_add` (tag the requirement id), add missing steps with `step_definition_create` if `step_definitions_find` reports any, add a unit test with `unit_test_create`. Show `changes_show` and ask me before `changes_commit`. Then `run_tests` (expect RED). Implement the simplest production code in `StringCalculator`. `run_tests` (GREEN). `start_refactor` if I agree. On GREEN, `requirement_mark_implemented`. Ask me before each phase change.
+> Using the spec-driven-server tools: validate the spec first, then `get_requirement` for REQ-003 — not the REQ-007 you just drafted, which stays pending until homework. Add its Gherkin with `scenario_add` (tag the requirement id), add missing steps with `step_definition_create` if `step_definitions_find` reports any, add a unit test with `unit_test_create`. Stop and show me what you wrote before you go on. Then `run_tests` (expect RED). Implement the simplest production code in `StringCalculator`. `run_tests` (GREEN). `start_refactor` if I agree. On GREEN, `requirement_mark_implemented`. Ask me before each phase change.
 
 Name the id. "The next pending id" reads fine until Exercise 1 succeeds —
 then REQ-007 is pending too, and it is the freshest thing in the agent's
@@ -276,8 +275,8 @@ requirement: the phase gates police *how* an agent works, never *what it
 works on*.
 
 You'll watch the loop: `validate_spec` → `get_requirement` →
-`scenario_add` / `unit_test_create` (staged) → **you review with
-`changes_show` before `changes_commit`** → `run_tests` (RED) → you review
+`scenario_add` / `unit_test_create` → **you read the Gherkin and the
+test in `git diff`** → `run_tests` (RED) → you review
 production `add` (a file edit) → `run_tests` (GREEN) → `start_refactor` if
 you agree → **`requirement_mark_implemented`** (the tool refuses off GREEN
 or without a tagged scenario). Requirements REQ-003 through REQ-006 are
@@ -294,8 +293,8 @@ steps also collapses the checks, and the checks are what the hour is
 about. Show them firing: `spec status` between steps re-reads the assets
 on disk and names the gap still open, so a step that claims to have
 written a scenario is answered by a survey that says whether one is
-there; `spec changes show` twice — once on the staged Gherkin and tests
-before the RED bar, once on the production diff before GREEN; and
+there; `git diff` twice — once on the Gherkin and tests before the RED
+bar, once on the production diff before GREEN; and
 `spec test` as the only thing that reports a bar color. The harness path
 ([`harness-path.md`](../student-follow-docs/harness-path.md)) is the same
 sequence in the terminal, and it ends where the agent run does —
@@ -306,7 +305,7 @@ validation runs on the workshop's local model, `spec implement` takes
 66–125 seconds per requirement, and 284.6 seconds in the worst case
 observed — which is what happens when the model asks to run shell commands
 and each one waits on your confirmation. Add the two Maven runs that
-bracket it and the review you owe the staged Gherkin, and one requirement
+bracket it and the review you owe the generated Gherkin, and one requirement
 is a comfortable fit in this window while two are not. Plan the room's time
 around the worst case, not the median: nearly five minutes of a spinner is
 within normal range and looks exactly like a hang. Per-command timings are

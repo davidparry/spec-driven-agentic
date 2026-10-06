@@ -1,7 +1,7 @@
 Feature: Per-command tool profiles
   As a developer running an LLM-backed spec command
   I want each caller offered only the tools that step of the loop needs
-  So that the model stays on-task and cannot stage or commit by default
+  So that the model stays on-task and cannot write to the project by default
 
   Scenario Outline: Each caller is offered exactly its default tools
     When the tools for "<caller>" are listed offline
@@ -13,14 +13,14 @@ Feature: Per-command tool profiles
       | spec-reword        | get_requirement, validate_spec, refine_requirement                                             |
       | steps-generate     | project_inspect, feature_list, feature_read, step_definitions_find                             |
       | unittest-generate  | project_inspect, get_requirement, feature_read, step_definitions_find                          |
-      | implement-advice   | get_tdd_state, validate_spec, feature_list, changes_show, changes_validate                      |
-      | implement          | get_requirement, feature_read, step_definitions_find, get_tdd_state, run_tests, command_run, changes_show |
-      | status             | project_root, list_requirements, get_requirement, get_tdd_state, validate_spec, changes_show, changes_validate |
-      | ask                | project_root, list_requirements, get_requirement, validate_spec, refine_requirement, get_tdd_state, project_inspect, feature_list, feature_read, step_definitions_find, changes_show, changes_validate |
+      | implement-advice   | get_tdd_state, validate_spec, feature_list                                                     |
+      | implement          | get_requirement, feature_read, step_definitions_find, get_tdd_state, run_tests, command_run    |
+      | status             | project_root, list_requirements, get_requirement, get_tdd_state, validate_spec                 |
+      | ask                | project_root, list_requirements, get_requirement, validate_spec, refine_requirement, get_tdd_state, project_inspect, feature_list, feature_read, step_definitions_find |
 
-  Scenario: No default profile offers a staging or commit tool
+  Scenario: No default profile offers a tool that writes
     When every default profile is inspected
-    Then no default profile offers a staging or commit tool
+    Then no default profile offers a tool that writes
 
   @HARNESS-005
   Scenario: command_run appears only for implement
@@ -52,16 +52,16 @@ Feature: Per-command tool profiles
       status = ["feature_list"]
       """
     When the tools for "status" are listed offline
-    Then the offered tools are "project_root, list_requirements, get_requirement, get_tdd_state, validate_spec, changes_show, changes_validate, feature_list"
+    Then the offered tools are "project_root, list_requirements, get_requirement, get_tdd_state, validate_spec, feature_list"
 
   Scenario: A disabled table removes from a caller's set
     Given the config file contains:
       """
       [tools.disabled]
-      status = ["changes_show"]
+      status = ["get_tdd_state"]
       """
     When the tools for "status" are listed offline
-    Then the offered tools are "project_root, list_requirements, get_requirement, get_tdd_state, validate_spec, changes_validate"
+    Then the offered tools are "project_root, list_requirements, get_requirement, validate_spec"
 
   Scenario: Removal beats attachment
     Given the config file contains:
@@ -109,15 +109,15 @@ Feature: Per-command tool profiles
   Scenario: tools profiles prints every caller and its resolved set
     When the tool profiles are listed
     Then the profile for "spec-draft" offers "list_requirements, get_requirement, validate_spec, refine_requirement"
-    And the profile for "implement" offers "get_requirement, feature_read, step_definitions_find, get_tdd_state, run_tests, command_run, changes_show"
+    And the profile for "implement" offers "get_requirement, feature_read, step_definitions_find, get_tdd_state, run_tests, command_run"
 
   Scenario: --tools replaces a profile for one run
-    When the tools for "status" are listed with --tools "get_tdd_state,changes_show"
-    Then the offered tools are "get_tdd_state, changes_show"
+    When the tools for "status" are listed with --tools "get_tdd_state,feature_list"
+    Then the offered tools are "get_tdd_state, feature_list"
 
   Scenario: tools list --for implement shows only that caller's set
     When the tools for "implement" are listed offline
-    Then the offered tools are "get_requirement, feature_read, step_definitions_find, get_tdd_state, run_tests, command_run, changes_show"
+    Then the offered tools are "get_requirement, feature_read, step_definitions_find, get_tdd_state, run_tests, command_run"
 
   Scenario: tools list --offline never connects
     When the tools are listed offline

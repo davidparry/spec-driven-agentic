@@ -14,7 +14,7 @@
 
 `spec` is one native binary for a spec-driven loop: requirements, Gherkin,
 RED, GREEN, REFACTOR. `spec mcp serve` is the same binary as an MCP server
-(25 tools, wire identity `spec-driven-server` / `1.0.0`). The command
+(21 tools, wire identity `spec-driven-server` / `1.0.0`). The command
 manual is [searchable online](https://davidparry.github.io/spec-driven-agentic/manual/);
 the harness itself is documented in [`harness/README.md`](harness/README.md).
 
@@ -34,7 +34,7 @@ a build from this repository until the next release.
 
 ## Where `spec` keeps its files
 
-Everything the harness writes for a project lives in one hidden directory, `.spec/`, next to `requirements/`. `spec init` creates it. The next `spec` run also creates it and moves an older root-level name (`.spec.toml`, `.spec-state.json`, `.spec-memory.json`, `.spec-history`, `.spec-cache/`, `.spec-log/`, `.spec-staged/`) into the matching path below when that new path is still empty.
+The harness writes your project's real files — feature files, step definitions, tests, the spec — and git is the undo; `spec greenfield` and `spec deliver` offer a branch before they start. Everything the harness keeps for *itself* lives in one hidden directory, `.spec/`, next to `requirements/`. `spec init` creates it. The next `spec` run also creates it and moves an older root-level name (`.spec.toml`, `.spec-state.json`, `.spec-memory.json`, `.spec-history`, `.spec-cache/`, `.spec-log/`) into the matching path below when that new path is still empty.
 
 ```text
 .spec/
@@ -44,14 +44,14 @@ Everything the harness writes for a project lives in one hidden directory, `.spe
   history        interactive-shell command history
   cache/         cached LLM responses and discovered tool catalogs
   log/           daily diagnostic logs (spec.log.YYYY-MM-DD)
-  staged/        mutations waiting for `spec changes commit`
+  .lock          advisory lock serializing concurrent writes
 ```
 
-Only `config.toml` is meant to be committed. The other children are gitignored. Deleting `cache/` or `log/` is always safe. Deleting `state.json` resets the phase to START. Deleting `staged/` throws away mutations that have not been committed.
+Only `config.toml` is meant to be committed. The other children are gitignored. Deleting `cache/` or `log/` is always safe. Deleting `state.json` resets the phase to START.
 
 ## Install `spec`
 
-Use the published installer from the [spec site](https://davidparry.github.io/spec-driven-agentic/). It places `spec` on your PATH. You want **0.7.4 or newer** — the `.spec/` directory described above replaced the flat `.spec.toml` in 0.6.0.
+Use the published installer from the [spec site](https://davidparry.github.io/spec-driven-agentic/). It places `spec` on your PATH. You want **0.8.0 or newer** — the `.spec/` directory described above replaced the flat `.spec.toml` in 0.6.0.
 
 macOS and Linux:
 

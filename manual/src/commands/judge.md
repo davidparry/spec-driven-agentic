@@ -71,7 +71,7 @@ harness can never:
 
 - turn a red test bar green, or change a test result in any way
 - mark a requirement implemented, or certify any implementation
-- bypass the [staging area](../staged-changes.md) or a commit
+- bypass the [branch gate](../branch-gate.md) or a human confirmation
 - waive a human checkpoint
 - make a wording review `clean` that the deterministic rules did not
 - edit or drop a deterministic finding

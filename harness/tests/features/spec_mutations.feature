@@ -1,15 +1,15 @@
 # Executable spec for controlled spec authoring — the behavior of
 # `spec draft`, `spec mark-implemented`, `spec feature create`,
-# and `spec scenario add|update|delete`. All mutations land in staging.
+# and `spec scenario add|update|delete`. Every mutation lands on disk.
 Feature: Spec mutations
   As a developer who owns the spec wording
-  I want drafting, status flips, and scenario edits staged and gated
+  I want drafting, status flips, and scenario edits reviewed as they land
   So that the spec stays the reviewed source of truth
 
   Background:
     Given a working spec with the pending requirement "REQ-001"
 
-  Scenario: A clean draft is staged under the next free id
+  Scenario: A clean draft is written under the next free id
     Given the developer will answer:
       """
       Comma sums
@@ -20,8 +20,8 @@ Feature: Spec mutations
       y
       """
     When a requirement is drafted
-    Then the draft is staged as "REQ-002"
-    And the staged spec has 2 requirements
+    Then the draft is written as "REQ-002"
+    And the written spec has 2 requirements
 
   Scenario: Findings drive rewording until the draft is clean
     Given the developer will answer:
@@ -38,7 +38,7 @@ Feature: Spec mutations
       y
       """
     When a requirement is drafted
-    Then the draft is staged as "REQ-002"
+    Then the draft is written as "REQ-002"
     And the developer was told a finding containing "must be phrased Given/When/Then"
     And the developer was told a finding containing "'should' is ambiguous"
     And the developer was told a finding containing "try: rephrase as: Given <starting state>, when <action>, then <exact result>"
@@ -60,11 +60,11 @@ Feature: Spec mutations
       y
       """
     When a requirement is drafted
-    Then the draft is staged as "REQ-002"
+    Then the draft is written as "REQ-002"
     And the developer was asked "REQ-002 title [Comma sums] (Enter keeps it):"
     And the developer was asked "REQ-002 criterion 1 [Given the input "1,2", when add is called, then the result is 3] (Enter keeps it, '-' drops it):"
     And the developer was asked "REQ-002 criterion 3 (leave blank to finish the criteria):"
-    And the staged spec has 2 requirements
+    And the written spec has 2 requirements
 
   Scenario: A described feature is split into proposals the wizard walks through
     Given the model will reply:
@@ -88,23 +88,23 @@ Feature: Spec mutations
       y
       """
     When a requirement is drafted with the model's help
-    Then the draft is staged as "REQ-003"
+    Then the draft is written as "REQ-003"
     And the developer was told a finding containing "Accept all these requirements to refine, or enter comma-separated numbers of the ones to accept."
     And the developer was told a finding containing "The description holds 2 requirement(s):"
     And the developer was told a finding containing "2. Empty string returns zero"
     And the developer was asked "Accept [Enter for all, or comma-separated numbers]:"
-    And the developer was told a finding containing "Accepted requirements are staged for requirements/requirements.json as pending"
+    And the developer was told a finding containing "Accepted requirements were written to requirements/requirements.json as pending"
     And the developer was told a finding containing "REQ-002 Comma separated numbers are summed"
     And the developer was told a finding containing "REQ-003 Empty string returns zero"
     And the developer was asked "Which requirement first to review and refine? [1-2, Enter for 1]:"
     And the developer was asked "REQ-003 title [Empty string returns zero] (Enter keeps it):"
     And the developer was asked "REQ-003 criterion 1 [Given an empty string "", when add is called, then the result is 0] (Enter keeps it, '-' drops it):"
-    And the staged spec has 3 requirements
-    And the working spec has 1 requirement
+    And the written spec has 3 requirements
 
-  # The assisted wizard stages the accepted batch up front so the developer
-  # can see it, but declining the wording must not leave anything applied.
-  Scenario: Declining the reworded wording keeps the batch staged and the working spec untouched
+  # The assisted wizard writes the accepted batch up front so the developer
+  # can see it. Declining the rewording after that does not take the batch
+  # back, so the report says where it landed instead of claiming nothing did.
+  Scenario: Declining the reworded wording leaves the accepted batch on disk
     Given the model will reply:
       """
       [{"title": "Comma separated numbers are summed",
@@ -126,10 +126,9 @@ Feature: Spec mutations
       n
       """
     When a requirement is drafted with the model's help
-    Then the working spec has 1 requirement
-    And the staged spec has 3 requirements
-    And the draft next step contains "are still staged for requirements/requirements.json"
-    And the draft next step contains "spec changes discard"
+    Then the written spec has 3 requirements
+    And the draft next step contains "already in requirements/requirements.json under the model's wording"
+    And the draft next step contains "undo it with git restore"
 
   Scenario: An unusable model reply falls back to manual drafting
     Given the model will reply:
@@ -147,7 +146,7 @@ Feature: Spec mutations
       y
       """
     When a requirement is drafted with the model's help
-    Then the draft is staged as "REQ-002"
+    Then the draft is written as "REQ-002"
     And the developer was told a finding containing "asking again (2 of 3)"
     And the developer was told a finding containing "The description gave no complete requirement - drafting manually."
     And the developer was asked "REQ-002 title:"
@@ -175,13 +174,13 @@ Feature: Spec mutations
       y
       """
     When a requirement is drafted with the model's help
-    Then the draft is staged as "REQ-002"
+    Then the draft is written as "REQ-002"
     And the developer was told a finding containing "only happy paths"
     And the developer was told a finding containing "Asking scripted-model to address finding 1 of 1 - working ..."
     And the developer was told a finding containing "The model reworded the draft"
     And the developer was asked "REQ-002 title [Comma separated numbers are summed] (Enter keeps it):"
     And the developer was asked "REQ-002 criterion 2 [Given an empty string "", when add is called, then the result is 0] (Enter keeps it, '-' drops it):"
-    And the staged spec has 2 requirements
+    And the written spec has 2 requirements
 
   Scenario: Each finding is its own model call, chained on the previous fix
     Given the model will reply:
@@ -206,7 +205,7 @@ Feature: Spec mutations
       y
       """
     When a requirement is drafted with the model's help
-    Then the draft is staged as "REQ-002"
+    Then the draft is written as "REQ-002"
     And the developer was told a finding containing "Asking scripted-model to address finding 1 of 2 - working ..."
     And the developer was told a finding containing "Asking scripted-model to address finding 2 of 2 - working ..."
 
@@ -236,7 +235,7 @@ Feature: Spec mutations
       y
       """
     When a requirement is drafted with the model's help
-    Then the draft is staged as "REQ-002"
+    Then the draft is written as "REQ-002"
     And the developer was told a finding containing "Asking scripted-model to address finding 1 of 1 - working ..." 2 times
 
   Scenario: An unusable rewording still lets the developer fix the draft by hand
@@ -259,11 +258,11 @@ Feature: Spec mutations
       y
       """
     When a requirement is drafted with the model's help
-    Then the draft is staged as "REQ-002"
+    Then the draft is written as "REQ-002"
     And the developer was told a finding containing "The model's rewording for finding 1 was unusable"
     And the developer was told a finding containing "Reword the requirement to address each finding."
 
-  Scenario: A declined draft stages nothing
+  Scenario: A declined draft writes nothing
     Given the developer will answer:
       """
       Comma sums
@@ -274,10 +273,10 @@ Feature: Spec mutations
       n
       """
     When a requirement is drafted
-    Then the draft is not staged
-    And nothing is staged at the spec path
+    Then the draft is not written
+    And the spec file is unchanged
 
-  Scenario: Marking implemented on GREEN stages the flip and records the feature file
+  Scenario: Marking implemented on GREEN writes the flip and records the feature file
     Given the persisted TDD phase is "GREEN"
     And a project feature file "features/calc.feature" containing:
       """
@@ -288,8 +287,8 @@ Feature: Spec mutations
           Given a calculator
       """
     When requirement "REQ-001" is marked implemented
-    Then the staged spec shows "REQ-001" as "implemented"
-    And the staged spec names "features/calc.feature" as the feature file of "REQ-001"
+    Then the written spec shows "REQ-001" as "implemented"
+    And the written spec names "features/calc.feature" as the feature file of "REQ-001"
 
   @HARNESS-008
   Scenario: Marking implemented is refused off GREEN
@@ -300,35 +299,35 @@ Feature: Spec mutations
   Scenario: Marking implemented without a tagged scenario names the recovery commands
     Given the persisted TDD phase is "GREEN"
     When marking requirement "REQ-001" implemented fails
-    Then the mutation error is "No scenario is tagged @REQ-001 - implemented requirements need an executable scenario. Add one with spec scenario add, apply it with spec changes commit, then mark REQ-001 implemented."
+    Then the mutation error is "No scenario is tagged @REQ-001 - implemented requirements need an executable scenario. Add one with spec scenario add, then mark REQ-001 implemented."
 
-  Scenario: Creating a feature stages a bare feature file
+  Scenario: Creating a feature writes a bare feature file
     When the feature "features/calc.feature" named "Calc" is created
-    Then staged content at "features/calc.feature" equals:
+    Then written content at "features/calc.feature" equals:
       """
       Feature: Calc
       """
 
-  Scenario: Adding a scenario stages it tagged with the requirement
-    Given the feature file "features/calc.feature" is created named "Calc" via staging
+  Scenario: Adding a scenario writes it tagged with the requirement
+    Given the feature file "features/calc.feature" is created named "Calc"
     When scenario "Empty string" for "REQ-001" is added to "features/calc.feature" with steps:
       """
       Given a calculator
       When add is called with ""
       Then the result is 0
       """
-    Then the staged feature "features/calc.feature" has scenario "Empty string" tagged "@REQ-001"
+    Then the written feature "features/calc.feature" has scenario "Empty string" tagged "@REQ-001"
 
   Scenario: A step without a Gherkin keyword is refused
-    Given the feature file "features/calc.feature" is created named "Calc" via staging
+    Given the feature file "features/calc.feature" is created named "Calc"
     When adding scenario "Bad" for "REQ-001" to "features/calc.feature" fails with steps:
       """
       the result is 0
       """
     Then the mutation error is "step \"the result is 0\" must start with Given, When, Then, And, or But"
 
-  Scenario: Updating a scenario replaces its steps in staging
-    Given the feature file "features/calc.feature" is created named "Calc" via staging
+  Scenario: Updating a scenario replaces its steps in the file
+    Given the feature file "features/calc.feature" is created named "Calc"
     And scenario "Empty string" for "REQ-001" is added to "features/calc.feature" with steps:
       """
       Given a calculator
@@ -340,16 +339,16 @@ Feature: Spec mutations
       When add is called with ""
       Then the result is 0
       """
-    Then the staged feature "features/calc.feature" scenario "Empty string" has 3 steps
+    Then the written feature "features/calc.feature" scenario "Empty string" has 3 steps
 
-  Scenario: Deleting a scenario removes it from staging
-    Given the feature file "features/calc.feature" is created named "Calc" via staging
+  Scenario: Deleting a scenario removes it from the file
+    Given the feature file "features/calc.feature" is created named "Calc"
     And scenario "Empty string" for "REQ-001" is added to "features/calc.feature" with steps:
       """
       Given a calculator
       """
     When scenario "Empty string" is deleted from "features/calc.feature"
-    Then the staged feature "features/calc.feature" has 0 scenarios
+    Then the written feature "features/calc.feature" has 0 scenarios
 
   Scenario: Adding to a missing feature names the recovery command
     When adding scenario "S" for "REQ-001" to "features/nope.feature" fails with steps:

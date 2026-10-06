@@ -48,14 +48,16 @@ Feature: Project inspection
     Then exactly 4 languages are detected
 
   Scenario: A present runtime is reported with its version
-    Given the project contains "Cargo.toml"
+    Given the project is a git repository on "main"
+    And the project contains "Cargo.toml"
     And the runtime "cargo" is installed with version "cargo 1.97.0"
     When the project is inspected
     Then the runtime for "Rust" is present with version "cargo 1.97.0"
     And the next step says all runtimes are present
 
   Scenario: A missing runtime disables execution but not authoring
-    Given the project contains a file with extension "csproj"
+    Given the project is a git repository on "main"
+    And the project contains a file with extension "csproj"
     When the project is inspected
     Then the runtime for ".NET" is missing
     And the note for ".NET" contains "runtime_missing"
@@ -63,9 +65,26 @@ Feature: Project inspection
     And the next step says some runtimes are missing
 
   Scenario: An empty directory lists the supported ecosystems
+    Given the project is a git repository on "main"
     When the project is inspected
     Then no languages are detected
     And the next step lists "Java (Cucumber-JVM)"
     And the next step lists "JavaScript (Cucumber-JS)"
     And the next step lists ".NET (Reqnroll)"
     And the next step lists "Rust (cucumber-rs)"
+
+  # Outside a repository nothing the harness writes can be undone, and
+  # that outranks whichever runtime happens to be installed.
+  Scenario: A project outside git is told so before anything else
+    Given the project is not a git repository
+    And the project contains "Cargo.toml"
+    And the runtime "cargo" is installed with version "cargo 1.97.0"
+    When the project is inspected
+    Then the inspection reports no git repository
+    And the next step starts with "This project is not a git repository"
+
+  Scenario: A project inside git reports the branch it is on
+    Given the project is a git repository on "spec/2026-10-05-kata"
+    And the project contains "Cargo.toml"
+    When the project is inspected
+    Then the inspection reports the branch "spec/2026-10-05-kata"

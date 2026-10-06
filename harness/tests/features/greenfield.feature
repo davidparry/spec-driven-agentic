@@ -41,7 +41,7 @@ Feature: Greenfield mode
     And the developer was told a finding containing "Saving status - working ..."
     And the developer was told a finding containing "REQ-001 is implemented. Loop closed."
 
-  Scenario: Declining the generated-test review discards the generation
+  Scenario: Declining the generated-test review leaves the files to inspect
     Given a Java project marker
     And an empty working spec
     And the developer will answer:
@@ -55,10 +55,10 @@ Feature: Greenfield mode
       """
     When the greenfield loop runs
     Then the greenfield run is not completed
-    And the greenfield next step starts with "Generation was discarded"
-    And nothing is staged at the spec path
+    And the greenfield next step starts with "Stopped before running the tests"
+    And the greenfield next step mentions "undo them with git restore"
 
-  Scenario: Declining to stage the drafted wording ends the run
+  Scenario: Declining to write the drafted wording ends the run
     Given a Java project marker
     And an empty working spec
     And the developer will answer:
@@ -71,7 +71,7 @@ Feature: Greenfield mode
       """
     When the greenfield loop runs
     Then the greenfield run is not completed
-    And the greenfield next step starts with "Nothing was staged"
+    And the greenfield next step starts with "Nothing was written"
 
   Scenario: A missing runtime stops execution but authoring stands
     Given a Java project marker

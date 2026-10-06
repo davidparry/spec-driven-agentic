@@ -12,12 +12,11 @@ use crate::domain::prompts::{RenderedPrompt, render};
 pub const WORKFLOW_PROCESS: &str = include_str!("../../prompts/workflow.md");
 
 /// The `spec status` advice call: the workflow process plus the full
-/// project state - phase, last run counts, staged changes, and every
-/// requirement's position - so the model names the one next command.
+/// project state - phase, last run counts, and every requirement's
+/// position - so the model names the one next command.
 pub fn next_step_prompt(
     phase: &str,
     last_run: impl Serialize,
-    staged: impl Serialize,
     requirements: impl Serialize,
 ) -> RenderedPrompt {
     render(
@@ -26,7 +25,6 @@ pub fn next_step_prompt(
             workflow => WORKFLOW_PROCESS,
             phase,
             last_run,
-            staged,
             requirements,
         },
     )
@@ -42,13 +40,6 @@ mod tests {
         failures: u32,
         errors: u32,
         skipped: u32,
-    }
-
-    #[derive(Serialize)]
-    struct Change {
-        path: String,
-        action: String,
-        summary: String,
     }
 
     #[derive(Serialize)]
@@ -77,11 +68,6 @@ mod tests {
                 errors: 0,
                 skipped: 0,
             },
-            vec![Change {
-                path: "requirements/requirements.json".into(),
-                action: "modify".into(),
-                summary: "mark REQ-001 implemented".into(),
-            }],
             vec![Position {
                 id: "REQ-001".into(),
                 title: "Adds two numbers".into(),
@@ -100,18 +86,13 @@ mod tests {
         assert!(
             prompt
                 .user
-                .contains("- requirements/requirements.json (modify): mark REQ-001 implemented")
-        );
-        assert!(
-            prompt
-                .user
                 .contains("- REQ-001 \"Adds two numbers\" status=pending")
         );
         assert!(prompt.user.contains("gaps: No scenario is tagged @REQ-001"));
     }
 
     #[test]
-    fn an_empty_state_reads_as_nothing_staged() {
+    fn an_empty_state_still_renders_the_process_and_the_phase() {
         let prompt = next_step_prompt(
             "START",
             Run {
@@ -120,10 +101,9 @@ mod tests {
                 errors: 0,
                 skipped: 0,
             },
-            Vec::<Change>::new(),
             Vec::<Position>::new(),
         );
-        assert!(prompt.user.contains("Nothing is staged."));
-        assert!(!prompt.user.contains("Staged files awaiting review"));
+        assert!(prompt.system.contains("THE LOOP FOR ONE REQUIREMENT"));
+        assert!(prompt.user.contains("The TDD phase: START"));
     }
 }

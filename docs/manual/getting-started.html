@@ -35,10 +35,10 @@
             const path_to_root = "";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "searchindex-bb14de4e.js";
+            window.path_to_searchindex_js = "searchindex-d84b362c.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-2ab172c3.js"></script>
+        <script src="toc-0006eac3.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -266,7 +266,6 @@ spec draft          # describe what to build in plain words; with a
                         # criteria for you to edit (manual prompts otherwise)
 spec validate       # structure gate
 spec refine REQ-001 # wording gate
-spec changes commit      # apply the staged spec
 spec test                # expect RED
 # ...implement...
 spec test                # expect GREEN
@@ -274,7 +273,7 @@ spec refactor --note "extract parser" --req REQ-001   # does the cleanup
 git diff                 # read what it changed
 spec test                # still GREEN
 spec status              # confirm REQ-001 is ready to mark
-spec mark-implemented REQ-001 &amp;&amp; spec changes commit
+spec mark-implemented REQ-001
 </code></pre>
 <p>This repository’s String Calculator workshop can be finished with the
 same commands. The kata-specific recipe (paths under <code>kata/</code>, draft
@@ -294,13 +293,12 @@ still empty.</p>
   history        interactive-shell command history
   cache/         cached LLM responses and tool catalogs
   log/           daily diagnostic logs
-  staged/        mutations waiting for spec changes commit
+  .lock          the advisory lock that serializes concurrent writes
 </code></pre>
 <p>Only <code>config.toml</code> is meant to be committed. <code>spec init</code> writes a
 gitignore that ignores <code>.spec/*</code> and keeps <code>.spec/config.toml</code>. The
 other children are generated. Deleting <code>cache/</code> or <code>log/</code> is always
-safe. Deleting <code>state.json</code> resets the phase to START. Deleting
-<code>staged/</code> throws away mutations that have not been committed.</p>
+safe. Deleting <code>state.json</code> resets the phase to START.</p>
 <h2 id="working-against-an-existing-project"><a class="header" href="#working-against-an-existing-project">Working against an existing project</a></h2>
 <p>Every command takes <code>--root</code> (see <a href="global-flags.html">Global flags</a>), so
 you can point the harness at any project:</p>

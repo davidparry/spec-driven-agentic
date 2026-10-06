@@ -13,11 +13,10 @@ use std::sync::Arc;
 use serde::Serialize;
 
 use crate::adapters::fs_spec::FsSpecRepository;
-use crate::adapters::fs_staging::FsChangeStore;
 use crate::adapters::fs_state::FsStateStore;
+use crate::adapters::fs_worktree::FsWorkTree;
 use crate::adapters::runners::detect_runner;
 use crate::application::DEFAULT_LLM_ATTEMPTS;
-use crate::application::change_service::ChangeService;
 use crate::application::generation_service::GenerationService;
 use crate::application::implement_service::ImplementService;
 use crate::application::scenario_service::ScenarioService;
@@ -29,8 +28,8 @@ use crate::domain::model::Spec;
 use crate::domain::scaffold::slug;
 use crate::domain::steps::criterion_to_steps;
 use crate::domain::tdd::ImplementAttempt;
-use crate::ports::{ChangeStore as _, Prompter, TestFilter, TestRunner};
-use crate::wiring::{DynLlm, OverlayFeatures, OverlayTree, RunnerFactory};
+use crate::ports::{Prompter, TestFilter, TestRunner, WorkTree as _};
+use crate::wiring::{DynLlm, ProjectFeatures, ProjectTree, RunnerFactory};
 use crate::workspace::SPEC_PATH;
 
 /// Where the run ended, and what the human does next.
@@ -52,6 +51,9 @@ pub struct Greenfield {
     runner_factory: RunnerFactory,
     llm: Option<(String, DynLlm)>,
     llm_attempts: u32,
+    /// Skip the branch gate: do not consult git, do not ask, write
+    /// where the project already stands.
+    no_branch: bool,
 }
 
 /// Which pending requirement to deliver next. Enter means the first;
@@ -109,7 +111,14 @@ impl Greenfield {
             runner_factory,
             llm,
             llm_attempts: DEFAULT_LLM_ATTEMPTS,
+            no_branch: false,
         }
+    }
+
+    /// Skip the branch gate entirely.
+    pub fn without_branch(mut self, no_branch: bool) -> Self {
+        self.no_branch = no_branch;
+        self
     }
 
     /// How many times a model reply is tried when validation fails.
@@ -141,6 +150,17 @@ impl Greenfield {
             language.bdd_framework()
         ));
 
+        // Before the first write, and after the project is known to
+        // exist: the run is about to author real files, and the branch
+        // is what makes that undoable.
+        crate::branch::offer_branch(
+            prompter,
+            &crate::wiring::vcs(&self.root),
+            self.no_branch,
+            &crate::branch::today(),
+            crate::branch::seed(),
+        );
+
         // Gate 1 (inside draft): the human words the spec and approves it.
         // With a model, drafting starts from a plain-words description the
         // model splits into requirement proposals the wizard walks through.
@@ -150,19 +170,18 @@ impl Greenfield {
             None => mutation.draft(prompter),
         }
         .map_err(|e| e.to_string())?;
-        if !draft.staged {
+        if !draft.written {
             return Ok(GreenfieldReport {
                 requirement: None,
                 feature: None,
                 phase: None,
                 completed: false,
                 next_step:
-                    "Nothing was staged. Run spec greenfield again when the wording is ready."
+                    "Nothing was written. Run spec greenfield again when the wording is ready."
                         .into(),
             });
         }
-        self.commit()?;
-        prompter.tell(&format!("{} committed to the spec.", draft.id));
+        prompter.tell(&format!("{} is in the spec.", draft.id));
         let mut report = self.deliver(prompter, language, &draft.id)?;
 
         // A closed loop offers every remaining pending requirement as a
@@ -188,19 +207,18 @@ impl Greenfield {
                 None => self.mutation_service().reword(prompter, &next_id),
             }
             .map_err(|e| e.to_string())?;
-            if !reworded.staged {
+            if !reworded.written {
                 return Ok(GreenfieldReport {
                     requirement: Some(next_id),
                     feature: None,
                     phase: None,
                     completed: false,
-                    next_step: "Nothing was staged. Run spec greenfield again when the \
+                    next_step: "Nothing was written. Run spec greenfield again when the \
                                 wording is ready."
                         .into(),
                 });
             }
-            self.commit()?;
-            prompter.tell(&format!("{next_id} committed to the spec."));
+            prompter.tell(&format!("{next_id} is in the spec."));
             report = self.deliver(prompter, language, &next_id)?;
         }
         Ok(report)
@@ -216,10 +234,9 @@ impl Greenfield {
         req_id: &str,
     ) -> Result<GreenfieldReport, String> {
         let feature_path = self.author_scenarios(prompter, req_id)?;
-        self.commit()?;
-        prompter.tell(&format!("Scenarios committed to {feature_path}."));
+        prompter.tell(&format!("Scenarios written to {feature_path}."));
 
-        // Generation into staging, then gate 2: review before commit.
+        // Generation, then gate 2: read what was written before going on.
         let generation = self.generation_service(language);
         let implement = self.implement_service(language);
         let missing = generation.steps_missing().map_err(|e| e.to_string())?;
@@ -229,7 +246,7 @@ impl Greenfield {
                 .steps_generate(prompter)
                 .map_err(|e| e.to_string())?;
             drop(work);
-            prompter.tell(&format!("Staged {} ({}).", report.target, report.source));
+            prompter.tell(&format!("Wrote {} ({}).", report.target, report.source));
         }
         let work = prompter.working(&format!("Generating the unit test for {req_id} - working"));
         let unit_test = generation
@@ -237,33 +254,35 @@ impl Greenfield {
             .map_err(|e| e.to_string())?;
         drop(work);
         prompter.tell(&format!(
-            "Staged {} ({}).",
+            "Wrote {} ({}).",
             unit_test.target, unit_test.source
         ));
         if let Some(content) = self
-            .change_store()
-            .content(&unit_test.target)
+            .work_tree()
+            .read(&unit_test.target)
             .map_err(|e| e.to_string())?
         {
             prompter.tell("Generated unit test (the assertions are yours to sharpen):");
             prompter.tell(&content);
         }
+        // The files are on disk by now, so this gate is a read rather
+        // than an approval: the loop stops here and leaves the branch
+        // for the developer to inspect, keep, or throw away with git.
         if !prompter
-            .confirm("Commit the generated tests and step definitions?")
+            .confirm("Keep going with the generated tests and step definitions?")
             .map_err(|e| e.to_string())?
         {
-            self.change_service().discard().map_err(|e| e.to_string())?;
             return Ok(GreenfieldReport {
                 requirement: Some(req_id.to_string()),
                 feature: Some(feature_path),
                 phase: None,
                 completed: false,
-                next_step: "Generation was discarded. Author the tests by hand or rerun \
-                            spec greenfield."
+                next_step: "Stopped before running the tests. The generated files are in \
+                            the working tree - edit them, or undo them with git restore, \
+                            then rerun spec greenfield."
                     .into(),
             });
         }
-        self.commit()?;
 
         // Execution only when the runtime is present; authoring is done
         // either way.
@@ -361,7 +380,6 @@ impl Greenfield {
         self.mutation_service()
             .mark_implemented(req_id)
             .map_err(|e| e.to_string())?;
-        self.commit()?;
         drop(work);
         prompter.tell(&format!("{req_id} is implemented. Loop closed."));
         Ok(GreenfieldReport {
@@ -482,8 +500,8 @@ impl Greenfield {
         }
     }
 
-    /// Ask the model to make the failing tests pass and commit whatever it
-    /// staged. The brief carries the persisted failure details (stack
+    /// Ask the model to make the failing tests pass. The brief carries
+    /// the persisted failure details (stack
     /// traces included), prior attempts on this requirement, and only the
     /// three latest dated state entries. The attempt is logged so the next
     /// one learns from it. A model failure is narrated, not fatal - the
@@ -492,9 +510,9 @@ impl Greenfield {
         &self,
         prompter: &mut dyn Prompter,
         implement: &ImplementService<
-            crate::wiring::OverlayFeatures,
-            crate::wiring::OverlayTree,
-            FsChangeStore,
+            crate::wiring::ProjectFeatures,
+            crate::wiring::ProjectTree,
+            FsWorkTree,
             FsSpecRepository,
             DynLlm,
         >,
@@ -533,48 +551,35 @@ impl Greenfield {
                     ..Default::default()
                 })
                 .map_err(tdd_message)?;
-                self.commit()?;
             }
             Err(error) => prompter.warn(&format!("{} Implement by hand instead.", error.0)),
         }
         Ok(())
     }
 
-    fn commit(&self) -> Result<(), String> {
-        self.change_service().commit().map_err(|e| e.to_string())?;
-        Ok(())
-    }
-
-    fn change_store(&self) -> FsChangeStore {
-        FsChangeStore::new(self.root.clone())
-    }
-
-    fn change_service(
-        &self,
-    ) -> ChangeService<FsChangeStore, FsSpecRepository, crate::wiring::OverlayFeatures> {
-        crate::wiring::change_service(&self.root)
+    fn work_tree(&self) -> FsWorkTree {
+        FsWorkTree::new(self.root.clone())
     }
 
     fn mutation_service(
         &self,
     ) -> SpecMutationService<
         FsSpecRepository,
-        crate::wiring::OverlayFeatures,
-        FsChangeStore,
+        crate::wiring::ProjectFeatures,
+        FsWorkTree,
         FsStateStore,
     > {
         crate::wiring::mutation_service(&self.root, self.llm_attempts)
     }
 
-    fn scenario_service(&self) -> ScenarioService<FsChangeStore, crate::wiring::OverlayFeatures> {
+    fn scenario_service(&self) -> ScenarioService<FsWorkTree, crate::wiring::ProjectFeatures> {
         crate::wiring::scenario_service(&self.root)
     }
 
     fn generation_service(
         &self,
         language: Language,
-    ) -> GenerationService<OverlayFeatures, OverlayTree, FsChangeStore, FsSpecRepository, DynLlm>
-    {
+    ) -> GenerationService<ProjectFeatures, ProjectTree, FsWorkTree, FsSpecRepository, DynLlm> {
         crate::wiring::generation_service(
             &self.root,
             language,
@@ -586,8 +591,7 @@ impl Greenfield {
     fn implement_service(
         &self,
         language: Language,
-    ) -> ImplementService<OverlayFeatures, OverlayTree, FsChangeStore, FsSpecRepository, DynLlm>
-    {
+    ) -> ImplementService<ProjectFeatures, ProjectTree, FsWorkTree, FsSpecRepository, DynLlm> {
         crate::wiring::implement_service(&self.root, language, self.llm.as_ref(), self.llm_attempts)
     }
 

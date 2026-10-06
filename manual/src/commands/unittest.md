@@ -32,10 +32,10 @@ spec unittest generate REQ-003
 ```json
 {
   "target": "src/test/java/StringCalculatorTest.java",
-  "staged": true,
+  "written": true,
   "source": "template",
   "summary": "Unit test for REQ-003 with 2 cases from its acceptance criteria.",
-  "nextStep": "Review with 'spec changes show', apply with 'spec changes commit', then 'spec test' to see RED."
+  "nextStep": "Sharpen the assertions (they are yours), then run spec test (expect RED)."
 }
 ```
 
@@ -61,9 +61,8 @@ An unknown requirement id fails with exit status 1.
 ## Where it fits
 
 ```bash
-spec show REQ-003          # read the criteria
-spec unittest generate REQ-003  # stage the test
-spec changes commit
+spec show REQ-003               # read the criteria
+spec unittest generate REQ-003  # write the test
 spec test                       # RED at both altitudes
 ```
 

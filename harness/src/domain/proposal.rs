@@ -60,7 +60,7 @@ pub fn parse_proposals_checked(reply: &str) -> Result<Vec<ProposedRequirement>, 
     Ok(complete)
 }
 
-/// Why a batch of proposals is not worth staging yet, or `None` once
+/// Why a batch of proposals is not worth writing yet, or `None` once
 /// every one of them covers an edge case.
 ///
 /// The wording review applies this same rule to every draft, so a

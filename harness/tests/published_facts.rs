@@ -180,7 +180,7 @@ fn versions_in(text: &str) -> Vec<String> {
 fn every_documented_tool_count_is_the_number_the_server_serves() {
     let served = tools_the_server_lists();
     assert_eq!(
-        served, 25,
+        served, 21,
         "the server's tool count moved. Every page that states it needs the new \
          number before this assertion is changed to match"
     );
@@ -194,7 +194,7 @@ fn every_documented_tool_count_is_the_number_the_server_serves() {
         }
         for (number, line) in text.lines().enumerate() {
             for claimed in counts_of_tools_in(line) {
-                // The talk adds the 26th tool on stage, so a page may
+                // The talk adds the 22nd tool on stage, so a page may
                 // correctly say either the number served or one more.
                 if claimed != served && claimed != served + 1 {
                     wrong.push(format!(

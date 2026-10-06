@@ -72,9 +72,8 @@ A file that is not valid Gherkin fails with the parser's diagnosis.
 
 ## spec feature create
 
-Create a feature file. The file is **staged**, not written to the
-working tree — review with [`spec changes show`](changes.md) and apply
-with `spec changes commit`.
+Create a feature file. The file is written straight into the working
+tree — read it with `git diff`, undo it with `git restore`.
 
 ```text
 Usage: spec feature create [OPTIONS] --path <PATH> --name <NAME>
@@ -87,20 +86,20 @@ Usage: spec feature create [OPTIONS] --path <PATH> --name <NAME>
 
 ```bash
 spec feature create --path features/string_calculator.feature --name "String Calculator"
-spec changes show
-spec changes commit
+git diff
 ```
 
-The staged file contains the `Feature:` header ready for scenarios:
+The new file contains the `Feature:` header ready for scenarios:
 
 ```gherkin
 Feature: String Calculator
 ```
 
-Add scenarios with [`spec scenario add`](scenario.md) — don't edit the
-staged file by hand.
+Add scenarios with [`spec scenario add`](scenario.md) rather than
+editing the file by hand: the command keeps the tags and the ordering
+right.
 
 ## See also
 
 - [`spec scenario`](scenario.md) — populate features with tagged scenarios.
-- [`spec changes validate`](changes.md#spec-changes-validate) — parse-check all features, staged included.
+- [`spec validate`](spec.md#spec-validate) — parse-check every feature file against the spec.

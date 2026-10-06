@@ -61,9 +61,9 @@ Feature: The workshop agent narrates one spec-to-green walkthrough
     Then the server connection has been closed
 
   @CLI-012
-  Scenario: Operational reads prove spec, inspect, Gherkin, and staging tools
+  Scenario: Operational reads prove spec, inspect, Gherkin, and state tools
     When the walkthrough runs
-    Then the narration contains "STEP 6 — operational reads (no staging)"
+    Then the narration contains "STEP 6 — operational reads (nothing is written)"
     And the narration contains "\"name\":\"validate_spec\""
     And the narration contains "\"name\":\"refine_requirement\""
     And the narration contains "\"id\":\"REQ-001\""
@@ -73,6 +73,5 @@ Feature: The workshop agent narrates one spec-to-green walkthrough
     And the narration contains "\"name\":\"feature_read\""
     And the narration contains "kata/src/test/resources/features/string_calculator.feature"
     And the narration does not contain "features/calc.feature"
-    And the narration contains "\"name\":\"changes_show\""
-    And the narration contains "\"name\":\"changes_validate\""
+    And the narration contains "\"name\":\"get_tdd_state\""
     And the narration contains "\"name\":\"step_definitions_find\""

@@ -60,10 +60,10 @@ spec steps generate
 ```json
 {
   "target": "features/step_definitions/string_calculator_steps.js",
-  "staged": true,
+  "written": true,
   "source": "template",
   "summary": "2 step definitions generated for undefined steps.",
-  "nextStep": "Review with 'spec changes show', apply with 'spec changes commit', implement the bodies, then 'spec test'."
+  "nextStep": "Read it against the acceptance criteria, then run spec test (expect RED)."
 }
 ```
 
@@ -95,5 +95,4 @@ Given('the input {string}', function (input) {
 ## See also
 
 - [`spec scenario`](scenario.md) — where the steps come from.
-- [`spec changes`](changes.md) — apply the staged definitions.
-- [`spec test`](test.md) — run and watch the honest RED.
+- [`spec test`](test.md) — run the definitions and watch the honest RED.

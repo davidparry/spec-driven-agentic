@@ -46,10 +46,12 @@ not have to edit the config to follow along on a different model.
 
 ## Work on a branch
 
-Everything that follows mutates the repository: the catalog gets
-reworded, a feature file and a test appear, production code is written,
-and the Java smoke test gets bumped. Put all of it on a branch you can
-throw away, so you can run the morning a second time:
+Everything that follows writes the repository's real files: the catalog
+gets reworded, a feature file and a test appear, production code is
+written, and the Java smoke test gets bumped. There is no staging area
+to review first — the harness edits the file and `git diff` is how you
+read it. So put the morning on a branch you can throw away, which also
+lets you run it a second time:
 
 ```bash
 git clone https://github.com/davidparry/spec-driven-agentic
@@ -59,9 +61,13 @@ git switch -c my-morning
 cd harness                 # everything after this runs from here
 ```
 
-Do not do this on `trunk`. The step that bites is the committed draft at
-9:10 — leave it in place and the next run starts with a requirement
-already waiting, which kills the sentence-first opening.
+Do not do this on `trunk`. The step that bites is the draft at 9:10 —
+leave it in place and the next run starts with a requirement already
+waiting, which kills the sentence-first opening.
+
+(`spec deliver` at 11:10 would have offered to make this branch for
+you. Doing it by hand now means the morning's hand-run commands land
+somewhere you can throw away too.)
 
 **About that `cd harness`.** There is no `--root` flag anywhere in this
 walk. `spec` walks up from the working directory to the nearest
@@ -108,7 +114,7 @@ add at least one edge case to each) - asking again (2 of 3)
 ```
 
 That is the wording review running *inside* the draft, before anything
-is staged. Remember it — it is the whole of the next section.
+is written. Remember it — it is the whole of the next section.
 
 **Then it proposes**, having split your sentence into atomic
 requirements, one capability each:
@@ -133,13 +139,13 @@ Type `1`.
 
 One keystroke, and it is a real choice: four proposed requirements are
 discarded unbuilt, and you set the scope rather than the machine. What
-stages is `HARNESS-018`, and nothing has touched the working tree:
+lands in `requirements.json` is `HARNESS-018`:
 
 ```text
 {
   "id": "HARNESS-018",
   "title": "Uncovered acceptance criteria are listed for one requirement",
-  "staged": true
+  "written": true
 }
 ```
 
@@ -235,8 +241,7 @@ Given a requirement carrying 0 acceptance criteria, when the criteria_coverage M
 
 ```bash
 spec reword HARNESS-018
-spec changes show         # read it
-spec changes commit
+git diff requirements/    # read what you just changed
 spec refine HARNESS-018   # no findings from the rule set — exactly as before the edit
 ```
 
@@ -246,8 +251,8 @@ deterministic review cannot tell the two requirements apart, and they
 build different software. That gap is where your judgment lives, and it
 is the reason this step is not automated.
 
-Do not skip `changes show` either. Every mutation the harness makes
-lands in staging first; this is one of three places the morning asks
+Do not skip the `git diff` either. Every mutation the harness makes is
+already in the file; reading it is one of three places the morning asks
 for your judgment.
 
 ### Optional: ask a second model the question the rules cannot
@@ -338,15 +343,14 @@ question against your own criteria before you leave the gate on.
 
 The scenarios go in a feature file of their own, so it has to exist
 before anything can be appended to it. Create it through the harness
-rather than by hand — a staged file is already readable by the next
-command, so all three edits are reviewed together at the end:
+rather than by hand — the file is on disk the moment the command
+answers, so the next command reads it straight away:
 
 ```bash
 spec feature create --path tests/features/tool_coverage.feature --name "Criteria coverage"
 spec scenario generate HARNESS-018 --feature tests/features/tool_coverage.feature
 spec unittest generate HARNESS-018
-spec changes show
-spec changes commit
+git diff
 spec steps missing
 ```
 
@@ -357,8 +361,7 @@ fine, but anything in the list has to be defined before the bar can run:
 
 ```bash
 spec steps generate      # only if the list was not empty
-spec changes show
-spec changes commit
+git diff
 spec steps missing       # 0 now
 ```
 
@@ -405,8 +408,7 @@ Refused: `Never refactor on a red bar`. That is a state machine in
 
 ```bash
 spec implement HARNESS-018
-spec changes show
-spec changes commit
+git diff       # read the model's code before you trust the bar
 spec test      # GREEN
 ```
 
@@ -456,9 +458,8 @@ So run the morning before you need it, and keep the result. Identical
 requests are answered from `.spec/cache/` without calling the model at
 all, and the TTL in `harness/.spec/config.toml` is a day, so a
 rehearsal the night before replays in seconds. Two things to know about
-that cache: the key is the prompt, so a different `--into`, an edited
-scenario, or a stray `changes discard` misses it and you pay full price
-again; and expired entries are swept on the next write, so raising the
+that cache: the key is the prompt, so a different `--into` or an
+edited scenario misses it and you pay full price again; and expired entries are swept on the next write, so raising the
 TTL afterwards does not bring back a run you have already let go stale.
 
 If rehearsal never gives you an attempt that compiles, that is the
@@ -517,7 +518,6 @@ tagged scenario in `smoke-test/requirements/requirements.json` and
 
 ```bash
 spec mark-implemented HARNESS-018
-spec changes commit
 cargo test --manifest-path Cargo.toml --test spec_completeness
 ```
 
@@ -533,19 +533,19 @@ Every command you ran this morning, `spec deliver` runs on its own. Not
 a similar sequence — the same stages, in the same order, through the
 same services.
 
-**Commit first, or it will not start.** `deliver` refuses outright while
-anything is staged: leftover work from an earlier session would ride
-along on its first commit, and settling that is yours, not the
-machine's.
+**It stops once, before it writes anything.** `deliver` asks for a
+branch name for the run — Enter takes a generated `spec/<date>-<id>`,
+`n` stays where you are, and `--no-branch` skips the question. That is
+the one interruption; after it the run never pauses again.
 
 ```bash
-spec changes show      # must be empty
 spec deliver "every requirement should report which of its criteria no test proves"
+# Branch name for this run (Enter for spec/2026-10-05-k3f92a, or n to stay on my-morning):
 ```
 
 | You typed | `deliver`'s stage |
 | --- | --- |
-| `spec draft` + `changes commit` | `draft_plan` — drafts, commits, then reads back which ids actually reached the catalog |
+| `spec draft` | `draft_plan` — drafts, then reads back which ids actually reached the catalog |
 | `feature create` + `scenario generate` | `author_scenarios` |
 | `steps missing` + `steps generate` | `author_steps` — and it **re-checks**, looping until nothing is undefined or it runs out of rounds |
 | `unittest generate` | `author_unit_test` |
@@ -584,14 +584,15 @@ the three moments this morning asked you for:
 | The moment | You, this morning | `spec deliver` |
 | --- | --- | --- |
 | The wording | You rewrote it until `refine` was clean | The model's draft stands as written |
-| The staged diff | You read it before committing | Committed unread |
-| The implementation | You reviewed the code | Committed on a green bar alone |
+| The diff | You read `git diff` before moving on | Written unread |
+| The implementation | You reviewed the code | Accepted on a green bar alone |
 
 Every one of those is a **human judgement**. What `deliver` does *not*
 give up is every gate that is a state machine rather than a prompt: it
-still cannot refactor on a red bar, still cannot mark a requirement
-implemented without a green bar and a scenario carrying its tag, and
-still will not start while work is staged.
+still cannot refactor on a red bar, and still cannot mark a requirement
+implemented without a green bar and a scenario carrying its tag. And it
+still offers the branch, so a run you did not watch is one `git switch`
+and one `git branch -D` away from never having happened.
 
 ### The part worth sitting with
 
@@ -736,8 +737,8 @@ become the tests.
   of waiting between the sentence and the first red bar is normal.
 - **A command reports `REQ-` ids** — you are above `harness/`, so it
   discovered the kata catalog at the repository root. `cd harness`.
-- **`spec deliver` refuses to start** — something is staged. `spec
-  changes show`, then commit or discard.
+- **`spec deliver` asked for a branch name and you did not want one**
+  — answer `n`, or pass `--no-branch` to skip the question entirely.
 - **`spec test` runs the whole suite** — pass `--feature
   tests/features/tool_coverage.feature` and the Cargo runner scopes the
   run to the one test target that owns that feature.
@@ -771,9 +772,9 @@ git switch trunk
 git branch -D my-morning
 git clean -fd harness/ smoke-test/
 
-# 2. the TDD phase and staging are gitignored, so step 1 leaves them
-#    behind and the next run starts mid-cycle
-rm -rf harness/.spec/staged harness/.spec/state.json
+# 2. the TDD phase is gitignored, so step 1 leaves it behind and the
+#    next run starts mid-cycle
+rm -f harness/.spec/state.json
 
 # 2b. the cached model replies - only if you want the slow, honest
 #     run back. Keeping them is what makes a second pass quick.

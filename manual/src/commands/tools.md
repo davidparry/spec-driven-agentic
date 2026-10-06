@@ -24,27 +24,27 @@ spec tools profiles
 # spec-reword         3  get_requirement, refine_requirement, validate_spec
 # steps-generate      4  feature_list, feature_read, project_inspect, step_definitions_find
 # unittest-generate   4  feature_read, get_requirement, project_inspect, step_definitions_find
-# implement-advice    5  changes_show, changes_validate, feature_list, get_tdd_state, validate_spec
-# implement           7  get_requirement, feature_read, …, command_run, changes_show
-# status              7  project_root, list_requirements, …, changes_show, changes_validate
-# ask                12  the read-only set: everything above that only reads
+# implement-advice    3  feature_list, get_tdd_state, validate_spec
+# implement           6  get_requirement, feature_read, …, run_tests, command_run
+# status              5  project_root, list_requirements, …, get_tdd_state, validate_spec
+# ask                10  the read-only set: everything above that only reads
 
-spec tools list --for status          # exactly those seven
+spec tools list --for status          # exactly those five
 spec tools list --offline             # built-ins only; never connects
 spec tools enable self__validate_spec --for status
 spec tools servers
 ```
 
-A command that generates or implements is handed **3–7** tools — the ones
+A command that generates or implements is handed **3–6** tools — the ones
 its current step can legitimately use, and nothing else. Only the read-only
-`ask` gets 12. Compare that with the **25** a general host such as Cursor or
+`ask` gets 10. Compare that with the **21** a general host such as Cursor or
 `pi -nbt` sees: same server, same tools, different amount of rope.
 
 `--for` accepts: `spec-draft`, `spec-reword`, `steps-generate`,
 `unittest-generate`, `implement-advice`, `implement`, `status`, `ask`.
 Omitting it lists those names and exits nonzero.
 
-Default profiles contain no staging or commit tools. The only mutation
+No default profile contains a tool that writes a file. The only mutation
 a harness-side model may request is `command_run` on the `implement`
 profile, and that call still asks the human to confirm.
 

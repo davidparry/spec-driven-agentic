@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-bb14de4e.js";
+            window.path_to_searchindex_js = "../searchindex-d84b362c.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-2ab172c3.js"></script>
+        <script src="../toc-0006eac3.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -230,9 +230,8 @@ as structured JSON rather than raw text.</p>
 <p>A file that is not valid Gherkin fails with the parser’s diagnosis.</p>
 <hr>
 <h2 id="spec-feature-create"><a class="header" href="#spec-feature-create">spec feature create</a></h2>
-<p>Create a feature file. The file is <strong>staged</strong>, not written to the
-working tree — review with <a href="changes.html"><code>spec changes show</code></a> and apply
-with <code>spec changes commit</code>.</p>
+<p>Create a feature file. The file is written straight into the working
+tree — read it with <code>git diff</code>, undo it with <code>git restore</code>.</p>
 <pre><code class="language-text">Usage: spec feature create [OPTIONS] --path &lt;PATH&gt; --name &lt;NAME&gt;
 </code></pre>
 <div class="table-wrapper">
@@ -247,18 +246,18 @@ with <code>spec changes commit</code>.</p>
 </table>
 </div>
 <pre><code class="language-bash">spec feature create --path features/string_calculator.feature --name "String Calculator"
-spec changes show
-spec changes commit
+git diff
 </code></pre>
-<p>The staged file contains the <code>Feature:</code> header ready for scenarios:</p>
+<p>The new file contains the <code>Feature:</code> header ready for scenarios:</p>
 <pre><code class="language-gherkin">Feature: String Calculator
 </code></pre>
-<p>Add scenarios with <a href="scenario.html"><code>spec scenario add</code></a> — don’t edit the
-staged file by hand.</p>
+<p>Add scenarios with <a href="scenario.html"><code>spec scenario add</code></a> rather than
+editing the file by hand: the command keeps the tags and the ordering
+right.</p>
 <h2 id="see-also"><a class="header" href="#see-also">See also</a></h2>
 <ul>
 <li><a href="scenario.html"><code>spec scenario</code></a> — populate features with tagged scenarios.</li>
-<li><a href="changes.html#spec-changes-validate"><code>spec changes validate</code></a> — parse-check all features, staged included.</li>
+<li><a href="spec.html#spec-validate"><code>spec validate</code></a> — parse-check every feature file against the spec.</li>
 </ul>
 
                     </main>

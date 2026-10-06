@@ -23,7 +23,7 @@ pub struct FeatureDoc {
     pub tags: Vec<String>,
     /// The comment lines above the feature keyword, `#` included - the
     /// file's header. The Gherkin parser discards comments, so these are
-    /// read off the raw text; without them a staged edit would strip the
+    /// read off the raw text; without them an edit would strip the
     /// header off every file it touches. Comments *between* or after
     /// scenarios are still lost on a round trip: keeping those would mean
     /// anchoring each one to its neighbouring scenario, and the header is
@@ -39,8 +39,8 @@ pub struct FeatureDoc {
     /// included - the kata's file ends in a note telling the reader
     /// that REQ-003+ get written live. Like the header these are read
     /// off the raw text, and without them `scenario add` deleted every
-    /// one of them, silently: the staged file simply stopped where the
-    /// scenarios did, and `changes show` had nothing to report.
+    /// one of them, silently: the rewritten file simply stopped where
+    /// the scenarios did.
     ///
     /// New scenarios are appended to `scenarios`, which [`render`]
     /// writes *above* this block, so a trailing note keeps pointing at
@@ -326,7 +326,7 @@ Feature: String Calculator addition
 ";
 
     #[test]
-    fn a_staged_edit_keeps_the_comment_block_and_the_narrative() {
+    fn a_round_trip_keeps_the_comment_block_and_the_narrative() {
         let doc = parse("features/calc.feature", WITH_HEADER).unwrap();
         assert_eq!(doc.comments.len(), 3);
         assert_eq!(
@@ -397,9 +397,8 @@ Feature: String Calculator addition
 
     /// The shape the kata ships *below* its scenarios: a note saying
     /// the rest gets written live. One `scenario add` used to delete
-    /// it, and `changes show` reported only the addition - the review
-    /// checkpoint could not catch the deletion because it was never
-    /// told about it.
+    /// it while reporting only the addition, so nothing downstream could
+    /// catch the deletion.
     const WITH_TRAILER: &str = "\
 Feature: String Calculator addition
 

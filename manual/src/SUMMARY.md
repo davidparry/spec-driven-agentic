@@ -10,7 +10,8 @@
 - [The workflow: spec → RED → GREEN → REFACTOR](workflow.md)
 - [The requirements format](spec-format.md)
 - [This workshop’s String Calculator](workshop.md)
-- [Staged changes](staged-changes.md)
+- [Direct writes](direct-writes.md)
+- [The branch gate](branch-gate.md)
 
 # Command reference
 
@@ -28,7 +29,6 @@
 - [spec state](commands/state.md)
 - [spec status](commands/status.md)
 - [spec refactor](commands/refactor.md)
-- [spec changes](commands/changes.md)
 - [spec model](commands/model.md)
 - [spec judge](commands/judge.md)
 - [spec config](commands/config.md)

@@ -11,7 +11,7 @@ import java.util.Map;
  * the handoff to a real LLM agent. Talks to the server only through the
  * {@link McpToolClient} port, so the whole walkthrough runs against a
  * scripted fake in tests. Does not send the legacy {@code initialize}
- * handshake — MCP 2026-07-28 dropped it. Does not stage files.
+ * handshake — MCP 2026-07-28 dropped it. Does not write the kata.
  */
 public class AgentWorkflow {
 
@@ -67,18 +67,17 @@ public class AgentWorkflow {
         return nextId;
     }
 
-    /** Remaining READ tools: prove spec, inspect, Gherkin, staging, and missing-steps without writing the kata. */
+    /** Remaining READ tools: prove spec, inspect, Gherkin, and missing-steps without writing the kata. */
     private void operationalReads() {
-        out.banner("STEP 6 — operational reads (no staging)");
-        out.say("These tools do not write the kata; they prove spec, inspect, Gherkin, staging, and missing-steps are live.");
+        out.banner("STEP 6 — operational reads (nothing is written)");
+        out.say("These tools do not write the kata; they prove spec, inspect, Gherkin, and missing-steps are live.");
         callTool("validate_spec", Map.of());
         callTool("refine_requirement", Map.of("id", "REQ-001"));
         callTool("project_root", Map.of());
         callTool("project_inspect", Map.of());
         callTool("feature_list", Map.of());
         callTool("feature_read", Map.of("path", WORKSHOP_FEATURE));
-        callTool("changes_show", Map.of());
-        callTool("changes_validate", Map.of());
+        callTool("get_tdd_state", Map.of());
         callTool("step_definitions_find", Map.of());
     }
 
@@ -88,7 +87,7 @@ public class AgentWorkflow {
                 1. Using the spec-driven-server tools, add a Gherkin scenario for {req}
                    with scenario_add (tag @{tag}), add missing steps with
                    step_definition_create, and a unit test with unit_test_create.
-                2. Review the staged files with changes_show, then changes_commit.
+                2. Review what landed with git diff — every tool writes the file itself.
                 3. Call run_tests            -> expect RED
                 4. Implement the behavior in StringCalculator.add
                 5. Call run_tests            -> expect GREEN

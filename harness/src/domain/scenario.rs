@@ -15,12 +15,12 @@ use crate::domain::prompts::{RenderedPrompt, render};
 use crate::domain::steps::criterion_to_steps;
 
 /// The Gherkin keywords a step may open with, as [`ScenarioService`]
-/// checks them before staging.
+/// checks them before the write.
 ///
 /// [`ScenarioService`]: crate::application::scenario_service::ScenarioService
 const KEYWORDS: [&str; 5] = ["Given ", "When ", "Then ", "And ", "But "];
 
-/// One scenario, before it is tagged and staged.
+/// One scenario, before it is tagged and written.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct ProposedScenario {
     #[serde(default)]
@@ -161,7 +161,7 @@ fn check(
 }
 
 /// The scenario names already in the document, so a proposal cannot
-/// collide with one. Staging refuses a duplicate name, and finding that
+/// collide with one. Exclusive refuses a duplicate name, and finding that
 /// out after three model calls is a poor way to learn it.
 pub fn taken_names(doc: Option<&FeatureDoc>) -> Vec<String> {
     doc.map(|doc| doc.scenarios.iter().map(|s| s.name.clone()).collect())

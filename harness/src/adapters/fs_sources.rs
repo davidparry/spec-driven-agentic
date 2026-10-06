@@ -7,7 +7,7 @@
 //! file outside the module is not on the build's compile path, so
 //! counting it would let `steps missing` report clean over a step the
 //! runner still cannot find — which is exactly the bug this scope
-//! closes. Paths stay project-root-relative so staging is unaffected.
+//! closes. Paths stay project-root-relative so writes land in the right place.
 
 use std::fs;
 use std::path::{Path, PathBuf};

@@ -13,6 +13,7 @@ use crate::domain::memory::{
 use crate::domain::model::Spec;
 use crate::ports::{
     LlmConversation, LlmError, MemoryError, MemoryStore, ProjectFiles, ProjectInventory, Prompter,
+    Vcs,
 };
 
 /// Where the spec lives by convention, mirroring
@@ -75,28 +76,32 @@ impl<C: LlmConversation> LlmConversation for MemoryAwareConversation<C> {
     }
 }
 
-pub struct MemoryService<S, I, P>
+pub struct MemoryService<S, I, P, V>
 where
     S: MemoryStore,
     I: ProjectInventory,
     P: ProjectFiles,
+    V: Vcs,
 {
     store: S,
     inventory: I,
     files: P,
+    vcs: V,
 }
 
-impl<S, I, P> MemoryService<S, I, P>
+impl<S, I, P, V> MemoryService<S, I, P, V>
 where
     S: MemoryStore,
     I: ProjectInventory,
     P: ProjectFiles,
+    V: Vcs,
 {
-    pub fn new(store: S, inventory: I, files: P) -> Self {
+    pub fn new(store: S, inventory: I, files: P, vcs: V) -> Self {
         Self {
             store,
             inventory,
             files,
+            vcs,
         }
     }
 
@@ -283,6 +288,7 @@ where
             manifests: &manifests,
             tree: &tree,
             spec_features: &spec_features,
+            git: self.vcs.state(),
             now: &now,
         });
         scan.memory = apply_chosen(scan.memory, chosen);
@@ -361,6 +367,24 @@ mod tests {
         names: Vec<&'static str>,
     }
 
+    /// Scanning records the git state; these tests are about the
+    /// layout, so they record the ordinary one.
+    struct FakeVcs;
+
+    impl crate::ports::Vcs for FakeVcs {
+        fn state(&self) -> crate::ports::GitState {
+            crate::ports::GitState {
+                repository: true,
+                branch: Some("main".into()),
+                dirty: false,
+            }
+        }
+
+        fn create_branch(&self, _: &str) -> Result<(), crate::ports::VcsError> {
+            unimplemented!("scanning never creates a branch")
+        }
+    }
+
     impl ProjectFiles for FakeFiles {
         fn exists(&self, name: &str) -> bool {
             self.names.contains(&name)
@@ -435,6 +459,7 @@ mod tests {
             FakeFiles {
                 names: vec!["pom.xml"],
             },
+            FakeVcs,
         );
         let first = service.refresh(None).unwrap();
         assert_eq!(first.language, "Java");
@@ -461,7 +486,7 @@ mod tests {
         let files = FakeFiles {
             names: vec!["pom.xml", "package.json"],
         };
-        let service = MemoryService::new(store, inventory, files);
+        let service = MemoryService::new(store, inventory, files, FakeVcs);
         let again = service.refresh(None).unwrap();
         assert_eq!(again.language, "Rust");
         assert_eq!(again.bdd_framework, "cucumber-rs");
@@ -470,7 +495,12 @@ mod tests {
     #[test]
     fn refresh_does_not_write_when_nothing_is_detected() {
         let store = FakeStore::default();
-        let service = MemoryService::new(store, FakeInventory::default(), FakeFiles::default());
+        let service = MemoryService::new(
+            store,
+            FakeInventory::default(),
+            FakeFiles::default(),
+            FakeVcs,
+        );
         let memory = service.refresh(None).unwrap();
         assert!(memory.is_empty());
         assert!(service.load().unwrap().is_empty());
@@ -482,7 +512,12 @@ mod tests {
             load_error: Some("boom".into()),
             ..Default::default()
         };
-        let service = MemoryService::new(store, FakeInventory::default(), FakeFiles::default());
+        let service = MemoryService::new(
+            store,
+            FakeInventory::default(),
+            FakeFiles::default(),
+            FakeVcs,
+        );
         assert_eq!(
             service.refresh(None).unwrap_err(),
             MemoryError("boom".into())
@@ -602,13 +637,16 @@ mod tests {
         }
     }
 
-    fn two_module_service(store: FakeStore) -> MemoryService<FakeStore, FakeInventory, FakeFiles> {
+    fn two_module_service(
+        store: FakeStore,
+    ) -> MemoryService<FakeStore, FakeInventory, FakeFiles, FakeVcs> {
         MemoryService::new(
             store,
             two_module_inventory(),
             FakeFiles {
                 names: vec!["pom.xml"],
             },
+            FakeVcs,
         )
     }
 
@@ -638,6 +676,7 @@ mod tests {
             FakeFiles {
                 names: vec!["pom.xml"],
             },
+            FakeVcs,
         );
         let llm = SaysModule(r#"{"moduleRoot": "kata"}"#);
         let mut prompter = ScriptedPrompter::new(true);
@@ -778,7 +817,7 @@ mod tests {
             tree: vec!["App.csproj".into()],
         };
         let store = FakeStore::default();
-        let service = MemoryService::new(store, inventory, FakeFiles::default());
+        let service = MemoryService::new(store, inventory, FakeFiles::default(), FakeVcs);
         let memory = service.refresh(Some(Language::DotNet)).unwrap();
         assert_eq!(memory.language, ".NET");
         assert!(

@@ -1,8 +1,8 @@
 # The requirements spec
 
 The spec at `requirements/requirements.json` is the project's source of
-truth. These commands read it, gate it, and mutate it (through the
-[staging area](../staged-changes.md)). The root file is a
+truth. These commands read it, gate it, and mutate it (writing the file
+itself — see [direct writes](../direct-writes.md)). The root file is a
 [catalog](../spec-format.md#the-catalog-splitting-the-spec-across-files):
 it may include child spec files, and every command here operates on the
 merged view of the whole tree.
@@ -88,14 +88,14 @@ Error: no requirement with id REQ-999
 
 Interactively draft a requirement. Human input drives the spec — the
 harness never invents requirements. The draft is validated and
-quality-gated in a loop until it is clean, then staged.
+quality-gated in a loop until it is clean, then written.
 
 ```bash
 spec draft
 ```
 
 Non-interactive (no TTY). Repeat `--criterion` for each Given/When/Then
-line. The next free id is allocated; the draft is staged.
+line. The next free id is allocated; the draft is written.
 
 ```bash
 spec draft \
@@ -225,14 +225,14 @@ fall back to your prior answers exactly as without a model. Nothing is
 accepted silently either way — every field still passes through your
 hands, and validate + refine rerun on whatever you accept.
 
-When the draft is clean it is staged:
+When the draft is clean it is written:
 
 ```json
 {
   "id": "REQ-004",
   "title": "Newlines act as delimiters",
-  "staged": true,
-  "nextStep": "Review with 'spec changes show', apply with 'spec changes commit', then write the Gherkin scenario."
+  "written": true,
+  "nextStep": "Add the @REQ-004 scenario with scenario add."
 }
 ```
 
@@ -359,7 +359,7 @@ stops asking, set `mode = "off"` under `[decision]`.
 
 ## spec reword
 
-Reword an existing backlog item (staged). Interactive wizard is the
+Reword an existing backlog item in place. Interactive wizard is the
 same refine → reword loop as draft. Flags skip the wizard:
 
 ```bash
@@ -381,9 +381,9 @@ string replacement against `requirements.json` will not match.
 
 ## spec set-feature
 
-Point a requirement at the feature file that was actually written
-(staged). Used when a copied spec still names `kata/…` paths that do
-not exist on an extracted project. `spec scenario add` already updates
+Point a requirement at the feature file that was actually written.
+Used when a copied spec still names `kata/…` paths that do not exist
+on an extracted project. `spec scenario add` already updates
 `featureFile` when it is missing or stale.
 
 ```bash
@@ -396,8 +396,7 @@ spec set-feature REQ-003 --file src/test/resources/features/string_calculator.fe
 
 Flip a requirement's status to `implemented` and record its
 `featureFile` — the feature carrying the `@REQ-...` tag — in the same
-staged edit, so the spec passes validation. The change is staged, not
-applied directly.
+edit, so the spec passes validation.
 
 ```text
 Usage: spec mark-implemented [OPTIONS] <REQ_ID>
@@ -405,16 +404,15 @@ Usage: spec mark-implemented [OPTIONS] <REQ_ID>
 
 ```bash
 spec mark-implemented REQ-003
-spec changes validate
-spec changes commit
+spec validate
 ```
 
 ```json
 {
   "id": "REQ-003",
   "status": "implemented",
-  "staged": true,
-  "nextStep": "Review with changes show, run spec changes validate (it checks the @REQ-003 scenario exists), then spec changes commit."
+  "written": true,
+  "nextStep": "Run validate - it checks the @REQ-003 scenario exists."
 }
 ```
 
@@ -423,9 +421,9 @@ The command is gated twice:
 - **GREEN only** — it refuses unless the last recorded run passed.
   Do this only when the scenario and tests for the requirement are
   GREEN; it is the last move of the per-requirement rhythm.
-- **Tagged scenario only** — it refuses when no committed feature
-  file carries a scenario tagged `@<REQ_ID>`; add one with
-  `spec scenario add` and apply it with `spec changes commit` first.
+- **Tagged scenario only** — it refuses when no feature file carries
+  a scenario tagged `@<REQ_ID>`; add one with `spec scenario add`
+  first.
 
 Re-running it on an already-implemented requirement is safe: on GREEN
 it backfills a missing `featureFile`, which is exactly the repair for
@@ -463,8 +461,8 @@ spec include add requirements/core/arithmetic.json
   "file": "requirements/core/arithmetic.json",
   "parent": "requirements/requirements.json",
   "created": true,
-  "staged": true,
-  "nextStep": "Review with spec changes show, apply with spec changes commit, then draft into it with spec draft --file."
+  "written": true,
+  "nextStep": "Draft into it with spec draft --file."
 }
 ```
 
@@ -483,4 +481,3 @@ Includes must be `.json` files inside the spec directory.
 
 - [The requirements format](../spec-format.md) — every field of the spec, and the include catalog.
 - [The workflow](../workflow.md) — where each subcommand fits.
-- [`spec changes`](changes.md) — reviewing and applying staged spec mutations.

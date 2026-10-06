@@ -1,8 +1,8 @@
-Feature: Hybrid generation into staging
+Feature: Hybrid generation
   Step definitions and unit tests are generated from deterministic
   templates that always work. When an LLM model is resolved its output is
   preferred - but only after validation; anything unusable falls back to
-  the template silently. Generated code lands in the staging area, never
+  the template silently. Generated code lands in the working tree, never
   in working files, so the human reviews before anything is applied.
 
   Background:
@@ -18,12 +18,11 @@ Feature: Hybrid generation into staging
       """
 
   @HARNESS-009
-  Scenario: Without a model the template is staged
+  Scenario: Without a model the template is written
     When step definitions are generated without a model
-    Then the generation is staged at "src/test/java/GeneratedSteps.java" from "template"
-    And the staged file "src/test/java/GeneratedSteps.java" contains "@Given(\"a calculator\")"
-    And the staged file "src/test/java/GeneratedSteps.java" contains "PendingException"
-    And the working tree has no file "src/test/java/GeneratedSteps.java"
+    Then the generation is written at "src/test/java/GeneratedSteps.java" from "template"
+    And the written file "src/test/java/GeneratedSteps.java" contains "@Given(\"a calculator\")"
+    And the written file "src/test/java/GeneratedSteps.java" contains "PendingException"
 
   Scenario: Steps that collapse to one expression get one definition, not duplicates
     Given a project feature file "features/more.feature" containing:
@@ -34,7 +33,7 @@ Feature: Hybrid generation into staging
           Then the result is 5
       """
     When step definitions are generated without a model
-    Then the staged file "src/test/java/GeneratedSteps.java" defines "@Then(\"the result is {int}\")" exactly once
+    Then the written file "src/test/java/GeneratedSteps.java" defines "@Then(\"the result is {int}\")" exactly once
 
   # The bug this closes: the target used to be a hardcoded
   # src/test/java path. In a project whose kata is a module, that path
@@ -70,11 +69,10 @@ Feature: Hybrid generation into staging
       }
       """
     When step definitions are generated without a model
-    Then the generation is staged at "kata/src/test/java/com/example/kata/CalculatorSteps.java" from "template"
-    And the staged file "kata/src/test/java/com/example/kata/CalculatorSteps.java" contains "package com.example.kata;"
-    And the staged file "kata/src/test/java/com/example/kata/CalculatorSteps.java" contains "@Then(\"the total is rounded\")"
-    And the staged file "kata/src/test/java/com/example/kata/CalculatorSteps.java" defines "@Given(\"a calculator\")" exactly once
-    And the working tree has no file "src/test/java/GeneratedSteps.java"
+    Then the generation is written at "kata/src/test/java/com/example/kata/CalculatorSteps.java" from "template"
+    And the written file "kata/src/test/java/com/example/kata/CalculatorSteps.java" contains "package com.example.kata;"
+    And the written file "kata/src/test/java/com/example/kata/CalculatorSteps.java" contains "@Then(\"the total is rounded\")"
+    And the written file "kata/src/test/java/com/example/kata/CalculatorSteps.java" defines "@Given(\"a calculator\")" exactly once
 
   Scenario: Validated model output is preferred over the template
     Given the model will reply:
@@ -88,8 +86,8 @@ Feature: Hybrid generation into staging
       ```
       """
     When step definitions are generated with the model
-    Then the generation is staged at "src/test/java/GeneratedSteps.java" from "llm"
-    And the staged file "src/test/java/GeneratedSteps.java" contains "polished"
+    Then the generation is written at "src/test/java/GeneratedSteps.java" from "llm"
+    And the written file "src/test/java/GeneratedSteps.java" contains "polished"
 
   Scenario: Unusable model output falls back to the template silently
     Given the model will reply:
@@ -97,8 +95,8 @@ Feature: Hybrid generation into staging
       I cannot help with that request.
       """
     When step definitions are generated with the model
-    Then the generation is staged at "src/test/java/GeneratedSteps.java" from "template"
-    And the staged file "src/test/java/GeneratedSteps.java" contains "PendingException"
+    Then the generation is written at "src/test/java/GeneratedSteps.java" from "template"
+    And the written file "src/test/java/GeneratedSteps.java" contains "PendingException"
 
   Scenario: Generating with every step already defined is refused
     Given a project source file "src/test/java/Steps.java" containing:
@@ -115,12 +113,11 @@ Feature: Hybrid generation into staging
     When generating step definitions fails
     Then the generation error is "Every step already has a definition - nothing to generate."
 
-  Scenario: A failing unit test is staged from a requirement's criteria
+  Scenario: A failing unit test is written from a requirement's criteria
     Given a working spec whose requirement "REQ-001" is "pending" with feature file "features/calc.feature"
     When a unit test is generated for "REQ-001" without a model
-    Then the generation is staged at "src/test/java/Req001Test.java" from "template"
-    And the staged file "src/test/java/Req001Test.java" contains "fail(\"TODO: assert - Given a, when b, then 3\")"
-    And the working tree has no file "src/test/java/Req001Test.java"
+    Then the generation is written at "src/test/java/Req001Test.java" from "template"
+    And the written file "src/test/java/Req001Test.java" contains "fail(\"TODO: assert - Given a, when b, then 3\")"
 
   Scenario: A unit test for an unknown requirement is refused
     Given a working spec whose requirement "REQ-001" is "pending" with feature file "features/calc.feature"
@@ -135,9 +132,8 @@ Feature: Hybrid generation into staging
       [{"path": "src/main/java/Kata.java", "content": "public class Kata { int add(String input) { return 3; } }"}]
       """
     When an implementation is generated for "REQ-001" with the model
-    Then the implementation staged "src/main/java/Kata.java" from the model
-    And the staged file "src/main/java/Kata.java" contains "public class Kata"
-    And the working tree has no file "src/main/java/Kata.java"
+    Then the implementation wrote "src/main/java/Kata.java" from the model
+    And the written file "src/main/java/Kata.java" contains "public class Kata"
     And the persisted attempt log holds 1 attempt for "REQ-001"
 
   Scenario: Every attempt is logged so the next one is briefed with the history
@@ -213,17 +209,6 @@ Feature: Hybrid generation into staging
     When the model is asked for implement advice on "REQ-001"
     Then the implement readiness is not ready
     And the implement advice is "Not yet - run spec test first to record the RED bar, then spec implement REQ-001."
-
-  Scenario: Status puts staged changes before everything else
-    Given a working spec whose requirement "REQ-001" is "pending" with feature file "features/calc.feature"
-    And raw content is staged at "src/main/java/Kata.java":
-      """
-      public class Kata {}
-      """
-    When the project status is checked
-    Then the status next step contains "1 staged file(s) await review"
-    And the status next step contains "spec changes commit"
-    And the status lists 1 staged file and 1 requirement
 
   Scenario: Status on GREEN points to mark-implemented for the requirement in flight
     Given a working spec whose requirement "REQ-001" is "pending" with feature file "features/calc.feature"

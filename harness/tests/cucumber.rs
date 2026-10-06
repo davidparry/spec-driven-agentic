@@ -17,9 +17,9 @@ use spec_harness::adapters::config::{
 use spec_harness::adapters::fs_project::FsProjectFiles;
 use spec_harness::adapters::fs_scaffold::FsScaffoldWriter;
 use spec_harness::adapters::fs_sources::FsSourceFiles;
-use spec_harness::adapters::fs_spec::{FsFeatureFiles, FsSpecRepository};
-use spec_harness::adapters::fs_staging::FsChangeStore;
+use spec_harness::adapters::fs_spec::FsSpecRepository;
 use spec_harness::adapters::fs_state::FsStateStore;
+use spec_harness::adapters::fs_worktree::FsWorkTree;
 use spec_harness::adapters::gherkin_features::GherkinFeatureCatalog;
 use spec_harness::adapters::mcp_client::McpToolBroker;
 use spec_harness::adapters::mcp_config::FsMcpRegistry;
@@ -34,7 +34,6 @@ use spec_harness::application::DEFAULT_LLM_ATTEMPTS;
 use spec_harness::application::agent_service::{
     Agent, AgentConfig, DEFAULT_MAX_ROUNDS, NullPrompter,
 };
-use spec_harness::application::change_service::{ChangeService, ChangesReport};
 use spec_harness::application::decision_service::{DecisionService, apply_review};
 use spec_harness::application::generation_service::{
     GenerationReport, GenerationService, MissingStepsReport, ResolvedLlm,
@@ -63,13 +62,14 @@ use spec_harness::application::tdd_service::{
 use spec_harness::application::tool_call_service::ToolCallService;
 use spec_harness::application::tool_service::{self, ToolService};
 use spec_harness::bootstrap::refresh_project_memory;
+use spec_harness::branch::{Branched, offer_branch};
 use spec_harness::deliver::{Deliver, DeliverOptions, DeliverReport, Target, parse_target};
 use spec_harness::domain::CACHE_DIR;
 use spec_harness::domain::decision::{DEFAULT_MIN_CONFIDENCE, Judgment, Mode, Policy, Verdict};
 use spec_harness::domain::feature::{FeatureDoc, FeatureSummary};
 use spec_harness::domain::language::{Language, detect_languages};
 use spec_harness::domain::mcp_registry::{RegistryLoad, ServerSpec, parse_registry};
-use spec_harness::domain::model::{self, Requirement, Spec, TestRunSummary};
+use spec_harness::domain::model::{Requirement, Spec, TestRunSummary};
 use spec_harness::domain::prompts::DecisionPrompt;
 use spec_harness::domain::refiner::RequirementRefiner;
 use spec_harness::domain::tdd::{
@@ -83,11 +83,11 @@ use spec_harness::domain::tools::{
 use spec_harness::greenfield::{Greenfield, GreenfieldReport};
 use spec_harness::mcp::{WorkflowServer, builtin_tool_definitions};
 use spec_harness::ports::{
-    ChangeStore, DecisionError, FeatureCatalog, FeatureError, FeatureFiles, InteractiveShell,
-    LlmConversation, LlmError, McpRegistrySource, ModelCatalog, ModelInfo, ModelStore,
-    ProjectFiles, PromptError, Prompter, RunnerError, RuntimeProbe, ShellError, ShellLine,
-    SpecError, SpecRepository, StageError, StagedChange, StateStore, TestFilter, TestRunner,
-    ToolBroker, ToolDiscovery, ToolError,
+    DecisionError, FeatureCatalog, FeatureError, FeatureFiles, FileChange, GitState,
+    InteractiveShell, LlmConversation, LlmError, McpRegistrySource, ModelCatalog, ModelInfo,
+    ModelStore, ProjectFiles, PromptError, Prompter, RunnerError, RuntimeProbe, ShellError,
+    ShellLine, SpecError, SpecRepository, StateStore, TestFilter, TestRunner, ToolBroker,
+    ToolDiscovery, ToolError, Vcs, VcsError, WorkTree, Working, WriteError,
 };
 use spec_harness::repl::{Ending, ShellSummary, offer_greenfield, run_shell};
 use spec_harness::wiring::{DynLlm, RunnerFactory, project_memory_service};
@@ -123,8 +123,6 @@ struct SpecWorld {
     feature_list: Option<Vec<FeatureSummary>>,
     feature_doc: Option<FeatureDoc>,
     feature_error: Option<FeatureError>,
-    changes_report: Option<ChangesReport>,
-    staged_validation: Option<ValidationReport>,
     draft_report: Option<DraftReport>,
     include_report: Option<IncludeReport>,
     listed_requirements: Option<Vec<ListedRequirement>>,
@@ -199,7 +197,6 @@ struct SpecWorld {
     oversized_tool: bool,
     registry: Option<spec_harness::domain::mcp_registry::RegistryLoad>,
     config_text: Option<String>,
-    staged_spec: Option<Spec>,
     model_capabilities: HashMap<String, Vec<String>>,
     decision_model: Option<String>,
     decision_mode: Option<String>,
@@ -218,6 +215,16 @@ struct SpecWorld {
     discovery_start: Option<PathBuf>,
     discovered_root: Option<Option<PathBuf>>,
     deliver_target: Option<Target>,
+    /// What the last direct write through the work tree answered.
+    write_outcome: Option<Result<FileChange, WriteError>>,
+    /// The branch gate's scripted git, its answer, and what it did.
+    git_state: GitState,
+    git_refuses: bool,
+    branches_created: Arc<Mutex<Vec<String>>>,
+    branch_outcome: Option<Branched>,
+    branch_transcript: Vec<String>,
+    /// The root spec file as it stood before the run under test.
+    spec_file_at_start: Option<Option<String>>,
 }
 
 // ---- fakes implementing the ports ----------------------------------------
@@ -227,46 +234,6 @@ struct InMemorySpec(Spec);
 impl SpecRepository for InMemorySpec {
     fn load(&self) -> Result<Spec, SpecError> {
         Ok(self.0.clone())
-    }
-}
-
-/// The staging area of the in-memory spec world: at most one
-/// uncommitted edit of the root spec document. Enough to tell a tool
-/// that reads staged-first from one that reads the working tree.
-#[derive(Default)]
-struct StagedSpec(Option<String>);
-
-impl ChangeStore for StagedSpec {
-    fn stage(&self, _: &str, _: &str, _: &str) -> Result<StagedChange, StageError> {
-        unimplemented!("the in-memory spec world stages through the world, not the store")
-    }
-
-    fn changes(&self) -> Result<Vec<StagedChange>, StageError> {
-        Ok(self
-            .0
-            .iter()
-            .map(|_| StagedChange {
-                path: SPEC_PATH.into(),
-                action: "modify".into(),
-                summary: "reword".into(),
-            })
-            .collect())
-    }
-
-    fn content(&self, path: &str) -> Result<Option<String>, StageError> {
-        Ok(if path == SPEC_PATH {
-            self.0.clone()
-        } else {
-            None
-        })
-    }
-
-    fn commit(&self) -> Result<Vec<StagedChange>, StageError> {
-        Ok(Vec::new())
-    }
-
-    fn discard(&self) -> Result<Vec<StagedChange>, StageError> {
-        Ok(Vec::new())
     }
 }
 
@@ -356,7 +323,7 @@ fn base_requirement(id: &str) -> Requirement {
 }
 
 impl SpecWorld {
-    fn spec_service(&self) -> SpecService<InMemorySpec, InMemoryFeatures, StagedSpec> {
+    fn spec_service(&self) -> SpecService<InMemorySpec, InMemoryFeatures> {
         let named = |spec: &Spec| {
             let mut spec = spec.clone();
             if spec.project.trim().is_empty() {
@@ -370,11 +337,6 @@ impl SpecWorld {
                 existing: self.existing_features.clone(),
                 tags: self.feature_tags.clone(),
             },
-            StagedSpec(
-                self.staged_spec
-                    .as_ref()
-                    .map(|spec| model::render(&named(spec)).expect("a spec always renders")),
-            ),
             ProjectLayout {
                 step_definitions: "steps/Steps.java".into(),
                 test_location: "tests/Test.java".into(),
@@ -510,6 +472,14 @@ fn an_implemented_requirement_tagged(world: &mut SpecWorld, id: String) {
         .insert(format!("@{id}"));
 }
 
+/// Validate the catalog as it stands on disk, includes and all.
+#[when("the spec on disk is validated")]
+fn the_spec_on_disk_is_validated(world: &mut SpecWorld) {
+    let root = world.project_root();
+    let layout = spec_harness::workspace::detect_project_layout(&root);
+    world.validation = Some(spec_harness::wiring::spec_service(&root, layout).validate_spec());
+}
+
 #[when("the spec is validated")]
 fn the_spec_is_validated(world: &mut SpecWorld) {
     world.validation = Some(world.spec_service().validate_spec());
@@ -532,6 +502,15 @@ fn an_issue_is(world: &mut SpecWorld, expected: String) {
     assert!(
         issues.contains(&expected),
         "issue {expected:?} not in {issues:?}"
+    );
+}
+
+#[then(regex = r#"^an issue contains "(.+)"$"#)]
+fn an_issue_contains(world: &mut SpecWorld, fragment: String) {
+    let issues = &world.validation().issues;
+    assert!(
+        issues.iter().any(|issue| issue.contains(&fragment)),
+        "issue containing {fragment:?} not in {issues:?}"
     );
 }
 
@@ -572,6 +551,19 @@ fn the_requirement_has_criterion(world: &mut SpecWorld, criterion: String) {
         .expect("a requirement was given")
         .acceptance_criteria
         .push(criterion);
+}
+
+/// A reword lands in the spec file, so the next refinement pass reads
+/// the new story. The in-memory spec is this world's disk.
+#[given(regex = r#"^the requirement "([^"]+)" is reworded with the story "(.+)"$"#)]
+fn the_requirement_is_reworded_with(world: &mut SpecWorld, id: String, story: String) {
+    world
+        .spec
+        .requirements
+        .iter_mut()
+        .find(|requirement| requirement.id == id)
+        .expect("requirement exists")
+        .story = story;
 }
 
 #[when(regex = r#"^the requirement "([^"]+)" is refined$"#)]
@@ -622,42 +614,6 @@ fn next_step_advises_confirming(world: &mut SpecWorld) {
             .next_step
             .starts_with("The wording reads clean.")
     );
-}
-
-#[given(regex = r#"^the requirement "([^"]+)" has a staged story "(.+)"$"#)]
-fn the_requirement_has_a_staged_story(world: &mut SpecWorld, id: String, story: String) {
-    let mut staged = world.spec.clone();
-    staged
-        .requirements
-        .iter_mut()
-        .find(|r| r.id == id)
-        .unwrap_or_else(|| panic!("{id} is not in the spec"))
-        .story = story;
-    world.staged_spec = Some(staged);
-}
-
-#[then(regex = r#"^the refinement read the "([^"]+)" wording$"#)]
-fn the_refinement_read(world: &mut SpecWorld, source: String) {
-    assert_eq!(world.refinement().source, source);
-}
-
-#[then("the next step says a commit is not needed between passes")]
-fn next_step_says_no_commit_needed(world: &mut SpecWorld) {
-    let next_step = &world.refinement().next_step;
-    assert!(
-        next_step.contains("no need to commit between passes"),
-        "{next_step}"
-    );
-}
-
-#[then("the next step advises applying the staged wording with changes_commit")]
-fn next_step_advises_committing(world: &mut SpecWorld) {
-    let next_step = &world.refinement().next_step;
-    assert!(
-        next_step.starts_with("The staged wording reads clean."),
-        "{next_step}"
-    );
-    assert!(next_step.contains("changes_commit"), "{next_step}");
 }
 
 #[then("the next step advises requirement_reword and iterating")]
@@ -920,6 +876,11 @@ fn the_project_is_inspected(world: &mut SpecWorld) {
             extensions: world.project_extensions.clone(),
         },
         InMemoryRuntimes(world.runtimes.clone()),
+        ScriptedVcs {
+            state: world.git_state.clone(),
+            refuses: false,
+            created: Arc::clone(&world.branches_created),
+        },
     );
     world.inspection = Some(service.inspect());
 }
@@ -993,6 +954,22 @@ fn next_step_some_missing(world: &mut SpecWorld) {
     );
 }
 
+#[then("the inspection reports no git repository")]
+fn inspection_reports_no_repository(world: &mut SpecWorld) {
+    assert!(!world.inspection().git.repository);
+}
+
+#[then(regex = r#"^the inspection reports the branch "([^"]+)"$"#)]
+fn inspection_reports_branch(world: &mut SpecWorld, branch: String) {
+    assert_eq!(world.inspection().git.branch.as_deref(), Some(&*branch));
+}
+
+#[then(regex = r#"^the next step starts with "(.+)"$"#)]
+fn inspection_next_step_starts_with(world: &mut SpecWorld, prefix: String) {
+    let next = &world.inspection().next_step;
+    assert!(next.starts_with(&prefix), "next step: {next}");
+}
+
 #[then(regex = r#"^the next step lists "(.+)"$"#)]
 fn next_step_lists(world: &mut SpecWorld, fragment: String) {
     let next_step = &world.inspection().next_step;
@@ -1002,7 +979,7 @@ fn next_step_lists(world: &mut SpecWorld, fragment: String) {
     );
 }
 
-// ---- staging and mutation plumbing ----------------------------------------
+// ---- write and mutation plumbing -------------------------------------------
 
 /// Scripted prompter: answers come from the feature file, everything the
 /// service says is captured for assertions.
@@ -1027,28 +1004,16 @@ impl Prompter for ScriptedPrompter {
 }
 
 impl SpecWorld {
-    fn change_store(&mut self) -> FsChangeStore {
-        FsChangeStore::new(self.project_root())
-    }
-
-    fn real_change_service(
-        &mut self,
-    ) -> ChangeService<FsChangeStore, FsSpecRepository, FsFeatureFiles> {
-        let root = self.project_root();
-        ChangeService::new(
-            FsChangeStore::new(root.clone()),
-            FsSpecRepository::new(root.join(SPEC_PATH)),
-            FsFeatureFiles::new(root),
-            SPEC_PATH.into(),
-        )
+    fn work_tree(&mut self) -> FsWorkTree {
+        FsWorkTree::new(self.project_root())
     }
 
     fn real_mutation_service(
         &mut self,
     ) -> SpecMutationService<
         FsSpecRepository,
-        spec_harness::wiring::OverlayFeatures,
-        FsChangeStore,
+        spec_harness::wiring::ProjectFeatures,
+        FsWorkTree,
         FsStateStore,
     > {
         let root = self.project_root();
@@ -1058,7 +1023,7 @@ impl SpecWorld {
 
     fn real_scenario_service(
         &mut self,
-    ) -> ScenarioService<FsChangeStore, spec_harness::wiring::OverlayFeatures> {
+    ) -> ScenarioService<FsWorkTree, spec_harness::wiring::ProjectFeatures> {
         let root = self.project_root();
         spec_harness::wiring::scenario_service(&root)
     }
@@ -1067,6 +1032,13 @@ impl SpecWorld {
         let file = self.project_root().join(SPEC_PATH);
         std::fs::create_dir_all(file.parent().unwrap()).unwrap();
         std::fs::write(file, serde_json::to_string_pretty(spec).unwrap()).unwrap();
+        self.remember_spec_file();
+    }
+
+    /// Snapshot the root spec file so a later step can prove a refused
+    /// run left it exactly as it found it.
+    fn remember_spec_file(&mut self) {
+        self.spec_file_at_start = Some(self.work_tree().read(SPEC_PATH).unwrap());
     }
 
     /// Update (or create) one spec file of the catalog in the working tree.
@@ -1080,23 +1052,26 @@ impl SpecWorld {
         };
         update(&mut spec);
         std::fs::write(file, serde_json::to_string_pretty(&spec).unwrap()).unwrap();
+        if path == SPEC_PATH {
+            self.remember_spec_file();
+        }
     }
 
-    fn staged_spec_file(&mut self, path: &str) -> Spec {
+    fn written_spec_file(&mut self, path: &str) -> Spec {
         let content = self
-            .change_store()
-            .content(path)
+            .work_tree()
+            .read(path)
             .unwrap()
-            .unwrap_or_else(|| panic!("{path} is not staged"));
+            .unwrap_or_else(|| panic!("{path} was not written"));
         serde_json::from_str(&content).unwrap()
     }
 
-    fn staged_spec(&mut self) -> Spec {
+    fn written_spec(&mut self) -> Spec {
         let content = self
-            .change_store()
-            .content(SPEC_PATH)
+            .work_tree()
+            .read(SPEC_PATH)
             .unwrap()
-            .expect("a spec is staged");
+            .expect("the spec was written");
         serde_json::from_str(&content).unwrap()
     }
 
@@ -1105,17 +1080,17 @@ impl SpecWorld {
         serde_json::from_str(&std::fs::read_to_string(file).unwrap()).unwrap()
     }
 
-    fn staged_feature(&mut self, path: &str) -> FeatureDoc {
-        let content = self
-            .change_store()
-            .content(path)
-            .unwrap()
-            .unwrap_or_else(|| panic!("{path} is not staged"));
-        spec_harness::domain::feature::parse(path, &content).unwrap()
+    fn write_outcome(&self) -> &Result<FileChange, WriteError> {
+        self.write_outcome.as_ref().expect("a write was attempted")
     }
 
-    fn changes_report(&self) -> &ChangesReport {
-        self.changes_report.as_ref().expect("a changes report")
+    fn written_feature(&mut self, path: &str) -> FeatureDoc {
+        let content = self
+            .work_tree()
+            .read(path)
+            .unwrap()
+            .unwrap_or_else(|| panic!("{path} was not written"));
+        spec_harness::domain::feature::parse(path, &content).unwrap()
     }
 }
 
@@ -1141,20 +1116,77 @@ fn unescape(text: &str) -> String {
     text.replace("\\\"", "\"")
 }
 
-// ---- staged changes steps ---------------------------------------------------
+// ---- direct write steps ------------------------------------------------------
 
-#[given(regex = r#"^the feature file "([^"]+)" is created named "([^"]+)" via staging$"#)]
-fn feature_created_via_staging(world: &mut SpecWorld, path: String, name: String) {
+#[given(regex = r#"^the feature file "([^"]+)" is created named "([^"]+)"$"#)]
+fn feature_created(world: &mut SpecWorld, path: String, name: String) {
     world
         .real_scenario_service()
         .create_feature(&path, &name)
         .unwrap();
 }
 
-#[given(regex = r#"^raw content is staged at "([^"]+)":$"#)]
-fn raw_content_staged(world: &mut SpecWorld, path: String, step: &Step) {
+#[when(regex = r#"^a scenario "([^"]+)" tagged "([^"]+)" is added to "([^"]+)"$"#)]
+fn scenario_added_to(world: &mut SpecWorld, name: String, tag: String, path: String) {
+    world
+        .real_scenario_service()
+        .add_scenario(&path, &tag, &name, vec!["Given a calculator".into()])
+        .unwrap();
+}
+
+#[given(regex = r#"^raw content is written at "([^"]+)":$"#)]
+fn raw_content_written(world: &mut SpecWorld, path: String, step: &Step) {
     let content = step.docstring.as_deref().unwrap().trim_start_matches('\n');
-    world.change_store().stage(&path, content, "raw").unwrap();
+    world.work_tree().write(&path, content, "raw").unwrap();
+}
+
+#[when(regex = r#"^"([^"]+)" is written with "([^"]*)"$"#)]
+fn path_is_written(world: &mut SpecWorld, path: String, content: String) {
+    world.write_outcome = Some(world.work_tree().write(&path, &content, "a direct write"));
+}
+
+#[then(regex = r#"^the write is reported as a "([^"]+)"$"#)]
+fn write_reported_as(world: &mut SpecWorld, action: String) {
+    let change = world.write_outcome().as_ref().expect("the write succeeded");
+    assert_eq!(change.action, action);
+}
+
+#[then("the write is refused")]
+fn write_is_refused(world: &mut SpecWorld) {
+    assert!(
+        world.write_outcome().is_err(),
+        "the write was allowed: {:?}",
+        world.write_outcome()
+    );
+}
+
+#[then(regex = r#"^the write refusal mentions "(.+)"$"#)]
+fn write_refusal_mentions(world: &mut SpecWorld, fragment: String) {
+    let error = world
+        .write_outcome()
+        .as_ref()
+        .expect_err("the write was allowed");
+    assert!(error.0.contains(&fragment), "error: {}", error.0);
+}
+
+/// The jail is only worth anything if the file really did not appear.
+#[then("no file was written outside the project")]
+fn nothing_written_outside(world: &mut SpecWorld) {
+    let root = world.project_root();
+    let parent = root.parent().expect("a parent directory");
+    assert!(!parent.join("outside.txt").exists());
+    assert!(!root.join("etc").exists());
+}
+
+#[then("no scratch file is left in the project root")]
+fn no_scratch_left(world: &mut SpecWorld) {
+    let leftovers: Vec<String> = std::fs::read_dir(world.project_root())
+        .unwrap()
+        .filter_map(Result::ok)
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .filter(|name| name.ends_with(".writing"))
+        .collect();
+    assert!(leftovers.is_empty(), "scratch files: {leftovers:?}");
 }
 
 #[given(
@@ -1171,50 +1203,6 @@ fn working_spec_with_status(world: &mut SpecWorld, id: String, status: String, f
     });
 }
 
-#[when("the staged changes are shown")]
-fn staged_changes_shown(world: &mut SpecWorld) {
-    world.changes_report = Some(world.real_change_service().show().unwrap());
-}
-
-#[when("the staged changes are committed")]
-fn staged_changes_committed(world: &mut SpecWorld) {
-    world.changes_report = Some(world.real_change_service().commit().unwrap());
-}
-
-#[when("the staged changes are discarded")]
-fn staged_changes_discarded(world: &mut SpecWorld) {
-    world.changes_report = Some(world.real_change_service().discard().unwrap());
-}
-
-#[when("the staged changes are validated")]
-fn staged_changes_validated(world: &mut SpecWorld) {
-    world.staged_validation = Some(world.real_change_service().validate().unwrap());
-}
-
-#[then(regex = r"^(\d+) staged changes? (?:is|are) reported$")]
-fn n_staged_changes(world: &mut SpecWorld, count: usize) {
-    assert_eq!(world.changes_report().changes.len(), count);
-}
-
-#[then(regex = r#"^a staged "([^"]+)" of "([^"]+)" is listed$"#)]
-fn staged_change_listed(world: &mut SpecWorld, action: String, path: String) {
-    let report = world.changes_report();
-    assert!(
-        report
-            .changes
-            .iter()
-            .any(|c| c.action == action && c.path == path),
-        "changes: {:?}",
-        report.changes
-    );
-}
-
-#[then(regex = r#"^the changes next step starts with "(.+)"$"#)]
-fn changes_next_step(world: &mut SpecWorld, prefix: String) {
-    let next = &world.changes_report().next_step;
-    assert!(next.starts_with(&prefix), "next step: {next}");
-}
-
 #[then(regex = r#"^the working tree file "([^"]+)" does not exist$"#)]
 fn working_tree_file_missing(world: &mut SpecWorld, path: String) {
     assert!(!world.project_root().join(path).exists());
@@ -1225,43 +1213,6 @@ fn working_tree_file_contains(world: &mut SpecWorld, path: String, expected: Str
     let content = std::fs::read_to_string(world.project_root().join(&path))
         .unwrap_or_else(|e| panic!("{path}: {e}"));
     assert!(content.contains(&expected), "content: {content}");
-}
-
-#[then(regex = r"^the staged validation is (valid|invalid)$")]
-fn staged_validation_verdict(world: &mut SpecWorld, verdict: String) {
-    let report = world
-        .staged_validation
-        .as_ref()
-        .expect("a validation report");
-    assert_eq!(
-        report.valid,
-        verdict == "valid",
-        "issues: {:?}",
-        report.issues
-    );
-}
-
-#[then(regex = r#"^a staged validation issue contains "(.+)"$"#)]
-fn staged_validation_issue(world: &mut SpecWorld, fragment: String) {
-    let report = world
-        .staged_validation
-        .as_ref()
-        .expect("a validation report");
-    assert!(
-        report.issues.iter().any(|i| i.contains(&fragment)),
-        "issues: {:?}",
-        report.issues
-    );
-}
-
-#[then(regex = r#"^the staged validation next step starts with "(.+)"$"#)]
-fn staged_validation_next_step(world: &mut SpecWorld, prefix: String) {
-    let next = &world
-        .staged_validation
-        .as_ref()
-        .expect("a report")
-        .next_step;
-    assert!(next.starts_with(&prefix), "next step: {next}");
 }
 
 // ---- spec mutation steps ----------------------------------------------------
@@ -1309,27 +1260,27 @@ fn requirement_drafted_assisted(world: &mut SpecWorld) {
     world.prompt_transcript = prompter.transcript;
 }
 
-#[then(regex = r#"^the draft is staged as "([^"]+)"$"#)]
-fn draft_staged_as(world: &mut SpecWorld, id: String) {
+#[then(regex = r#"^the draft is written as "([^"]+)"$"#)]
+fn draft_written_as(world: &mut SpecWorld, id: String) {
     let report = world.draft_report.as_ref().expect("a draft report");
-    assert!(report.staged, "report: {report:?}");
+    assert!(report.written, "report: {report:?}");
     assert_eq!(report.id, id);
 }
 
-#[then("the draft is not staged")]
-fn draft_not_staged(world: &mut SpecWorld) {
+#[then("the draft is not written")]
+fn draft_not_written(world: &mut SpecWorld) {
     let report = world.draft_report.as_ref().expect("a draft report");
-    assert!(!report.staged, "report: {report:?}");
+    assert!(!report.written, "report: {report:?}");
 }
 
-#[then(regex = r#"^the staged requirement "([^"]+)" has (\d+) criteria$"#)]
-fn staged_requirement_criteria_count(world: &mut SpecWorld, id: String, count: usize) {
-    let staged = world.staged_spec();
-    let requirement = staged
+#[then(regex = r#"^the written requirement "([^"]+)" has (\d+) criteria$"#)]
+fn written_requirement_criteria_count(world: &mut SpecWorld, id: String, count: usize) {
+    let written = world.written_spec();
+    let requirement = written
         .requirements
         .iter()
         .find(|r| r.id == id)
-        .unwrap_or_else(|| panic!("no staged requirement {id}"));
+        .unwrap_or_else(|| panic!("no written requirement {id}"));
     assert_eq!(
         requirement.acceptance_criteria.len(),
         count,
@@ -1359,9 +1310,9 @@ fn draft_next_step_contains(world: &mut SpecWorld, fragment: String) {
     assert!(report.next_step.contains(&fragment), "report: {report:?}");
 }
 
-#[then(regex = r"^the staged spec has (\d+) requirements?$")]
-fn staged_spec_requirement_count(world: &mut SpecWorld, count: usize) {
-    assert_eq!(world.staged_spec().requirements.len(), count);
+#[then(regex = r"^the written spec has (\d+) requirements?$")]
+fn written_spec_requirement_count(world: &mut SpecWorld, count: usize) {
+    assert_eq!(world.written_spec().requirements.len(), count);
 }
 
 #[then(regex = r"^the working spec has (\d+) requirements?$")]
@@ -1369,9 +1320,13 @@ fn working_spec_requirement_count(world: &mut SpecWorld, count: usize) {
     assert_eq!(world.working_spec().requirements.len(), count);
 }
 
-#[then("nothing is staged at the spec path")]
-fn nothing_staged_at_spec_path(world: &mut SpecWorld) {
-    assert_eq!(world.change_store().content(SPEC_PATH).unwrap(), None);
+#[then("the spec file is unchanged")]
+fn spec_file_is_unchanged(world: &mut SpecWorld) {
+    let before = world
+        .spec_file_at_start
+        .clone()
+        .expect("a spec file was written up front");
+    assert_eq!(world.work_tree().read(SPEC_PATH).unwrap(), before);
 }
 
 #[then(regex = r#"^the developer was told a finding containing "(.+)"$"#)]
@@ -1444,16 +1399,16 @@ fn marking_implemented_fails(world: &mut SpecWorld, id: String) {
     world.mutation_error = Some(error.0);
 }
 
-#[then(regex = r#"^the staged spec shows "([^"]+)" as "([^"]+)"$"#)]
-fn staged_spec_shows_status(world: &mut SpecWorld, id: String, status: String) {
-    let spec = world.staged_spec();
+#[then(regex = r#"^the written spec shows "([^"]+)" as "([^"]+)"$"#)]
+fn written_spec_shows_status(world: &mut SpecWorld, id: String, status: String) {
+    let spec = world.written_spec();
     let requirement = spec.requirements.iter().find(|r| r.id == id).unwrap();
     assert_eq!(requirement.status, status);
 }
 
-#[then(regex = r#"^the staged spec names "([^"]+)" as the feature file of "([^"]+)"$"#)]
-fn staged_spec_names_feature_file(world: &mut SpecWorld, feature: String, id: String) {
-    let spec = world.staged_spec();
+#[then(regex = r#"^the written spec names "([^"]+)" as the feature file of "([^"]+)"$"#)]
+fn written_spec_names_feature_file(world: &mut SpecWorld, feature: String, id: String) {
+    let spec = world.written_spec();
     let requirement = spec.requirements.iter().find(|r| r.id == id).unwrap();
     assert_eq!(requirement.feature_file.as_deref(), Some(feature.as_str()));
 }
@@ -1497,17 +1452,17 @@ fn spec_file_included_in_catalog(world: &mut SpecWorld, path: String) {
     );
 }
 
-#[then(regex = r#"^the include of "([^"]+)" under "([^"]+)" is staged as created$"#)]
-fn include_staged_as_created(world: &mut SpecWorld, file: String, parent: String) {
+#[then(regex = r#"^the include of "([^"]+)" under "([^"]+)" is written as created$"#)]
+fn include_written_as_created(world: &mut SpecWorld, file: String, parent: String) {
     let report = world.include_report.as_ref().expect("an include report");
-    assert!(report.staged && report.created, "report: {report:?}");
+    assert!(report.written && report.created, "report: {report:?}");
     assert_eq!(report.file, file);
     assert_eq!(report.parent, parent);
 }
 
-#[then(regex = r#"^the staged spec lists the include "([^"]+)"$"#)]
-fn staged_spec_lists_include(world: &mut SpecWorld, entry: String) {
-    let spec = world.staged_spec();
+#[then(regex = r#"^the written spec lists the include "([^"]+)"$"#)]
+fn written_spec_lists_include(world: &mut SpecWorld, entry: String) {
+    let spec = world.written_spec();
     assert!(
         spec.includes.contains(&entry),
         "includes: {:?}",
@@ -1515,14 +1470,14 @@ fn staged_spec_lists_include(world: &mut SpecWorld, entry: String) {
     );
 }
 
-#[then(regex = r#"^the staged spec file "([^"]+)" has (\d+) requirements$"#)]
-fn staged_spec_file_requirement_count(world: &mut SpecWorld, path: String, count: usize) {
-    assert_eq!(world.staged_spec_file(&path).requirements.len(), count);
+#[then(regex = r#"^the written spec file "([^"]+)" has (\d+) requirements$"#)]
+fn written_spec_file_requirement_count(world: &mut SpecWorld, path: String, count: usize) {
+    assert_eq!(world.written_spec_file(&path).requirements.len(), count);
 }
 
-#[then(regex = r#"^the staged spec file "([^"]+)" shows "([^"]+)" as "([^"]+)"$"#)]
-fn staged_spec_file_shows_status(world: &mut SpecWorld, path: String, id: String, status: String) {
-    let spec = world.staged_spec_file(&path);
+#[then(regex = r#"^the written spec file "([^"]+)" shows "([^"]+)" as "([^"]+)"$"#)]
+fn written_spec_file_shows_status(world: &mut SpecWorld, path: String, id: String, status: String) {
+    let spec = world.written_spec_file(&path);
     let requirement = spec
         .requirements
         .iter()
@@ -1706,14 +1661,14 @@ fn feature_is_created(world: &mut SpecWorld, path: String, name: String) {
         .unwrap();
 }
 
-#[then(regex = r#"^staged content at "([^"]+)" equals:$"#)]
-fn staged_content_equals(world: &mut SpecWorld, path: String, step: &Step) {
+#[then(regex = r#"^written content at "([^"]+)" equals:$"#)]
+fn written_content_equals(world: &mut SpecWorld, path: String, step: &Step) {
     let expected = step.docstring.as_deref().unwrap().trim_matches('\n');
     let actual = world
-        .change_store()
-        .content(&path)
+        .work_tree()
+        .read(&path)
         .unwrap()
-        .unwrap_or_else(|| panic!("{path} is not staged"));
+        .unwrap_or_else(|| panic!("{path} was not written"));
     assert_eq!(actual.trim_end_matches('\n'), expected);
 }
 
@@ -1751,23 +1706,23 @@ fn scenario_deleted(world: &mut SpecWorld, name: String, path: String) {
         .unwrap();
 }
 
-#[then(regex = r#"^the staged feature "([^"]+)" has scenario "([^"]+)" tagged "([^"]+)"$"#)]
-fn staged_feature_scenario_tagged(world: &mut SpecWorld, path: String, name: String, tag: String) {
-    let doc = world.staged_feature(&path);
+#[then(regex = r#"^the written feature "([^"]+)" has scenario "([^"]+)" tagged "([^"]+)"$"#)]
+fn written_feature_scenario_tagged(world: &mut SpecWorld, path: String, name: String, tag: String) {
+    let doc = world.written_feature(&path);
     let scenario = doc.scenarios.iter().find(|s| s.name == name).unwrap();
     assert!(scenario.tags.contains(&tag), "tags: {:?}", scenario.tags);
 }
 
-#[then(regex = r#"^the staged feature "([^"]+)" scenario "([^"]+)" has (\d+) steps$"#)]
-fn staged_feature_scenario_steps(world: &mut SpecWorld, path: String, name: String, count: usize) {
-    let doc = world.staged_feature(&path);
+#[then(regex = r#"^the written feature "([^"]+)" scenario "([^"]+)" has (\d+) steps$"#)]
+fn written_feature_scenario_steps(world: &mut SpecWorld, path: String, name: String, count: usize) {
+    let doc = world.written_feature(&path);
     let scenario = doc.scenarios.iter().find(|s| s.name == name).unwrap();
     assert_eq!(scenario.steps.len(), count, "steps: {:?}", scenario.steps);
 }
 
-#[then(regex = r#"^the staged feature "([^"]+)" has (\d+) scenarios$"#)]
-fn staged_feature_scenario_count(world: &mut SpecWorld, path: String, count: usize) {
-    assert_eq!(world.staged_feature(&path).scenarios.len(), count);
+#[then(regex = r#"^the written feature "([^"]+)" has (\d+) scenarios$"#)]
+fn written_feature_scenario_count(world: &mut SpecWorld, path: String, count: usize) {
+    assert_eq!(world.written_feature(&path).scenarios.len(), count);
 }
 
 // ---- test runner and TDD persistence steps ----------------------------------
@@ -2251,7 +2206,7 @@ impl SpecWorld {
     ) -> GenerationService<
         GherkinFeatureCatalog,
         FsSourceFiles,
-        FsChangeStore,
+        FsWorkTree,
         FsSpecRepository,
         ScriptedLlm,
     > {
@@ -2270,7 +2225,7 @@ impl SpecWorld {
         GenerationService::new(
             GherkinFeatureCatalog::new(root.clone()),
             FsSourceFiles::in_module(root.clone(), layout.module_root.as_deref()),
-            FsChangeStore::new(root.clone()),
+            FsWorkTree::new(root.clone()),
             FsSpecRepository::new(root.join(SPEC_PATH)),
             language,
             layout,
@@ -2284,7 +2239,7 @@ impl SpecWorld {
     ) -> ImplementService<
         GherkinFeatureCatalog,
         FsSourceFiles,
-        FsChangeStore,
+        FsWorkTree,
         FsSpecRepository,
         ScriptedLlm,
     > {
@@ -2303,7 +2258,7 @@ impl SpecWorld {
         ImplementService::new(
             GherkinFeatureCatalog::new(root.clone()),
             FsSourceFiles::in_module(root.clone(), layout.module_root.as_deref()),
-            FsChangeStore::new(root.clone()),
+            FsWorkTree::new(root.clone()),
             FsSpecRepository::new(root.join(SPEC_PATH)),
             language,
             layout,
@@ -2313,13 +2268,7 @@ impl SpecWorld {
 
     fn status_service(
         &mut self,
-    ) -> StatusService<
-        GherkinFeatureCatalog,
-        FsSourceFiles,
-        FsChangeStore,
-        FsSpecRepository,
-        ScriptedLlm,
-    > {
+    ) -> StatusService<GherkinFeatureCatalog, FsSourceFiles, FsSpecRepository, ScriptedLlm> {
         let root = self.project_root();
         let language = detect_languages(&FsProjectFiles::new(root.clone()))
             .first()
@@ -2329,7 +2278,6 @@ impl SpecWorld {
         StatusService::new(
             GherkinFeatureCatalog::new(root.clone()),
             FsSourceFiles::in_module(root.clone(), layout.module_root.as_deref()),
-            FsChangeStore::new(root.clone()),
             FsSpecRepository::new(root.join(SPEC_PATH)),
             language,
             layout,
@@ -2554,10 +2502,9 @@ fn status_next_step_contains(world: &mut SpecWorld, fragment: String) {
     );
 }
 
-#[then(regex = r#"^the status lists (\d+) staged files? and (\d+) requirements?$"#)]
-fn status_lists(world: &mut SpecWorld, staged: usize, requirements: usize) {
+#[then(regex = r#"^the status lists (\d+) requirements?$"#)]
+fn status_lists(world: &mut SpecWorld, requirements: usize) {
     let report = world.status_report.as_ref().expect("a status report");
-    assert_eq!(report.staged.len(), staged, "staged: {:?}", report.staged);
     assert_eq!(
         report.requirements.len(),
         requirements,
@@ -2606,8 +2553,8 @@ fn persisted_attempt_log_holds(world: &mut SpecWorld, count: usize, req_id: Stri
     assert_eq!(attempts.len(), count, "log: {:?}", snapshot.attempt_log());
 }
 
-#[then(regex = r#"^the implementation staged "([^"]+)" from the model$"#)]
-fn implementation_staged(world: &mut SpecWorld, target: String) {
+#[then(regex = r#"^the implementation wrote "([^"]+)" from the model$"#)]
+fn implementation_written(world: &mut SpecWorld, target: String) {
     let report = world
         .implementation_report
         .as_ref()
@@ -2617,7 +2564,7 @@ fn implementation_staged(world: &mut SpecWorld, target: String) {
         "targets: {:?}",
         report.targets
     );
-    assert!(report.staged);
+    assert!(report.written);
     assert_eq!(report.source, "llm");
 }
 
@@ -2668,33 +2615,33 @@ fn missing_next_step_mentions(world: &mut SpecWorld, fragment: String) {
     assert!(next_step.contains(&fragment), "next step: {next_step}");
 }
 
-#[then(regex = r#"^the generation is staged at "([^"]+)" from "([^"]+)"$"#)]
-fn generation_staged_at(world: &mut SpecWorld, target: String, source: String) {
+#[then(regex = r#"^the generation is written at "([^"]+)" from "([^"]+)"$"#)]
+fn generation_written_at(world: &mut SpecWorld, target: String, source: String) {
     let report = world.generation_report();
     assert_eq!(report.target, target);
     assert_eq!(report.source, source);
-    assert!(report.staged);
+    assert!(report.written);
 }
 
-#[then(regex = r#"^the staged file "([^"]+)" contains "(.+)"$"#)]
-fn staged_file_contains(world: &mut SpecWorld, path: String, fragment: String) {
+#[then(regex = r#"^the written file "([^"]+)" contains "(.+)"$"#)]
+fn written_file_contains(world: &mut SpecWorld, path: String, fragment: String) {
     let fragment = unescape(&fragment);
     let content = world
-        .change_store()
-        .content(&path)
+        .work_tree()
+        .read(&path)
         .unwrap()
-        .unwrap_or_else(|| panic!("{path} is not staged"));
+        .unwrap_or_else(|| panic!("{path} was not written"));
     assert!(content.contains(&fragment), "content:\n{content}");
 }
 
-#[then(regex = r#"^the staged file "([^"]+)" defines "(.+)" exactly once$"#)]
-fn staged_file_defines_once(world: &mut SpecWorld, path: String, fragment: String) {
+#[then(regex = r#"^the written file "([^"]+)" defines "(.+)" exactly once$"#)]
+fn written_file_defines_once(world: &mut SpecWorld, path: String, fragment: String) {
     let fragment = unescape(&fragment);
     let content = world
-        .change_store()
-        .content(&path)
+        .work_tree()
+        .read(&path)
         .unwrap()
-        .unwrap_or_else(|| panic!("{path} is not staged"));
+        .unwrap_or_else(|| panic!("{path} was not written"));
     assert_eq!(content.matches(&fragment).count(), 1, "content:\n{content}");
 }
 
@@ -2839,6 +2786,12 @@ fn greenfield_next_step(world: &mut SpecWorld, prefix: String) {
     assert!(next.starts_with(&prefix), "next step: {next}");
 }
 
+#[then(regex = r#"^the greenfield next step mentions "(.+)"$"#)]
+fn greenfield_next_step_mentions(world: &mut SpecWorld, fragment: String) {
+    let next = &world.greenfield_report().next_step;
+    assert!(next.contains(&fragment), "next step: {next}");
+}
+
 #[then(regex = r#"^the greenfield phase is "([^"]+)"$"#)]
 fn greenfield_phase_is(world: &mut SpecWorld, phase: String) {
     assert_eq!(
@@ -2950,12 +2903,12 @@ fn a_working_spec_with_unshaped_criteria(world: &mut SpecWorld, id: String) {
     });
 }
 
-#[given(regex = r#"^a staged feature file "([^"]+)" named "([^"]+)"$"#)]
-fn a_staged_feature_file(world: &mut SpecWorld, path: String, name: String) {
+#[given(regex = r#"^a feature file "([^"]+)" named "([^"]+)"$"#)]
+fn a_written_feature_file(world: &mut SpecWorld, path: String, name: String) {
     world
         .real_scenario_service()
         .create_feature(&path, &name)
-        .expect("the feature is staged");
+        .expect("the feature was written");
 }
 
 /// Drive the orchestrator. `target` is the command-line argument, so the
@@ -3774,15 +3727,13 @@ fn offered_tools_do_not_include(world: &mut SpecWorld, name: String) {
     );
 }
 
-#[then("no default profile offers a staging or commit tool")]
-fn no_default_profile_offers_staging(world: &mut SpecWorld) {
+#[then("no default profile offers a tool that writes")]
+fn no_default_profile_offers_a_writer(world: &mut SpecWorld) {
     let forbidden = [
         "scenario_add",
         "scenario_update",
         "scenario_delete",
         "feature_create",
-        "changes_commit",
-        "changes_discard",
         "requirement_reword",
         "requirement_mark_implemented",
         "step_definition_create",
@@ -5084,4 +5035,190 @@ fn the_decision_model_list_is(world: &mut SpecWorld, expected: String) {
 
 fn main() {
     futures::executor::block_on(SpecWorld::run("tests/features"));
+}
+
+// ---- branch gate steps --------------------------------------------------------
+
+/// The branch gate's git: whatever the scenario said, plus a record of
+/// every branch it was asked to create.
+struct ScriptedVcs {
+    state: GitState,
+    refuses: bool,
+    created: Arc<Mutex<Vec<String>>>,
+}
+
+impl Vcs for ScriptedVcs {
+    fn state(&self) -> GitState {
+        self.state.clone()
+    }
+
+    fn create_branch(&self, name: &str) -> Result<(), VcsError> {
+        if self.refuses {
+            return Err(VcsError(format!("git could not create the branch {name}")));
+        }
+        self.created.lock().unwrap().push(name.to_string());
+        Ok(())
+    }
+}
+
+/// A prompter with one scripted answer, recording everything said. An
+/// exhausted script is the no-one-is-there case.
+struct GateAnswers {
+    answer: Option<String>,
+    said: Vec<String>,
+    asked: Vec<String>,
+}
+
+struct NoWork;
+impl Working for NoWork {}
+
+impl Prompter for GateAnswers {
+    fn tell(&mut self, message: &str) {
+        self.said.push(message.to_string());
+    }
+
+    fn working(&mut self, _: &str) -> Box<dyn Working> {
+        Box::new(NoWork)
+    }
+
+    fn ask(&mut self, question: &str) -> Result<String, PromptError> {
+        self.asked.push(question.to_string());
+        self.answer
+            .take()
+            .ok_or_else(|| PromptError("input is not readable - no one is there".into()))
+    }
+
+    fn confirm(&mut self, question: &str) -> Result<bool, PromptError> {
+        Ok(self.ask(question)?.eq_ignore_ascii_case("y"))
+    }
+}
+
+#[given(regex = r#"^the project is a git repository on "([^"]+)"$"#)]
+fn repository_on_branch(world: &mut SpecWorld, branch: String) {
+    world.git_state = GitState {
+        repository: true,
+        branch: Some(branch),
+        dirty: false,
+    };
+}
+
+#[given(regex = r#"^the project is a git repository on "([^"]+)" with uncommitted work$"#)]
+fn repository_dirty(world: &mut SpecWorld, branch: String) {
+    world.git_state = GitState {
+        repository: true,
+        branch: Some(branch),
+        dirty: true,
+    };
+}
+
+#[given(regex = r#"^the project is a git repository on "([^"]+)" where creating a branch fails$"#)]
+fn repository_that_refuses(world: &mut SpecWorld, branch: String) {
+    repository_on_branch(world, branch);
+    world.git_refuses = true;
+}
+
+#[given("the project is not a git repository")]
+fn not_a_repository(world: &mut SpecWorld) {
+    world.git_state = GitState::default();
+}
+
+fn run_gate(world: &mut SpecWorld, answer: Option<String>, no_branch: bool) {
+    let vcs = ScriptedVcs {
+        state: world.git_state.clone(),
+        refuses: world.git_refuses,
+        created: Arc::clone(&world.branches_created),
+    };
+    let mut prompter = GateAnswers {
+        answer,
+        said: Vec::new(),
+        asked: Vec::new(),
+    };
+    world.branch_outcome = Some(offer_branch(
+        &mut prompter,
+        &vcs,
+        no_branch,
+        "2026-10-05",
+        7,
+    ));
+    world.branch_transcript = prompter.said;
+    world.branch_transcript.extend(prompter.asked);
+}
+
+#[when(regex = r#"^the branch gate runs and the developer answers "(.*)"$"#)]
+fn gate_runs_with_answer(world: &mut SpecWorld, answer: String) {
+    run_gate(world, Some(answer), false);
+}
+
+#[when("the branch gate runs with --no-branch")]
+fn gate_runs_with_no_branch(world: &mut SpecWorld) {
+    run_gate(world, Some("newlines".into()), true);
+}
+
+#[when("the branch gate runs with no one to answer")]
+fn gate_runs_unanswered(world: &mut SpecWorld) {
+    run_gate(world, None, false);
+}
+
+#[then(regex = r#"^the branch "([^"]+)" is created$"#)]
+fn branch_created(world: &mut SpecWorld, name: String) {
+    assert_eq!(*world.branches_created.lock().unwrap(), vec![name.clone()]);
+    assert_eq!(world.branch_outcome, Some(Branched::Created(name)));
+}
+
+#[then(regex = r#"^a branch starting with "([^"]+)" is created$"#)]
+fn branch_created_with_prefix(world: &mut SpecWorld, prefix: String) {
+    let created = world.branches_created.lock().unwrap();
+    assert_eq!(created.len(), 1, "created: {created:?}");
+    assert!(created[0].starts_with(&prefix), "created: {created:?}");
+}
+
+#[then("no branch is created")]
+fn no_branch_created(world: &mut SpecWorld) {
+    let created = world.branches_created.lock().unwrap();
+    assert!(created.is_empty(), "created: {created:?}");
+}
+
+#[then("the developer was asked nothing")]
+fn asked_nothing(world: &mut SpecWorld) {
+    assert!(
+        world.branch_transcript.is_empty(),
+        "said: {:?}",
+        world.branch_transcript
+    );
+}
+
+#[then("the developer was told the run writes the project's files directly")]
+fn told_direct_writes(world: &mut SpecWorld) {
+    assert_gate_said(world, "writes the project's files directly");
+}
+
+#[then("the developer was warned that there is no undo")]
+fn warned_no_undo(world: &mut SpecWorld) {
+    assert_gate_said(world, "no undo");
+}
+
+#[then("the developer was warned about uncommitted work")]
+fn warned_dirty(world: &mut SpecWorld) {
+    assert_gate_said(world, "uncommitted work");
+}
+
+#[then("the developer was warned that the name is not usable")]
+fn warned_unusable_name(world: &mut SpecWorld) {
+    assert_gate_said(world, "not a usable branch name");
+}
+
+#[then(regex = r#"^the developer was told the run continues on "([^"]+)"$"#)]
+fn told_run_continues(world: &mut SpecWorld, branch: String) {
+    assert_gate_said(world, &format!("Continuing on {branch}"));
+}
+
+fn assert_gate_said(world: &SpecWorld, fragment: &str) {
+    assert!(
+        world
+            .branch_transcript
+            .iter()
+            .any(|line| line.contains(fragment)),
+        "said: {:?}",
+        world.branch_transcript
+    );
 }

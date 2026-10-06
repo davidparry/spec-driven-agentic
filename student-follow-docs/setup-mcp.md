@@ -16,7 +16,8 @@ spec mcp serve --root /absolute/path/to/spec-driven-agentic
 ```
 
 Cursor, `pi -nbt`, and the bundled `smoke-test.jar` all speak to this process
-over stdio and see **every tool it exposes**, including staging.
+over stdio and see **every tool it exposes**, including the ones that
+write files.
 
 ---
 

@@ -86,6 +86,7 @@ pub fn project_layout(root: &Path) -> ProjectStructure {
         FsMemoryStore::new(root.to_path_buf()),
         FsProjectInventory::new(root.to_path_buf()),
         FsProjectFiles::new(root.to_path_buf()),
+        crate::adapters::git_cli::GitCli::new(root.to_path_buf()),
     );
     if let Ok(stored) = memory.load()
         && stored.structure.is_resolved()
@@ -288,6 +289,7 @@ pub fn primary_language(root: &Path) -> Result<Language, String> {
         FsMemoryStore::new(root.to_path_buf()),
         FsProjectInventory::new(root.to_path_buf()),
         FsProjectFiles::new(root.to_path_buf()),
+        crate::adapters::git_cli::GitCli::new(root.to_path_buf()),
     );
     if let Ok(memory) = memory.load()
         && let Some(language) = Language::parse(&memory.language)

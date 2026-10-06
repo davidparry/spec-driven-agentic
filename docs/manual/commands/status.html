@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-bb14de4e.js";
+            window.path_to_searchindex_js = "../searchindex-d84b362c.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-2ab172c3.js"></script>
+        <script src="../toc-0006eac3.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -191,9 +191,6 @@ am I in the whole loop and what do I do now”.</p>
 </code></pre>
 <pre><code class="language-json">{
   "phase": "RED",
-  "staged": [
-    { "path": "src/main/java/BddTest.java", "action": "modify", "summary": "implementation attempt for REQ-001 (llm)" }
-  ],
   "requirements": [
     {
       "id": "REQ-001",
@@ -202,21 +199,17 @@ am I in the whole loop and what do I do now”.</p>
       "findings": []
     }
   ],
-  "nextStep": "1 staged file(s) await review - inspect with spec changes show, apply with spec changes commit, then run spec test."
+  "nextStep": "REQ-001 has every asset in place and the bar is RED - run spec test; on RED let the model try with spec implement REQ-001."
 }
 </code></pre>
 <h2 id="how-the-next-step-is-chosen"><a class="header" href="#how-the-next-step-is-chosen">How the next step is chosen</a></h2>
 <p>The priority order mirrors the loop itself:</p>
 <ol>
-<li><strong>Staged changes wait</strong> — nothing the harness authors touches the
-working tree until you apply it, so an unapplied implementation
-attempt (or scenario, or spec edit) always comes first:
-<code>spec changes show</code>, then <code>spec changes commit</code>, then <code>spec test</code>.</li>
 <li><strong>A requirement is in flight</strong> — its scenario, step definitions,
-and unit test all exist. On GREEN the loop closes with the chain
-<code>spec mark-implemented &lt;id&gt;</code>, then <code>spec changes validate</code>, then
-<code>spec changes commit</code>; on any other bar the step is <code>spec test</code>,
-and on RED <code>spec implement &lt;id&gt;</code> lets the model try.</li>
+and unit test all exist. On GREEN the loop closes with
+<code>spec mark-implemented &lt;id&gt;</code>, then <code>spec validate</code>; on any other bar
+the step is <code>spec test</code>, and on RED <code>spec implement &lt;id&gt;</code> lets the
+model try.</li>
 <li><strong>The earliest asset gap</strong> — a pending requirement is missing its
 tagged scenario (<code>spec scenario add</code>), step definitions
 (<code>spec steps generate</code>), or unit test
@@ -231,11 +224,10 @@ several requirements you see every gap, not just the first.</p>
 deterministic report is followed by one advice call: the model is
 briefed with the whole workflow process — the states, the commands,
 the loop, and the invariants — plus the current phase, the last run’s
-counts, the staging area, and every requirement’s position, and it
-answers with the next command in plain words:</p>
+counts, and every requirement’s position, and it answers with the next
+command in plain words:</p>
 <pre><code class="language-text">Model advice: The bar is GREEN and REQ-001 has every asset in place -
-close the loop with spec mark-implemented REQ-001, then spec
-validate, then spec changes commit.
+close the loop with spec mark-implemented REQ-001, then spec validate.
 </code></pre>
 <p>Without a model the report alone is the whole reply, and a model
 failure never breaks <code>spec status</code>.</p>
@@ -245,14 +237,11 @@ only when you run <a href="spec.html"><code>spec mark-implemented</code></a> —
 command is GREEN-gated: it refuses unless the last recorded run
 passed, and it refuses without a scenario tagged <code>@&lt;id&gt;</code> (it records
 the tagged feature as the requirement’s <code>featureFile</code>). The road is
-always: staged changes applied → <code>spec test</code> GREEN →
-<code>spec mark-implemented &lt;id&gt;</code> → <code>spec changes validate</code> →
-<code>spec changes commit</code> (the status change is staged too, like every
-mutation).</p>
+always: <code>spec test</code> GREEN → <code>spec mark-implemented &lt;id&gt;</code> →
+<code>spec validate</code>.</p>
 <h2 id="see-also"><a class="header" href="#see-also">See also</a></h2>
 <ul>
 <li><a href="state.html"><code>spec state</code></a> — the raw TDD state: phase, last run, refactor log.</li>
-<li><a href="changes.html"><code>spec changes</code></a> — review and apply what is staged.</li>
 <li><a href="implement.html"><code>spec implement</code></a> — the model attempt, with its own preflight.</li>
 </ul>
 

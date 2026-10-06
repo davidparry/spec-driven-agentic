@@ -22,8 +22,9 @@ hatches.
 ## How to read this manual
 
 - **Using spec** covers the concepts that span commands: the global
-  flags, the interactive shell, the workflow phases, and the staged
-  changes model that protects your working tree.
+  flags, the interactive shell, the workflow phases, how the harness
+  writes your files, and the branch it offers before a run that writes
+  a lot of them.
 - **Command reference** documents every command, subcommand, and flag,
   with realistic examples and the exact JSON reply shapes.
 

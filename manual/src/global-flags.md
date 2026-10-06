@@ -149,6 +149,25 @@ spec --tools list_requirements,get_requirement status
 Override `[tools] max_rounds` for one run: how many tool-call rounds
 `Agent::ask` may take before it must return a parsed reply.
 
+## `--no-branch`
+
+Skip [the branch gate](branch-gate.md). `spec greenfield` and
+`spec deliver` normally stop once, before they write anything, to offer
+the run a branch of its own; with this flag they ask nothing and start
+immediately.
+
+Git is not consulted at all, which is the point of the flag rather than
+a side effect of it. A project deliberately kept outside version
+control should not be asked about a branch, and a CI job that already
+made its own should not pay for the probe or risk a question nothing is
+there to answer.
+
+```bash
+spec --no-branch deliver "sum comma-separated numbers"
+```
+
+Every other command ignores the flag, because no other command asks.
+
 ## `-V`, `--version`
 
 Prints the version compiled into the binary (from `Cargo.toml` at

@@ -113,7 +113,6 @@ spec draft          # describe what to build in plain words; with a
                         # criteria for you to edit (manual prompts otherwise)
 spec validate       # structure gate
 spec refine REQ-001 # wording gate
-spec changes commit      # apply the staged spec
 spec test                # expect RED
 # ...implement...
 spec test                # expect GREEN
@@ -121,7 +120,7 @@ spec refactor --note "extract parser" --req REQ-001   # does the cleanup
 git diff                 # read what it changed
 spec test                # still GREEN
 spec status              # confirm REQ-001 is ready to mark
-spec mark-implemented REQ-001 && spec changes commit
+spec mark-implemented REQ-001
 ```
 
 This repository’s String Calculator workshop can be finished with the
@@ -146,14 +145,13 @@ still empty.
   history        interactive-shell command history
   cache/         cached LLM responses and tool catalogs
   log/           daily diagnostic logs
-  staged/        mutations waiting for spec changes commit
+  .lock          the advisory lock that serializes concurrent writes
 ```
 
 Only `config.toml` is meant to be committed. `spec init` writes a
 gitignore that ignores `.spec/*` and keeps `.spec/config.toml`. The
 other children are generated. Deleting `cache/` or `log/` is always
-safe. Deleting `state.json` resets the phase to START. Deleting
-`staged/` throws away mutations that have not been committed.
+safe. Deleting `state.json` resets the phase to START.
 
 ## Working against an existing project
 

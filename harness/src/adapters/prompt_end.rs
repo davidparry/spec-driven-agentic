@@ -64,8 +64,8 @@ impl<P: Prompter> AbortOnEndOfInput<P> {
         let _ = writeln!(
             self.explain_to,
             "{error}: nothing more will be asked, the confirmation is declined, \
-             and nothing is staged. Supply an answer for every prompt, including \
-             the final confirmation, to stage from a pipe."
+             and nothing is written. Supply an answer for every prompt, including \
+             the final confirmation, to write from a pipe."
         );
         let _ = self.explain_to.flush();
     }
@@ -244,7 +244,11 @@ mod tests {
         let _ = prompter.ask("story:");
         let _ = prompter.confirm("Stage this?");
         assert_eq!(sink.text().lines().count(), 1, "{}", sink.text());
-        assert!(sink.text().contains("nothing is staged"), "{}", sink.text());
+        assert!(
+            sink.text().contains("nothing is written"),
+            "{}",
+            sink.text()
+        );
     }
 
     /// A genuine read failure is not the end of the input, and must

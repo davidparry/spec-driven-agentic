@@ -1,12 +1,12 @@
 //! Typed feature and scenario mutations. Every edit is parsed back as
-//! Gherkin before it is staged, so broken syntax can never reach the
-//! staging area, let alone the working tree.
+//! Gherkin before it is written, so broken syntax can never reach the
+//! working tree.
 
 use serde::Serialize;
 
 use crate::application::spec_service::ServiceError;
 use crate::domain::feature::{self, FeatureDoc, ScenarioDoc};
-use crate::ports::{ChangeStore, FeatureCatalog};
+use crate::ports::{FeatureCatalog, WorkTree};
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
 pub struct MutationReport {
@@ -14,24 +14,24 @@ pub struct MutationReport {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scenario: Option<String>,
     pub action: String,
-    pub staged: bool,
+    pub written: bool,
     #[serde(rename = "nextStep")]
     pub next_step: String,
 }
 
-pub struct ScenarioService<C: ChangeStore, F: FeatureCatalog> {
+pub struct ScenarioService<C: WorkTree, F: FeatureCatalog> {
     store: C,
     catalog: F,
 }
 
-impl<C: ChangeStore, F: FeatureCatalog> ScenarioService<C, F> {
+impl<C: WorkTree, F: FeatureCatalog> ScenarioService<C, F> {
     pub fn new(store: C, catalog: F) -> Self {
         Self { store, catalog }
     }
 
     pub fn create_feature(&self, path: &str, name: &str) -> Result<MutationReport, ServiceError> {
         let _claim = self.store.claim()?;
-        if self.effective_doc(path)?.is_some() {
+        if self.current_doc(path)?.is_some() {
             return Err(ServiceError(format!(
                 "{path} already exists - add scenarios to it with scenario add."
             )));
@@ -45,7 +45,7 @@ impl<C: ChangeStore, F: FeatureCatalog> ScenarioService<C, F> {
             scenarios: Vec::new(),
             trailing: Vec::new(),
         };
-        self.stage(&doc, &format!("create feature \"{name}\""))?;
+        self.save(&doc, &format!("create feature \"{name}\""))?;
         Ok(self.report(path, None, "create"))
     }
 
@@ -73,7 +73,7 @@ impl<C: ChangeStore, F: FeatureCatalog> ScenarioService<C, F> {
             tags: vec![requirement_tag(req_id)],
             steps,
         });
-        self.stage(&doc, &format!("add scenario \"{name}\" for {req_id}"))?;
+        self.save(&doc, &format!("add scenario \"{name}\" for {req_id}"))?;
         Ok(self.report(path, Some(name), "add"))
     }
 
@@ -98,7 +98,7 @@ impl<C: ChangeStore, F: FeatureCatalog> ScenarioService<C, F> {
         if let Some(req_id) = req_id {
             scenario.tags = vec![requirement_tag(req_id)];
         }
-        self.stage(&doc, &format!("update scenario \"{name}\""))?;
+        self.save(&doc, &format!("update scenario \"{name}\""))?;
         Ok(self.report(path, Some(name), "update"))
     }
 
@@ -110,18 +110,12 @@ impl<C: ChangeStore, F: FeatureCatalog> ScenarioService<C, F> {
         if doc.scenarios.len() == before {
             return Err(no_such_scenario(path, name));
         }
-        self.stage(&doc, &format!("delete scenario \"{name}\""))?;
+        self.save(&doc, &format!("delete scenario \"{name}\""))?;
         Ok(self.report(path, Some(name), "delete"))
     }
 
-    /// The feature as it would look after commit: staged content wins,
-    /// then the working tree; `None` when the file exists nowhere.
-    fn effective_doc(&self, path: &str) -> Result<Option<FeatureDoc>, ServiceError> {
-        if let Some(content) = self.store.content(path)? {
-            return feature::parse(path, &content)
-                .map(Some)
-                .map_err(ServiceError);
-        }
+    /// The feature on disk, or `None` when there is no such file.
+    fn current_doc(&self, path: &str) -> Result<Option<FeatureDoc>, ServiceError> {
         if !self.catalog.exists(path) {
             return Ok(None);
         }
@@ -132,18 +126,18 @@ impl<C: ChangeStore, F: FeatureCatalog> ScenarioService<C, F> {
     }
 
     fn existing_doc(&self, path: &str) -> Result<FeatureDoc, ServiceError> {
-        self.effective_doc(path)?.ok_or_else(|| {
+        self.current_doc(path)?.ok_or_else(|| {
             ServiceError(format!(
                 "{path}: no such feature file. Create it first with feature create."
             ))
         })
     }
 
-    /// Render, re-parse (the syntax gate), then stage.
-    fn stage(&self, doc: &FeatureDoc, summary: &str) -> Result<(), ServiceError> {
+    /// Render, re-parse (the syntax gate), then write.
+    fn save(&self, doc: &FeatureDoc, summary: &str) -> Result<(), ServiceError> {
         let text = feature::render(doc);
         feature::parse(&doc.path, &text).map_err(ServiceError)?;
-        self.store.stage(&doc.path, &text, summary)?;
+        self.store.write(&doc.path, &text, summary)?;
         Ok(())
     }
 
@@ -152,10 +146,8 @@ impl<C: ChangeStore, F: FeatureCatalog> ScenarioService<C, F> {
             feature: path.to_string(),
             scenario: scenario.map(String::from),
             action: action.to_string(),
-            staged: true,
-            next_step: "Review with changes show, run validate, then apply with \
-                        changes commit."
-                .into(),
+            written: true,
+            next_step: format!("{path} updated. Run spec validate, then spec test."),
         }
     }
 }
@@ -187,38 +179,36 @@ fn no_such_scenario(path: &str, name: &str) -> ServiceError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{InMemoryChangeStore, InMemoryFeatureCatalog};
+    use crate::test_support::SharedTree;
 
     const PATH: &str = "features/calc.feature";
     const EXISTING: &str = "Feature: Calc\n\n  @REQ-001\n  Scenario: Empty string\n    Given a calculator\n    When add is called with \"\"\n    Then the result is 0\n";
 
-    fn service_with_file() -> ScenarioService<InMemoryChangeStore, InMemoryFeatureCatalog> {
-        let mut catalog = InMemoryFeatureCatalog::default();
-        catalog.files.insert(PATH.into(), EXISTING.into());
-        ScenarioService::new(InMemoryChangeStore::default(), catalog)
+    /// The work tree and the catalog are one tree, as they are on
+    /// disk: what a mutation writes is what the next one reads.
+    fn service_with_file() -> ScenarioService<SharedTree, SharedTree> {
+        let tree = SharedTree::holding(&[(PATH, EXISTING)]);
+        ScenarioService::new(tree.clone(), tree)
     }
 
-    fn staged(
-        service: &ScenarioService<InMemoryChangeStore, InMemoryFeatureCatalog>,
-    ) -> FeatureDoc {
-        let content = service.store.content(PATH).unwrap().expect("staged");
+    fn empty_service() -> ScenarioService<SharedTree, SharedTree> {
+        let tree = SharedTree::default();
+        ScenarioService::new(tree.clone(), tree)
+    }
+
+    fn written(service: &ScenarioService<SharedTree, SharedTree>) -> FeatureDoc {
+        let content = service.store.get(PATH).expect("written");
         feature::parse(PATH, &content).unwrap()
     }
 
     #[test]
     fn create_feature_stages_a_bare_feature_file() {
-        let service = ScenarioService::new(
-            InMemoryChangeStore::default(),
-            InMemoryFeatureCatalog::default(),
-        );
+        let service = empty_service();
         let report = service.create_feature(PATH, "Calc").unwrap();
         assert_eq!(report.action, "create");
         assert_eq!(report.scenario, None);
-        assert!(report.staged);
-        assert_eq!(
-            service.store.content(PATH).unwrap().as_deref(),
-            Some("Feature: Calc\n")
-        );
+        assert!(report.written);
+        assert_eq!(service.store.get(PATH).as_deref(), Some("Feature: Calc\n"));
     }
 
     #[test]
@@ -247,7 +237,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(report.scenario.as_deref(), Some("Single number"));
-        let doc = staged(&service);
+        let doc = written(&service);
         assert_eq!(doc.scenarios.len(), 2);
         assert_eq!(doc.scenarios[1].tags, vec!["@REQ-002"]);
         assert_eq!(
@@ -258,21 +248,18 @@ mod tests {
 
     /// The workshop defect: the kata's file closes with a note telling
     /// the reader that REQ-003+ get written live, and one `scenario
-    /// add` deleted it. The staged bytes are what the human reviews,
+    /// add` deleted it. The written bytes are what the human reviews,
     /// so this asserts on them rather than on the parsed document.
     #[test]
     fn add_scenario_keeps_the_note_that_closes_the_file_and_stays_above_it() {
         const TRAILER: &str = "  # REQ-003+: scenarios are written live during the workshop.";
-        let mut catalog = InMemoryFeatureCatalog::default();
-        catalog
-            .files
-            .insert(PATH.into(), format!("{EXISTING}\n{TRAILER}\n"));
-        let service = ScenarioService::new(InMemoryChangeStore::default(), catalog);
+        let tree = SharedTree::holding(&[(PATH, &format!("{EXISTING}\n{TRAILER}\n"))]);
+        let service = ScenarioService::new(tree.clone(), tree);
 
         service
             .add_scenario(PATH, "REQ-009", "Single number", vec!["Given a".into()])
             .unwrap();
-        let once = service.store.content(PATH).unwrap().expect("staged");
+        let once = service.store.get(PATH).expect("written");
         assert!(
             once.contains(TRAILER),
             "the closing note was deleted: {once}"
@@ -282,14 +269,14 @@ mod tests {
             "the new scenario landed below the closing note: {once}"
         );
 
-        // A second add re-reads the staged file, so this is where a
+        // A second add re-reads the file on disk, so this is where a
         // duplicated or dropped trailer would show up.
         service
             .add_scenario(PATH, "REQ-010", "Two numbers", vec!["Given a".into()])
             .unwrap();
-        let twice = service.store.content(PATH).unwrap().expect("staged");
+        let twice = service.store.get(PATH).expect("written");
         assert_eq!(twice.matches(TRAILER).count(), 1, "got: {twice}");
-        assert_eq!(staged(&service).scenarios.len(), 3);
+        assert_eq!(written(&service).scenarios.len(), 3);
     }
 
     #[test]
@@ -298,7 +285,7 @@ mod tests {
         service
             .add_scenario(PATH, "@REQ-002", "S", vec!["Given a".into()])
             .unwrap();
-        assert_eq!(staged(&service).scenarios[1].tags, vec!["@REQ-002"]);
+        assert_eq!(written(&service).scenarios[1].tags, vec!["@REQ-002"]);
     }
 
     #[test]
@@ -316,10 +303,7 @@ mod tests {
 
     #[test]
     fn add_scenario_to_a_missing_feature_names_the_recovery_command() {
-        let service = ScenarioService::new(
-            InMemoryChangeStore::default(),
-            InMemoryFeatureCatalog::default(),
-        );
+        let service = empty_service();
         let error = service
             .add_scenario(PATH, "REQ-001", "S", vec!["Given a".into()])
             .unwrap_err();
@@ -331,7 +315,7 @@ mod tests {
     }
 
     #[test]
-    fn a_step_without_a_gherkin_keyword_is_refused_before_staging() {
+    fn a_step_without_a_gherkin_keyword_is_refused_before_writing() {
         let service = service_with_file();
         let error = service
             .add_scenario(PATH, "REQ-002", "S", vec!["the result is 0".into()])
@@ -340,7 +324,11 @@ mod tests {
             error.0,
             "step \"the result is 0\" must start with Given, When, Then, And, or But"
         );
-        assert_eq!(service.store.content(PATH).unwrap(), None);
+        assert_eq!(
+            service.store.get(PATH).as_deref(),
+            Some(EXISTING),
+            "a refused step must leave the file as it was"
+        );
         let update = service
             .update_scenario(PATH, "Empty string", vec!["nope".into()], None)
             .unwrap_err();
@@ -358,7 +346,7 @@ mod tests {
                 Some("REQ-009"),
             )
             .unwrap();
-        let doc = staged(&service);
+        let doc = written(&service);
         assert_eq!(doc.scenarios[0].steps.len(), 2);
         assert_eq!(doc.scenarios[0].tags, vec!["@REQ-009"]);
     }
@@ -369,7 +357,7 @@ mod tests {
         service
             .update_scenario(PATH, "Empty string", vec![], Some("REQ-009"))
             .unwrap();
-        let doc = staged(&service);
+        let doc = written(&service);
         assert_eq!(doc.scenarios[0].steps.len(), 3);
         assert_eq!(doc.scenarios[0].tags, vec!["@REQ-009"]);
     }
@@ -392,7 +380,7 @@ mod tests {
         let service = service_with_file();
         let report = service.delete_scenario(PATH, "Empty string").unwrap();
         assert_eq!(report.action, "delete");
-        assert!(staged(&service).scenarios.is_empty());
+        assert!(written(&service).scenarios.is_empty());
     }
 
     #[test]
@@ -403,7 +391,7 @@ mod tests {
     }
 
     #[test]
-    fn mutations_build_on_staged_content_not_the_working_tree() {
+    fn mutations_build_on_what_the_last_one_wrote() {
         let service = service_with_file();
         service
             .add_scenario(PATH, "REQ-002", "Second", vec!["Given a".into()])
@@ -411,13 +399,13 @@ mod tests {
         service
             .add_scenario(PATH, "REQ-003", "Third", vec!["Given a".into()])
             .unwrap();
-        assert_eq!(staged(&service).scenarios.len(), 3);
+        assert_eq!(written(&service).scenarios.len(), 3);
     }
 
     #[test]
-    fn corrupt_staged_content_is_a_structured_error() {
+    fn corrupt_content_on_disk_is_a_structured_error() {
         let service = service_with_file();
-        service.store.stage(PATH, "not gherkin", "oops").unwrap();
+        service.store.write(PATH, "not gherkin", "oops").unwrap();
         let error = service
             .add_scenario(PATH, "REQ-002", "S", vec!["Given a".into()])
             .unwrap_err();

@@ -463,8 +463,8 @@ mod tests {
             sink.clone(),
         ));
         assert_eq!(prompter.ask("Title?").unwrap(), "a fine title");
-        prompter.tell("staged");
-        assert_eq!(sink.text(), "Title? staged\n");
+        prompter.tell("written");
+        assert_eq!(sink.text(), "Title? written\n");
     }
 
     /// Records every write in order, so a test can ask what reached the

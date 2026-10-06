@@ -18,7 +18,7 @@ use spec_harness::adapters::console_prompt::ConsolePrompter;
 use spec_harness::adapters::fs_project::FsProjectFiles;
 use spec_harness::adapters::fs_scaffold::FsScaffoldWriter;
 use spec_harness::adapters::fs_spec::FsSpecRepository;
-use spec_harness::adapters::fs_staging::FsChangeStore;
+use spec_harness::adapters::fs_worktree::FsWorkTree;
 use spec_harness::adapters::mcp_client::McpToolBroker;
 use spec_harness::adapters::mcp_config::FsMcpRegistry;
 use spec_harness::adapters::ollama::{DEFAULT_ENDPOINT, DEFAULT_GENERATION_TIMEOUT, OllamaCatalog};
@@ -43,7 +43,6 @@ use spec_harness::application::model_service::{
 };
 use spec_harness::application::refactor_service::{RefactorReport, RefactorService};
 use spec_harness::application::spec_mutation_service::SpecMutationService;
-use spec_harness::application::spec_service::STAGED;
 use spec_harness::application::status_service::StatusService;
 use spec_harness::application::tdd_service::TddError;
 use spec_harness::application::tool_call_service::ToolCallService;
@@ -143,6 +142,11 @@ struct Cli {
     #[arg(long, global = true)]
     max_rounds: Option<u32>,
 
+    /// Do not offer a git branch before a generating run: write the
+    /// project where it stands, and do not check for git at all
+    #[arg(long, global = true)]
+    no_branch: bool,
+
     /// Omitted entirely: print help and open the interactive shell
     #[command(subcommand)]
     command: Option<Command>,
@@ -191,9 +195,6 @@ enum Command {
     Status,
     /// Begin a refactor step; only allowed on GREEN (start_refactor)
     Refactor(RefactorArgs),
-    /// Staged-transaction management
-    #[command(subcommand)]
-    Changes(ChangesCommand),
     /// LLM model discovery and selection (Ollama)
     #[command(subcommand)]
     Model(ModelCommand),
@@ -249,7 +250,7 @@ enum SpecCommand {
         /// The requirement to review, e.g. REQ-003
         req_id: String,
     },
-    /// Reword an existing requirement (staged). Flags skip the wizard.
+    /// Reword an existing requirement. Flags skip the wizard.
     Reword {
         req_id: String,
         #[arg(long)]
@@ -259,7 +260,7 @@ enum SpecCommand {
         #[arg(long)]
         criterion: Vec<String>,
     },
-    /// Point a requirement at a feature file (staged; for extracted specs)
+    /// Point a requirement at a feature file (for extracted specs)
     SetFeature {
         req_id: String,
         #[arg(long)]
@@ -274,7 +275,7 @@ enum SpecCommand {
 
 #[derive(Subcommand)]
 enum IncludeCommand {
-    /// Include a spec file in the catalog (staged); created empty when missing
+    /// Include a spec file in the catalog; created empty when missing
     Add {
         /// The spec file to include, e.g. requirements/core/math.json
         path: String,
@@ -291,7 +292,7 @@ enum FeatureCommand {
     List,
     /// Show one parsed feature file (path relative to --root)
     Show { path: String },
-    /// Create a feature file (staged)
+    /// Create a feature file
     Create {
         /// Feature file path relative to --root
         #[arg(long)]
@@ -304,7 +305,7 @@ enum FeatureCommand {
 
 #[derive(Subcommand)]
 enum ScenarioCommand {
-    /// Append a tagged scenario to a feature file (staged)
+    /// Append a tagged scenario to a feature file
     Add {
         /// Feature file path relative to --root
         #[arg(long)]
@@ -319,14 +320,14 @@ enum ScenarioCommand {
         #[arg(long = "step")]
         steps: Vec<String>,
     },
-    /// Write a requirement's scenarios from its acceptance criteria (staged)
+    /// Write a requirement's scenarios from its acceptance criteria
     Generate {
         req_id: String,
         /// Feature file to append to; defaults to the requirement's own
         #[arg(long)]
         feature: Option<String>,
     },
-    /// Replace a scenario's steps and/or requirement tag (staged)
+    /// Replace a scenario's steps and/or requirement tag
     Update {
         #[arg(long)]
         feature: String,
@@ -339,7 +340,7 @@ enum ScenarioCommand {
         #[arg(long = "step")]
         steps: Vec<String>,
     },
-    /// Remove a scenario from a feature file (staged)
+    /// Remove a scenario from a feature file
     Delete {
         #[arg(long)]
         feature: String,
@@ -417,15 +418,6 @@ struct RefactorArgs {
     /// Mark the phase and stop - the cleanup stays in your hands
     #[arg(long)]
     manual: bool,
-}
-
-#[derive(Subcommand)]
-enum ChangesCommand {
-    Show,
-    Commit,
-    Discard,
-    /// Validate Gherkin on disk and in the stage (changes_validate)
-    Validate,
 }
 
 #[derive(Subcommand)]
@@ -625,6 +617,7 @@ fn main() -> anyhow::Result<()> {
                 cli.retry,
                 cli.tools.as_deref(),
                 cli.max_rounds,
+                cli.no_branch,
                 command,
             ) {
                 Err(error) if error.is::<NonzeroExit>() => {
@@ -706,6 +699,7 @@ fn init_logging(debug: bool, root: &Path) -> Option<tracing_appender::non_blocki
     Some(guard)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn execute(
     root: &Path,
     model: Option<&str>,
@@ -713,6 +707,7 @@ fn execute(
     retry: Option<u32>,
     tools: Option<&str>,
     max_rounds: Option<u32>,
+    no_branch: bool,
     command: &Command,
 ) -> anyhow::Result<()> {
     let attempts = resolve_llm_attempts(root, retry);
@@ -738,18 +733,20 @@ fn execute(
             }
         }
         Command::Inspect => {
-            let service =
-                InspectService::new(FsProjectFiles::new(root.to_path_buf()), ProcessRuntimeProbe);
+            let service = InspectService::new(
+                FsProjectFiles::new(root.to_path_buf()),
+                ProcessRuntimeProbe,
+                spec_harness::wiring::vcs(root),
+            );
             print_json(&service.inspect())
         }
         Command::Feature(command) => run_feature(root, command),
         Command::Scenario(command) => {
             run_scenario(root, model, attempts, tools, max_rounds, command)
         }
-        Command::Changes(command) => run_changes(root, command),
         Command::Init(args) => run_init(root, args),
-        Command::Greenfield => run_greenfield(root, model, attempts),
-        Command::Deliver(args) => run_deliver(root, model, attempts, args),
+        Command::Greenfield => run_greenfield(root, model, attempts, no_branch),
+        Command::Deliver(args) => run_deliver(root, model, attempts, no_branch, args),
         Command::Mcp(command) => run_mcp(root, command),
         Command::Tools(command) => run_tools(root, command),
         Command::Ask { task, json } => {
@@ -916,7 +913,7 @@ fn execute(
             drop(work);
             let report = report?;
             for target in &report.targets {
-                println!("  staged: {target}");
+                println!("  wrote: {target}");
             }
             if let Some(warning) = &report.warning {
                 println!("{RED}{warning}{RESET}");
@@ -932,7 +929,7 @@ fn execute(
             .map_err(|e| anyhow::anyhow!(tdd_error_message(e)))?;
             print_json(&report)?;
             drop(prompter);
-            if report.staged && !report.targets.is_empty() {
+            if report.written && !report.targets.is_empty() {
                 implement_follow_up(root, req_id)?;
             }
             Ok(())
@@ -1147,6 +1144,7 @@ fn interactive_shell_loop(
                         line_retry,
                         cli.tools.as_deref(),
                         cli.max_rounds,
+                        cli.no_branch,
                         &command,
                     ) {
                         Ok(()) => {}
@@ -1182,11 +1180,11 @@ fn primary_language(root: &Path) -> anyhow::Result<Language> {
     spec_harness::workspace::primary_language(root).map_err(anyhow::Error::msg)
 }
 
-type OverlayFeatures = wiring::OverlayFeatures;
-type OverlayTree = wiring::OverlayTree;
+type ProjectFeatures = wiring::ProjectFeatures;
+type ProjectTree = wiring::ProjectTree;
 
-fn overlay_catalog(root: &Path) -> OverlayFeatures {
-    wiring::overlay_catalog(root)
+fn feature_catalog(root: &Path) -> ProjectFeatures {
+    wiring::feature_catalog(root)
 }
 
 fn deterministic_status_gap(next_step: &str) -> bool {
@@ -1206,9 +1204,9 @@ fn generation_service(
     caller: Caller,
 ) -> anyhow::Result<
     GenerationService<
-        OverlayFeatures,
-        OverlayTree,
-        FsChangeStore,
+        ProjectFeatures,
+        ProjectTree,
+        FsWorkTree,
         FsSpecRepository,
         ChatLlm,
         LiveBroker,
@@ -1217,9 +1215,9 @@ fn generation_service(
     let language = primary_language(root)?;
     let layout = project_layout(root);
     Ok(GenerationService::new(
-        overlay_catalog(root),
-        wiring::overlay_sources(root, layout.module_root.as_deref()),
-        wiring::change_store(root),
+        feature_catalog(root),
+        wiring::source_tree(root, layout.module_root.as_deref()),
+        wiring::work_tree(root),
         wiring::spec_repository(root),
         language,
         layout,
@@ -1236,9 +1234,9 @@ fn implement_service(
     caller: Caller,
 ) -> anyhow::Result<
     ImplementService<
-        OverlayFeatures,
-        OverlayTree,
-        FsChangeStore,
+        ProjectFeatures,
+        ProjectTree,
+        FsWorkTree,
         FsSpecRepository,
         ChatLlm,
         LiveBroker,
@@ -1247,9 +1245,9 @@ fn implement_service(
     let language = primary_language(root)?;
     let layout = project_layout(root);
     Ok(ImplementService::new(
-        overlay_catalog(root),
-        wiring::overlay_sources(root, layout.module_root.as_deref()),
-        wiring::change_store(root),
+        feature_catalog(root),
+        wiring::source_tree(root, layout.module_root.as_deref()),
+        wiring::work_tree(root),
         wiring::spec_repository(root),
         language,
         layout,
@@ -1263,15 +1261,14 @@ fn refactor_service(
     attempts: u32,
     tools: Option<&str>,
     max_rounds: Option<u32>,
-) -> anyhow::Result<
-    RefactorService<OverlayTree, FsChangeStore, FsSpecRepository, ChatLlm, LiveBroker>,
-> {
+) -> anyhow::Result<RefactorService<ProjectTree, FsWorkTree, FsSpecRepository, ChatLlm, LiveBroker>>
+{
     let language = primary_language(root)?;
     let layout = project_layout(root);
     let rounds = refactor_attempts(&config_path(root));
     Ok(RefactorService::new(
-        wiring::overlay_sources(root, layout.module_root.as_deref()),
-        wiring::change_store(root),
+        wiring::source_tree(root, layout.module_root.as_deref()),
+        wiring::work_tree(root),
         wiring::spec_repository(root),
         language,
         layout,
@@ -1294,20 +1291,12 @@ fn status_service(
     tools: Option<&str>,
     max_rounds: Option<u32>,
 ) -> anyhow::Result<
-    StatusService<
-        OverlayFeatures,
-        OverlayTree,
-        FsChangeStore,
-        FsSpecRepository,
-        ChatLlm,
-        LiveBroker,
-    >,
+    StatusService<ProjectFeatures, ProjectTree, FsSpecRepository, ChatLlm, LiveBroker>,
 > {
     let layout = project_layout(root);
     Ok(StatusService::new(
-        overlay_catalog(root),
-        wiring::overlay_sources(root, layout.module_root.as_deref()),
-        wiring::change_store(root),
+        feature_catalog(root),
+        wiring::source_tree(root, layout.module_root.as_deref()),
         wiring::spec_repository(root),
         primary_language(root)?,
         layout,
@@ -1327,19 +1316,8 @@ fn spec_service(
 ) -> spec_harness::application::spec_service::SpecService<
     FsSpecRepository,
     spec_harness::adapters::fs_spec::FsFeatureFiles,
-    spec_harness::adapters::fs_staging::FsChangeStore,
 > {
     wiring::spec_service(root, detect_project_layout(root))
-}
-
-fn change_service(
-    root: &Path,
-) -> spec_harness::application::change_service::ChangeService<
-    spec_harness::adapters::fs_staging::FsChangeStore,
-    FsSpecRepository,
-    OverlayFeatures,
-> {
-    wiring::change_service(root)
 }
 
 fn mutation_service(
@@ -1347,8 +1325,8 @@ fn mutation_service(
     attempts: u32,
 ) -> SpecMutationService<
     FsSpecRepository,
-    OverlayFeatures,
-    spec_harness::adapters::fs_staging::FsChangeStore,
+    ProjectFeatures,
+    spec_harness::adapters::fs_worktree::FsWorkTree,
     spec_harness::adapters::fs_state::FsStateStore,
 > {
     wiring::mutation_service(root, attempts)
@@ -1357,8 +1335,8 @@ fn mutation_service(
 fn scenario_service(
     root: &Path,
 ) -> spec_harness::application::scenario_service::ScenarioService<
-    spec_harness::adapters::fs_staging::FsChangeStore,
-    OverlayFeatures,
+    spec_harness::adapters::fs_worktree::FsWorkTree,
+    ProjectFeatures,
 > {
     wiring::scenario_service(root)
 }
@@ -1383,10 +1361,10 @@ fn run_test(root: &Path, args: &TestArgs) -> anyhow::Result<()> {
     tdd_reply(tdd_service(root).run_tests(runner.as_ref(), &filter))
 }
 
-/// After `spec implement` stages files, close the loop. On a terminal
-/// the command offers to apply the staged changes and run the tests
-/// right away; a decline - or piped stdin - still says the next
-/// command in plain words instead of leaving it inside the JSON.
+/// After `spec implement` writes its files, close the loop. On a
+/// terminal the command offers to run the tests right away; a decline,
+/// or piped stdin, still says the next command in plain words instead
+/// of leaving it inside the JSON.
 fn implement_follow_up(root: &Path, req_id: &str) -> anyhow::Result<()> {
     const RED: &str = "\x1b[31m";
     const GREEN: &str = "\x1b[32m";
@@ -1397,17 +1375,15 @@ fn implement_follow_up(root: &Path, req_id: &str) -> anyhow::Result<()> {
             std::io::BufReader::new(std::io::stdin()),
             std::io::stdout(),
         ))
-        .confirm("Apply the staged files and run the tests now?")
+        .confirm("Run the tests now?")
         .unwrap_or(false);
     if !accepted {
         println!(
-            "Next: {GREEN}changes commit && test{RESET} - then \
+            "Next: {GREEN}test{RESET} - then \
              {GREEN}implement {req_id}{RESET} again if the bar stays RED."
         );
         return Ok(());
     }
-    let changes = change_service(root).commit()?;
-    print_json(&changes)?;
     let runner = detect_runner(root).map_err(|message| anyhow::anyhow!(message))?;
     let filter = TestFilter {
         feature: None,
@@ -1420,7 +1396,7 @@ fn implement_follow_up(root: &Path, req_id: &str) -> anyhow::Result<()> {
             if green {
                 println!(
                     "{GREEN}GREEN{RESET} - next: refactor (optional), then \
-                     {GREEN}mark-implemented {req_id} && changes commit{RESET}."
+                     {GREEN}mark-implemented {req_id}{RESET}."
                 );
             } else {
                 println!(
@@ -1460,17 +1436,6 @@ fn tdd_error_message(error: TddError) -> String {
         TddError::Other(message) => message,
         TddError::RuntimeMissing { hint, .. } => hint,
     }
-}
-
-fn run_changes(root: &Path, command: &ChangesCommand) -> anyhow::Result<()> {
-    let service = change_service(root);
-    let report = match command {
-        ChangesCommand::Validate => return print_json(&service.validate()?),
-        ChangesCommand::Show => service.show(),
-        ChangesCommand::Commit => service.commit(),
-        ChangesCommand::Discard => service.discard(),
-    }?;
-    print_json(&report)
 }
 
 fn run_scenario(
@@ -1584,19 +1549,12 @@ fn run_spec(
             let gated = judge_refinement(root, decision_model, &mut report)?;
             // Same advice as the service gives the agent, naming commands
             // instead of tools.
-            report.next_step = match (report.clean, report.source) {
-                (false, _) => format!(
+            if !report.clean {
+                report.next_step = format!(
                     "Run spec reword {req_id} to address each finding, then run \
-                     spec refine {req_id} again - it reviews your staged edit, so \
-                     there is no need to commit between passes. Iterate until there \
-                     are no findings."
-                ),
-                (true, STAGED) => "The staged wording reads clean. Review it with spec changes \
-                     show, apply it with spec changes commit, then add the scenario \
-                     with spec scenario add."
-                    .into(),
-                (true, _) => report.next_step,
-            };
+                     spec refine {req_id} again. Iterate until there are no findings."
+                );
+            }
             print_json(&report)?;
             if gated {
                 // The judgment asked for rework or a human. The reply is
@@ -1701,7 +1659,7 @@ fn config_report(root: &Path) -> spec_harness::domain::config_report::ConfigRepo
 }
 
 fn run_feature(root: &Path, command: &FeatureCommand) -> anyhow::Result<()> {
-    let catalog = overlay_catalog(root);
+    let catalog = feature_catalog(root);
     match command {
         FeatureCommand::List => {
             let summaries = catalog.list()?;
@@ -1773,7 +1731,7 @@ fn judge_refinement(
     let Some(service) = wiring::decision_service(root, flag) else {
         return Ok(false);
     };
-    let criteria = match spec_service(root).effective_criteria(&report.id) {
+    let criteria = match spec_service(root).criteria(&report.id) {
         Ok(criteria) => criteria,
         // The caller already refined this id successfully, so a failure
         // here is not worth turning into the command's error.
@@ -2032,12 +1990,18 @@ fn run_init(root: &Path, args: &InitArgs) -> anyhow::Result<()> {
     print_json(&report)
 }
 
-fn run_greenfield(root: &Path, model_flag: Option<&str>, attempts: u32) -> anyhow::Result<()> {
+fn run_greenfield(
+    root: &Path,
+    model_flag: Option<&str>,
+    attempts: u32,
+    no_branch: bool,
+) -> anyhow::Result<()> {
     let llm = cached_chat(root, model_flag)
         .map(|(model, chat)| (model, std::sync::Arc::new(chat) as DynLlm));
     let mut prompter = interactive_prompter(Prompts::Wizard);
     let report = Greenfield::new(root.to_path_buf(), llm)
         .with_llm_attempts(attempts)
+        .without_branch(no_branch)
         .run(prompter.as_mut())
         .map_err(|message| anyhow::anyhow!(message))?;
     print_json(&report)
@@ -2051,6 +2015,7 @@ fn run_deliver(
     root: &Path,
     model_flag: Option<&str>,
     attempts: u32,
+    no_branch: bool,
     args: &DeliverArgs,
 ) -> anyhow::Result<()> {
     let options = DeliverOptions {
@@ -2066,6 +2031,22 @@ fn run_deliver(
     // numbering HARNESS-014 is as deliverable as one numbering REQ-003.
     let target = parse_target(Some(args.target.join(" ").as_str()), &deliver.known_ids())
         .map_err(|message| anyhow::anyhow!(message))?;
+    // The branch gate is the one question `spec deliver` stops for, so
+    // it is asked here, on a prompter a human can actually answer,
+    // before the auto-answering one takes over. Scaffolding questions
+    // come after, and `Deliver::run` refuses a project it would have to
+    // scaffold - so the same refusal is made first, rather than asking
+    // about a branch for a run that cannot start.
+    if spec_harness::bootstrap::project_detected(root) {
+        let mut asking = interactive_prompter(Prompts::Incidental);
+        spec_harness::branch::offer_branch(
+            asking.as_mut(),
+            &spec_harness::wiring::vcs(root),
+            no_branch,
+            &spec_harness::branch::today(),
+            spec_harness::branch::seed(),
+        );
+    }
     // The auto-answering prompter is wrapped here, at the one place that
     // decides who answers the questions, so nothing further down has to
     // know that nobody is attached.
@@ -2116,14 +2097,14 @@ const PIPED_STDIN_WARNING: &str = "stdin is not a terminal: prompts are read fro
      once it runs out every remaining prompt takes its default and every confirmation declines.";
 
 /// What the warning adds for a wizard. The draft/reword wizard does its
-/// model work and then loses it: the last question is "Stage this?" and
-/// an exhausted pipe declines it, so the command stages nothing and
+/// model work and then loses it: the last question is "Write this?" and
+/// an exhausted pipe declines it, so the command writes nothing and
 /// still exits 0. `spec implement`, `spec unittest generate` and
-/// `spec steps generate` have no wizard and stage regardless - they used
-/// to print this too, which told a scripted run its staged work had been
+/// `spec steps generate` have no wizard and write regardless - they used
+/// to print this too, which told a scripted run its work had been
 /// thrown away when it had not.
 const PIPED_STDIN_WIZARD_WARNING: &str =
-    "A wizard that ends in \"Stage this?\" therefore stages nothing.";
+    "A wizard that ends in \"Write this?\" therefore writes nothing.";
 
 const PIPED_STDIN_REMEDY: &str = "Run this in a terminal to answer the prompts.";
 
@@ -2131,7 +2112,7 @@ const PIPED_STDIN_REMEDY: &str = "Run this in a terminal to answer the prompts."
 /// decides if anything is kept.
 #[derive(Clone, Copy, PartialEq)]
 enum Prompts {
-    /// Ends in "Stage this?": a declined prompt throws the work away.
+    /// Ends in "Write this?": a declined prompt throws the work away.
     Wizard,
     /// Prompts along the way - an optional tool call, a setup question -
     /// and finishes either way.
@@ -2228,7 +2209,7 @@ fn list_flags(flags: &[&str]) -> String {
 /// the advice literally types something that does not run. Tools with
 /// no CLI equivalent are deliberately absent - leaving the tool name
 /// visible is better than inventing a command.
-const CLI_FOR_TOOL: [(&str, &str); 23] = [
+const CLI_FOR_TOOL: [(&str, &str); 19] = [
     ("requirement_mark_implemented", "spec mark-implemented"),
     ("step_definitions_find", "spec steps missing"),
     ("step_definition_create", "spec steps generate"),
@@ -2236,38 +2217,26 @@ const CLI_FOR_TOOL: [(&str, &str); 23] = [
     ("refine_requirement", "spec refine"),
     ("list_requirements", "spec list"),
     ("unit_test_create", "spec unittest generate"),
-    ("changes_validate", "spec changes validate"),
     ("scenario_update", "spec scenario update"),
     ("scenario_delete", "spec scenario delete"),
     ("get_requirement", "spec show"),
-    ("changes_discard", "spec changes discard"),
     ("project_inspect", "spec inspect"),
     ("start_refactor", "spec refactor"),
-    ("changes_commit", "spec changes commit"),
     ("feature_create", "spec feature create"),
     ("get_tdd_state", "spec state"),
     ("validate_spec", "spec validate"),
     ("feature_list", "spec feature list"),
     ("feature_read", "spec feature show"),
     ("scenario_add", "spec scenario add"),
-    ("changes_show", "spec changes show"),
     ("run_tests", "spec test"),
 ];
 
 /// Command phrases the services write without their `spec ` prefix, so
-/// "Review with changes show" and "Review with spec changes show" do
-/// not both ship. Only unambiguous multi-word phrases are listed:
-/// bare words like "validate" and "list" are ordinary English as often
-/// as they are commands, and guessing wrong reads worse than leaving
-/// them be.
-const BARE_CLI_PHRASES: [&str; 6] = [
-    "changes validate",
-    "changes discard",
-    "changes commit",
-    "changes show",
-    "run validate",
-    "run list",
-];
+/// "run validate" and "run spec validate" do not both ship. Only
+/// unambiguous multi-word phrases are listed: bare words like
+/// "validate" and "list" are ordinary English as often as they are
+/// commands, and guessing wrong reads worse than leaving them be.
+const BARE_CLI_PHRASES: [&str; 2] = ["run validate", "run list"];
 
 /// Rewrite every `nextStep` in a reply into the shell's dialect.
 ///
@@ -2332,7 +2301,7 @@ fn cli_next_step(text: &str) -> String {
 }
 
 /// `phrase` given its `spec ` prefix wherever it does not already have
-/// one, so no reply says "spec spec changes show".
+/// one, so no reply says "run spec spec validate".
 fn prefix_with_spec(text: &str, phrase: &str) -> String {
     let bare = phrase.strip_prefix("run ").unwrap_or(phrase);
     let lead = &phrase[..phrase.len() - bare.len()];
@@ -2341,7 +2310,7 @@ fn prefix_with_spec(text: &str, phrase: &str) -> String {
     while let Some(at) = rest.find(phrase) {
         let end = at + phrase.len();
         let (before, after) = (&rest[..at], &rest[end..]);
-        // "the changes shown by" does not name the changes show command.
+        // "run validated input" does not name the validate command.
         if after.starts_with(|c: char| c.is_alphanumeric() || c == '_' || c == '-') {
             out.push_str(&rest[..end]);
             rest = after;
@@ -2496,8 +2465,8 @@ fn mutation_with_tools(
     max_rounds_flag: Option<u32>,
 ) -> SpecMutationService<
     FsSpecRepository,
-    OverlayFeatures,
-    spec_harness::adapters::fs_staging::FsChangeStore,
+    ProjectFeatures,
+    spec_harness::adapters::fs_worktree::FsWorkTree,
     spec_harness::adapters::fs_state::FsStateStore,
 > {
     let settings = tools_settings(&config_file(root));
@@ -2790,20 +2759,20 @@ mod tests {
             piped_stdin_warning(Prompts::Wizard),
             "stdin is not a terminal: prompts are read from the pipe, and once it runs out \
              every remaining prompt takes its default and every confirmation declines. \
-             A wizard that ends in \"Stage this?\" therefore stages nothing. \
+             A wizard that ends in \"Write this?\" therefore writes nothing. \
              Run this in a terminal to answer the prompts."
         );
     }
 
     /// `spec unittest generate` and `spec steps generate` have no
-    /// wizard and stage either way. Telling a scripted run they staged
+    /// wizard and write either way. Telling a scripted run they wrote
     /// nothing was simply false.
     #[test]
-    fn a_command_that_stages_regardless_does_not_claim_it_stages_nothing() {
+    fn a_command_that_writes_regardless_does_not_claim_it_writes_nothing() {
         let warning = piped_stdin_warning(Prompts::Incidental);
         assert!(warning.starts_with("stdin is not a terminal:"), "{warning}");
         assert!(warning.ends_with("Run this in a terminal to answer the prompts."));
-        assert!(!warning.contains("stages nothing"), "{warning}");
+        assert!(!warning.contains("writes nothing"), "{warning}");
     }
 
     #[test]
@@ -2876,29 +2845,26 @@ mod tests {
         );
     }
 
-    /// `spec draft` said "Review with spec changes show" and `spec
-    /// reword` said "Review with changes show". Only one of them can
-    /// be pasted.
+    /// One service said "run validate" and another "run spec
+    /// validate". Only one of them can be pasted.
     #[test]
     fn a_command_named_without_its_prefix_gains_one() {
         assert_eq!(
-            cli_next_step(
-                "Review with changes show, run validate, then apply with changes commit."
-            ),
-            "Review with spec changes show, run spec validate, then apply with spec changes commit."
+            cli_next_step("Fix the wording, run validate, then run list."),
+            "Fix the wording, run spec validate, then run spec list."
         );
     }
 
     #[test]
     fn a_command_that_already_has_its_prefix_does_not_get_a_second() {
-        let already = "Review with spec changes show, apply with spec changes commit.";
+        let already = "Fix the wording, then run spec validate.";
         assert_eq!(cli_next_step(already), already);
     }
 
     /// The prefixer matches a phrase, not the letters that start one.
     #[test]
     fn an_english_word_that_starts_like_a_command_is_left_alone() {
-        let prose = "Read the changes shown above before you decide.";
+        let prose = "Read the validated input above before you decide.";
         assert_eq!(cli_next_step(prose), prose);
     }
 
@@ -2923,10 +2889,10 @@ mod tests {
 
     #[test]
     fn a_next_step_holding_quotes_survives_the_rewrite() {
-        let rendered = "{\n  \"nextStep\": \"Answer \\\"Stage this?\\\", then call run_tests.\"\n}";
+        let rendered = "{\n  \"nextStep\": \"Answer \\\"Write this?\\\", then call run_tests.\"\n}";
         assert_eq!(
             speak_cli(rendered),
-            "{\n  \"nextStep\": \"Answer \\\"Stage this?\\\", then run spec test.\"\n}"
+            "{\n  \"nextStep\": \"Answer \\\"Write this?\\\", then run spec test.\"\n}"
         );
     }
 

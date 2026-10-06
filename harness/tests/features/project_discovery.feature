@@ -57,8 +57,8 @@ Feature: The project and the spec file are found from where you are
       Given the input "1\n2,3", when add is called, then the result is 6
       Given an empty string "", when add is called, then the result is 0
       """
-    Then the draft is staged as "MATH-002"
-    And the staged spec file "requirements/core/math.json" has 2 requirements
+    Then the draft is written as "MATH-002"
+    And the written spec file "requirements/core/math.json" has 2 requirements
 
   @HARNESS-017
   Scenario: A working directory no catalog file covers drafts into the root
@@ -72,8 +72,8 @@ Feature: The project and the spec file are found from where you are
       Given the input "1\n2,3", when add is called, then the result is 6
       Given an empty string "", when add is called, then the result is 0
       """
-    Then the draft is staged as "REQ-002"
-    And the staged spec file "requirements/requirements.json" has 2 requirements
+    Then the draft is written as "REQ-002"
+    And the written spec file "requirements/requirements.json" has 2 requirements
 
   @HARNESS-017
   Scenario: A named file outranks the working directory
@@ -87,5 +87,5 @@ Feature: The project and the spec file are found from where you are
       Given the input "1\n2,3", when add is called, then the result is 6
       Given an empty string "", when add is called, then the result is 0
       """
-    Then the draft is staged as "REQ-002"
-    And the staged spec file "requirements/requirements.json" has 2 requirements
+    Then the draft is written as "REQ-002"
+    And the written spec file "requirements/requirements.json" has 2 requirements

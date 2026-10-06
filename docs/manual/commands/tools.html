@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-bb14de4e.js";
+            window.path_to_searchindex_js = "../searchindex-d84b362c.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-2ab172c3.js"></script>
+        <script src="../toc-0006eac3.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -201,24 +201,24 @@ Commands:
 # spec-reword         3  get_requirement, refine_requirement, validate_spec
 # steps-generate      4  feature_list, feature_read, project_inspect, step_definitions_find
 # unittest-generate   4  feature_read, get_requirement, project_inspect, step_definitions_find
-# implement-advice    5  changes_show, changes_validate, feature_list, get_tdd_state, validate_spec
-# implement           7  get_requirement, feature_read, …, command_run, changes_show
-# status              7  project_root, list_requirements, …, changes_show, changes_validate
-# ask                12  the read-only set: everything above that only reads
+# implement-advice    3  feature_list, get_tdd_state, validate_spec
+# implement           6  get_requirement, feature_read, …, run_tests, command_run
+# status              5  project_root, list_requirements, …, get_tdd_state, validate_spec
+# ask                10  the read-only set: everything above that only reads
 
-spec tools list --for status          # exactly those seven
+spec tools list --for status          # exactly those five
 spec tools list --offline             # built-ins only; never connects
 spec tools enable self__validate_spec --for status
 spec tools servers
 </code></pre>
-<p>A command that generates or implements is handed <strong>3–7</strong> tools — the ones
+<p>A command that generates or implements is handed <strong>3–6</strong> tools — the ones
 its current step can legitimately use, and nothing else. Only the read-only
-<code>ask</code> gets 12. Compare that with the <strong>25</strong> a general host such as Cursor or
+<code>ask</code> gets 10. Compare that with the <strong>21</strong> a general host such as Cursor or
 <code>pi -nbt</code> sees: same server, same tools, different amount of rope.</p>
 <p><code>--for</code> accepts: <code>spec-draft</code>, <code>spec-reword</code>, <code>steps-generate</code>,
 <code>unittest-generate</code>, <code>implement-advice</code>, <code>implement</code>, <code>status</code>, <code>ask</code>.
 Omitting it lists those names and exits nonzero.</p>
-<p>Default profiles contain no staging or commit tools. The only mutation
+<p>No default profile contains a tool that writes a file. The only mutation
 a harness-side model may request is <code>command_run</code> on the <code>implement</code>
 profile, and that call still asks the human to confirm.</p>
 <p>External tools are namespaced <code>server__tool</code>. A name in config that is

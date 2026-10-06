@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-bb14de4e.js";
+            window.path_to_searchindex_js = "../searchindex-d84b362c.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-2ab172c3.js"></script>
+        <script src="../toc-0006eac3.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -182,8 +182,8 @@
                     <main>
                         <h1 id="the-requirements-spec"><a class="header" href="#the-requirements-spec">The requirements spec</a></h1>
 <p>The spec at <code>requirements/requirements.json</code> is the project’s source of
-truth. These commands read it, gate it, and mutate it (through the
-<a href="../staged-changes.html">staging area</a>). The root file is a
+truth. These commands read it, gate it, and mutate it (writing the file
+itself — see <a href="../direct-writes.html">direct writes</a>). The root file is a
 <a href="../spec-format.html#the-catalog-splitting-the-spec-across-files">catalog</a>:
 it may include child spec files, and every command here operates on the
 merged view of the whole tree.</p>
@@ -243,11 +243,11 @@ hint.</p>
 <h2 id="spec-draft"><a class="header" href="#spec-draft">spec draft</a></h2>
 <p>Interactively draft a requirement. Human input drives the spec — the
 harness never invents requirements. The draft is validated and
-quality-gated in a loop until it is clean, then staged.</p>
+quality-gated in a loop until it is clean, then written.</p>
 <pre><code class="language-bash">spec draft
 </code></pre>
 <p>Non-interactive (no TTY). Repeat <code>--criterion</code> for each Given/When/Then
-line. The next free id is allocated; the draft is staged.</p>
+line. The next free id is allocated; the draft is written.</p>
 <pre><code class="language-bash">spec draft \
   --title "Newlines as delimiters" \
   --story "As a calculator user, I want newlines to separate numbers in addition to commas so that multi-line input just works." \
@@ -361,12 +361,12 @@ is in flight.</p>
 fall back to your prior answers exactly as without a model. Nothing is
 accepted silently either way — every field still passes through your
 hands, and validate + refine rerun on whatever you accept.</p>
-<p>When the draft is clean it is staged:</p>
+<p>When the draft is clean it is written:</p>
 <pre><code class="language-json">{
   "id": "REQ-004",
   "title": "Newlines act as delimiters",
-  "staged": true,
-  "nextStep": "Review with 'spec changes show', apply with 'spec changes commit', then write the Gherkin scenario."
+  "written": true,
+  "nextStep": "Add the @REQ-004 scenario with scenario add."
 }
 </code></pre>
 <hr>
@@ -462,7 +462,7 @@ kind, and what enforcing them costs are in
 stops asking, set <code>mode = "off"</code> under <code>[decision]</code>.</p>
 <hr>
 <h2 id="spec-reword"><a class="header" href="#spec-reword">spec reword</a></h2>
-<p>Reword an existing backlog item (staged). Interactive wizard is the
+<p>Reword an existing backlog item in place. Interactive wizard is the
 same refine → reword loop as draft. Flags skip the wizard:</p>
 <pre><code class="language-bash">spec reword REQ-007
 spec reword REQ-007 \
@@ -478,9 +478,9 @@ indentation differ from what the read tools return, so a hand-written
 string replacement against <code>requirements.json</code> will not match.</p>
 <hr>
 <h2 id="spec-set-feature"><a class="header" href="#spec-set-feature">spec set-feature</a></h2>
-<p>Point a requirement at the feature file that was actually written
-(staged). Used when a copied spec still names <code>kata/…</code> paths that do
-not exist on an extracted project. <code>spec scenario add</code> already updates
+<p>Point a requirement at the feature file that was actually written.
+Used when a copied spec still names <code>kata/…</code> paths that do not exist
+on an extracted project. <code>spec scenario add</code> already updates
 <code>featureFile</code> when it is missing or stale.</p>
 <pre><code class="language-bash">spec set-feature REQ-003 --file src/test/resources/features/string_calculator.feature
 </code></pre>
@@ -488,19 +488,17 @@ not exist on an extracted project. <code>spec scenario add</code> already update
 <h2 id="spec-mark-implemented"><a class="header" href="#spec-mark-implemented">spec mark-implemented</a></h2>
 <p>Flip a requirement’s status to <code>implemented</code> and record its
 <code>featureFile</code> — the feature carrying the <code>@REQ-...</code> tag — in the same
-staged edit, so the spec passes validation. The change is staged, not
-applied directly.</p>
+edit, so the spec passes validation.</p>
 <pre><code class="language-text">Usage: spec mark-implemented [OPTIONS] &lt;REQ_ID&gt;
 </code></pre>
 <pre><code class="language-bash">spec mark-implemented REQ-003
-spec changes validate
-spec changes commit
+spec validate
 </code></pre>
 <pre><code class="language-json">{
   "id": "REQ-003",
   "status": "implemented",
-  "staged": true,
-  "nextStep": "Review with changes show, run spec changes validate (it checks the @REQ-003 scenario exists), then spec changes commit."
+  "written": true,
+  "nextStep": "Run validate - it checks the @REQ-003 scenario exists."
 }
 </code></pre>
 <p>The command is gated twice:</p>
@@ -508,9 +506,9 @@ spec changes commit
 <li><strong>GREEN only</strong> — it refuses unless the last recorded run passed.
 Do this only when the scenario and tests for the requirement are
 GREEN; it is the last move of the per-requirement rhythm.</li>
-<li><strong>Tagged scenario only</strong> — it refuses when no committed feature
-file carries a scenario tagged <code>@&lt;REQ_ID&gt;</code>; add one with
-<code>spec scenario add</code> and apply it with <code>spec changes commit</code> first.</li>
+<li><strong>Tagged scenario only</strong> — it refuses when no feature file carries
+a scenario tagged <code>@&lt;REQ_ID&gt;</code>; add one with <code>spec scenario add</code>
+first.</li>
 </ul>
 <p>Re-running it on an already-implemented requirement is safe: on GREEN
 it backfills a missing <code>featureFile</code>, which is exactly the repair for
@@ -537,8 +535,8 @@ spec skeleton (<code>{ "requirements": [] }</code>) for it.</p>
   "file": "requirements/core/arithmetic.json",
   "parent": "requirements/requirements.json",
   "created": true,
-  "staged": true,
-  "nextStep": "Review with spec changes show, apply with spec changes commit, then draft into it with spec draft --file."
+  "written": true,
+  "nextStep": "Draft into it with spec draft --file."
 }
 </code></pre>
 <p>Nest deeper by including from a child instead of the root; the entry
@@ -552,7 +550,6 @@ Includes must be <code>.json</code> files inside the spec directory.</p>
 <ul>
 <li><a href="../spec-format.html">The requirements format</a> — every field of the spec, and the include catalog.</li>
 <li><a href="../workflow.html">The workflow</a> — where each subcommand fits.</li>
-<li><a href="changes.html"><code>spec changes</code></a> — reviewing and applying staged spec mutations.</li>
 </ul>
 
                     </main>

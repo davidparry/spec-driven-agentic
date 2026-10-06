@@ -116,7 +116,7 @@ The model reply was invalid (requirements "..." cover only happy paths -
 add at least one edge case to each) - asking again (2 of 3)
 ```
 
-That is the wording review firing *before anything is staged*. Do not
+That is the wording review firing *before anything is written*. Do not
 skip past it — it is the single best unplanned moment in the run, and it
 sets up 9:10.
 
@@ -246,8 +246,7 @@ function, green on every criterion and no use at all to the 10:50 beat.
 
 ```bash
 spec reword HARNESS-018
-spec changes show       # read the diff out loud
-spec changes commit
+git diff requirements/  # read the edit out loud
 spec refine HARNESS-018 # clean: true, same as before the edit
 ```
 
@@ -319,15 +318,15 @@ approval — but only if you say it on purpose rather than discovering it.
 ```bash
 spec feature create --path tests/features/tool_coverage.feature --name "Criteria coverage"
 spec scenario generate HARNESS-018 --feature tests/features/tool_coverage.feature
-spec changes show
+git diff tests/features/
 ```
 
 `generate`, not `add`. `add` appends one scenario you have already
 written out step by step; `generate` is the one that reads the
 acceptance criteria and derives the scenarios from them — which is the
-whole point of the beat. The feature file has to exist first, but a
-staged file is readable by the next command, so there is no commit
-between these two.
+whole point of the beat. The feature file has to exist first, and
+`feature create` writes it, so the next command reads it straight off
+disk.
 
 **This is the slow one.** About five minutes on the big local model, one
 model call. Have something to say while it runs: this is the natural
@@ -350,18 +349,14 @@ requirement into a test.
 
 ### This beat is yours
 
-Read the staged diff before it lands. Then:
-
-```bash
-spec changes commit
-```
+Read the diff. `git restore tests/features/` throws it away if the
+scenarios are not what you meant.
 
 ## 9:50 — the unit test
 
 ```bash
 spec unittest generate HARNESS-018
-spec changes show
-spec changes commit
+git diff
 spec steps missing
 ```
 
@@ -372,7 +367,6 @@ phrasings and report a dozen. Both happen. If the list is not empty:
 
 ```bash
 spec steps generate
-spec changes commit
 spec steps missing       # 0
 ```
 
@@ -413,11 +407,10 @@ Refused: `Never refactor on a red bar`. This is a state machine in
 `harness/src/domain/tdd.rs`, not a line in a prompt. An agent cannot
 talk its way past it.
 
-> **Deliver parity.** The factory is bound by the identical gate. Its
-> refactor stage runs only on GREEN, and `deliver_one` refuses to start
-> at all while anything is staged. The autonomy is inside the rails, not
-> around them — this is the single most important thing to say in the
-> whole autonomous segment.
+> **Deliver parity.** The factory is bound by the identical gate: its
+> refactor stage runs only on GREEN. The autonomy is inside the rails,
+> not around them — this is the single most important thing to say in
+> the whole autonomous segment.
 
 ## 10:15 — the developer agent writes the code
 
@@ -425,8 +418,8 @@ talk its way past it.
 spec implement HARNESS-018
 ```
 
-What it is allowed to touch: no shell, no free-hand write. The
-implementation lands in staging.
+What it is allowed to touch: no shell, no free-hand write. It writes
+the files the preflight named and nothing else.
 
 The preflight prints where the code will land, and it should say
 `src/mcp.rs`. Nothing declares that: the harness matches the
@@ -465,9 +458,8 @@ drift from the rehearsed command order changes the prompt and misses.
 **Go on stage knowing which version you are giving.** If rehearsal
 produced an attempt that compiles and goes green, the cache replays it
 and the beat is live. If it did not — which is the likelier outcome on
-a local model — implement it yourself beforehand, stage it, and run
-this beat as `changes show` → `changes commit` → green. Say that out
-loud; "the model needed three tries and I wrote it in the end" is a
+a local model — implement it yourself beforehand and run this beat as
+`git diff` → `spec test` → green. Say that out loud; "the model needed three tries and I wrote it in the end" is a
 truer story about agentic TDD than a green bar nobody saw earned, and
 the guard rails you have been demonstrating all morning are exactly
 what made the failure safe.
@@ -495,8 +487,7 @@ after the close covers all three.
 ### This beat is yours
 
 ```bash
-spec changes show       # review it properly, out loud
-spec changes commit
+git diff                # review it properly, out loud
 ```
 
 ## 10:40 — GREEN
@@ -539,7 +530,6 @@ spec mark-implemented HARNESS-018
 Gated twice: GREEN, plus a scenario carrying the tag. Then:
 
 ```bash
-spec changes commit
 cargo test --manifest-path Cargo.toml --test spec_completeness
 ```
 
@@ -555,17 +545,27 @@ checked because it is implemented.
 Everything so far was a human driving one stage at a time. Now run the
 whole thing as a factory.
 
-**Commit first, or it will not start.** `deliver_one` stops immediately
-if anything is staged — staged work from an earlier session would ride
-along on its first commit, and that is the author's to settle, not the
-machine's. Check before you start:
+**It asks one question, and this is the beat.** `deliver` writes the
+project's real files, so before it starts it offers the run a branch of
+its own — the only stop it makes:
 
-```bash
-spec changes show       # must be empty
+```text
+This run writes the project's files directly. You are on talk-<date>.
+Branch name for this run (Enter for spec/2026-10-05-amber-kite, or n to stay on talk-<date>)
 ```
 
-Then, from one sentence to an implemented requirement, with no human in
-the loop:
+Type a name. It answers with the undo, which is the line to read out
+loud:
+
+```text
+Working on spec/criteria-coverage. Keep it, merge it, or throw the whole
+run away with git switch talk-<date> && git branch -D spec/criteria-coverage.
+```
+
+That is the whole safety argument for an unattended run in two
+sentences: it writes real files, and one `git branch -D` un-writes all
+of them. From there, one sentence to an implemented requirement with no
+human in the loop:
 
 ```bash
 spec deliver "every requirement should report which of its criteria no test proves"
@@ -576,7 +576,7 @@ one of them by hand:
 
 ```mermaid
 flowchart TD
-    Plan["plan — spec list, or draft_plan from your sentence"] --> Draft["draft — spec draft + changes commit"]
+    Plan["plan — spec list, or draft_plan from your sentence"] --> Draft["draft — spec draft"]
     Draft --> Scenario["author_scenarios — feature create + scenario add per criterion"]
     Scenario --> Steps["author_steps — steps missing + steps generate, re-checked"]
     Steps --> Unit["author_unit_test — unittest generate"]
@@ -610,12 +610,14 @@ yours this morning:
 | The moment | Manual | `spec deliver` |
 | --- | --- | --- |
 | The wording the test is generated from | You rewrote it | The model's draft stands |
-| The scenarios | You read the diff | Derived, committed unread |
-| The implementation | You reviewed it | Committed on a green bar alone |
+| The scenarios | You read the diff | Derived, written unread |
+| The implementation | You reviewed it | Accepted on a green bar alone |
 
 What it does **not** give up is every gate that is a state machine
 rather than a prompt: no refactor on red, no mark-implemented without a
-green bar and a tagged scenario, no start while work is staged. The
+green bar and a tagged scenario. And it does not give up the undo — the
+branch it asked for at the top is what makes three unread diffs a
+reviewable pull request rather than a mess in your working tree. The
 autonomy is bounded by the same rails you spent the morning
 demonstrating, and that is the only reason it is safe to leave running.
 
@@ -699,9 +701,10 @@ prompt mentions is a tool nobody calls.*
   something unusually good from your sentence. Reword it anyway — the
   beat is a human improving a machine's wording, and it survives a
   smaller diff.
-- **`spec deliver` refuses to start.** Something is staged. `spec changes
-  show`, then commit or discard. This is in the script on purpose; if it
-  fires, read the message out loud, because it is the argument.
+- **`spec deliver` stops on the branch question.** That is the script,
+  not a fault. Type a name and read the undo line it answers with out
+  loud. `spec deliver --no-branch` skips the question entirely, which is
+  what to reach for if you are already on a throwaway branch.
 - **A command cannot find the project.** You are above `harness/`, so it
   found the repo-root catalog instead — ids will read `REQ-`. `cd
   harness` and run it again.
@@ -722,9 +725,9 @@ git switch trunk
 git branch -D talk-<date>
 git clean -fd harness/ smoke-test/
 
-# 2. the TDD phase and staging - gitignored, so step 1 leaves them
+# 2. the TDD phase - gitignored, so step 1 leaves it
 #    behind and the next run starts mid-cycle
-rm -rf harness/.spec/staged harness/.spec/state.json
+rm -rf harness/.spec/state.json
 
 # 2b. the cached model replies - ONLY if you are rehearsing again
 #     afterwards. This is what makes the live run take seconds

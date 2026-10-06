@@ -108,13 +108,7 @@ pub fn default_profile(caller: Caller) -> &'static [&'static str] {
             "feature_read",
             "step_definitions_find",
         ],
-        Caller::ImplementAdvice => &[
-            "get_tdd_state",
-            "validate_spec",
-            "feature_list",
-            "changes_show",
-            "changes_validate",
-        ],
+        Caller::ImplementAdvice => &["get_tdd_state", "validate_spec", "feature_list"],
         Caller::Implement => &[
             "get_requirement",
             "feature_read",
@@ -122,7 +116,6 @@ pub fn default_profile(caller: Caller) -> &'static [&'static str] {
             "get_tdd_state",
             "run_tests",
             "command_run",
-            "changes_show",
         ],
         // No run_tests and no command_run: the refactor loop runs the
         // suite itself, once per round, and judges the result. A model
@@ -141,8 +134,6 @@ pub fn default_profile(caller: Caller) -> &'static [&'static str] {
             "get_requirement",
             "get_tdd_state",
             "validate_spec",
-            "changes_show",
-            "changes_validate",
         ],
         Caller::Ask => &[
             "project_root",
@@ -155,20 +146,16 @@ pub fn default_profile(caller: Caller) -> &'static [&'static str] {
             "feature_list",
             "feature_read",
             "step_definitions_find",
-            "changes_show",
-            "changes_validate",
         ],
     }
 }
 
-/// Tools that mutate the project (stage, commit, mark implemented).
-const MUTATING: [&str; 9] = [
+/// Tools that mutate the project (write a file, mark implemented).
+const MUTATING: [&str; 7] = [
     "scenario_add",
     "scenario_update",
     "scenario_delete",
     "feature_create",
-    "changes_commit",
-    "changes_discard",
     "requirement_reword",
     "requirement_mark_implemented",
     "step_definition_create",
@@ -284,10 +271,6 @@ mod tests {
             "scenario_add",
             "scenario_update",
             "scenario_delete",
-            "changes_show",
-            "changes_validate",
-            "changes_commit",
-            "changes_discard",
             "command_run",
             "requirement_reword",
             "requirement_mark_implemented",
@@ -342,14 +325,14 @@ mod tests {
         let mut overrides = ProfileOverrides::default();
         overrides.replace.insert(
             "status".into(),
-            vec!["get_tdd_state".into(), "changes_show".into()],
+            vec!["get_tdd_state".into(), "validate_spec".into()],
         );
         overrides
             .attached
             .insert("status".into(), vec!["playwright__browser_navigate".into()]);
         overrides
             .removed
-            .insert("status".into(), vec!["changes_show".into()]);
+            .insert("status".into(), vec!["validate_spec".into()]);
         let resolved = resolve(Caller::Status, &overrides, &catalog);
         let names: Vec<_> = resolved.tools.iter().map(|t| t.name.as_str()).collect();
         assert_eq!(names, vec!["get_tdd_state"]);

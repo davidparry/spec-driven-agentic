@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "searchindex-bb14de4e.js";
+            window.path_to_searchindex_js = "searchindex-d84b362c.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-2ab172c3.js"></script>
+        <script src="toc-0006eac3.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -197,8 +197,9 @@ hatches.</p>
 <h2 id="how-to-read-this-manual"><a class="header" href="#how-to-read-this-manual">How to read this manual</a></h2>
 <ul>
 <li><strong>Using spec</strong> covers the concepts that span commands: the global
-flags, the interactive shell, the workflow phases, and the staged
-changes model that protects your working tree.</li>
+flags, the interactive shell, the workflow phases, how the harness
+writes your files, and the branch it offers before a run that writes
+a lot of them.</li>
 <li><strong>Command reference</strong> documents every command, subcommand, and flag,
 with realistic examples and the exact JSON reply shapes.</li>
 </ul>
@@ -332,7 +333,6 @@ spec draft          # describe what to build in plain words; with a
                         # criteria for you to edit (manual prompts otherwise)
 spec validate       # structure gate
 spec refine REQ-001 # wording gate
-spec changes commit      # apply the staged spec
 spec test                # expect RED
 # ...implement...
 spec test                # expect GREEN
@@ -340,7 +340,7 @@ spec refactor --note "extract parser" --req REQ-001   # does the cleanup
 git diff                 # read what it changed
 spec test                # still GREEN
 spec status              # confirm REQ-001 is ready to mark
-spec mark-implemented REQ-001 &amp;&amp; spec changes commit
+spec mark-implemented REQ-001
 </code></pre>
 <p>This repository’s String Calculator workshop can be finished with the
 same commands. The kata-specific recipe (paths under <code>kata/</code>, draft
@@ -360,13 +360,12 @@ still empty.</p>
   history        interactive-shell command history
   cache/         cached LLM responses and tool catalogs
   log/           daily diagnostic logs
-  staged/        mutations waiting for spec changes commit
+  .lock          the advisory lock that serializes concurrent writes
 </code></pre>
 <p>Only <code>config.toml</code> is meant to be committed. <code>spec init</code> writes a
 gitignore that ignores <code>.spec/*</code> and keeps <code>.spec/config.toml</code>. The
 other children are generated. Deleting <code>cache/</code> or <code>log/</code> is always
-safe. Deleting <code>state.json</code> resets the phase to START. Deleting
-<code>staged/</code> throws away mutations that have not been committed.</p>
+safe. Deleting <code>state.json</code> resets the phase to START.</p>
 <h2 id="working-against-an-existing-project"><a class="header" href="#working-against-an-existing-project">Working against an existing project</a></h2>
 <p>Every command takes <code>--root</code> (see <a href="#global-flags">Global flags</a>), so
 you can point the harness at any project:</p>
@@ -486,6 +485,19 @@ prints the resolved keys and their source.</p>
 <h2 id="--max-rounds-n"><a class="header" href="#--max-rounds-n"><code>--max-rounds &lt;N&gt;</code></a></h2>
 <p>Override <code>[tools] max_rounds</code> for one run: how many tool-call rounds
 <code>Agent::ask</code> may take before it must return a parsed reply.</p>
+<h2 id="--no-branch"><a class="header" href="#--no-branch"><code>--no-branch</code></a></h2>
+<p>Skip <a href="#the-branch-gate">the branch gate</a>. <code>spec greenfield</code> and
+<code>spec deliver</code> normally stop once, before they write anything, to offer
+the run a branch of its own; with this flag they ask nothing and start
+immediately.</p>
+<p>Git is not consulted at all, which is the point of the flag rather than
+a side effect of it. A project deliberately kept outside version
+control should not be asked about a branch, and a CI job that already
+made its own should not pay for the probe or risk a question nothing is
+there to answer.</p>
+<pre><code class="language-bash">spec --no-branch deliver "sum comma-separated numbers"
+</code></pre>
+<p>Every other command ignores the flag, because no other command asks.</p>
 <h2 id="-v---version"><a class="header" href="#-v---version"><code>-V</code>, <code>--version</code></a></h2>
 <p>Prints the version compiled into the binary (from <code>Cargo.toml</code> at
 build time).</p>
@@ -711,17 +723,15 @@ spec scenario add --feature features/calculator.feature \
     --step 'Given the input "1,2"' \
     --step 'When add is called' \
     --step 'Then the result is 3'
-spec changes commit           # apply the staged scenario
 spec steps missing            # any undefined steps?
-spec steps generate &amp;&amp; spec changes commit
+spec steps generate
 spec test                     # RED: the scenario fails honestly
 # ...implement the production code...
 spec test                     # GREEN
 spec refactor --note "tidy the parser" &amp;&amp; spec test
 spec status                   # confirm REQ-002 is ready to mark
 spec mark-implemented REQ-002   # flips the status, records the featureFile
-spec changes validate                 # checks the @REQ-002 scenario exists
-spec changes commit
+spec validate                   # structure still holds
 </code></pre>
 <p><a href="#spec-greenfield"><code>spec greenfield</code></a> automates exactly this
 rhythm, pausing only at the two human gates.
@@ -829,9 +839,8 @@ lives in and stage only that file. <code>spec draft</code> appends to the
 root by default, or to a chosen file with <code>--file</code>.</li>
 </ul>
 <h3 id="growing-the-catalog"><a class="header" href="#growing-the-catalog">Growing the catalog</a></h3>
-<pre><code class="language-bash"># Stage a new (empty) spec file and the include entry on the root:
+<pre><code class="language-bash"># Write a new (empty) spec file and the include entry on the root:
 spec include add requirements/core/arithmetic.json
-spec changes commit
 
 # Draft directly into it:
 spec draft --file requirements/core/arithmetic.json
@@ -876,58 +885,136 @@ classes):</p>
 <li><code>kata/src/test/java/com/davidparry/workshop/kata/StringCalculatorTest.java</code></li>
 <li><code>kata/src/main/java/com/davidparry/workshop/kata/StringCalculator.java</code></li>
 </ul>
-<p>Commit staged files <strong>before</strong> <a href="#spec-test"><code>spec test</code></a>. The
-runner executes Maven on the working tree. <a href="#the-requirements-spec"><code>spec mark-implemented</code></a>
+<p>Everything the harness writes is already on disk when
+<a href="#spec-test"><code>spec test</code></a> runs — the runner executes Maven on the
+working tree it just wrote. <a href="#the-requirements-spec"><code>spec mark-implemented</code></a>
 stays GREEN-gated.</p>
 <div style="break-before: page; page-break-before: always;"></div>
-<h1 id="staged-changes"><a class="header" href="#staged-changes">Staged changes</a></h1>
-<p>Every command that would write into your project — feature creation,
+<h1 id="direct-writes"><a class="header" href="#direct-writes">Direct writes</a></h1>
+<p>Every command that writes into your project — feature creation,
 scenario mutations, step-definition and unit-test generation, spec
-drafting, marking a requirement implemented — writes to a staging area
-instead: <code>.spec/staged/</code>. Nothing touches your
-working tree until you commit the transaction.</p>
+drafting, marking a requirement implemented — writes the real file.
+There is no staging area, no transaction to commit, and nothing to
+remember to apply. When <code>spec scenario add</code> answers, the scenario is in
+the feature file.</p>
 <h2 id="why"><a class="header" href="#why">Why</a></h2>
 <ul>
-<li><strong>Review before apply.</strong> You (or an agent’s human supervisor) can
-inspect exactly what would change.</li>
-<li><strong>Atomicity.</strong> A multi-file change (say, a feature file plus new
-step definitions) lands together or not at all.</li>
-<li><strong>Safe agents.</strong> Over MCP, a model can propose file changes without
-ever holding write access to your tree.</li>
+<li><strong>One source of truth.</strong> Your editor, your test runner, your build and
+the harness are all looking at the same bytes. A scenario the harness
+reports as added is one <code>mvn test</code> will run.</li>
+<li><strong>No forgotten work.</strong> The old staging area could hold an edit the
+developer never applied, and a later command would quietly build on a
+file that did not exist yet.</li>
+<li><strong>Review where review already happens.</strong> <code>git diff</code> shows exactly what
+changed, in the tool you already use for every other change.</li>
 </ul>
-<h2 id="the-lifecycle"><a class="header" href="#the-lifecycle">The lifecycle</a></h2>
-<pre><code class="language-bash">spec feature create --path features/calculator.feature --name "String Calculator"
-spec changes show      # review: one staged "create"
-spec changes commit    # apply to the working tree, clear the stage
-# or
-spec changes discard   # drop everything staged, tree untouched
-</code></pre>
-<p><code>spec changes show</code> lists each staged entry with its action and path:</p>
-<pre><code class="language-json">{
-  "changes": [
-    { "action": "create", "path": "features/calculator.feature" }
-  ],
-  "nextStep": "Review the staged changes, then 'spec changes commit' to apply or 'spec changes discard' to drop them."
-}
-</code></pre>
-<h2 id="what-stages-and-what-doesnt"><a class="header" href="#what-stages-and-what-doesnt">What stages and what doesn’t</a></h2>
+<h2 id="how-a-write-lands"><a class="header" href="#how-a-write-lands">How a write lands</a></h2>
+<p>Each write goes to a scratch file beside the target and is then renamed
+over it. A rename is atomic, so a reader racing the write sees either
+the old file or the new one, never a half-written mixture. Concurrent
+<code>spec</code> processes serialize their read-modify-write cycles on an advisory
+lock at <code>.spec/.lock</code>.</p>
+<p>A write is confined to the project. A path that escapes the root —
+absolute, <code>..</code>-relative, or through a symlink — is refused, as is any
+path under <code>.spec/</code>, which is the harness’s own state.</p>
+<h2 id="undo"><a class="header" href="#undo">Undo</a></h2>
+<p>Git is the undo. That is why the two commands that generate at scale,
+<a href="#spec-greenfield"><code>spec greenfield</code></a> and
+<a href="#spec-deliver"><code>spec deliver</code></a>, offer to put the run on a branch
+of its own before they write anything — see
+<a href="#the-branch-gate">the branch gate</a>. For a single command, <code>git diff</code> and
+<code>git restore</code> are the review and the undo.</p>
+<h2 id="what-writes-and-what-doesnt"><a class="header" href="#what-writes-and-what-doesnt">What writes and what doesn’t</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
-<tr><th>Writes to the stage</th><th>Writes directly</th></tr>
+<tr><th>Writes project files</th><th>Writes harness state</th></tr>
 </thead>
 <tbody>
 <tr><td><code>feature create</code></td><td><code>init</code> (scaffolding a fresh project)</td></tr>
 <tr><td><code>scenario add</code> / <code>update</code> / <code>delete</code></td><td><code>model use</code> (writes <code>.spec/config.toml</code>)</td></tr>
 <tr><td><code>steps generate</code></td><td><code>test</code> / <code>refactor</code> (phase state file)</td></tr>
 <tr><td><code>unittest generate</code></td><td></td></tr>
-<tr><td><code>spec draft</code></td><td></td></tr>
+<tr><td><code>spec draft</code> / <code>spec reword</code></td><td></td></tr>
 <tr><td><code>spec mark-implemented</code></td><td></td></tr>
+<tr><td><code>implement</code>, <code>greenfield</code>, <code>deliver</code></td><td></td></tr>
 </tbody>
 </table>
 </div>
-<p>Validation (<code>spec changes validate</code>) checks staged Gherkin too, so you can gate
-a transaction before committing it.</p>
+<p><code>spec validate</code> reads the spec and the Gherkin as they stand on disk, so
+running it after a write tells you what the next command will see.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="the-branch-gate"><a class="header" href="#the-branch-gate">The branch gate</a></h1>
+<p>The harness <a href="#direct-writes">writes your project’s real files</a>. That
+is only safe because you can throw the result away, and git is what
+makes it throwable. So the two commands that generate at scale —
+<a href="#spec-greenfield"><code>spec greenfield</code></a> and
+<a href="#spec-deliver"><code>spec deliver</code></a> — stop exactly once, before they
+write anything, and offer to put the run on a branch of its own.</p>
+<h2 id="the-one-question"><a class="header" href="#the-one-question">The one question</a></h2>
+<pre><code class="language-text">This run writes the project's files directly. You are on main.
+Branch name for this run (Enter for spec/2026-10-05-k3f92a, or n to stay on main):
+</code></pre>
+<p>Three answers, none of them wrong:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>You type</th><th>What happens</th></tr>
+</thead>
+<tbody>
+<tr><td>A name</td><td>The branch is created and checked out. A bare name is prefixed <code>spec/</code>; a name with a <code>/</code> in it is taken as you typed it.</td></tr>
+<tr><td>Enter</td><td>A generated name is used: <code>spec/&lt;today&gt;-&lt;six characters&gt;</code>.</td></tr>
+<tr><td><code>n</code></td><td>Nothing is created. The run writes on the branch you are already on.</td></tr>
+</tbody>
+</table>
+</div>
+<p>Spaces and underscores in a typed name are folded to <code>-</code>, so
+<code>add newline support</code> becomes <code>spec/add-newline-support</code>. A name git
+would refuse outright — one containing <code>..</code>, <code>~</code>, <code>^</code>, <code>:</code> or a control
+character — is reported and the run continues where it stands.</p>
+<h2 id="when-it-does-not-ask"><a class="header" href="#when-it-does-not-ask">When it does not ask</a></h2>
+<ul>
+<li>
+<p><strong><code>--no-branch</code>.</strong> Git is not consulted at all: no probe, no
+question, no branch. The run writes the project where it is. This is
+the flag for CI, for a project deliberately outside version control,
+and for any script that manages its own refs.</p>
+</li>
+<li>
+<p><strong>Outside a git repository.</strong> There is nothing to branch from, so the
+run says so once and carries on:</p>
+<pre><code class="language-text">This project is not a git repository, so there is no branch to work on
+and no undo for what this run writes. Continuing here.
+</code></pre>
+</li>
+<li>
+<p><strong>Over MCP.</strong> The server never prompts and never creates a branch. An
+agent-driven session is the caller’s to arrange; put yourself on a
+branch before you start it.</p>
+</li>
+<li>
+<p><strong>Any other command.</strong> <code>spec scenario add</code>, <code>spec implement</code>,
+<code>spec steps generate</code> and the rest write one or two files and never
+ask. They are small enough to read in a <code>git diff</code>.</p>
+</li>
+</ul>
+<h2 id="uncommitted-work"><a class="header" href="#uncommitted-work">Uncommitted work</a></h2>
+<p>If the working tree is dirty when the gate runs, it says so before it
+asks, because it changes the answer:</p>
+<pre><code class="language-text">There is uncommitted work here. A new branch carries it along, so it
+will be mixed in with what this run writes.
+</code></pre>
+<p>Commit or stash first if you want the run’s output on its own.</p>
+<h2 id="throwing-the-run-away"><a class="header" href="#throwing-the-run-away">Throwing the run away</a></h2>
+<p>When a branch was created, the gate tells you how to undo the whole
+thing in one line:</p>
+<pre><code class="language-bash">git switch main &amp;&amp; git branch -D spec/2026-10-05-k3f92a
+</code></pre>
+<h2 id="it-never-stops-the-run"><a class="header" href="#it-never-stops-the-run">It never stops the run</a></h2>
+<p>The gate is advisory. An unusable name, a git that refuses to create
+the branch, or piped input with no answer left all produce a warning
+and a run that continues on the current branch. Nothing the gate does
+can fail a delivery.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="spec-init"><a class="header" href="#spec-init">spec init</a></h1>
 <p>Scaffold build files, a Cucumber runner, an empty requirements spec,
@@ -964,7 +1051,7 @@ for reference). Other keys are commented with their defaults.</li>
 <p>After scaffolding, <code>init</code> scans the new files into <code>.spec/memory.json</code>
 (language, BDD framework, libraries, layout). That file is generated
 state inside <code>.spec/</code> and is gitignored, like <code>state.json</code>, <code>history</code>,
-<code>cache/</code>, <code>log/</code>, and <code>staged/</code>. Only <code>.spec/config.toml</code> is written to
+<code>cache/</code>, and <code>log/</code>. Only <code>.spec/config.toml</code> is written to
 be committed. Memory is refreshed again when a shell, MCP server, or
 LLM command starts. Every model system prompt then opens with that
 brief.</p>
@@ -1025,9 +1112,8 @@ spec init --language rust --name "String Calculator"
 unrecognized answer re-prompts.</p>
 <h2 id="notes"><a class="header" href="#notes">Notes</a></h2>
 <ul>
-<li><code>init</code> writes directly to the working tree (there is nothing to
-protect in an empty project); everything after <code>init</code> goes through
-<a href="#staged-changes">staged changes</a>.</li>
+<li><code>init</code> writes directly to the working tree, as does everything after
+it — see <a href="#direct-writes">direct writes</a>.</li>
 <li><code>init</code> does not install runtimes. Run
 <a href="#spec-inspect"><code>spec inspect</code></a> to see whether the language’s runtime is
 present before expecting <code>spec test</code> to execute.</li>
@@ -1058,6 +1144,7 @@ there.</p>
 <tr><td><code>--fail-fast</code></td><td>Stop at the first requirement that falls short instead of carrying on.</td></tr>
 <tr><td><code>--no-refactor</code></td><td>Skip the refactor step even on a green bar.</td></tr>
 <tr><td><code>--file &lt;FILE&gt;</code></td><td>Draft new requirements into this included spec file. Omitted, the drafted requirement lands in the catalog document covering the working directory — see <a href="#spec-draft"><code>spec draft</code></a>.</td></tr>
+<tr><td><code>--no-branch</code></td><td>Skip <a href="#the-branch-gate">the branch gate</a> entirely: git is not consulted and no branch is created.</td></tr>
 </tbody>
 </table>
 </div>
@@ -1135,7 +1222,14 @@ Running the tests - working ...
 <p>A step that loops on its own is called once and its loop is trusted:
 drafting’s validate-and-reword rounds, <code>spec implement</code>’s attempts,
 and <code>spec refactor</code>’s rounds are not wrapped in a second loop here.</p>
-<h2 id="it-never-stops-to-ask"><a class="header" href="#it-never-stops-to-ask">It never stops to ask</a></h2>
+<h2 id="it-stops-once-before-it-writes-anything"><a class="header" href="#it-stops-once-before-it-writes-anything">It stops once, before it writes anything</a></h2>
+<p>A run that delivers a backlog writes a lot of files. So before the first
+one, it asks a single question: a branch name for this run, Enter for a
+generated one, or <code>n</code> to stay where you are. That is
+<a href="#the-branch-gate">the branch gate</a>, and <code>--no-branch</code> removes it. A
+run outside a git repository, or one whose stdin has nothing left to
+read, takes the no-branch path and says so.</p>
+<h2 id="after-that-it-never-stops-to-ask"><a class="header" href="#after-that-it-never-stops-to-ask">After that it never stops to ask</a></h2>
 <p>A run either completes or tells you why it could not. It does neither
 halfway through a question, because an orchestrator that waits at a
 prompt is not running.</p>
@@ -1145,7 +1239,7 @@ treats <kbd>Enter</kbd> as “accept what is in front of you”, and this is
 that path. Each one is echoed, so the transcript shows what was decided
 for you and which wording landed:</p>
 <pre><code class="language-text">REQ-001 title [Empty string returns zero] (Enter keeps it): kept (spec deliver never stops to ask)
-The wording reads clean. Stage this requirement? yes (spec deliver never stops to ask)
+The wording reads clean. Write this requirement? yes (spec deliver never stops to ask)
 </code></pre>
 <p>The generated unit test is still printed before it runs — the assertions
 are the one thing here you will want to sharpen afterwards — but it is
@@ -1178,7 +1272,7 @@ backlog:</p>
 <pre><code class="language-text">Plan: 2 requirement(s) - REQ-001, REQ-002.
 [1 of 2] REQ-001
 ...
-REQ-001 stopped: The generated tests were declined and the staging area is clear. Author them by hand, then run spec deliver again.
+REQ-001 stopped: The generated tests were declined. Author them by hand, then run spec deliver again.
 [2 of 2] REQ-002
 </code></pre>
 <p><code>--fail-fast</code> stops instead, and the requirements after it are counted
@@ -1236,8 +1330,10 @@ refuses up front rather than pausing for you.</p>
 <p>Run the full orchestrated loop from an empty directory to an
 implemented requirement, with exactly <strong>two human gates</strong>: approving
 the spec wording, and approving the generated tests before they run.
-Everything else — scaffolding, validation, scenario authoring, step
-generation, test execution, phase tracking — is automated.</p>
+Before either of them, the run asks once whether to work on a branch
+of its own — see <a href="#the-branch-gate">the branch gate</a>. Everything else
+— scaffolding, validation, scenario authoring, step generation, test
+execution, phase tracking — is automated.</p>
 <pre><code class="language-text">Usage: spec greenfield [OPTIONS]
 </code></pre>
 <h2 id="flags-2"><a class="header" href="#flags-2">Flags</a></h2>
@@ -1250,31 +1346,35 @@ generation, test execution, phase tracking — is automated.</p>
 <tr><td><code>--root &lt;ROOT&gt;</code></td><td>Project root. Defaults to <code>.</code>.</td></tr>
 <tr><td><code>--model &lt;MODEL&gt;</code></td><td>LLM model for the generation steps, this run only.</td></tr>
 <tr><td><code>--retry &lt;N&gt;</code></td><td>Max attempts when a model reply fails validation. Default 3.</td></tr>
+<tr><td><code>--no-branch</code></td><td>Skip <a href="#the-branch-gate">the branch gate</a> entirely: git is not consulted and no branch is created.</td></tr>
 </tbody>
 </table>
 </div>
 <h2 id="the-orchestrated-flow"><a class="header" href="#the-orchestrated-flow">The orchestrated flow</a></h2>
 <pre><code class="language-text"> 1. inspect / init      scaffold if the root is empty (asks for language)
                         and records the choice in .spec/memory.json
- 2. describe            you describe what to build in plain words; the
+ 2. branch gate         one question: a branch name for this run, Enter
+                        for a generated one, or n to stay put. Skipped
+                        by --no-branch and outside a git repository
+ 3. describe            you describe what to build in plain words; the
                         model splits it into requirement proposals
- 3. accept + wizard     you accept all listed proposals, or a
+ 4. accept + wizard     you accept all listed proposals, or a
                         comma-separated subset; accepted ones are
                         stored in the spec under sequential REQ-###
                         ids. You then pick which stored one to review
                         first; every field arrives pre-filled -
                         Enter accepts, typing replaces
- 4. spec validate       structure gate; findings loop back to rewording
- 5. spec refine         wording gate; each finding comes with a "try:" fix
+ 5. spec validate       structure gate; findings loop back to rewording
+ 6. spec refine         wording gate; each finding comes with a "try:" fix
     ── HUMAN GATE 1 ──  approve the requirement's wording
- 6. scenario + steps    Gherkin scenario tagged @REQ-...; step definitions
+ 7. scenario + steps    Gherkin scenario tagged @REQ-...; step definitions
     ── HUMAN GATE 2 ──  approve the generated tests
- 7. test → RED          the scenario fails honestly
- 8. implement           Enter lets the model attempt the implementation;
+ 8. test → RED          the scenario fails honestly
+ 9. implement           Enter lets the model attempt the implementation;
                         a number, e.g. 5, buys that many hands-off attempts
- 9. test → GREEN        loop back to 8 while failing
-10. refactor            optional; only offered on GREEN
-11. mark implemented    Saving status spinner until requirements.json
+10. test → GREEN        loop back to 9 while failing
+11. refactor            optional; only offered on GREEN
+12. mark implemented    Saving status spinner until requirements.json
                         is written; then the spec&gt; prompt for the next
                         command
 </code></pre>
@@ -1290,7 +1390,7 @@ The description holds 2 requirement(s):
   2. Empty string returns zero
 Accept [Enter for all, or comma-separated numbers]:
 
-Accepted requirements are staged for requirements/requirements.json as pending - nothing reaches the working spec until spec changes commit:
+Accepted requirements were written to requirements/requirements.json as pending:
   REQ-001 Comma separated numbers are summed
   REQ-002 Empty string returns zero
 Which requirement first to review and refine? [1-2, Enter for 1]:
@@ -1304,15 +1404,15 @@ REQ-002 criterion 2 (leave blank to finish the criteria):
 <p>The model must deliver each proposal complete — title, story, and at
 least one Given/When/Then criterion — or the proposal is dropped.
 The list is shown so you can accept all of them, or a comma-separated
-subset (for example <code>1,3,5</code>). Only the accepted proposals are staged
-for <code>requirements.json</code> (the root of the
+subset (for example <code>1,3,5</code>). Only the accepted proposals are written
+to <code>requirements.json</code> (the root of the
 <a href="#the-requirements-format">spec catalog</a>), each under its own sequential
-<code>REQ-###</code> id — read them with <code>spec changes show</code> at any point in the
-wizard. Like every other mutation they reach the working spec only on
-<code>spec changes commit</code>, so declining the last prompt leaves the batch in
-staging for <code>spec changes show</code> or <code>spec changes discard</code> rather than
-on disk.
-You then pick which staged requirement to review and refine first.
+<code>REQ-###</code> id — read them with <code>spec list</code> at any point in the wizard.
+They are on disk from that moment, so declining the rewording at the
+end leaves the accepted batch in the file under the model’s wording
+rather than taking it back; the reply says so, and <code>git restore</code> is
+the undo.
+You then pick which of them to review and refine first.
 The others wait as pending requirements — reword them any time with
 <code>spec reword</code>.
 Nothing is accepted silently: every field passes through your hands,
@@ -1321,8 +1421,8 @@ and the validate + refine gates still run on whatever you accept.</p>
 description is left blank, no model is resolved, the model is
 unreachable, or its reply holds no complete requirement.</p>
 <p>At each gate you can approve, decline (the run stops cleanly), or
-pause to resume later — the phase state and staged changes survive
-between invocations.</p>
+pause to resume later — the phase state and everything written so far
+survive between invocations.</p>
 <h2 id="the-implementation-attempt"><a class="header" href="#the-implementation-attempt">The implementation attempt</a></h2>
 <p>On a RED bar with a resolved model, <kbd>Enter</kbd> asks the model to
 make the failing tests pass, then reruns the suite and prints the
@@ -1370,7 +1470,7 @@ model, <kbd>Enter</kbd> just reruns the tests.</p>
 <p>Typing <code>stop</code> pauses the run; a paused project continues with the
 standalone <a href="#spec-implement"><code>spec implement</code></a> command, which runs the
 same attempt from the persisted failure details:</p>
-<pre><code class="language-bash">spec implement REQ-001 &amp;&amp; spec changes commit &amp;&amp; spec test
+<pre><code class="language-bash">spec implement REQ-001 &amp;&amp; spec test
 </code></pre>
 <h2 id="rewording-loop-details"><a class="header" href="#rewording-loop-details">Rewording loop details</a></h2>
 <p>When validation or refinement finds problems, each finding is printed
@@ -1467,8 +1567,8 @@ greenfield when you want the decisions to be yours.</li>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="the-requirements-spec"><a class="header" href="#the-requirements-spec">The requirements spec</a></h1>
 <p>The spec at <code>requirements/requirements.json</code> is the project’s source of
-truth. These commands read it, gate it, and mutate it (through the
-<a href="#staged-changes">staging area</a>). The root file is a
+truth. These commands read it, gate it, and mutate it (writing the file
+itself — see <a href="#direct-writes">direct writes</a>). The root file is a
 <a href="#the-catalog-splitting-the-spec-across-files">catalog</a>:
 it may include child spec files, and every command here operates on the
 merged view of the whole tree.</p>
@@ -1528,11 +1628,11 @@ hint.</p>
 <h2 id="spec-draft"><a class="header" href="#spec-draft">spec draft</a></h2>
 <p>Interactively draft a requirement. Human input drives the spec — the
 harness never invents requirements. The draft is validated and
-quality-gated in a loop until it is clean, then staged.</p>
+quality-gated in a loop until it is clean, then written.</p>
 <pre><code class="language-bash">spec draft
 </code></pre>
 <p>Non-interactive (no TTY). Repeat <code>--criterion</code> for each Given/When/Then
-line. The next free id is allocated; the draft is staged.</p>
+line. The next free id is allocated; the draft is written.</p>
 <pre><code class="language-bash">spec draft \
   --title "Newlines as delimiters" \
   --story "As a calculator user, I want newlines to separate numbers in addition to commas so that multi-line input just works." \
@@ -1646,12 +1746,12 @@ is in flight.</p>
 fall back to your prior answers exactly as without a model. Nothing is
 accepted silently either way — every field still passes through your
 hands, and validate + refine rerun on whatever you accept.</p>
-<p>When the draft is clean it is staged:</p>
+<p>When the draft is clean it is written:</p>
 <pre><code class="language-json">{
   "id": "REQ-004",
   "title": "Newlines act as delimiters",
-  "staged": true,
-  "nextStep": "Review with 'spec changes show', apply with 'spec changes commit', then write the Gherkin scenario."
+  "written": true,
+  "nextStep": "Add the @REQ-004 scenario with scenario add."
 }
 </code></pre>
 <hr>
@@ -1747,7 +1847,7 @@ kind, and what enforcing them costs are in
 stops asking, set <code>mode = "off"</code> under <code>[decision]</code>.</p>
 <hr>
 <h2 id="spec-reword"><a class="header" href="#spec-reword">spec reword</a></h2>
-<p>Reword an existing backlog item (staged). Interactive wizard is the
+<p>Reword an existing backlog item in place. Interactive wizard is the
 same refine → reword loop as draft. Flags skip the wizard:</p>
 <pre><code class="language-bash">spec reword REQ-007
 spec reword REQ-007 \
@@ -1763,9 +1863,9 @@ indentation differ from what the read tools return, so a hand-written
 string replacement against <code>requirements.json</code> will not match.</p>
 <hr>
 <h2 id="spec-set-feature"><a class="header" href="#spec-set-feature">spec set-feature</a></h2>
-<p>Point a requirement at the feature file that was actually written
-(staged). Used when a copied spec still names <code>kata/…</code> paths that do
-not exist on an extracted project. <code>spec scenario add</code> already updates
+<p>Point a requirement at the feature file that was actually written.
+Used when a copied spec still names <code>kata/…</code> paths that do not exist
+on an extracted project. <code>spec scenario add</code> already updates
 <code>featureFile</code> when it is missing or stale.</p>
 <pre><code class="language-bash">spec set-feature REQ-003 --file src/test/resources/features/string_calculator.feature
 </code></pre>
@@ -1773,19 +1873,17 @@ not exist on an extracted project. <code>spec scenario add</code> already update
 <h2 id="spec-mark-implemented"><a class="header" href="#spec-mark-implemented">spec mark-implemented</a></h2>
 <p>Flip a requirement’s status to <code>implemented</code> and record its
 <code>featureFile</code> — the feature carrying the <code>@REQ-...</code> tag — in the same
-staged edit, so the spec passes validation. The change is staged, not
-applied directly.</p>
+edit, so the spec passes validation.</p>
 <pre><code class="language-text">Usage: spec mark-implemented [OPTIONS] &lt;REQ_ID&gt;
 </code></pre>
 <pre><code class="language-bash">spec mark-implemented REQ-003
-spec changes validate
-spec changes commit
+spec validate
 </code></pre>
 <pre><code class="language-json">{
   "id": "REQ-003",
   "status": "implemented",
-  "staged": true,
-  "nextStep": "Review with changes show, run spec changes validate (it checks the @REQ-003 scenario exists), then spec changes commit."
+  "written": true,
+  "nextStep": "Run validate - it checks the @REQ-003 scenario exists."
 }
 </code></pre>
 <p>The command is gated twice:</p>
@@ -1793,9 +1891,9 @@ spec changes commit
 <li><strong>GREEN only</strong> — it refuses unless the last recorded run passed.
 Do this only when the scenario and tests for the requirement are
 GREEN; it is the last move of the per-requirement rhythm.</li>
-<li><strong>Tagged scenario only</strong> — it refuses when no committed feature
-file carries a scenario tagged <code>@&lt;REQ_ID&gt;</code>; add one with
-<code>spec scenario add</code> and apply it with <code>spec changes commit</code> first.</li>
+<li><strong>Tagged scenario only</strong> — it refuses when no feature file carries
+a scenario tagged <code>@&lt;REQ_ID&gt;</code>; add one with <code>spec scenario add</code>
+first.</li>
 </ul>
 <p>Re-running it on an already-implemented requirement is safe: on GREEN
 it backfills a missing <code>featureFile</code>, which is exactly the repair for
@@ -1822,8 +1920,8 @@ spec skeleton (<code>{ "requirements": [] }</code>) for it.</p>
   "file": "requirements/core/arithmetic.json",
   "parent": "requirements/requirements.json",
   "created": true,
-  "staged": true,
-  "nextStep": "Review with spec changes show, apply with spec changes commit, then draft into it with spec draft --file."
+  "written": true,
+  "nextStep": "Draft into it with spec draft --file."
 }
 </code></pre>
 <p>Nest deeper by including from a child instead of the root; the entry
@@ -1837,7 +1935,6 @@ Includes must be <code>.json</code> files inside the spec directory.</p>
 <ul>
 <li><a href="#the-requirements-format">The requirements format</a> — every field of the spec, and the include catalog.</li>
 <li><a href="#the-workflow-spec--red--green--refactor">The workflow</a> — where each subcommand fits.</li>
-<li><a href="#spec-changes"><code>spec changes</code></a> — reviewing and applying staged spec mutations.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="spec-inspect"><a class="header" href="#spec-inspect">spec inspect</a></h1>
@@ -1965,9 +2062,8 @@ as structured JSON rather than raw text.</p>
 <p>A file that is not valid Gherkin fails with the parser’s diagnosis.</p>
 <hr>
 <h2 id="spec-feature-create"><a class="header" href="#spec-feature-create">spec feature create</a></h2>
-<p>Create a feature file. The file is <strong>staged</strong>, not written to the
-working tree — review with <a href="#spec-changes"><code>spec changes show</code></a> and apply
-with <code>spec changes commit</code>.</p>
+<p>Create a feature file. The file is written straight into the working
+tree — read it with <code>git diff</code>, undo it with <code>git restore</code>.</p>
 <pre><code class="language-text">Usage: spec feature create [OPTIONS] --path &lt;PATH&gt; --name &lt;NAME&gt;
 </code></pre>
 <div class="table-wrapper">
@@ -1982,24 +2078,25 @@ with <code>spec changes commit</code>.</p>
 </table>
 </div>
 <pre><code class="language-bash">spec feature create --path features/string_calculator.feature --name "String Calculator"
-spec changes show
-spec changes commit
+git diff
 </code></pre>
-<p>The staged file contains the <code>Feature:</code> header ready for scenarios:</p>
+<p>The new file contains the <code>Feature:</code> header ready for scenarios:</p>
 <pre><code class="language-gherkin">Feature: String Calculator
 </code></pre>
-<p>Add scenarios with <a href="#spec-scenario"><code>spec scenario add</code></a> — don’t edit the
-staged file by hand.</p>
+<p>Add scenarios with <a href="#spec-scenario"><code>spec scenario add</code></a> rather than
+editing the file by hand: the command keeps the tags and the ordering
+right.</p>
 <h2 id="see-also-5"><a class="header" href="#see-also-5">See also</a></h2>
 <ul>
 <li><a href="#spec-scenario"><code>spec scenario</code></a> — populate features with tagged scenarios.</li>
-<li><a href="#spec-changes-validate"><code>spec changes validate</code></a> — parse-check all features, staged included.</li>
+<li><a href="#spec-validate"><code>spec validate</code></a> — parse-check every feature file against the spec.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="spec-scenario"><a class="header" href="#spec-scenario">spec scenario</a></h1>
 <p>Scenario mutations. Every scenario is tied to a requirement by a
 <code>@REQ-...</code> tag, keeping the feature files traceable back to the spec.
-All four subcommands write to the <a href="#staged-changes">staging area</a>.</p>
+All four subcommands write the feature file itself — see
+<a href="#direct-writes">direct writes</a>.</p>
 <pre><code class="language-text">Usage: spec scenario [OPTIONS] &lt;COMMAND&gt;
 
 Commands: generate, add, update, delete
@@ -2033,16 +2130,16 @@ scenario per criterion, in order.</p>
     "Two larger numbers separated by a comma are summed"
   ],
   "criteria": 2,
-  "staged": true,
+  "written": true,
   "source": "llm",
-  "nextStep": "Read the steps against the acceptance criteria, apply with spec changes commit, then run spec steps missing."
+  "nextStep": "Read the steps against the acceptance criteria, then run spec steps missing."
 }
 </code></pre>
 <h3 id="where-the-wording-comes-from"><a class="header" href="#where-the-wording-comes-from">Where the wording comes from</a></h3>
 <p>Acceptance criteria are already <code>Given …, when …, then …</code>, so a literal
 reading of them is always available and needs no model. That literal
 reading is the <strong>template</strong>, and <code>source</code> reports <code>template</code> when it is
-what got staged.</p>
+what got written.</p>
 <p>It is correct but rarely idiomatic: it cannot know that the feature file
 it is joining opens every scenario on <code>Given a string calculator</code>. So
 when a model is resolved it is asked to say the same thing in the file’s
@@ -2068,7 +2165,7 @@ undefined steps.</p>
 criterion</strong>, every step opens with a Gherkin keyword, every scenario has
 a <code>When</code> and a <code>Then</code>, and no name collides with one already in the file
 or with another in the reply. A reply failing any of those is retried
-with the reason, and the template is staged if the retries run out —
+with the reason, and the template is written if the retries run out —
 coverage is never quietly lost to a chatty model.</p>
 <p>The command itself refuses two situations outright:</p>
 <ul>
@@ -2108,7 +2205,7 @@ passing <code>--feature</code> also points the requirement at that file, exactly
   --step 'When add is called' \
   --step 'Then the result is 3'
 </code></pre>
-<p>The staged result appended to the feature:</p>
+<p>The result appended to the feature:</p>
 <pre><code class="language-gherkin">  @REQ-003
   Scenario: Two numbers separated by a comma are summed
     Given the input "1,2"
@@ -2164,8 +2261,7 @@ found by feature path + scenario name; omitted parts are kept.</p>
 names the feature searched.</p>
 <h2 id="the-full-rhythm"><a class="header" href="#the-full-rhythm">The full rhythm</a></h2>
 <pre><code class="language-bash">spec scenario generate REQ-002   # or scenario add, to write them yourself
-spec changes show      # review the staged modify
-spec changes commit    # apply
+git diff               # review what landed
 spec steps missing     # any steps without definitions?
 spec test              # expect RED
 </code></pre>
@@ -2173,7 +2269,7 @@ spec test              # expect RED
 <ul>
 <li><a href="#spec-steps"><code>spec steps</code></a> — find and generate the step definitions
 behind these scenarios.</li>
-<li><a href="#spec-changes"><code>spec changes</code></a> — review, apply, or discard the staged mutation.</li>
+<li><a href="#spec-validate"><code>spec validate</code></a> — check the scenarios against the spec.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="spec-steps"><a class="header" href="#spec-steps">spec steps</a></h1>
@@ -2218,10 +2314,10 @@ for its language created in the module’s test root.</p>
 </code></pre>
 <pre><code class="language-json">{
   "target": "features/step_definitions/string_calculator_steps.js",
-  "staged": true,
+  "written": true,
   "source": "template",
   "summary": "2 step definitions generated for undefined steps.",
-  "nextStep": "Review with 'spec changes show', apply with 'spec changes commit', implement the bodies, then 'spec test'."
+  "nextStep": "Read it against the acceptance criteria, then run spec test (expect RED)."
 }
 </code></pre>
 <h3 id="source-template-or-llm"><a class="header" href="#source-template-or-llm"><code>source</code>: template or llm</a></h3>
@@ -2248,8 +2344,7 @@ ecosystem’s conventions, not just the step expressions.</p>
 <h2 id="see-also-7"><a class="header" href="#see-also-7">See also</a></h2>
 <ul>
 <li><a href="#spec-scenario"><code>spec scenario</code></a> — where the steps come from.</li>
-<li><a href="#spec-changes"><code>spec changes</code></a> — apply the staged definitions.</li>
-<li><a href="#spec-test"><code>spec test</code></a> — run and watch the honest RED.</li>
+<li><a href="#spec-test"><code>spec test</code></a> — run the definitions and watch the honest RED.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="spec-unittest"><a class="header" href="#spec-unittest">spec unittest</a></h1>
@@ -2273,10 +2368,10 @@ assertion.</p>
 </code></pre>
 <pre><code class="language-json">{
   "target": "src/test/java/StringCalculatorTest.java",
-  "staged": true,
+  "written": true,
   "source": "template",
   "summary": "Unit test for REQ-003 with 2 cases from its acceptance criteria.",
-  "nextStep": "Review with 'spec changes show', apply with 'spec changes commit', then 'spec test' to see RED."
+  "nextStep": "Sharpen the assertions (they are yours), then run spec test (expect RED)."
 }
 </code></pre>
 <p>The target file and framework follow the detected language:</p>
@@ -2302,9 +2397,8 @@ in the prompt. Generated assertions fail honestly until the
 production code exists — the point is a real RED.</p>
 <p>An unknown requirement id fails with exit status 1.</p>
 <h2 id="where-it-fits"><a class="header" href="#where-it-fits">Where it fits</a></h2>
-<pre><code class="language-bash">spec show REQ-003          # read the criteria
-spec unittest generate REQ-003  # stage the test
-spec changes commit
+<pre><code class="language-bash">spec show REQ-003               # read the criteria
+spec unittest generate REQ-003  # write the test
 spec test                       # RED at both altitudes
 </code></pre>
 <h2 id="see-also-8"><a class="header" href="#see-also-8">See also</a></h2>
@@ -2322,8 +2416,8 @@ practices (package naming for Java, snake_case modules for Rust, and
 so on), and must reply with complete files:
 the production code plus real bodies for the TODO placeholders in the
 generated tests and step definitions. Everything it writes lands in
-the staging area — you review before anything touches the working
-tree, and the next test run is the real validator.</p>
+the working tree as it goes — read it with <code>git diff</code>, undo it with
+<code>git restore</code>, and let the next test run be the real validator.</p>
 <pre><code class="language-text">Usage: spec implement [OPTIONS] &lt;REQ_ID&gt;
 
 Options:
@@ -2357,7 +2451,7 @@ gets the single static line instead:</p>
   unit test: src/test/java/Req001Test.java - present
   production code (the attempt creates it when missing): src/main/java/StringCalculator.java - missing
 Sending the sources, the failures, and the attempt history to the model - working ...
-  staged: src/main/java/StringCalculator.java
+  wrote: src/main/java/StringCalculator.java
 </code></pre>
 <pre><code class="language-json">{
   "targets": [
@@ -2365,27 +2459,28 @@ Sending the sources, the failures, and the attempt history to the model - workin
     "src/test/java/Req001Test.java",
     "src/test/java/GeneratedSteps.java"
   ],
-  "staged": true,
+  "written": true,
   "source": "llm",
-  "nextStep": "Apply with spec changes commit, then spec test - the run decides."
+  "nextStep": "Run spec test - the run decides."
 }
 </code></pre>
 <h2 id="the-follow-up-offer"><a class="header" href="#the-follow-up-offer">The follow-up offer</a></h2>
-<p>When files were staged and you are on a terminal, the command closes
+<p>When files were written and you are on a terminal, the command closes
 the loop itself:</p>
-<pre><code class="language-text">Apply the staged files and run the tests now? [y/N]
+<pre><code class="language-text">Run the tests now? [y/N]
 </code></pre>
-<p>Answering <code>y</code> runs <code>changes commit</code> and <code>test</code> in one go and prints
-both reports, ending with the verdict in color — green
-<code>GREEN - next: refactor (optional), then spec mark-implemented REQ-001 &amp;&amp; changes commit.</code>
+<p>Answering <code>y</code> runs <code>test</code> and prints the report, ending with the
+verdict in color — green
+<code>GREEN - next: refactor (optional), then mark-implemented REQ-001.</code>
 or red
 <code>Still RED - the fresh failures are recorded; run implement REQ-001 for another model attempt, or implement by hand and rerun test.</code></p>
 <p>Pressing <kbd>Enter</kbd> (or piping the output, where no question is
 asked) declines and prints the next command in plain words instead:</p>
-<pre><code class="language-text">Next: changes commit &amp;&amp; test - then implement REQ-001 again if the bar stays RED.
+<pre><code class="language-text">Next: test - then implement REQ-001 again if the bar stays RED.
 </code></pre>
-<p>In every one of these lines the command itself — <code>changes commit &amp;&amp; test</code>, <code>implement REQ-001</code>, <code>spec mark-implemented REQ-001 &amp;&amp; changes commit</code> — is printed in green, the harness’s marker for text meant to be
-copied and pasted.</p>
+<p>In every one of these lines the command itself — <code>test</code>,
+<code>implement REQ-001</code>, <code>mark-implemented REQ-001</code> — is printed in green,
+the harness’s marker for text meant to be copied and pasted.</p>
 <h2 id="the-preflight"><a class="header" href="#the-preflight">The preflight</a></h2>
 <p>Before anything goes to the model, the command surveys the
 prerequisites of an implementation attempt:</p>
@@ -2410,7 +2505,7 @@ and the JSON reply is the readiness report:</p>
   ],
   "findings": [
     "No RED test run is recorded - run spec test first so its failures brief the model.",
-    "No scenario is tagged @REQ-001 - add one with spec scenario add, then spec changes commit."
+    "No scenario is tagged @REQ-001 - add one with spec scenario add."
   ],
   "nextStep": "No RED test run is recorded - run spec test first so its failures brief the model."
 }
@@ -2428,7 +2523,7 @@ updates. Only two kinds of path are accepted: files already in the
 project’s sources (the generated unit test and step definitions it
 needs to wire up), and the production file described below. Anything
 else in the reply is dropped. A reply with no usable update fails with
-<code>The model's reply held no usable file update.</code> — nothing is staged,
+<code>The model's reply held no usable file update.</code> — nothing is written,
 and you implement by hand instead.</p>
 <p>A reply that would <em>destroy</em> a file it replaces is dropped too, and
 reported. Two things disqualify it: no longer declaring a name the
@@ -2436,7 +2531,7 @@ file declares today, or braces that never close. Both describe a
 truncated or junk reply rather than a wrong one — the test run is what
 decides whether an attempt is any good, and it never gets to run when
 the reply deletes the code the tests were going to call. The refusal
-is per file, so the rest of an otherwise fine attempt is still staged.</p>
+is per file, so the rest of an otherwise fine attempt is still written.</p>
 <h2 id="where-the-work-lands"><a class="header" href="#where-the-work-lands">Where the work lands</a></h2>
 <p>The production file is resolved in this order, and the first answer
 wins:</p>
@@ -2496,17 +2591,17 @@ reason. Either write a step body or two against the real types, or pass
 <pre><code class="language-text">production code (the attempt creates it when missing): unknown - pass --into &lt;path&gt; - missing
 </code></pre>
 <h2 id="when-an-attempt-reaches-past-its-requirement"><a class="header" href="#when-an-attempt-reaches-past-its-requirement">When an attempt reaches past its requirement</a></h2>
-<p>The report’s <code>warning</code> also calls out staged code that looks like it
+<p>The report’s <code>warning</code> also calls out written code that looks like it
 satisfies a <em>different</em> requirement still marked <code>pending</code>:</p>
-<pre><code class="language-text">The staged code also satisfies REQ-005, still pending - REQ-006 was the
-requirement asked for. Review the diff with spec changes show and drop what
+<pre><code class="language-text">The code written also satisfies REQ-005, still pending - REQ-006 was the
+requirement asked for. Review the diff with git diff and drop what
 REQ-006 does not need, so each requirement keeps its own RED bar.
 </code></pre>
 <p>It is a literal match — the code feeds in the same quoted inputs the other
 requirement’s criteria name and lands on the same expected numbers — so it
 warns and never blocks. A criterion worded without literals is invisible to
 it, and a literal two requirements share can raise it when nothing is wrong.
-Read the staged diff and decide; that is the check this is a prompt for, not
+Read the diff and decide; that is the check this is a prompt for, not
 a replacement of.</p>
 <p>The implementation prompt is the largest call the harness makes, and
 against a real project it is slow: attempts on this repository’s own
@@ -2525,9 +2620,8 @@ the same requirement is always a fresh call.</p>
 implementation attempt — the same behavior <kbd>Enter</kbd> triggers
 on a RED bar inside the loop. Use it to continue a paused run:</p>
 <pre><code class="language-bash">spec test                 # confirm RED, record the failures
-spec implement REQ-001    # stage the model's attempt
-spec changes show         # review what it wrote
-spec changes commit
+spec implement REQ-001    # the model's attempt, written into the tree
+git diff                  # review what it wrote
 spec test                 # GREEN? then spec refactor / spec mark-implemented
 </code></pre>
 <p>If the bar stays RED, run <code>spec implement</code> again — the fresh failure
@@ -2552,14 +2646,14 @@ stays on disk for humans; it is not sent to the model.</p>
 <p>The attempt log is scoped to the requirement and cleared the moment a
 test run goes GREEN — a closed loop leaves no history for the next
 requirement to inherit.</p>
-<p><code>run_tests</code> during this command sees the <strong>working tree</strong>, not the
-unstaged patch sitting in <code>.spec/staged/</code>. Commit (or apply) before you
-trust the bar. If the model requests <code>command_run</code>, the harness asks you to
-confirm first; piped or CI stdin declines and never hangs.</p>
+<p><code>run_tests</code> during this command sees the <strong>working tree</strong> — which is
+where the attempt just wrote, so the bar is measured against exactly
+the files the model produced. If the model requests <code>command_run</code>, the
+harness asks you to confirm first; piped or CI stdin declines and never
+hangs.</p>
 <h2 id="see-also-9"><a class="header" href="#see-also-9">See also</a></h2>
 <ul>
 <li><a href="#spec-greenfield"><code>spec greenfield</code></a> — the orchestrated loop with the same attempt built in.</li>
-<li><a href="#spec-changes"><code>spec changes</code></a> — review and apply the staged files.</li>
 <li><a href="#spec-test"><code>spec test</code></a> — the run that decides.</li>
 <li><a href="#spec-tools"><code>spec tools</code></a> — the implement profile (includes <code>command_run</code>).</li>
 </ul>
@@ -2751,9 +2845,6 @@ am I in the whole loop and what do I do now”.</p>
 </code></pre>
 <pre><code class="language-json">{
   "phase": "RED",
-  "staged": [
-    { "path": "src/main/java/BddTest.java", "action": "modify", "summary": "implementation attempt for REQ-001 (llm)" }
-  ],
   "requirements": [
     {
       "id": "REQ-001",
@@ -2762,21 +2853,17 @@ am I in the whole loop and what do I do now”.</p>
       "findings": []
     }
   ],
-  "nextStep": "1 staged file(s) await review - inspect with spec changes show, apply with spec changes commit, then run spec test."
+  "nextStep": "REQ-001 has every asset in place and the bar is RED - run spec test; on RED let the model try with spec implement REQ-001."
 }
 </code></pre>
 <h2 id="how-the-next-step-is-chosen"><a class="header" href="#how-the-next-step-is-chosen">How the next step is chosen</a></h2>
 <p>The priority order mirrors the loop itself:</p>
 <ol>
-<li><strong>Staged changes wait</strong> — nothing the harness authors touches the
-working tree until you apply it, so an unapplied implementation
-attempt (or scenario, or spec edit) always comes first:
-<code>spec changes show</code>, then <code>spec changes commit</code>, then <code>spec test</code>.</li>
 <li><strong>A requirement is in flight</strong> — its scenario, step definitions,
-and unit test all exist. On GREEN the loop closes with the chain
-<code>spec mark-implemented &lt;id&gt;</code>, then <code>spec changes validate</code>, then
-<code>spec changes commit</code>; on any other bar the step is <code>spec test</code>,
-and on RED <code>spec implement &lt;id&gt;</code> lets the model try.</li>
+and unit test all exist. On GREEN the loop closes with
+<code>spec mark-implemented &lt;id&gt;</code>, then <code>spec validate</code>; on any other bar
+the step is <code>spec test</code>, and on RED <code>spec implement &lt;id&gt;</code> lets the
+model try.</li>
 <li><strong>The earliest asset gap</strong> — a pending requirement is missing its
 tagged scenario (<code>spec scenario add</code>), step definitions
 (<code>spec steps generate</code>), or unit test
@@ -2791,11 +2878,10 @@ several requirements you see every gap, not just the first.</p>
 deterministic report is followed by one advice call: the model is
 briefed with the whole workflow process — the states, the commands,
 the loop, and the invariants — plus the current phase, the last run’s
-counts, the staging area, and every requirement’s position, and it
-answers with the next command in plain words:</p>
+counts, and every requirement’s position, and it answers with the next
+command in plain words:</p>
 <pre><code class="language-text">Model advice: The bar is GREEN and REQ-001 has every asset in place -
-close the loop with spec mark-implemented REQ-001, then spec
-validate, then spec changes commit.
+close the loop with spec mark-implemented REQ-001, then spec validate.
 </code></pre>
 <p>Without a model the report alone is the whole reply, and a model
 failure never breaks <code>spec status</code>.</p>
@@ -2805,14 +2891,11 @@ only when you run <a href="#the-requirements-spec"><code>spec mark-implemented</
 command is GREEN-gated: it refuses unless the last recorded run
 passed, and it refuses without a scenario tagged <code>@&lt;id&gt;</code> (it records
 the tagged feature as the requirement’s <code>featureFile</code>). The road is
-always: staged changes applied → <code>spec test</code> GREEN →
-<code>spec mark-implemented &lt;id&gt;</code> → <code>spec changes validate</code> →
-<code>spec changes commit</code> (the status change is staged too, like every
-mutation).</p>
+always: <code>spec test</code> GREEN → <code>spec mark-implemented &lt;id&gt;</code> →
+<code>spec validate</code>.</p>
 <h2 id="see-also-12"><a class="header" href="#see-also-12">See also</a></h2>
 <ul>
 <li><a href="#spec-state"><code>spec state</code></a> — the raw TDD state: phase, last run, refactor log.</li>
-<li><a href="#spec-changes"><code>spec changes</code></a> — review and apply what is staged.</li>
 <li><a href="#spec-implement"><code>spec implement</code></a> — the model attempt, with its own preflight.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
@@ -2942,14 +3025,10 @@ Attempting it off GREEN is refused with exit status 1:
 ```text
    140|Error: Refactoring is only allowed from GREEN (current phase: RED). Make the tests pass first.
 </code></pre>
-<p>So is starting with work already staged, since the loop applies each
-round in order to test it:</p>
-<pre><code class="language-text">Error: 1 change(s) are already staged, and the refactor loop applies each round to run the tests - review them with spec changes show, then spec changes commit or spec changes discard before refactoring.
-</code></pre>
-<p>150|## It writes to your working tree</p>
-<p>Every other authoring command stages its work for you to read before it
-lands. This one cannot: the only thing that can tell a refactor from a
-rewrite is the test suite, and the suite runs against files on disk.</p>
+<h2 id="it-writes-to-your-working-tree"><a class="header" href="#it-writes-to-your-working-tree">It writes to your working tree</a></h2>
+<p>Like every other authoring command, this one writes the real file — and
+it has to: the only thing that can tell a refactor from a rewrite is the
+test suite, and the suite runs against files on disk.</p>
 <p>So a successful refactor is already applied when the command returns.
 Read it with <code>git diff</code>, and run <code>spec test</code> to record the run in the
 phase log.</p>
@@ -2974,147 +3053,6 @@ also a note worth acting on.</p>
 <li><a href="#spec-state"><code>spec state</code></a> — the phase and the accumulated log.</li>
 <li><a href="#spec-config"><code>spec config</code></a> — where <code>refactor.attempts</code> is reported.</li>
 <li><a href="#the-workflow-spec--red--green--refactor">The workflow</a> — where REFACTOR sits in the machine.</li>
-</ul>
-<div style="break-before: page; page-break-before: always;"></div>
-<h1 id="spec-changes"><a class="header" href="#spec-changes">spec changes</a></h1>
-<p>Staged-transaction management. Every file mutation the harness authors
-lands in <code>.spec/staged/</code> first (see <a href="#staged-changes">Staged changes</a>);
-these subcommands are how you review, apply, or drop the transaction.</p>
-<pre><code class="language-text">Usage: spec changes [OPTIONS] &lt;COMMAND&gt;
-
-Commands: show, commit, discard, validate
-</code></pre>
-<p>None of the subcommands take flags beyond the
-<a href="#global-flags">global flags</a>.</p>
-<hr>
-<h2 id="spec-changes-show"><a class="header" href="#spec-changes-show">spec changes show</a></h2>
-<p>List everything currently staged: the path, whether applying would
-create or modify the file, and a one-line summary of the change.</p>
-<pre><code class="language-bash">spec changes show
-</code></pre>
-<pre><code class="language-json">{
-  "changes": [
-    {
-      "path": "features/string_calculator.feature",
-      "action": "modify",
-      "summary": "append scenario 'Two numbers separated by a comma are summed' tagged @REQ-003"
-    },
-    {
-      "path": "features/step_definitions/string_calculator_steps.js",
-      "action": "create",
-      "summary": "2 step definitions generated for undefined steps"
-    }
-  ],
-  "nextStep": "Apply with 'spec changes commit' or drop with 'spec changes discard'."
-}
-</code></pre>
-<p>An empty stage:</p>
-<pre><code class="language-json">{
-  "changes": [],
-  "nextStep": "Nothing is staged. Authoring commands (feature, scenario, steps, unittest, spec draft) stage their output here."
-}
-</code></pre>
-<p>To see the full content of a staged file, read it directly under
-<code>.spec/staged/</code> — the layout mirrors the project tree.</p>
-<hr>
-<h2 id="spec-changes-commit"><a class="header" href="#spec-changes-commit">spec changes commit</a></h2>
-<p>Apply every staged change to the working tree atomically and clear
-the stage. Files marked <code>create</code> are written fresh; <code>modify</code> replaces
-the working copy with the staged version.</p>
-<pre><code class="language-bash">spec changes commit
-</code></pre>
-<p>Run <a href="#spec-changes-validate"><code>spec changes validate</code></a> first when the
-transaction contains Gherkin — broken staged Gherkin is reported there
-before it can land.</p>
-<p>After applying, <code>commit</code> re-validates the working tree. Open issues
-ride along in the reply as a warning — the commit still happened, but
-an invalid spec never lands silently:</p>
-<pre><code class="language-json">{
-  "changes": [
-    { "path": "requirements/requirements.json", "action": "modify", "summary": "mark REQ-001 implemented" }
-  ],
-  "issues": [
-    "REQ-001: implemented requirements must name their featureFile - rerun spec mark-implemented REQ-001 on GREEN to backfill it"
-  ],
-  "nextStep": "Staged changes applied, but the working tree does not validate - fix the issues above, then run spec changes validate again."
-}
-</code></pre>
-<p>A clean commit carries no <code>issues</code> field.</p>
-<hr>
-<h2 id="spec-changes-discard"><a class="header" href="#spec-changes-discard">spec changes discard</a></h2>
-<p>Drop the entire staged transaction. The working tree is untouched; the
-stage is emptied. There is no partial discard — the stage is one
-transaction by design (a scenario without its step definitions is not
-a state worth keeping).</p>
-<pre><code class="language-bash">spec changes discard
-</code></pre>
-<hr>
-<h2 id="spec-changes-validate"><a class="header" href="#spec-changes-validate">spec changes validate</a></h2>
-<p>Validate all Gherkin in the project — committed feature files <strong>and</strong>
-staged ones — so a broken scenario never reaches a test run. This is
-the cheap gate to run before <code>spec changes commit</code>. MCP clients call
-the same check as <code>changes_validate</code> (<code>validate_spec</code> remains the
-on-disk frozen tool).</p>
-<pre><code class="language-text">Usage: spec changes validate [OPTIONS]
-</code></pre>
-<h3 id="what-is-checked"><a class="header" href="#what-is-checked">What is checked</a></h3>
-<ul>
-<li>Every <code>.feature</code> file under the root parses as valid Gherkin.</li>
-<li>Every file in the staging area (<code>.spec/staged/</code>) that is a feature
-file parses too — you cannot commit a transaction containing broken
-Gherkin without knowing.</li>
-<li>Scenario requirement tags (<code>@REQ-...</code>) refer to ids that exist in
-the spec.</li>
-</ul>
-<h3 id="examples-4"><a class="header" href="#examples-4">Examples</a></h3>
-<p>Everything clean:</p>
-<pre><code class="language-bash">spec changes validate
-</code></pre>
-<pre><code class="language-json">{
-  "valid": true,
-  "issues": [],
-  "nextStep": "Gherkin is clean. Run 'spec test' or commit staged changes."
-}
-</code></pre>
-<p>Problems found (the command exits 0; the report carries the verdict):</p>
-<pre><code class="language-json">{
-  "valid": false,
-  "issues": [
-    "features/string_calculator.feature: (5:3) expected a step keyword",
-    "staged features/newlines.feature: scenario 'Newlines act as delimiters' is tagged @REQ-009 but the spec has no such requirement"
-  ],
-  "nextStep": "Fix the listed files (staged ones via their originating command), then validate again."
-}
-</code></pre>
-<h3 id="relation-to-spec-validate"><a class="header" href="#relation-to-spec-validate">Relation to <code>spec validate</code></a></h3>
-<div class="table-wrapper">
-<table>
-<thead>
-<tr><th>Command</th><th>Validates</th></tr>
-</thead>
-<tbody>
-<tr><td><code>spec validate</code></td><td>The requirements JSON: shape, ids, statuses, criterion phrasing.</td></tr>
-<tr><td><code>spec changes validate</code></td><td>The Gherkin: feature files on disk and in the stage, plus tag/spec consistency.</td></tr>
-</tbody>
-</table>
-</div>
-<p>Run both before a commit-and-test cycle; both appear as <code>nextStep</code>
-suggestions at the appropriate moments.</p>
-<h2 id="a-typical-review-session"><a class="header" href="#a-typical-review-session">A typical review session</a></h2>
-<pre><code class="language-bash">spec scenario add --feature features/calc.feature --req REQ-002 \
-    --name "A single number is returned" --step 'Given the input "5"' \
-    --step 'When add is called' --step 'Then the result is 5'
-spec steps generate
-spec changes show                 # one modify + one create
-spec changes validate                     # staged Gherkin parses, tags resolve
-spec changes commit               # both land together
-spec test                         # honest RED
-</code></pre>
-<h2 id="see-also-13"><a class="header" href="#see-also-13">See also</a></h2>
-<ul>
-<li><a href="#staged-changes">Staged changes</a> — the model and its rationale.</li>
-<li><a href="#spec-validate"><code>spec validate</code></a> — the requirements-spec gate, the other half of the pair.</li>
-<li><a href="#spec-feature-show"><code>spec feature show</code></a> — inspect a file that failed to parse.</li>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="spec-model"><a class="header" href="#spec-model">spec model</a></h1>
@@ -3231,7 +3169,7 @@ it explicitly (<code>no reply within 300s ... set timeout_seconds under [llm]</c
 </tbody>
 </table>
 </div>
-<h2 id="see-also-14"><a class="header" href="#see-also-14">See also</a></h2>
+<h2 id="see-also-13"><a class="header" href="#see-also-13">See also</a></h2>
 <ul>
 <li><a href="#spec-judge"><code>spec judge</code></a> — the <strong>decision</strong> model, a separate choice
 under <code>[decision]</code>.</li>
@@ -3298,7 +3236,7 @@ harness can never:</p>
 <ul>
 <li>turn a red test bar green, or change a test result in any way</li>
 <li>mark a requirement implemented, or certify any implementation</li>
-<li>bypass the <a href="#staged-changes">staging area</a> or a commit</li>
+<li>bypass the <a href="#the-branch-gate">branch gate</a> or a human confirmation</li>
 <li>waive a human checkpoint</li>
 <li>make a wording review <code>clean</code> that the deterministic rules did not</li>
 <li>edit or drop a deterministic finding</li>
@@ -3707,7 +3645,7 @@ dislikes.</p>
 </tbody>
 </table>
 </div>
-<h2 id="see-also-15"><a class="header" href="#see-also-15">See also</a></h2>
+<h2 id="see-also-14"><a class="header" href="#see-also-14">See also</a></h2>
 <ul>
 <li><a href="#spec-model"><code>spec model</code></a> — the <strong>generative</strong> model, a separate choice.</li>
 <li><a href="#spec-config"><code>spec config</code></a> — every key and where it came from.</li>
@@ -3799,7 +3737,7 @@ rows appear only when those tables are set.</p>
 <p>Optional keys with nothing to show print <code>(unset)</code> with source
 <code>(default)</code>: <code>tools.mcp_config</code>, and <code>llm.model</code> when Ollama is down
 or has no models pulled.</p>
-<h2 id="see-also-16"><a class="header" href="#see-also-16">See also</a></h2>
+<h2 id="see-also-15"><a class="header" href="#see-also-15">See also</a></h2>
 <ul>
 <li><a href="#spec-model"><code>spec model</code></a> — persist <code>llm.model</code>.</li>
 <li><a href="#spec-judge"><code>spec judge</code></a> — persist <code>decision.model</code>, and what the
@@ -3865,11 +3803,11 @@ so it needs the <code>pi-mcp-extension</code> package; the repo ships a ready
 and <code>pi -nbt</code> disables pi’s own <code>bash</code>/<code>write</code>/<code>edit</code> so these tools are all
 the model gets. The bridge registers them as <code>mcp_&lt;server&gt;_&lt;tool&gt;</code>, so
 <code>run_tests</code> arrives as <code>mcp_spec_driven_server_run_tests</code>.</p>
-<p>Cursor sees <strong>all 25 tools</strong>, including staging, and so does <code>pi -nbt</code>.
-Harness commands that call a model attach a <strong>narrower profile</strong>
-(<code>spec tools profiles</code>) — 3–7 tools for a generating command, 12 for the
-read-only <code>spec ask</code> — so a local model is not offered commit or
-mark-implemented.</p>
+<p>Cursor sees <strong>all 21 tools</strong>, including the writing ones, and so does
+<code>pi -nbt</code>. Harness commands that call a model attach a <strong>narrower
+profile</strong> (<code>spec tools profiles</code>) — 3–7 tools for a generating command,
+10 for the read-only <code>spec ask</code> — so a local model is never offered a
+tool that writes.</p>
 <h2 id="spec-mcp-tools"><a class="header" href="#spec-mcp-tools">spec mcp tools</a></h2>
 <p>List the built-in tools over one throwaway session. Default is an
 in-process loopback; <code>--stdio</code> spawns <code>spec mcp serve</code> as a child
@@ -3887,12 +3825,16 @@ spec mcp call run_tests --stdio
 <p><code>--arg key=value</code> is always a string unless the value parses as JSON.
 <code>--args '{"id":"REQ-003"}'</code> merges a JSON object.</p>
 <h2 id="the-tools-served"><a class="header" href="#the-tools-served">The tools served</a></h2>
-<p>Twenty-five tools in three groups. There is no <code>spec_draft</code> or
+<p>Twenty-one tools in three groups. There is no <code>spec_draft</code> or
 <code>implement</code> MCP tool: a <strong>new</strong> requirement is still drafted by the
 human (<code>spec draft</code>) and Cursor writes production Java. Rewording an
-existing requirement, Gherkin, steps, unit-test scaffolds,
-mark-implemented, and staging all go through tools. Generation over MCP
-is <strong>template-only</strong> (<code>source: "template"</code>).</p>
+existing requirement, Gherkin, steps, unit-test scaffolds and
+mark-implemented all go through tools. Generation over MCP is
+<strong>template-only</strong> (<code>source: "template"</code>).</p>
+<p>Every writing tool writes the real file — there is no staging area and
+nothing to commit afterwards. The server never prompts and never creates
+a branch, so put yourself on one before an agent session if you want the
+run isolated; see <a href="#the-branch-gate">the branch gate</a>.</p>
 <h3 id="frozen-seven-reply-shapes-stay"><a class="header" href="#frozen-seven-reply-shapes-stay">Frozen seven (reply shapes stay)</a></h3>
 <div class="table-wrapper">
 <table>
@@ -3910,7 +3852,7 @@ is <strong>template-only</strong> (<code>source: "template"</code>).</p>
 </tbody>
 </table>
 </div>
-<h3 id="authoring-and-staging"><a class="header" href="#authoring-and-staging">Authoring and staging</a></h3>
+<h3 id="authoring"><a class="header" href="#authoring">Authoring</a></h3>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3919,8 +3861,6 @@ is <strong>template-only</strong> (<code>source: "template"</code>).</p>
 <tbody>
 <tr><td><code>feature_list</code> / <code>feature_read</code> / <code>feature_create</code></td><td><a href="#spec-feature"><code>spec feature</code></a></td></tr>
 <tr><td><code>scenario_add</code> / <code>scenario_update</code> / <code>scenario_delete</code></td><td><a href="#spec-scenario"><code>spec scenario</code></a></td></tr>
-<tr><td><code>changes_show</code> / <code>changes_commit</code> / <code>changes_discard</code></td><td><a href="#spec-changes"><code>spec changes</code></a></td></tr>
-<tr><td><code>changes_validate</code></td><td><a href="#spec-changes-validate"><code>spec changes validate</code></a> (staged-wins; frozen <code>validate_spec</code> stays on disk)</td></tr>
 <tr><td><code>requirement_reword</code></td><td><a href="#spec-reword"><code>spec reword</code></a> (the repair path for <code>validate_spec</code> and <code>refine_requirement</code> findings; never hand-edit the spec file)</td></tr>
 <tr><td><code>requirement_mark_implemented</code></td><td><a href="#spec-mark-implemented"><code>spec mark-implemented</code></a></td></tr>
 <tr><td><code>step_definitions_find</code></td><td><a href="#spec-steps-missing"><code>spec steps missing</code></a></td></tr>
@@ -4015,15 +3955,16 @@ to its last 200 lines.</li>
 build tool can still run build scripts. What the policy makes
 unexpressible is running destructive binaries and reaching outside
 the project root.</p>
-<p><code>run_tests</code> during <code>spec implement</code> sees the <strong>working tree</strong>, not an
-unstaged patch. Commit (or apply staged files) before you trust the
-bar.</p>
+<p><code>run_tests</code> during <code>spec implement</code> sees the <strong>working tree</strong> — which is
+also where every tool just wrote, so the bar is measured against exactly
+the files the tools produced.</p>
 <h2 id="why-serve-tools-instead-of-letting-the-agent-edit-files"><a class="header" href="#why-serve-tools-instead-of-letting-the-agent-edit-files">Why serve tools instead of letting the agent edit files?</a></h2>
 <ul>
 <li><strong>No escape hatches.</strong> The agent gets exactly these tools — no
 open-ended shell, no arbitrary file writes. The one command tool is
-allowlisted, jailed to the root, and phase-gated; mutations go
-through the <a href="#staged-changes">staging area</a> for human review.</li>
+allowlisted, jailed to the root, and phase-gated; every write is
+confined to the project and lands as a reviewable
+<a href="#direct-writes">direct write</a>.</li>
 <li><strong>The discipline is in the server.</strong> An agent cannot skip RED,
 refactor while failing, or invent requirements: the tools refuse,
 with a <code>nextStep</code> that teaches the correct move.
@@ -4077,24 +4018,24 @@ Commands:
 # spec-reword         3  get_requirement, refine_requirement, validate_spec
 # steps-generate      4  feature_list, feature_read, project_inspect, step_definitions_find
 # unittest-generate   4  feature_read, get_requirement, project_inspect, step_definitions_find
-# implement-advice    5  changes_show, changes_validate, feature_list, get_tdd_state, validate_spec
-# implement           7  get_requirement, feature_read, …, command_run, changes_show
-# status              7  project_root, list_requirements, …, changes_show, changes_validate
-# ask                12  the read-only set: everything above that only reads
+# implement-advice    3  feature_list, get_tdd_state, validate_spec
+# implement           6  get_requirement, feature_read, …, run_tests, command_run
+# status              5  project_root, list_requirements, …, get_tdd_state, validate_spec
+# ask                10  the read-only set: everything above that only reads
 
-spec tools list --for status          # exactly those seven
+spec tools list --for status          # exactly those five
 spec tools list --offline             # built-ins only; never connects
 spec tools enable self__validate_spec --for status
 spec tools servers
 </code></pre>
-<p>A command that generates or implements is handed <strong>3–7</strong> tools — the ones
+<p>A command that generates or implements is handed <strong>3–6</strong> tools — the ones
 its current step can legitimately use, and nothing else. Only the read-only
-<code>ask</code> gets 12. Compare that with the <strong>25</strong> a general host such as Cursor or
+<code>ask</code> gets 10. Compare that with the <strong>21</strong> a general host such as Cursor or
 <code>pi -nbt</code> sees: same server, same tools, different amount of rope.</p>
 <p><code>--for</code> accepts: <code>spec-draft</code>, <code>spec-reword</code>, <code>steps-generate</code>,
 <code>unittest-generate</code>, <code>implement-advice</code>, <code>implement</code>, <code>status</code>, <code>ask</code>.
 Omitting it lists those names and exits nonzero.</p>
-<p>Default profiles contain no staging or commit tools. The only mutation
+<p>No default profile contains a tool that writes a file. The only mutation
 a harness-side model may request is <code>command_run</code> on the <code>implement</code>
 profile, and that call still asks the human to confirm.</p>
 <p>External tools are namespaced <code>server__tool</code>. A name in config that is
@@ -4139,11 +4080,11 @@ caller. <a href="#spec-config"><code>spec config</code></a> prints the resolved 
 each value is a default or came from the file.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="spec-ask"><a class="header" href="#spec-ask">spec ask</a></h1>
-<p>Ask the local model a question with the <strong>ask</strong> tool profile: the twelve
-read-only workflow tools (spec, TDD state, inspect, features, staged
-changes). It is the widest profile the harness attaches, because reading
-costs nothing — a generating command gets 3–7 tools instead. The model may
-look things up; it cannot stage, commit, or mark a requirement implemented.</p>
+<p>Ask the local model a question with the <strong>ask</strong> tool profile: the ten
+read-only workflow tools (spec, TDD state, inspect, features). It is the
+widest profile the harness attaches, because reading costs nothing — a
+generating command gets 3–7 tools instead. The model may look things up;
+it cannot write a file or mark a requirement implemented.</p>
 <pre><code class="language-text">Usage: spec ask [OPTIONS] [TASK]...
 </code></pre>
 <pre><code class="language-bash">spec ask "which pending requirement should we implement next?"

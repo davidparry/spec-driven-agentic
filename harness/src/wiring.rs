@@ -14,13 +14,12 @@ use crate::adapters::fs_memory::{FsMemoryStore, FsProjectInventory};
 use crate::adapters::fs_project::FsProjectFiles;
 use crate::adapters::fs_sources::FsSourceFiles;
 use crate::adapters::fs_spec::{FsFeatureFiles, FsSpecRepository};
-use crate::adapters::fs_staging::FsChangeStore;
 use crate::adapters::fs_state::FsStateStore;
+use crate::adapters::fs_worktree::FsWorkTree;
 use crate::adapters::gherkin_features::GherkinFeatureCatalog;
+use crate::adapters::git_cli::GitCli;
 use crate::adapters::ollama::OllamaCatalog;
 use crate::adapters::ollama_decision::OllamaDecision;
-use crate::adapters::overlay::{OverlayCatalog, OverlaySources};
-use crate::application::change_service::ChangeService;
 use crate::application::decision_service::DecisionService;
 use crate::application::generation_service::{GenerationService, ResolvedLlm};
 use crate::application::implement_service::ImplementService;
@@ -35,8 +34,13 @@ use crate::domain::language::Language;
 use crate::ports::{LlmConversation, TestRunner};
 use crate::workspace::{SPEC_PATH, project_layout};
 
-pub type OverlayFeatures = OverlayCatalog<GherkinFeatureCatalog, FsChangeStore>;
-pub type OverlayTree = OverlaySources<FsSourceFiles, FsChangeStore>;
+/// The project's feature files, read from disk. An alias rather than
+/// the adapter itself because every service that takes one names the
+/// type in its signature, and the readers used to be overlays.
+pub type ProjectFeatures = GherkinFeatureCatalog;
+
+/// The module's sources, read from disk.
+pub type ProjectTree = FsSourceFiles;
 
 /// Picks the test runner for a project root, or explains why none fits.
 pub type RunnerFactory = Arc<dyn Fn(&Path) -> Result<Box<dyn TestRunner>, String> + Send + Sync>;
@@ -126,62 +130,40 @@ pub fn decision_service(
     ))
 }
 
-pub fn change_store(root: &Path) -> FsChangeStore {
-    FsChangeStore::new(root.to_path_buf())
+pub fn work_tree(root: &Path) -> FsWorkTree {
+    FsWorkTree::new(root.to_path_buf())
 }
 
 pub fn feature_files(root: &Path) -> FsFeatureFiles {
     FsFeatureFiles::new(root.to_path_buf())
 }
 
-pub fn overlay_catalog(root: &Path) -> OverlayFeatures {
-    OverlayCatalog::new(
-        GherkinFeatureCatalog::new(root.to_path_buf()),
-        change_store(root),
-    )
+pub fn feature_catalog(root: &Path) -> ProjectFeatures {
+    GherkinFeatureCatalog::new(root.to_path_buf())
 }
 
-/// The module's sources with staged edits overlaid. `module_root` comes
-/// from the resolved layout, so the files a command reasons about are the
-/// files the test runner compiles.
-pub fn overlay_sources(root: &Path, module_root: Option<&str>) -> OverlayTree {
-    OverlaySources::new(
-        FsSourceFiles::in_module(root.to_path_buf(), module_root),
-        change_store(root),
-    )
+/// The module's sources. `module_root` comes from the resolved layout,
+/// so the files a command reasons about are the files the test runner
+/// compiles.
+pub fn source_tree(root: &Path, module_root: Option<&str>) -> ProjectTree {
+    FsSourceFiles::in_module(root.to_path_buf(), module_root)
 }
 
 pub fn spec_service(
     root: &Path,
     layout: ProjectLayout,
-) -> SpecService<FsSpecRepository, FsFeatureFiles, FsChangeStore> {
-    SpecService::new(
-        spec_repository(root),
-        feature_files(root),
-        change_store(root),
-        layout,
-    )
-}
-
-pub fn change_service(
-    root: &Path,
-) -> ChangeService<FsChangeStore, FsSpecRepository, OverlayFeatures> {
-    ChangeService::new(
-        change_store(root),
-        spec_repository(root),
-        overlay_catalog(root),
-        SPEC_PATH.into(),
-    )
+) -> SpecService<FsSpecRepository, FsFeatureFiles> {
+    SpecService::new(spec_repository(root), feature_files(root), layout)
 }
 
 pub fn mutation_service(
     root: &Path,
     attempts: u32,
-) -> SpecMutationService<FsSpecRepository, OverlayFeatures, FsChangeStore, FsStateStore> {
+) -> SpecMutationService<FsSpecRepository, ProjectFeatures, FsWorkTree, FsStateStore> {
     SpecMutationService::new(
         spec_repository(root),
-        overlay_catalog(root),
-        change_store(root),
+        feature_catalog(root),
+        work_tree(root),
         tdd_store(root),
         SPEC_PATH.into(),
     )
@@ -189,8 +171,8 @@ pub fn mutation_service(
     .with_llm_attempts(attempts)
 }
 
-pub fn scenario_service(root: &Path) -> ScenarioService<FsChangeStore, OverlayFeatures> {
-    ScenarioService::new(change_store(root), overlay_catalog(root))
+pub fn scenario_service(root: &Path) -> ScenarioService<FsWorkTree, ProjectFeatures> {
+    ScenarioService::new(work_tree(root), feature_catalog(root))
 }
 
 pub fn tdd_store(root: &Path) -> FsStateStore {
@@ -204,12 +186,18 @@ pub fn tdd_service(root: &Path) -> TddService<FsStateStore> {
 /// The memory service wired to the filesystem adapters.
 pub fn project_memory_service(
     root: PathBuf,
-) -> MemoryService<FsMemoryStore, FsProjectInventory, FsProjectFiles> {
+) -> MemoryService<FsMemoryStore, FsProjectInventory, FsProjectFiles, GitCli> {
     MemoryService::new(
         FsMemoryStore::new(root.clone()),
         FsProjectInventory::new(root.clone()),
-        FsProjectFiles::new(root),
+        FsProjectFiles::new(root.clone()),
+        GitCli::new(root),
     )
+}
+
+/// The project's version control, wired to the `git` on PATH.
+pub fn vcs(root: &Path) -> GitCli {
+    GitCli::new(root.to_path_buf())
 }
 
 /// `llm` with the project's memory brief prepended to every system prompt,
@@ -241,12 +229,12 @@ pub fn generation_service(
     language: Language,
     llm: Option<&(String, DynLlm)>,
     attempts: u32,
-) -> GenerationService<OverlayFeatures, OverlayTree, FsChangeStore, FsSpecRepository, DynLlm> {
+) -> GenerationService<ProjectFeatures, ProjectTree, FsWorkTree, FsSpecRepository, DynLlm> {
     let layout = project_layout(root);
     GenerationService::new(
-        overlay_catalog(root),
-        overlay_sources(root, layout.module_root.as_deref()),
-        change_store(root),
+        feature_catalog(root),
+        source_tree(root, layout.module_root.as_deref()),
+        work_tree(root),
         spec_repository(root),
         language,
         layout,
@@ -259,12 +247,12 @@ pub fn implement_service(
     language: Language,
     llm: Option<&(String, DynLlm)>,
     attempts: u32,
-) -> ImplementService<OverlayFeatures, OverlayTree, FsChangeStore, FsSpecRepository, DynLlm> {
+) -> ImplementService<ProjectFeatures, ProjectTree, FsWorkTree, FsSpecRepository, DynLlm> {
     let layout = project_layout(root);
     ImplementService::new(
-        overlay_catalog(root),
-        overlay_sources(root, layout.module_root.as_deref()),
-        change_store(root),
+        feature_catalog(root),
+        source_tree(root, layout.module_root.as_deref()),
+        work_tree(root),
         spec_repository(root),
         language,
         layout,
@@ -280,11 +268,11 @@ pub fn refactor_service(
     llm: Option<&(String, DynLlm)>,
     attempts: u32,
     rounds: u32,
-) -> RefactorService<OverlayTree, FsChangeStore, FsSpecRepository, DynLlm> {
+) -> RefactorService<ProjectTree, FsWorkTree, FsSpecRepository, DynLlm> {
     let layout = project_layout(root);
     RefactorService::new(
-        overlay_sources(root, layout.module_root.as_deref()),
-        change_store(root),
+        source_tree(root, layout.module_root.as_deref()),
+        work_tree(root),
         spec_repository(root),
         language,
         layout,

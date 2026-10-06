@@ -224,7 +224,7 @@ pub fn apply_review(
             if review.action != Transition::Continue {
                 report.findings.extend(review.advisories);
                 report.clean = false;
-                report.next_step = refinement_next_step(false, report.source).to_string();
+                report.next_step = refinement_next_step(false).to_string();
             }
             debug_assert!(
                 report.findings.starts_with(&deterministic),
@@ -328,7 +328,6 @@ mod tests {
             id: "REQ-007".into(),
             clean: true,
             findings: Vec::new(),
-            source: crate::application::spec_service::WORKING_TREE,
             next_step: "unchanged".into(),
             judgments: Vec::new(),
             judgment_advisories: Vec::new(),

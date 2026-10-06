@@ -33,7 +33,7 @@ Every language gets the two spec-driven anchors:
 After scaffolding, `init` scans the new files into `.spec/memory.json`
 (language, BDD framework, libraries, layout). That file is generated
 state inside `.spec/` and is gitignored, like `state.json`, `history`,
-`cache/`, `log/`, and `staged/`. Only `.spec/config.toml` is written to
+`cache/`, and `log/`. Only `.spec/config.toml` is written to
 be committed. Memory is refreshed again when a shell, MCP server, or
 LLM command starts. Every model system prompt then opens with that
 brief.
@@ -102,9 +102,8 @@ unrecognized answer re-prompts.
 
 ## Notes
 
-- `init` writes directly to the working tree (there is nothing to
-  protect in an empty project); everything after `init` goes through
-  [staged changes](../staged-changes.md).
+- `init` writes directly to the working tree, as does everything after
+  it — see [direct writes](../direct-writes.md).
 - `init` does not install runtimes. Run
   [`spec inspect`](inspect.md) to see whether the language's runtime is
   present before expecting `spec test` to execute.
