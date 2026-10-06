@@ -82,14 +82,18 @@ jobs:
       - name: Format
         run: cargo fmt --check
 
-      - name: Release binary
-        run: cargo build --release
+      # The profile dist ships with, not plain --release: LTO is the one
+      # setting a tag build could fail on that nothing else exercises,
+      # and it puts the live sweep below on a binary built exactly the
+      # way the published one is.
+      - name: Release binary (dist profile)
+        run: cargo build --profile dist
 
       - name: Upload spec binary
         uses: actions/upload-artifact@v4
         with:
           name: spec-linux
-          path: harness/target/release/spec
+          path: harness/target/dist/spec
 
       - name: Coverage
         id: coverage

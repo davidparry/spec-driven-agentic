@@ -61,7 +61,22 @@ cucumber = "0.23.0"
 futures = "0.3.34"
 tempfile = "3.27.0"
 
-# The profile that 'dist' will build with
+# Stripping the symbol table is free at build time and takes the binary
+# from 20.7 MB to 15.6 MB, so every from-source install gets it. The
+# costly knobs stay in `dist` below: `cargo install --path .` is a step
+# the workshop runs live, and tripling its link time would be felt.
+[profile.release]
+strip = "symbols"
+
+# The profile that 'dist' will build with. Build time is CI's problem
+# here, not a developer's, so this goes further than `release`: 12.6 MB
+# for about three times the link.
+#
+# `panic` stays at the default `unwind` deliberately. `spec mcp serve`
+# is a long-running tokio server, and under `abort` a panic in one tool
+# handler would take the whole process down with it instead of failing
+# that one call.
 [profile.dist]
 inherits = "release"
-lto = "thin"
+lto = "fat"
+codegen-units = 1
