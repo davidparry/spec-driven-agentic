@@ -167,16 +167,11 @@ binary drafting into `requirements/` at the repo root would have said
 configuration, and nothing for an agent to guess: `spec status` reports
 `nextId` precisely so an agent reads the shape instead of inventing one.
 
-Worth ten seconds: you are standing in `harness/` and never said where
-the project is. Run one command from deeper in to make it concrete:
-
-```bash
-cd src/domain && spec status && cd ../..
-```
-
-Same catalog, found by walking up. This is the first instance of the
-argument the whole talk makes — the tool reads its context rather than
-being told it.
+Worth saying out loud, not demonstrating: you are standing in
+`harness/` and never said where the project is. The same command from
+`src/domain` finds the same catalog by walking up. This is the first
+instance of the argument the whole talk makes — the tool reads its
+context rather than being told it.
 
 > **Deliver parity.** `spec deliver "<the same sentence>"` runs exactly
 > this as its *draft* stage, via `draft_plan`. It drafts, commits, reads

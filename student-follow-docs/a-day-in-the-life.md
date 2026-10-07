@@ -168,16 +168,6 @@ catalog numbers `REQ`. There is nothing to configure and nothing for an
 agent to guess — `spec status` reports `nextId` precisely so the shape
 can be read rather than invented.
 
-Try it from further down to see the discovery for yourself. You are
-still in `harness/`, so this is `harness/src/domain` — run it from the
-repository root instead and there is no `src/` to step into:
-
-```bash
-cd src/domain && spec status && cd ../..
-```
-
-Same catalog, two directories up, found by walking up the tree.
-
 > **Shortcut.** `spec deliver "<the sentence you just typed>"` runs this
 > exact draft as its first stage and then keeps going, all the way to
 > implemented. You will do that at the end of the morning; for now, one
