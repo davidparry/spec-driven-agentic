@@ -38,6 +38,18 @@ pub enum LlmReplyError {
     Invalid { reason: String },
 }
 
+impl LlmReplyError {
+    /// What a developer is told when the call itself never landed.
+    ///
+    /// Only the [`LlmReplyError::Call`] arm says the same thing
+    /// everywhere, so only it is named here: what an invalid reply means
+    /// depends on what was being asked for, and each caller words that
+    /// one itself.
+    pub fn call_failed(error: &LlmError) -> String {
+        format!("the model call failed - {}", error.0)
+    }
+}
+
 /// The single production entry point into [`LlmConversation`]. Logs
 /// the offered tools, every message, the reply content, and each
 /// requested call.

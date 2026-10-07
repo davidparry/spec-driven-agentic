@@ -49,7 +49,8 @@ use crate::application::scenario_service::ScenarioService;
 use crate::application::spec_mutation_service::SpecMutationService;
 use crate::application::tdd_service::{TddError, TddService, TestReport};
 use crate::bootstrap::{
-    ensure_project, ensure_spec, has_readable_spec, project_detected, refresh_project_memory,
+    IMPLEMENT_ATTEMPT_WORK, LOOP_CLOSED, ensure_project, ensure_spec, has_readable_spec,
+    project_detected, refresh_project_memory, run_and_narrate,
 };
 use crate::domain::language::Language;
 use crate::domain::model::{Requirement, Spec};
@@ -57,9 +58,7 @@ use crate::domain::requirement_id::{DEFAULT_PREFIX, is_id_shape, split_id};
 use crate::domain::scaffold::slug;
 use crate::domain::steps::criterion_to_steps;
 use crate::domain::tdd::ImplementAttempt;
-use crate::ports::{
-    FeatureCatalog as _, Prompter, SpecRepository as _, TestFilter, TestRunner, WorkTree as _,
-};
+use crate::ports::{FeatureCatalog as _, Prompter, SpecRepository as _, TestRunner, WorkTree as _};
 use crate::wiring::{DynLlm, ProjectFeatures, ProjectTree, RunnerFactory};
 use crate::workspace::project_layout;
 
@@ -337,7 +336,7 @@ impl Deliver {
             prompter.tell(&format!("[{} of {}] {id}", index + 1, planned.len()));
             match self.deliver_one(prompter, language, id)? {
                 Outcome::Implemented => {
-                    prompter.tell(&format!("{id} is implemented. Loop closed."));
+                    prompter.tell(&format!("{id} {LOOP_CLOSED}"));
                     delivered.push(id.clone());
                 }
                 Outcome::AlreadyImplemented => {
@@ -523,7 +522,7 @@ impl Deliver {
             }
         };
         let tdd = self.tdd_service();
-        let Some(report) = self.try_run(&tdd, runner.as_ref(), prompter)? else {
+        let Some(report) = run_and_narrate(&tdd, runner.as_ref(), prompter)? else {
             return Ok(Outcome::Stopped {
                 reason: "Authoring is complete but the language runtime is missing, so \
                          the tests never ran."
@@ -710,7 +709,7 @@ impl Deliver {
         for attempt in 1..=budget {
             prompter.tell(&format!("Attempt {attempt} of {budget}."));
             self.attempt_implementation(prompter, &implement, tdd, req_id)?;
-            report = match self.try_run(tdd, runner, prompter)? {
+            report = match run_and_narrate(tdd, runner, prompter)? {
                 Some(report) => report,
                 None => {
                     return Ok(Bar::stopped(
@@ -782,7 +781,7 @@ impl Deliver {
                 // mark-implemented reads the recorded phase, and the
                 // gate above moved it to REFACTOR. Put it back on the
                 // bar the refactor proved.
-                let runner_report = self.try_run(&self.tdd_service(), runner, prompter)?;
+                let runner_report = run_and_narrate(&self.tdd_service(), runner, prompter)?;
                 match runner_report {
                     Some(report) if report.phase == "GREEN" => Ok(None),
                     Some(report) => Ok(Some(Outcome::Stopped {
@@ -804,7 +803,7 @@ impl Deliver {
                 // The gate moved the phase to REFACTOR and the loop
                 // never ran, so the green bar has to be re-established
                 // before the requirement can be marked.
-                match self.try_run(&self.tdd_service(), runner, prompter)? {
+                match run_and_narrate(&self.tdd_service(), runner, prompter)? {
                     Some(report) if report.phase == "GREEN" => Ok(None),
                     Some(report) => Ok(Some(Outcome::Stopped {
                         reason: format!("The bar is {} after the refactor attempt.", report.phase),
@@ -868,7 +867,7 @@ impl Deliver {
         req_id: &str,
     ) -> Result<(), String> {
         let brief = tdd.implementation_brief(req_id).map_err(tdd_message)?;
-        let work = prompter.working("Generating an implementation attempt - working");
+        let work = prompter.working(IMPLEMENT_ATTEMPT_WORK);
         // Nobody is at the keyboard to answer --into; an unresolvable
         // target surfaces as the refusal this returns.
         let outcome = implement.generate(
@@ -901,36 +900,6 @@ impl Deliver {
             Err(error) => prompter.warn(&format!("{} Implement by hand instead.", error.0)),
         }
         Ok(())
-    }
-
-    /// Run the tests and narrate the outcome. `Ok(None)` means the
-    /// runtime is missing: execution stops but authoring stands.
-    fn try_run(
-        &self,
-        tdd: &TddService<FsStateStore>,
-        runner: &dyn TestRunner,
-        prompter: &mut dyn Prompter,
-    ) -> Result<Option<TestReport>, String> {
-        let work = prompter.working("Running the tests - working");
-        let outcome = tdd.run_tests(runner, &TestFilter::default());
-        drop(work);
-        match outcome {
-            Ok(report) => {
-                prompter.tell(&format!(
-                    "{}: {} tests, {} failures, {} errors.",
-                    report.phase, report.tests, report.failures, report.errors
-                ));
-                for detail in &report.failure_details {
-                    prompter.tell(&format!("  - {detail}"));
-                }
-                Ok(Some(report))
-            }
-            Err(TddError::RuntimeMissing { runtime, hint }) => {
-                prompter.warn(&format!("Runtime missing ({runtime}): {hint}"));
-                Ok(None)
-            }
-            Err(TddError::Other(message)) => Err(message),
-        }
     }
 
     /// Whether the asset survey still reports a gap whose finding
@@ -1224,6 +1193,7 @@ fn tdd_message(error: TddError) -> String {
 mod tests {
     use super::*;
     use crate::adapters::auto_prompt::AutoPrompter;
+    use crate::ports::TestFilter;
     use crate::workspace::SPEC_PATH;
     use std::path::Path;
 

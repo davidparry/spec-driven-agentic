@@ -44,6 +44,20 @@ impl Language {
         }
     }
 
+    /// The lowercase token a prompt offers and [`Language::parse`]
+    /// accepts. Named here so a pick list is built from the languages
+    /// that actually parse rather than a list someone has to remember to
+    /// extend.
+    pub fn key(self) -> &'static str {
+        match self {
+            Language::Java => "java",
+            Language::JavaScript => "javascript",
+            Language::TypeScript => "typescript",
+            Language::DotNet => "dotnet",
+            Language::Rust => "rust",
+        }
+    }
+
     /// The Cucumber-family BDD framework for this ecosystem. For .NET
     /// that is Reqnroll, the maintained successor of SpecFlow.
     pub fn bdd_framework(self) -> &'static str {

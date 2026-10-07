@@ -14,14 +14,64 @@ use std::path::Path;
 
 use crate::adapters::fs_project::FsProjectFiles;
 use crate::adapters::fs_scaffold::FsScaffoldWriter;
+use crate::adapters::fs_state::FsStateStore;
 use crate::application::init_service::InitService;
 use crate::application::memory_service::LayoutAsk;
+use crate::application::tdd_service::{TddError, TddService, TestReport};
 use crate::domain::language::{Language, detect_languages};
 use crate::domain::memory::ProjectMemory;
 use crate::domain::model::Spec;
-use crate::ports::{PromptError, Prompter};
+use crate::ports::{PromptError, Prompter, TestFilter, TestRunner};
 use crate::wiring::{DynLlm, project_memory_service};
 use crate::workspace::SPEC_PATH;
+
+/// Prompts and reports more than one caller has to agree on, named once.
+///
+/// The end-to-end driver in `tests/greenfield_e2e.rs` has to recognize
+/// these at runtime to answer them, and a driver that holds its own copy
+/// of the wording does not fail when the wording changes - it waits for a
+/// prompt that will never arrive. Naming them makes a rename a compile
+/// error instead. Unit tests asserting how a prompt *reads* still spell
+/// it out: restating the expected text is what those tests are for.
+pub const PROJECT_NAME_PROMPT: &str = "Project name:";
+
+/// The sentence that closes a requirement's loop. Both [`crate::greenfield`]
+/// and [`crate::deliver`] print it, and the end-to-end test watches for it.
+pub const LOOP_CLOSED: &str = "is implemented. Loop closed.";
+
+/// The spinner label for an implementation attempt. Each orchestrator
+/// asks for the attempt its own way but narrates the wait identically,
+/// so a reader watching either command sees the same words.
+pub const IMPLEMENT_ATTEMPT_WORK: &str = "Generating an implementation attempt - working";
+
+/// Run the tests and narrate the outcome. `Ok(None)` means the
+/// runtime is missing: execution stops but authoring stands.
+pub fn run_and_narrate(
+    tdd: &TddService<FsStateStore>,
+    runner: &dyn TestRunner,
+    prompter: &mut dyn Prompter,
+) -> Result<Option<TestReport>, String> {
+    let work = prompter.working("Running the tests - working");
+    let outcome = tdd.run_tests(runner, &TestFilter::default());
+    drop(work);
+    match outcome {
+        Ok(report) => {
+            prompter.tell(&format!(
+                "{}: {} tests, {} failures, {} errors.",
+                report.phase, report.tests, report.failures, report.errors
+            ));
+            for detail in &report.failure_details {
+                prompter.tell(&format!("  - {detail}"));
+            }
+            Ok(Some(report))
+        }
+        Err(TddError::RuntimeMissing { runtime, hint }) => {
+            prompter.warn(&format!("Runtime missing ({runtime}): {hint}"));
+            Ok(None)
+        }
+        Err(TddError::Other(message)) => Err(message),
+    }
+}
 
 /// Whether the root already holds marker files for a supported language,
 /// so no scaffolding question needs asking.
@@ -44,7 +94,9 @@ pub fn ensure_project(root: &Path, prompter: &mut dyn Prompter) -> Result<Langua
     }
     prompter.tell("No project detected - scaffolding a new one.");
     let language = prompt_language(prompter).map_err(|e| e.to_string())?;
-    let name = prompter.ask("Project name:").map_err(|e| e.to_string())?;
+    let name = prompter
+        .ask(PROJECT_NAME_PROMPT)
+        .map_err(|e| e.to_string())?;
     let report = InitService::new(FsScaffoldWriter::new(root.to_path_buf()))
         .init(language, &name)
         .map_err(|e| e.to_string())?;
@@ -81,15 +133,24 @@ pub fn ensure_spec(root: &Path, prompter: &mut dyn Prompter) -> Result<(), Strin
     Ok(())
 }
 
+/// The language question. The pick list is built from the languages that
+/// parse, so adding one cannot leave the prompt offering the old set.
+pub fn language_prompt() -> String {
+    let keys: Vec<&str> = Language::ALL
+        .iter()
+        .map(|language| language.key())
+        .collect();
+    format!("Language for the new project ({}):", keys.join(", "))
+}
+
 /// Ask for a supported language until the answer parses - the one
 /// prompt loop shared by `spec init` and the greenfield scaffold step.
 pub fn prompt_language(prompter: &mut dyn Prompter) -> Result<Language, PromptError> {
     loop {
-        let answer = prompter
-            .ask("Language for the new project (java, javascript, typescript, dotnet, rust):")?;
+        let answer = prompter.ask(&language_prompt())?;
         match Language::parse(&answer) {
             Some(language) => return Ok(language),
-            None => prompter.warn("Unrecognized language - pick one of the five listed."),
+            None => prompter.warn("Unrecognized language - pick one of the listed languages."),
         }
     }
 }

@@ -90,6 +90,18 @@ pub struct DraftReport {
 /// enough that a developer working through real findings will not meet it.
 const MAX_DRAFT_PASSES: u32 = 12;
 
+/// The wizard's questions, named so the end-to-end driver in
+/// `tests/greenfield_e2e.rs` answers the bytes this service prints -
+/// see [`crate::bootstrap::PROJECT_NAME_PROMPT`] for why a copy is worse
+/// than a shared name here.
+pub const DESCRIBE_PROMPT: &str = "Describe what to build in plain words (one or several \
+                                   requirements). Enter drafts manually instead:";
+pub const ACCEPT_PROMPT: &str = "Accept [Enter for all, or comma-separated numbers]:";
+/// The prefix of the ordering question; the row range is appended.
+pub const FIRST_REQUIREMENT_PROMPT: &str = "Which requirement first to review and refine?";
+/// The phrase both write confirmations carry, clean or with findings open.
+pub const WRITE_REQUIREMENT: &str = "Write this requirement";
+
 /// How the wizard's question loop ended.
 enum Gathered {
     /// A requirement to stage, its title, and any wording findings left
@@ -372,11 +384,7 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: WorkTree, S: StateS
         let id = next_id(&catalog, &target);
         let description = match given {
             Some(text) => text.trim().to_string(),
-            None => self.ask(
-                prompter,
-                "Describe what to build in plain words (one or several requirements). \
-                 Enter drafts manually instead:",
-            )?,
+            None => self.ask(prompter, DESCRIBE_PROMPT)?,
         };
         if description.is_empty() {
             return self.manual_draft(
@@ -584,10 +592,7 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: WorkTree, S: StateS
             return Ok(proposals.to_vec());
         }
         loop {
-            let answer = self.ask(
-                prompter,
-                "Accept [Enter for all, or comma-separated numbers]:",
-            )?;
+            let answer = self.ask(prompter, ACCEPT_PROMPT)?;
             match parse_accept_selection(&answer, proposals.len()) {
                 Ok(indices) => {
                     return Ok(indices.into_iter().map(|i| proposals[i].clone()).collect());
@@ -610,7 +615,7 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: WorkTree, S: StateS
         loop {
             let answer = self.ask(
                 prompter,
-                &format!("Which requirement first to review and refine? [1-{count}, Enter for 1]:"),
+                &format!("{FIRST_REQUIREMENT_PROMPT} [1-{count}, Enter for 1]:"),
             )?;
             if answer.is_empty() {
                 return Ok(0);
@@ -1091,10 +1096,10 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: WorkTree, S: StateS
             Err(error) => return Err(error),
         };
         let question = if unresolved.is_empty() {
-            "The wording reads clean. Write this requirement?".to_string()
+            format!("The wording reads clean. {WRITE_REQUIREMENT}?")
         } else {
             format!(
-                "{} wording finding(s) stay open. Write this requirement anyway?",
+                "{} wording finding(s) stay open. {WRITE_REQUIREMENT} anyway?",
                 unresolved.len()
             )
         };

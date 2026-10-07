@@ -188,7 +188,7 @@ where
         ) {
             Ok(reply) => reply,
             Err(LlmReplyError::Call(e)) => {
-                return Err(ServiceError(format!("the model call failed - {}", e.0)));
+                return Err(ServiceError(LlmReplyError::call_failed(&e)));
             }
             Err(LlmReplyError::Invalid { reason }) => {
                 return Err(ServiceError(reason));

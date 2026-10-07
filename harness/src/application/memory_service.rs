@@ -227,7 +227,7 @@ where
             prompter.warn(&notice);
         }
         outcome.map_err(|error| match error {
-            LlmReplyError::Call(error) => format!("the model call failed - {}", error.0),
+            LlmReplyError::Call(error) => LlmReplyError::call_failed(&error),
             LlmReplyError::Invalid { reason } => {
                 format!("the model did not choose a module - {reason}")
             }

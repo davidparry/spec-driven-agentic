@@ -47,11 +47,18 @@ use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use spec_harness::application::spec_mutation_service::{
+    ACCEPT_PROMPT, DESCRIBE_PROMPT, FIRST_REQUIREMENT_PROMPT, WRITE_REQUIREMENT,
+};
+use spec_harness::bootstrap::{LOOP_CLOSED, PROJECT_NAME_PROMPT, language_prompt};
+use spec_harness::greenfield::{
+    KEEP_GENERATED_PROMPT, MODEL_ATTEMPT_PROMPT, NEXT_PENDING_PROMPT, REFACTOR_PROMPT,
+};
+
 const SPEC: &str = env!("CARGO_BIN_EXE_spec");
 
 const PROJECT_NAME: &str = "String Calculator";
 const DESCRIPTION: &str = "String calculator only intended for addition";
-const DONE_MARKER: &str = "is implemented. Loop closed.";
 
 /// How many hands-off implementation attempts the driver grants - once.
 const ATTEMPT_BUDGET: &str = "30";
@@ -60,7 +67,7 @@ const ATTEMPT_BUDGET: &str = "30";
 /// attempt and again only when a whole granted budget failed to go
 /// green, so the driver treats a second appearance as the verdict.
 fn is_budget_prompt(prompt: &str) -> bool {
-    prompt.contains("Press Enter to let the model attempt")
+    prompt.contains(MODEL_ATTEMPT_PROMPT)
 }
 
 /// The answer for the prompt currently pending at the end of the child's
@@ -68,37 +75,39 @@ fn is_budget_prompt(prompt: &str) -> bool {
 /// Specific patterns come before generic ones; the manual-draft fallbacks
 /// at the bottom only fire if the model produced no proposal to accept.
 fn answer_for(prompt: &str) -> Option<&'static str> {
-    if prompt.contains("Language for the new project") {
+    if prompt.contains(&language_prompt()) {
         return Some("java");
     }
-    if prompt.ends_with("Project name:") {
+    if prompt.ends_with(PROJECT_NAME_PROMPT) {
         return Some(PROJECT_NAME);
     }
-    if prompt.contains("Describe what to build in plain words") {
+    if prompt.contains(DESCRIBE_PROMPT) {
         return Some(DESCRIPTION);
     }
-    if prompt.contains("Accept [Enter for all") {
+    if prompt.contains(ACCEPT_PROMPT) {
         return Some("");
     }
-    if prompt.contains("Which requirement first") {
+    if prompt.contains(FIRST_REQUIREMENT_PROMPT) {
         return Some("");
     }
     if prompt.contains("(Enter keeps it") {
         return Some(""); // accept every proposed title, story, criterion
     }
-    if prompt.contains("Stage this requirement?") {
+    // Both wordings the write confirmation takes: clean, and with
+    // wording findings still open. The happy path accepts either.
+    if prompt.contains(WRITE_REQUIREMENT) {
         return Some("y");
     }
-    if prompt.contains("Commit the generated tests and step definitions?") {
+    if prompt.contains(KEEP_GENERATED_PROMPT) {
         return Some("y");
     }
     if is_budget_prompt(prompt) {
         return Some(ATTEMPT_BUDGET); // attempt budget, as in the manual session
     }
-    if prompt.contains("Start a refactor step") {
+    if prompt.contains(REFACTOR_PROMPT) {
         return Some("n");
     }
-    if prompt.contains("Which pending requirement next?") {
+    if prompt.contains(NEXT_PENDING_PROMPT) {
         return Some("n"); // one closed loop is the E2E scope
     }
     // Manual-draft fallbacks: the model returned no usable proposal, so
@@ -201,7 +210,7 @@ fn milestone_kind(line: &str) -> Option<&'static str> {
     if line.starts_with("GREEN:") {
         return Some("green-bar");
     }
-    if line.contains(DONE_MARKER) {
+    if line.contains(LOOP_CLOSED) {
         return Some("loop-closed");
     }
     None
@@ -412,7 +421,13 @@ fn spawn_greenfield(root: &Path) -> Child {
     if let Ok(model) = std::env::var("SPEC_E2E_MODEL") {
         command.args(["--model", &model]);
     }
+    // The scaffold lives under this crate's own `target/`, which is
+    // inside this git repository, so the branch gate would offer a
+    // branch for the repository the test is running from. `--no-branch`
+    // asks nothing, which is the only answer that keeps this test about
+    // the RED loop rather than about the gate.
     command
+        .arg("--no-branch")
         .arg("greenfield")
         .current_dir(root)
         .stdin(Stdio::piped())
@@ -555,7 +570,7 @@ fn verify(root: &Path, transcript: &str) -> Result<(), String> {
     if !transcript.contains("GREEN:") {
         return Err("the run never reached a green bar".into());
     }
-    if !transcript.contains(DONE_MARKER) {
+    if !transcript.contains(LOOP_CLOSED) {
         return Err("the loop never closed".into());
     }
     let spec_path = root.join("requirements/requirements.json");
@@ -677,67 +692,61 @@ mod driver_unit {
         );
     }
 
+    /// Every prompt the happy path reaches, assembled from the binary's
+    /// own names rather than copies of them. That is the whole point: the
+    /// previous version of this test spelled each prompt out, so when two
+    /// of them were renamed the test and the driver stayed in agreement
+    /// with each other and wrong about the binary, and the live run hung
+    /// on a question neither of them recognized.
     #[test]
     fn every_happy_path_prompt_has_an_answer() {
-        let script = [
+        let script: Vec<(String, &str)> = vec![
+            (language_prompt(), "java"),
+            (PROJECT_NAME_PROMPT.to_string(), PROJECT_NAME),
+            (DESCRIBE_PROMPT.to_string(), DESCRIPTION),
+            (ACCEPT_PROMPT.to_string(), ""),
             (
-                "Language for the new project (java, javascript, typescript, dotnet, rust):",
-                "java",
-            ),
-            ("Project name:", PROJECT_NAME),
-            (
-                "Describe what to build in plain words (one or several requirements). \
-                 Enter drafts manually instead:",
-                DESCRIPTION,
-            ),
-            ("Accept [Enter for all, or comma-separated numbers]:", ""),
-            (
-                "Which requirement first to review and refine? [1-2, Enter for 1]:",
+                format!("{FIRST_REQUIREMENT_PROMPT} [1-2, Enter for 1]:"),
                 "",
             ),
-            ("REQ-001 title [Add two numbers] (Enter keeps it):", ""),
+            (
+                "REQ-001 title [Add two numbers] (Enter keeps it):".into(),
+                "",
+            ),
             (
                 "REQ-001 criterion 1 [Given \"2\" and \"3\", then \"5\"] \
-                 (Enter keeps it, '-' drops it):",
+                 (Enter keeps it, '-' drops it):"
+                    .into(),
                 "",
             ),
             (
-                "REQ-001 criterion 4 (leave blank to finish the criteria):",
+                "REQ-001 criterion 4 (leave blank to finish the criteria):".into(),
                 "",
             ),
             (
-                "The wording reads clean. Stage this requirement? [y/N]",
+                format!("The wording reads clean. {WRITE_REQUIREMENT}? [y/N]"),
                 "y",
             ),
             (
-                "Commit the generated tests and step definitions? [y/N]",
+                format!("2 wording finding(s) stay open. {WRITE_REQUIREMENT} anyway? [y/N]"),
                 "y",
             ),
+            (format!("{KEEP_GENERATED_PROMPT} [y/N]"), "y"),
+            (MODEL_ATTEMPT_PROMPT.to_string(), ATTEMPT_BUDGET),
+            (format!("{REFACTOR_PROMPT} [y/N]"), "n"),
             (
-                "Press Enter to let the model attempt the implementation and rerun \
-                 the tests, enter a number to attempt up to that many times without \
-                 asking again, or type stop to pause here:",
-                "30",
-            ),
-            (
-                "Green bar. Start a refactor step before closing the loop? [y/N]",
-                "n",
-            ),
-            (
-                "Which pending requirement next? [1-1, Enter for 1] (n stops):",
+                format!("{NEXT_PENDING_PROMPT} [1-1, Enter for 1] (n stops):"),
                 "n",
             ),
         ];
         for (prompt, expected) in script {
-            assert_eq!(answer_for(prompt), Some(expected), "prompt: {prompt}");
+            assert_eq!(answer_for(&prompt), Some(expected), "prompt: {prompt}");
         }
     }
 
     #[test]
     fn the_budget_prompt_is_recognized_and_answered_with_the_full_budget() {
-        let prompt = "Press Enter to let the model attempt the implementation and rerun \
-                      the tests, enter a number to attempt up to that many times without \
-                      asking again, or type stop to pause here:";
+        let prompt = MODEL_ATTEMPT_PROMPT;
         assert!(is_budget_prompt(prompt));
         assert_eq!(answer_for(prompt), Some(ATTEMPT_BUDGET));
         // Narration around the RED loop must not look like the budget

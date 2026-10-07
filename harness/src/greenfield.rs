@@ -21,16 +21,34 @@ use crate::application::generation_service::GenerationService;
 use crate::application::implement_service::ImplementService;
 use crate::application::scenario_service::ScenarioService;
 use crate::application::spec_mutation_service::SpecMutationService;
-use crate::application::tdd_service::{TddError, TddService, TestReport};
-use crate::bootstrap::{ensure_project, ensure_spec, refresh_project_memory};
+use crate::application::tdd_service::{TddError, TddService};
+use crate::bootstrap::{
+    IMPLEMENT_ATTEMPT_WORK, LOOP_CLOSED, ensure_project, ensure_spec, refresh_project_memory,
+    run_and_narrate,
+};
 use crate::domain::language::Language;
 use crate::domain::model::Spec;
 use crate::domain::scaffold::slug;
 use crate::domain::steps::criterion_to_steps;
 use crate::domain::tdd::ImplementAttempt;
-use crate::ports::{Prompter, TestFilter, TestRunner, WorkTree as _};
+use crate::ports::{Prompter, WorkTree as _};
 use crate::wiring::{DynLlm, ProjectFeatures, ProjectTree, RunnerFactory};
 use crate::workspace::SPEC_PATH;
+
+/// The questions this loop asks, named so the end-to-end driver in
+/// `tests/greenfield_e2e.rs` answers the bytes this module prints. See
+/// [`crate::bootstrap::PROJECT_NAME_PROMPT`] for why that matters: an
+/// unrecognized prompt does not fail the driver, it hangs it.
+pub const KEEP_GENERATED_PROMPT: &str = "Keep going with the generated tests and step definitions?";
+pub const REFACTOR_PROMPT: &str = "Green bar. Start a refactor step before closing the loop?";
+/// The prefix the pending-requirement question carries; the row range and
+/// the stop hint are appended per run.
+pub const NEXT_PENDING_PROMPT: &str = "Which pending requirement next?";
+/// The RED-loop budget question, asked only when a model is configured.
+pub const MODEL_ATTEMPT_PROMPT: &str = "Press Enter to let the model attempt the implementation \
+                                        and rerun the tests, enter a number to attempt up to \
+                                        that many times without asking again, or type stop to \
+                                        pause here:";
 
 /// Where the run ended, and what the human does next.
 #[derive(Debug, Serialize, PartialEq, Eq)]
@@ -64,7 +82,7 @@ fn pick_pending(
     pending: &[(String, String)],
 ) -> Result<Option<String>, String> {
     let count = pending.len();
-    let question = format!("Which pending requirement next? [1-{count}, Enter for 1] (n stops):");
+    let question = format!("{NEXT_PENDING_PROMPT} [1-{count}, Enter for 1] (n stops):");
     loop {
         let answer = prompter.ask(&question).map_err(|e| e.to_string())?;
         match parse_pending_pick(&answer, count) {
@@ -269,7 +287,7 @@ impl Greenfield {
         // than an approval: the loop stops here and leaves the branch
         // for the developer to inspect, keep, or throw away with git.
         if !prompter
-            .confirm("Keep going with the generated tests and step definitions?")
+            .confirm(KEEP_GENERATED_PROMPT)
             .map_err(|e| e.to_string())?
         {
             return Ok(GreenfieldReport {
@@ -294,15 +312,13 @@ impl Greenfield {
             }
         };
         let tdd = self.tdd_service();
-        let Some(mut report) = self.try_run(&tdd, runner.as_ref(), prompter)? else {
+        let Some(mut report) = run_and_narrate(&tdd, runner.as_ref(), prompter)? else {
             return Ok(self.authoring_done(req_id.to_string(), feature_path));
         };
 
         while report.phase != "GREEN" {
             let question = if self.llm.is_some() {
-                "Press Enter to let the model attempt the implementation and rerun \
-                 the tests, enter a number to attempt up to that many times without \
-                 asking again, or type stop to pause here:"
+                MODEL_ATTEMPT_PROMPT
             } else {
                 "Implement the production code now. Press Enter to run the tests \
                  again, or type stop to pause here:"
@@ -336,7 +352,7 @@ impl Greenfield {
                 if self.llm.is_some() {
                     self.attempt_implementation(prompter, &implement, &tdd, req_id)?;
                 }
-                report = match self.try_run(&tdd, runner.as_ref(), prompter)? {
+                report = match run_and_narrate(&tdd, runner.as_ref(), prompter)? {
                     Some(report) => report,
                     None => return Ok(self.authoring_done(req_id.to_string(), feature_path)),
                 };
@@ -347,7 +363,7 @@ impl Greenfield {
         }
 
         if prompter
-            .confirm("Green bar. Start a refactor step before closing the loop?")
+            .confirm(REFACTOR_PROMPT)
             .map_err(|e| e.to_string())?
         {
             prompter.tell(
@@ -360,8 +376,7 @@ impl Greenfield {
                 .ask("When your edits are in place, describe what you changed and why:")
                 .map_err(|e| e.to_string())?;
             tdd.refactor(Some(&note)).map_err(tdd_message)?;
-            report = self
-                .try_run(&tdd, runner.as_ref(), prompter)?
+            report = run_and_narrate(&tdd, runner.as_ref(), prompter)?
                 .ok_or_else(|| "the runtime disappeared mid-loop".to_string())?;
             if report.phase != "GREEN" {
                 return Ok(GreenfieldReport {
@@ -381,7 +396,7 @@ impl Greenfield {
             .mark_implemented(req_id)
             .map_err(|e| e.to_string())?;
         drop(work);
-        prompter.tell(&format!("{req_id} is implemented. Loop closed."));
+        prompter.tell(&format!("{req_id} {LOOP_CLOSED}"));
         Ok(GreenfieldReport {
             requirement: Some(req_id.to_string()),
             feature: Some(feature_path),
@@ -470,36 +485,6 @@ impl Greenfield {
         }
     }
 
-    /// Run the tests and narrate the outcome. `Ok(None)` means the
-    /// runtime is missing: execution stops but authoring stands.
-    fn try_run(
-        &self,
-        tdd: &TddService<FsStateStore>,
-        runner: &dyn TestRunner,
-        prompter: &mut dyn Prompter,
-    ) -> Result<Option<TestReport>, String> {
-        let work = prompter.working("Running the tests - working");
-        let outcome = tdd.run_tests(runner, &TestFilter::default());
-        drop(work);
-        match outcome {
-            Ok(report) => {
-                prompter.tell(&format!(
-                    "{}: {} tests, {} failures, {} errors.",
-                    report.phase, report.tests, report.failures, report.errors
-                ));
-                for detail in &report.failure_details {
-                    prompter.tell(&format!("  - {detail}"));
-                }
-                Ok(Some(report))
-            }
-            Err(TddError::RuntimeMissing { runtime, hint }) => {
-                prompter.warn(&format!("Runtime missing ({runtime}): {hint}"));
-                Ok(None)
-            }
-            Err(TddError::Other(message)) => Err(message),
-        }
-    }
-
     /// Ask the model to make the failing tests pass. The brief carries
     /// the persisted failure details (stack
     /// traces included), prior attempts on this requirement, and only the
@@ -520,7 +505,7 @@ impl Greenfield {
         req_id: &str,
     ) -> Result<(), String> {
         let brief = tdd.implementation_brief(req_id).map_err(tdd_message)?;
-        let work = prompter.working("Generating an implementation attempt - working");
+        let work = prompter.working(IMPLEMENT_ATTEMPT_WORK);
         // A greenfield project has no production file yet, so the
         // target resolves by convention and never needs --into.
         let outcome = implement.generate(
