@@ -15,7 +15,7 @@ use crate::domain::memory::ProjectStructure;
 use crate::domain::model::{Requirement, Spec, SpecCatalog};
 use crate::domain::neighborhood;
 use crate::domain::steps::{
-    MissingStep, extract_definitions, extract_patterns, find_missing, pattern_matches,
+    MissingStep, compile_pattern, extract_definitions, extract_patterns, find_missing,
     source_extension, split_step,
 };
 use crate::ports::{FeatureCatalog, SourceFiles, SpecRepository};
@@ -220,7 +220,8 @@ pub(crate) fn scenario_evidence(
             // evidence where a window runs on into the next definition,
             // which is the safe direction to err: too little evidence
             // makes the caller ask, too much sends it somewhere wrong.
-            if steps.iter().any(|step| pattern_matches(&pattern, step))
+            if compile_pattern(&pattern)
+                .is_some_and(|matcher| steps.iter().any(|step| matcher.is_match(step)))
                 && !is_pending_step_body(language, body)
             {
                 bodies.push_str(body);

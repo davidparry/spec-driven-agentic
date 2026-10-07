@@ -140,15 +140,29 @@ fn unescape_literal(text: &str) -> String {
     out
 }
 
-/// Does `text` match `pattern`? Patterns are either anchored regexes
-/// (starting with `^`) or Cucumber expressions (`{int}`, `{string}`, ...).
-pub fn pattern_matches(pattern: &str, text: &str) -> bool {
+/// The regex a pattern denotes: an anchored regex as written, or a
+/// Cucumber expression translated into one. `None` for a pattern that
+/// does not compile, which matches nothing rather than failing the run.
+///
+/// Public because compiling is far more expensive than matching, so a
+/// caller holding a pattern against many strings must build it once
+/// rather than reach for [`pattern_matches`] in a loop.
+pub fn compile_pattern(pattern: &str) -> Option<Regex> {
     let regex_source = if pattern.starts_with('^') {
         pattern.to_string()
     } else {
         cucumber_expression_to_regex(pattern)
     };
-    Regex::new(&regex_source).is_ok_and(|r| r.is_match(text))
+    Regex::new(&regex_source).ok()
+}
+
+/// Does `text` match `pattern`? Patterns are either anchored regexes
+/// (starting with `^`) or Cucumber expressions (`{int}`, `{string}`, ...).
+///
+/// Compiles on every call. For one question that is the clearest thing
+/// to write; against a list, use [`compile_pattern`] once instead.
+pub fn pattern_matches(pattern: &str, text: &str) -> bool {
+    compile_pattern(pattern).is_some_and(|r| r.is_match(text))
 }
 
 /// Translate a Cucumber expression into an anchored regex.
@@ -180,6 +194,13 @@ fn cucumber_expression_to_regex(expression: &str) -> String {
 /// Every step in the given features that no pattern matches, deduplicated
 /// by resolved keyword + text (the definition would be shared anyway).
 pub fn find_missing(features: &[FeatureDoc], patterns: &[String]) -> Vec<MissingStep> {
+    // Compiled once up front, not once per question. A step that no
+    // definition covers is asked about every pattern before it is
+    // declared missing, so compiling inside the loop costs steps x
+    // patterns builds - 1770 x 460 against this crate's own spec, which
+    // is minutes of `spec status` on a requirement that was just
+    // drafted and so matches nothing yet.
+    let compiled: Vec<Regex> = patterns.iter().filter_map(|p| compile_pattern(p)).collect();
     let mut missing: Vec<MissingStep> = Vec::new();
     for feature in features {
         for scenario in &feature.scenarios {
@@ -192,7 +213,7 @@ pub fn find_missing(features: &[FeatureDoc], patterns: &[String]) -> Vec<Missing
                     last_keyword = keyword.to_string();
                     last_keyword.clone()
                 };
-                if patterns.iter().any(|p| pattern_matches(p, text)) {
+                if compiled.iter().any(|r| r.is_match(text)) {
                     continue;
                 }
                 if missing
@@ -390,6 +411,46 @@ mod tests {
             "the result is x"
         ));
         assert!(!pattern_matches(r"^bro][ken$", "anything"));
+    }
+
+    /// A pattern that will not compile matches nothing, so a broken
+    /// definition leaves its steps missing rather than failing the run.
+    #[test]
+    fn a_pattern_that_does_not_compile_yields_no_matcher() {
+        assert!(compile_pattern(r"^bro][ken$").is_none());
+        assert!(compile_pattern("the result is {int}").is_some());
+    }
+
+    /// The cost of a pattern is in compiling it, not in asking it a
+    /// question, and a step that nothing covers is asked of every
+    /// pattern there is. Compiling inside that loop made `spec status`
+    /// take 130 seconds on this crate's own spec the moment a freshly
+    /// drafted requirement gave it steps that matched nothing.
+    ///
+    /// The bound is deliberately far looser than the fix needs - this
+    /// is a guard against the quadratic coming back, not a benchmark.
+    /// Compiling per question costs this case 80,000 builds, which is
+    /// tens of seconds; compiling once costs 200.
+    #[test]
+    fn an_unmatched_step_does_not_pay_to_compile_every_pattern_again() {
+        let patterns: Vec<String> = (0..200).map(|n| format!("a pattern {n} {{int}}")).collect();
+        let steps: Vec<String> = (0..400)
+            .map(|n| format!("Given nothing covers {n}"))
+            .collect();
+        let features = vec![feature_with_steps(
+            steps.iter().map(String::as_str).collect(),
+        )];
+
+        let started = std::time::Instant::now();
+        let missing = find_missing(&features, &patterns);
+        let elapsed = started.elapsed();
+
+        assert_eq!(missing.len(), 400, "every step is missing");
+        assert!(
+            elapsed < std::time::Duration::from_secs(3),
+            "find_missing took {elapsed:?} for 400 steps against 200 patterns, \
+             which is the shape of a regex compiled per question"
+        );
     }
 
     fn feature_with_steps(steps: Vec<&str>) -> FeatureDoc {
