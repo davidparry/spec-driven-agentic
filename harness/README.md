@@ -902,7 +902,7 @@ test-first:
    (`list_requirements`, `get_requirement`, `validate_spec`,
    `refine_requirement`, `run_tests`, `get_tdd_state`, `start_refactor`)
    must keep their reply shapes. The source of truth is
-   `tests/mcp_conformance.rs` plus smoke-test `ToolPlan` (exactly 25
+   `tests/mcp_conformance.rs` plus smoke-test `ToolPlan` (exactly 21
    names; a 22nd tool fails that Java build). Backup Inspector:
    `npx @modelcontextprotocol/inspector spec mcp serve --root $PWD`.
 4. **Never expose escape hatches.** No `write_file`, `run_shell`,

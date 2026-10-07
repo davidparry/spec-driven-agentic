@@ -60,10 +60,11 @@ waiting, which kills the sentence-first opening.
 you. Doing it by hand now means the morning's hand-run commands land
 somewhere you can throw away too.)
 
-**About that `cd harness`.** There is no `--root` flag anywhere in this
-walk. `spec` walks up from the working directory to the nearest
-enclosing project, so standing in `harness/` — or anywhere beneath it —
-is how it finds the harness catalog. Running from the repository root
+**About that `cd harness`.** `spec` does take a `--root`, but this walk
+never passes it, and you should not need to. `spec` walks up from the
+working directory to the nearest enclosing project, so standing in
+`harness/` — or anywhere beneath it — is how it finds the harness
+catalog. Running from the repository root
 instead finds the *kata* catalog in `requirements/`, which is a
 different spec entirely. If a command reports ids beginning `REQ-`, you
 are one directory too high.
@@ -79,11 +80,19 @@ cargo test --manifest-path Cargo.toml --test spec_completeness
 
 ## 9:00 — one sentence
 
-Nothing is waiting. Here is the whole of your input this morning:
+Nothing is waiting. Run `draft` with no arguments and it asks what to
+build; the sentence below is what you type at that prompt, and it is the
+whole of your input this morning:
 
 ```bash
 spec draft
 ```
+
+```text
+Describe what to build in plain words (one or several requirements). Enter drafts manually instead:
+```
+
+Paste this as the answer:
 
 ```
 for one requirement, report each acceptance criterion as proven or unproven; report all criteria proven when none are left unproven; count a scenario as proof only when it is tagged with that requirement id; treat a scenario whose step is undefined as proving nothing; and raise an error when the requirement id is absent from the spec
@@ -240,32 +249,30 @@ argument above is unaffected, and it is the one that matters.
 ### Your turn
 
 Rewrite it so that every criterion **names the tool you are building**.
-The behaviour barely changes; the contract does. Here is the version the
-talk uses:
+The behaviour barely changes; the contract does.
 
-**Title**
-
-```
-Uncovered acceptance criteria are reported per requirement
-```
-
-**Story**
-
-```
-As a developer closing out a requirement, I want each acceptance criterion reported as covered or uncovered by its scenarios and tests so that I can see what is still unproven before I mark the work implemented.
-```
-
-**Acceptance criteria**
-
-```
-Given a requirement whose every criterion is matched by a tagged scenario and an asserting test, when the criteria_coverage MCP tool is called with its id, then the verdict is "covered"
-Given a requirement with 3 criteria of which 1 is matched by no asserting test, when the criteria_coverage MCP tool is called with its id, then 1 criterion is reported uncovered
-Given the requirement id "REQ-999" is absent from the spec, when the criteria_coverage MCP tool is called with it, then the reply is an error naming "REQ-999"
-Given a requirement carrying 0 acceptance criteria, when the criteria_coverage MCP tool is called with its id, then the verdict is "uncovered"
-```
+Run bare, `spec reword HARNESS-019` opens a wizard that asks for the
+title, the story and then each criterion in turn, with a proposal
+already in the brackets. Here the flags are the better door: they skip
+the wizard, and `--criterion` **replaces** the criteria list, so the
+four below are the four you end up with however many your draft had.
+This is the version the talk uses — one command:
 
 ```bash
-spec reword HARNESS-019
+spec reword HARNESS-019 \
+  --title "Uncovered acceptance criteria are reported per requirement" \
+  --story "As a developer closing out a requirement, I want each acceptance criterion reported as covered or uncovered by its scenarios and tests so that I can see what is still unproven before I mark the work implemented." \
+  --criterion 'Given a requirement whose every criterion is matched by a tagged scenario and an asserting test, when the criteria_coverage MCP tool is called with its id, then the verdict is "covered"' \
+  --criterion 'Given a requirement with 3 criteria of which 1 is matched by no asserting test, when the criteria_coverage MCP tool is called with its id, then 1 criterion is reported uncovered' \
+  --criterion 'Given the requirement id "REQ-999" is absent from the spec, when the criteria_coverage MCP tool is called with it, then the reply is an error naming "REQ-999"' \
+  --criterion 'Given a requirement carrying 0 acceptance criteria, when the criteria_coverage MCP tool is called with its id, then the verdict is "uncovered"'
+```
+
+The criteria carry double quotes, so they are single-quoted here. If
+you would rather type your own wording at the prompts, run the command
+with no flags and the wizard walks you through the same three fields.
+
+```bash
 git diff requirements/    # read what you just changed
 spec refine HARNESS-019   # clean again, and the judgments are worth a look
 ```
@@ -566,11 +573,32 @@ that the smoke test cannot silently skip new surface area.
 `@EnabledIfSystemProperty(named = "spec.binary", ...)`; without it the
 test is skipped and the build stays green.
 
-Fix it: add `criteria_coverage` to
-`smoke-test/src/main/java/com/davidparry/workshop/smoke/ToolPlan.java`,
-bump the count in `ToolPlanTest`, and update `CLI-009`'s criteria and its
-tagged scenario in `smoke-test/requirements/requirements.json` and
-`features/tool_sweep.feature`. Rerun. Green.
+Fixing it means moving the planned count from 21 to 22 everywhere it is
+written down, and it is written down in four files. All paths are from
+the repository root:
+
+1. **`smoke-test/src/main/java/com/davidparry/workshop/smoke/ToolPlan.java`**
+   — add a row to the `TOOLS` list. It is a read-only tool taking an id,
+   so it follows `get_requirement`:
+
+   ```java
+   read("criteria_coverage", Map.of("id", "REQ-001")),
+   ```
+
+2. **`smoke-test/src/test/java/com/davidparry/workshop/smoke/ToolPlanTest.java`**
+   — the count appears in **four** assertions, not one: `ToolPlan.size()`
+   and `ToolPlan.names()` in `planIsExactlyTwentyOne`, then
+   `report.discovered()` and `report.called()` in the two sweep tests.
+   Maven will only show you the first one that fails, so change all four
+   before rerunning.
+
+3. **`smoke-test/requirements/requirements.json`** — `CLI-009` names the
+   number in both its title and its first criterion.
+
+4. **`smoke-test/src/test/resources/features/tool_sweep.feature`** — the
+   `Feature:` line, and the `@CLI-009` scenario's name and its `Then`.
+
+Rerun. Green.
 
 ## 11:05 — close it out
 
@@ -767,7 +795,9 @@ places, in descending order of value:
 
 ### 3. Give it a front door
 
-```bash
+This is the command you are being asked to build, not one to run:
+
+```text
 spec coverage HARNESS-019      # does not exist yet
 ```
 

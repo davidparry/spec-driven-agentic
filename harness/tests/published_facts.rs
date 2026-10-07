@@ -53,7 +53,11 @@ fn published_files() -> Vec<(String, String)> {
                 .to_string_lossy()
                 .replace('\\', "/");
 
-            let skip = relative.starts_with(".git")
+            // `.git` itself, but not `.github`: the workflows state
+            // counts and version floors like any other page, and a
+            // prefix match on ".git" hid every one of them.
+            let skip = relative == ".git"
+                || relative.starts_with(".git/")
                 || relative.starts_with("target")
                 || relative.starts_with("docs/manual")
                 || relative.starts_with("_site")
@@ -68,7 +72,7 @@ fn published_files() -> Vec<(String, String)> {
                 stack.push(path);
             } else if matches!(
                 path.extension().and_then(|e| e.to_str()),
-                Some("md" | "html")
+                Some("md" | "html" | "yml" | "yaml")
             ) && let Ok(text) = std::fs::read_to_string(&path)
             {
                 found.push((relative, text));
@@ -192,19 +196,18 @@ fn every_documented_tool_count_is_the_number_the_server_serves() {
         if file == "CHANGELOG.md" {
             continue;
         }
-        for (number, line) in text.lines().enumerate() {
-            for claimed in counts_of_tools_in(line) {
-                // The talk adds the 22nd tool on stage, so a page may
-                // correctly say either the number served or one more.
-                if claimed != served && claimed != served + 1 {
-                    wrong.push(format!(
-                        "{file}:{} says {claimed} tools; the server lists {served} \
-                         (or {} mid-demo)\n    {}",
-                        number + 1,
-                        served + 1,
-                        line.trim()
-                    ));
-                }
+        let lines: Vec<&str> = text.lines().collect();
+        for (number, claimed) in counts_of_tools_in(&text) {
+            // The talk adds the 22nd tool on stage, so a page may
+            // correctly say either the number served or one more.
+            if claimed != served && claimed != served + 1 {
+                wrong.push(format!(
+                    "{file}:{} says {claimed} tools; the server lists {served} \
+                     (or {} mid-demo)\n    {}",
+                    number + 1,
+                    served + 1,
+                    lines[number].trim()
+                ));
             }
         }
     }
@@ -242,19 +245,34 @@ fn tools_the_server_lists() -> usize {
 
 /// Counts written as "N tools", ignoring "7 tools" style counts of
 /// something else by requiring the number to be plausible for a server.
-fn counts_of_tools_in(line: &str) -> Vec<usize> {
+/// Every tool count stated anywhere in `text`, each paired with the
+/// 0-based line its number sits on.
+///
+/// Scanned as one word stream rather than line by line, because a
+/// wrapped sentence puts the number at the end of one line and its noun
+/// at the start of the next - which is exactly how `README.md` carried a
+/// stale count past this gate.
+fn counts_of_tools_in(text: &str) -> Vec<(usize, usize)> {
     let mut found = Vec::new();
-    let words: Vec<&str> = line.split_whitespace().collect();
+    let words: Vec<(usize, &str)> = text
+        .lines()
+        .enumerate()
+        .flat_map(|(number, line)| line.split_whitespace().map(move |word| (number, word)))
+        .collect();
+
     for pair in words.windows(2) {
-        let noun = pair[1].trim_matches(|c: char| !c.is_ascii_alphabetic());
-        if noun != "tools" {
+        let noun = pair[1].1.trim_matches(|c: char| !c.is_ascii_alphabetic());
+        // "21 names" is how the README states the same count, and
+        // "a 22nd tool fails" is how it states the one after. Matching
+        // only the plural let a stale 25 sit in both for months.
+        if !matches!(noun, "tools" | "tool" | "names") {
             continue;
         }
-        let number = pair[0].trim_matches(|c: char| !c.is_ascii_digit());
+        let number = pair[0].1.trim_matches(|c: char| !c.is_ascii_digit());
         if let Ok(count) = number.parse::<usize>()
             && count >= 20
         {
-            found.push(count);
+            found.push((pair[0].0, count));
         }
     }
     found

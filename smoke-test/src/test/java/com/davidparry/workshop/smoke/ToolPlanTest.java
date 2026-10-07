@@ -14,7 +14,7 @@ class ToolPlanTest {
 
     @Test
     @DisplayName("the plan names exactly the tools the server may serve, and no extras")
-    void planIsExactlyTwentyFive() {
+    void planIsExactlyTwentyOne() {
         assertThat(ToolPlan.size()).isEqualTo(21);
         assertThat(ToolPlan.names()).hasSize(21);
         assertThat(ToolPlan.all()).extracting(ToolPlan.PlannedTool::name).doesNotHaveDuplicates();
