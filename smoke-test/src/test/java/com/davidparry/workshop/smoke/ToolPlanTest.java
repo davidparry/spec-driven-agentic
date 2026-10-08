@@ -15,8 +15,8 @@ class ToolPlanTest {
     @Test
     @DisplayName("the plan names exactly the tools the server may serve, and no extras")
     void planIsExactlyTwentyOne() {
-        assertThat(ToolPlan.size()).isEqualTo(21);
-        assertThat(ToolPlan.names()).hasSize(21);
+        assertThat(ToolPlan.size()).isEqualTo(22);
+        assertThat(ToolPlan.names()).hasSize(22);
         assertThat(ToolPlan.all()).extracting(ToolPlan.PlannedTool::name).doesNotHaveDuplicates();
         assertThat(ToolPlan.names()).contains(
                 "list_requirements",
@@ -45,7 +45,7 @@ class ToolSweepTest {
         ToolSweep.SweepReport report = new ToolSweep().run(client, null, false);
         assertThat(report.missing()).isEmpty();
         assertThat(report.unexpected()).isEmpty();
-        assertThat(report.discovered()).hasSize(21);
+        assertThat(report.discovered()).hasSize(22);
         assertThat(report.called()).contains("list_requirements", "validate_spec", "feature_list");
         assertThat(report.called())
                 .doesNotContain("scenario_add", "command_run", "requirement_reword");
@@ -61,7 +61,7 @@ class ToolSweepTest {
         Narrator narrator = new Narrator(line -> {
         });
         ToolSweep.SweepReport report = new ToolSweep().run(client, narrator, true);
-        assertThat(report.called()).hasSize(21);
+        assertThat(report.called()).hasSize(22);
         assertThat(report.failures()).isEmpty();
     }
 

@@ -14,7 +14,7 @@
 
 `spec` is one native binary for a spec-driven loop: requirements, Gherkin,
 RED, GREEN, REFACTOR. `spec mcp serve` is the same binary as an MCP server
-(21 tools, wire identity `spec-driven-server` / `1.0.0`). The command
+(22 tools, wire identity `spec-driven-server` / `1.0.0`). The command
 manual is [searchable online](https://davidparry.github.io/spec-driven-agentic/manual/);
 the harness itself is documented in [`harness/README.md`](harness/README.md).
 

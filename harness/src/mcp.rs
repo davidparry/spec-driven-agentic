@@ -130,6 +130,15 @@ pub struct CommandRunParams {
 }
 
 #[derive(Deserialize, JsonSchema)]
+pub struct DiffParams {
+    /// Path to diff, relative to the project root, e.g. "requirements".
+    /// Omit for the whole project.
+    #[serde(default)]
+    #[schemars(schema_with = "nullable_string")]
+    pub path: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
 pub struct RequirementRewordParams {
     /// The requirement id, e.g. REQ-003
     pub id: String,
@@ -709,6 +718,33 @@ impl WorkflowServer {
             Ok(report) => json_result(&report),
             Err(e) => error_result(e),
         })
+    }
+
+    #[tool(
+        description = "Read what has changed in the working tree but is not committed \
+        yet: the unified diff of HEAD against the files on disk, staged and unstaged \
+        alike, narrowed to a project-relative path when one is given (e.g. \
+        \"requirements\" for the spec catalog alone). Read-only - it never writes, \
+        stages, or commits anything, and the path may not reach outside the project \
+        root. Needs a git that is installed and a directory that is a repository; \
+        without either, the reply says which one is missing rather than guessing. \
+        Files git is not tracking have no diff to show, so they are listed by name \
+        under untracked - report those as added rather than describing contents you \
+        were not given. A very large diff is cut on a line boundary and truncated is \
+        true; ask again with a narrower path for the rest."
+    )]
+    async fn git_diff(
+        &self,
+        Parameters(params): Parameters<DiffParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let _span = tool_call("git_diff");
+        tracing::debug!(path = ?params.path, "tool arguments");
+        Ok(
+            match wiring::diff_service(&self.root).diff(params.path.as_deref()) {
+                Ok(report) => json_result(&report),
+                Err(e) => error_result(e),
+            },
+        )
     }
 
     #[tool(

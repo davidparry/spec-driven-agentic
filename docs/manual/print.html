@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "searchindex-5300ee44.js";
+            window.path_to_searchindex_js = "searchindex-7d12d21a.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-0006eac3.js"></script>
+        <script src="toc-8557ae39.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -504,6 +504,36 @@ build time).</p>
 <h2 id="-h---help"><a class="header" href="#-h---help"><code>-h</code>, <code>--help</code></a></h2>
 <p>Every command and subcommand answers <code>--help</code> with its synopsis,
 arguments, and flags.</p>
+<h2 id="output-readable-on-a-terminal-json-everywhere-else"><a class="header" href="#output-readable-on-a-terminal-json-everywhere-else">Output: readable on a terminal, JSON everywhere else</a></h2>
+<p>Some commands answer two audiences, so they print for whichever one
+is actually reading:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Where the output goes</th><th>What is printed</th></tr>
+</thead>
+<tbody>
+<tr><td>A terminal</td><td>A readable summary</td></tr>
+<tr><td>A pipe, a file, a CI step, an agent</td><td>The JSON reply</td></tr>
+</tbody>
+</table>
+</div>
+<p>The commands that do this are <a href="#spec-list"><code>spec list</code></a>,
+<a href="#spec-show"><code>spec show</code></a>,
+<a href="#spec-validate"><code>spec validate</code></a>,
+<a href="#spec-refine"><code>spec refine</code></a>,
+<a href="#spec-status"><code>spec status</code></a>, <a href="#spec-state"><code>spec state</code></a>,
+<a href="#spec-test"><code>spec test</code></a>, and
+<a href="#spec-refactor"><code>spec refactor</code></a>. Each one takes <code>--json</code> to
+print the JSON on a terminal too.</p>
+<p>Two things follow. Nothing that parses <code>spec</code> output has to change:
+<code>spec validate | jq</code>, a CI gate, and an agent reading a reply are all
+pipes, and a pipe gets exactly the JSON it always got. And the JSON
+examples throughout this manual are what a pipe sees — on a terminal
+the same reply is laid out for reading.</p>
+<p><code>--json</code> is not a global flag. <code>spec config</code>, <code>spec ask</code>, <code>spec diff</code>,
+<code>spec judge</code>, <code>spec mcp</code>, and <code>spec tools</code> have their own <code>--json</code>
+with meanings described on their own pages.</p>
 <h2 id="exit-status"><a class="header" href="#exit-status">Exit status</a></h2>
 <ul>
 <li><code>0</code> — success (including replies whose JSON reports e.g. an invalid
@@ -1619,6 +1649,10 @@ spec validate         spec mark-implemented &lt;REQ_ID&gt;
 <p>MCP tool equivalents: <code>list_requirements</code>, <code>get_requirement</code>,
 <code>validate_spec</code>, <code>refine_requirement</code>, <code>requirement_reword</code>,
 <code>requirement_mark_implemented</code>.</p>
+<p><code>spec list</code>, <code>spec show</code>, <code>spec validate</code>, and <code>spec refine</code> print a
+readable summary on a terminal and the JSON below in a pipe. Each
+takes <code>--json</code> to print the JSON on a terminal too. See
+<a href="#output-readable-on-a-terminal-json-everywhere-else">output</a>.</p>
 <hr>
 <h2 id="spec-list"><a class="header" href="#spec-list">spec list</a></h2>
 <p>List every requirement with its id, title, status, and the spec file
@@ -2715,6 +2749,7 @@ heartbeat of the workflow.</p>
 <tbody>
 <tr><td><code>--feature &lt;FEATURE&gt;</code></td><td>Run only one feature (path or name, passed to the runner’s filter).</td></tr>
 <tr><td><code>--scenario &lt;SCENARIO&gt;</code></td><td>Run only one scenario by name.</td></tr>
+<tr><td><code>--json</code></td><td>Print the JSON reply on a terminal too. See <a href="#output-readable-on-a-terminal-json-everywhere-else">output</a>.</td></tr>
 <tr><td><code>--root &lt;ROOT&gt;</code></td><td>Project root. Defaults to <code>.</code>.</td></tr>
 <tr><td><code>--model &lt;MODEL&gt;</code></td><td>Accepted (global flag) but unused — running tests never involves an LLM.</td></tr>
 </tbody>
@@ -2797,7 +2832,22 @@ it never changes anything.</p>
 </code></pre>
 <p>MCP tool equivalent: <code>get_tdd_state</code>.</p>
 <h2 id="flags-5"><a class="header" href="#flags-5">Flags</a></h2>
-<p>Only the <a href="#global-flags">global flags</a> (<code>--root</code>, <code>--model</code>).</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Flag</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>--json</code></td><td>Print the JSON reply on a terminal too. See <a href="#output-readable-on-a-terminal-json-everywhere-else">output</a>.</td></tr>
+</tbody>
+</table>
+</div>
+<p>Otherwise only the <a href="#global-flags">global flags</a> (<code>--root</code>, <code>--model</code>).</p>
+<p>On a terminal this prints the phase, the last run’s counts, the
+refactor log, and the recent entries. <code>instructions</code> is left out
+there: it is guidance written to brief a model, and <code>spec state</code> is
+the command you run to find out what phase you are in. A pipe and
+<code>--json</code> still get it.</p>
 <h2 id="examples-3"><a class="header" href="#examples-3">Examples</a></h2>
 <pre><code class="language-bash">spec state
 </code></pre>
@@ -2897,6 +2947,20 @@ am I in the whole loop and what do I do now”.</p>
   "nextStep": "REQ-001 has every asset in place and the bar is RED - run spec test; on RED let the model try with spec implement REQ-001."
 }
 </code></pre>
+<h2 id="flags-6"><a class="header" href="#flags-6">Flags</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Flag</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>--json</code></td><td>Print the JSON reply on a terminal too. See <a href="#output-readable-on-a-terminal-json-everywhere-else">output</a>.</td></tr>
+</tbody>
+</table>
+</div>
+<p>Otherwise only the <a href="#global-flags">global flags</a>. On a terminal
+the reply above is laid out as a table of requirements under the
+phase, with each requirement’s findings beneath its id.</p>
 <h2 id="how-the-next-step-is-chosen"><a class="header" href="#how-the-next-step-is-chosen">How the next step is chosen</a></h2>
 <p>The priority order mirrors the loop itself:</p>
 <ol>
@@ -2951,13 +3015,14 @@ exactly where it was. Without one — or with <code>--manual</code> — it marks
 <pre><code class="language-text">Usage: spec refactor [OPTIONS]
 </code></pre>
 <p>MCP tool equivalent: <code>start_refactor</code> (the phase marker only).</p>
-<h2 id="flags-6"><a class="header" href="#flags-6">Flags</a></h2>
+<h2 id="flags-7"><a class="header" href="#flags-7">Flags</a></h2>
 <pre><code>20|| Flag | Description |
 </code></pre>
 <p>| — | — |
 | <code>--note &lt;NOTE&gt;</code> | What you intend to refactor and why. Recorded in the refactor log, and with a model resolved it is also the brief the model is given. |
 | <code>--req &lt;REQ-ID&gt;</code> | The requirement whose behaviour must not change. Its story and acceptance criteria are shown to the model as the specification it is preserving. |
 | <code>--manual</code> | Mark the phase and stop, without a model call. |
+| <code>--json</code> | Print the JSON reply on a terminal too. See <a href="#output-readable-on-a-terminal-json-everywhere-else">output</a>. |
 | <code>--root &lt;ROOT&gt;</code> | Project root. Defaults to <code>.</code>. |
 | <code>--model &lt;MODEL&gt;</code> | The model to use for the loop. |</p>
 <h2 id="the-tests-are-never-touched"><a class="header" href="#the-tests-are-never-touched">The tests are never touched</a></h2>
@@ -3831,7 +3896,7 @@ a judgment sits beside.</li>
 code <strong>default</strong> or was read from the project file (<code>.spec/config.toml</code>).</p>
 <pre><code class="language-text">Usage: spec config [OPTIONS]
 </code></pre>
-<h2 id="flags-7"><a class="header" href="#flags-7">Flags</a></h2>
+<h2 id="flags-8"><a class="header" href="#flags-8">Flags</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -3975,7 +4040,7 @@ so it needs the <code>pi-mcp-extension</code> package; the repo ships a ready
 and <code>pi -nbt</code> disables pi’s own <code>bash</code>/<code>write</code>/<code>edit</code> so these tools are all
 the model gets. The bridge registers them as <code>mcp_&lt;server&gt;_&lt;tool&gt;</code>, so
 <code>run_tests</code> arrives as <code>mcp_spec_driven_server_run_tests</code>.</p>
-<p>Cursor sees <strong>all 21 tools</strong>, including the writing ones, and so does
+<p>Cursor sees <strong>all 22 tools</strong>, including the writing ones, and so does
 <code>pi -nbt</code>. Harness commands that call a model attach a <strong>narrower
 profile</strong> (<code>spec tools profiles</code>) — 3–7 tools for a generating command,
 10 for the read-only <code>spec ask</code> — so a local model is never offered a
@@ -4146,7 +4211,7 @@ scenario.</li>
 reconnecting agent (or a human taking over in the harness) continues
 from the same place.</li>
 </ul>
-<h2 id="flags-8"><a class="header" href="#flags-8">Flags</a></h2>
+<h2 id="flags-9"><a class="header" href="#flags-9">Flags</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -4269,6 +4334,43 @@ task is refused so CI never hangs.</p>
 installed Ollama tag). There is no template fallback.</p>
 <p>The offered tools are the <code>ask</code> row of <a href="#spec-tools"><code>spec tools profiles</code></a>.
 Override for one run with <code>--tools</code>.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="spec-diff"><a class="header" href="#spec-diff">spec diff</a></h1>
+<p>Explain the work in the tree that is not committed yet. The harness runs
+<code>git diff HEAD</code> under the path you name, then asks the local model to
+turn that diff into prose: what behavior changed, what it means for the
+requirements it touches, and anything that looks unintended.</p>
+<pre><code class="language-text">Usage: spec diff [OPTIONS] [PATH]
+</code></pre>
+<pre><code class="language-bash">spec diff requirements     # just the spec catalog
+spec diff                  # the whole project
+spec diff requirements --raw
+spec diff --json
+</code></pre>
+<p><code>PATH</code> is relative to the project root and may not reach outside it —
+<code>..</code>, absolute paths, and <code>~</code> are refused before git runs. Omit it to
+diff everything.</p>
+<h2 id="what-it-compares"><a class="header" href="#what-it-compares">What it compares</a></h2>
+<p><code>HEAD</code> against the files on disk, so <strong>staged and unstaged edits both
+count</strong>. That is what someone asking “what have I changed?” means, and
+either half alone would answer it wrong.</p>
+<p>Files git is not tracking have no diff to show, so they are listed by
+name under <code>untracked</code> and the model is told to report them as added
+rather than describe contents it was never given.</p>
+<p>A very large diff is cut on a line boundary and <code>truncated</code> is true. Ask
+again with a narrower path to see the rest.</p>
+<h2 id="when-there-is-no-model"><a class="header" href="#when-there-is-no-model">When there is no model</a></h2>
+<p>Unlike <a href="#spec-ask"><code>spec ask</code></a>, a missing model is not a refusal. The diff
+is the thing you asked about and the harness already has it, so <code>spec diff</code> prints the diff and the suggested next step instead of failing.
+<code>--raw</code> asks for that on purpose, and skips the model even when one is
+configured.</p>
+<h2 id="requirements"><a class="header" href="#requirements">Requirements</a></h2>
+<p>A <code>git</code> on PATH and a project inside a work tree. Without either, the
+reply names which one is missing. A repository with no commits yet has
+no <code>HEAD</code> to compare against, and the reply says so.</p>
+<p>The offered tools are the <code>diff</code> row of <a href="#spec-tools"><code>spec tools profiles</code></a>. Override for one run with <code>--tools</code>.</p>
+<p>The same reading is available to an agent over MCP as the <code>git_diff</code>
+tool — see <a href="#spec-mcp">spec mcp</a>.</p>
 
                     </main>
 

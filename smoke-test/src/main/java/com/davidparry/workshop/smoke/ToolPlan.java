@@ -6,7 +6,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
- * The complete catalog the Java smoke test is willing to call. A 22nd tool
+ * The complete catalog the Java smoke test is willing to call. A 23rd tool
  * on the server fails the build until it is planned here.
  */
 public final class ToolPlan {
@@ -60,7 +60,8 @@ public final class ToolPlan {
             gated("requirement_mark_implemented", Map.of("id", "REQ-001")),
             read("step_definitions_find"),
             writes("step_definition_create", Map.of()),
-            writes("unit_test_create", Map.of("req_id", "REQ-001")));
+            writes("unit_test_create", Map.of("req_id", "REQ-001")),
+            read("git_diff", Map.of("path", "requirements")));
 
     private ToolPlan() {
     }

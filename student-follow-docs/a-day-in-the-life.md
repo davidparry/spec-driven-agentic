@@ -88,9 +88,10 @@ whole of your input this morning:
 spec draft
 ```
 
-```text
-Describe what to build in plain words (one or several requirements). Enter drafts manually instead:
-```
+With a model resolved it opens on a description prompt rather than a
+blank title prompt:
+
+**Describe what to build in plain words (one or several requirements). Enter drafts manually instead:**
 
 Paste this as the answer:
 
@@ -203,8 +204,9 @@ gate has done its work.
 
 The second review is a different model, answering one bounded question
 per criterion: could a test check this with a single unambiguous
-result? It writes no prose and returns a probability. Scroll up in the
-same reply:
+result? It writes no prose and returns a probability. The full record
+is in the JSON reply, so run `spec refine HARNESS-019 --json` and
+scroll up in it:
 
 ```text
 "judgments": [ … "verdict": "HOLDS", "answer": { "noul": 0.887 } … ],
@@ -274,7 +276,7 @@ with no flags and the wizard walks you through the same three fields.
 
 ```bash
 git diff requirements/    # read what you just changed
-spec refine HARNESS-019   # clean again, and the judgments are worth a look
+spec refine HARNESS-019 --json   # clean again, and the judgments are worth a look
 ```
 
 Look hard at that last line. The rule set had nothing to say about the
@@ -289,8 +291,10 @@ for your judgment.
 
 ### The review that is not a rule
 
-Run `refine` again on your reworded version and read the `judgments`
-block properly this time. Four criteria, four answers:
+Run `refine --json` again on your reworded version and read the
+`judgments` block properly this time — the audit record is in the JSON
+reply, and a terminal run prints the advisory sentences instead. Four
+criteria, four answers:
 
 | Your assertion | |
 | --- | --- |
@@ -819,7 +823,7 @@ become the tests.
 - **`refine` is clean on the first pass** — expected, and the point of
   9:10. The draft loop already applied the wording review. Reword it
   anyway, so the criteria name the tool.
-- **`refine` has no `judgments` in its reply** — no decision model was
+- **`refine --json` has no `judgments` in its reply** — no decision model was
   found, so only the deterministic review ran. `ollama pull nimble`,
   then `spec judge models` to confirm it is seen and `spec config` to
   check `decision.model`. Without it nothing in 9:20 happens, and that

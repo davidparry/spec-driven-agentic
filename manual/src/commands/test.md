@@ -16,6 +16,7 @@ MCP tool equivalent: `run_tests`.
 | --- | --- |
 | `--feature <FEATURE>` | Run only one feature (path or name, passed to the runner's filter). |
 | `--scenario <SCENARIO>` | Run only one scenario by name. |
+| `--json` | Print the JSON reply on a terminal too. See [output](../global-flags.md#output-readable-on-a-terminal-json-everywhere-else). |
 | `--root <ROOT>` | Project root. Defaults to `.`. |
 | `--model <MODEL>` | Accepted (global flag) but unused — running tests never involves an LLM. |
 

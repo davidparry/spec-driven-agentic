@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-5300ee44.js";
+            window.path_to_searchindex_js = "../searchindex-7d12d21a.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-0006eac3.js"></script>
+        <script src="../toc-8557ae39.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -196,6 +196,10 @@ spec validate         spec mark-implemented &lt;REQ_ID&gt;
 <p>MCP tool equivalents: <code>list_requirements</code>, <code>get_requirement</code>,
 <code>validate_spec</code>, <code>refine_requirement</code>, <code>requirement_reword</code>,
 <code>requirement_mark_implemented</code>.</p>
+<p><code>spec list</code>, <code>spec show</code>, <code>spec validate</code>, and <code>spec refine</code> print a
+readable summary on a terminal and the JSON below in a pipe. Each
+takes <code>--json</code> to print the JSON on a terminal too. See
+<a href="../global-flags.html#output-readable-on-a-terminal-json-everywhere-else">output</a>.</p>
 <hr>
 <h2 id="spec-list"><a class="header" href="#spec-list">spec list</a></h2>
 <p>List every requirement with its id, title, status, and the spec file

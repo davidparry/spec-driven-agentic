@@ -22,6 +22,7 @@ MCP tool equivalent: `start_refactor` (the phase marker only).
 | `--note <NOTE>` | What you intend to refactor and why. Recorded in the refactor log, and with a model resolved it is also the brief the model is given. |
 | `--req <REQ-ID>` | The requirement whose behaviour must not change. Its story and acceptance criteria are shown to the model as the specification it is preserving. |
 | `--manual` | Mark the phase and stop, without a model call. |
+| `--json` | Print the JSON reply on a terminal too. See [output](../global-flags.md#output-readable-on-a-terminal-json-everywhere-else). |
 | `--root <ROOT>` | Project root. Defaults to `.`. |
 | `--model <MODEL>` | The model to use for the loop. |
 

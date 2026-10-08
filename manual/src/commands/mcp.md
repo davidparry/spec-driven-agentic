@@ -70,7 +70,7 @@ and `pi -nbt` disables pi's own `bash`/`write`/`edit` so these tools are all
 the model gets. The bridge registers them as `mcp_<server>_<tool>`, so
 `run_tests` arrives as `mcp_spec_driven_server_run_tests`.
 
-Cursor sees **all 21 tools**, including the writing ones, and so does
+Cursor sees **all 22 tools**, including the writing ones, and so does
 `pi -nbt`. Harness commands that call a model attach a **narrower
 profile** (`spec tools profiles`) — 3–7 tools for a generating command,
 10 for the read-only `spec ask` — so a local model is never offered a

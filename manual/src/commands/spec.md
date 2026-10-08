@@ -19,6 +19,11 @@ MCP tool equivalents: `list_requirements`, `get_requirement`,
 `validate_spec`, `refine_requirement`, `requirement_reword`,
 `requirement_mark_implemented`.
 
+`spec list`, `spec show`, `spec validate`, and `spec refine` print a
+readable summary on a terminal and the JSON below in a pipe. Each
+takes `--json` to print the JSON on a terminal too. See
+[output](../global-flags.md#output-readable-on-a-terminal-json-everywhere-else).
+
 ---
 
 ## spec list

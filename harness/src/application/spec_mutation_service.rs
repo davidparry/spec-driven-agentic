@@ -11,6 +11,7 @@ use crate::application::decision_service::CriterionJudge;
 use crate::application::spec_service::ServiceError;
 use crate::application::{DEFAULT_LLM_ATTEMPTS, LlmReplyError};
 use crate::domain::decision::Verdict;
+use crate::domain::human::{Human, columns, counted, sections};
 use crate::domain::model::{Requirement, Spec, SpecCatalog, SpecFile};
 use crate::domain::prompts::RenderedPrompt;
 use crate::domain::proposal::{
@@ -165,6 +166,35 @@ pub struct ListedRequirement {
     /// The spec file declaring this requirement, relative to the
     /// project root.
     pub file: String,
+}
+
+/// The catalog as a table.
+///
+/// Implemented on the list rather than the entry because that is what
+/// `spec list` replies with, and because lining the columns up is a
+/// property of the whole list - a width is only known once every row
+/// has been seen.
+impl Human for Vec<ListedRequirement> {
+    fn human(&self) -> String {
+        if self.is_empty() {
+            return "No requirements yet.".to_string();
+        }
+        let rows: Vec<Vec<String>> = self
+            .iter()
+            .map(|requirement| {
+                vec![
+                    requirement.id.clone(),
+                    requirement.status.clone(),
+                    requirement.title.clone(),
+                    requirement.file.clone(),
+                ]
+            })
+            .collect();
+        sections(&[
+            counted(self.len(), "requirement", "requirements"),
+            columns(&rows),
+        ])
+    }
 }
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
@@ -4000,5 +4030,46 @@ mod tests {
         let report = service.reword(&mut prompter, "REQ-001").unwrap();
         assert!(report.written);
         assert_eq!(report.id, "REQ-001");
+    }
+
+    fn listed(id: &str, status: &str, title: &str) -> ListedRequirement {
+        ListedRequirement {
+            id: id.into(),
+            title: title.into(),
+            status: status.into(),
+            file: "requirements/requirements.json".into(),
+        }
+    }
+
+    /// Ids of different lengths still start their status in the same
+    /// column, which is what makes the list scannable.
+    #[test]
+    fn the_catalog_lines_up_under_its_count() {
+        let rendered = vec![
+            listed("REQ-001", "implemented", "Add two numbers"),
+            listed("HARNESS-012", "pending", "Serve the spec"),
+        ]
+        .human();
+        assert_eq!(
+            rendered,
+            "2 requirements\n\n\
+             REQ-001      implemented  Add two numbers  requirements/requirements.json\n\
+             HARNESS-012  pending      Serve the spec   requirements/requirements.json"
+        );
+    }
+
+    /// An empty table is a worse answer than a sentence saying so.
+    #[test]
+    fn an_empty_catalog_says_so_in_words() {
+        assert_eq!(
+            Vec::<ListedRequirement>::new().human(),
+            "No requirements yet."
+        );
+    }
+
+    #[test]
+    fn a_single_requirement_is_counted_in_the_singular() {
+        let rendered = vec![listed("REQ-001", "pending", "Add two numbers")].human();
+        assert!(rendered.starts_with("1 requirement\n"), "{rendered}");
     }
 }

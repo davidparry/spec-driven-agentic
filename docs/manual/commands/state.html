@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-5300ee44.js";
+            window.path_to_searchindex_js = "../searchindex-7d12d21a.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-0006eac3.js"></script>
+        <script src="../toc-8557ae39.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -188,7 +188,22 @@ it never changes anything.</p>
 </code></pre>
 <p>MCP tool equivalent: <code>get_tdd_state</code>.</p>
 <h2 id="flags"><a class="header" href="#flags">Flags</a></h2>
-<p>Only the <a href="../global-flags.html">global flags</a> (<code>--root</code>, <code>--model</code>).</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Flag</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>--json</code></td><td>Print the JSON reply on a terminal too. See <a href="../global-flags.html#output-readable-on-a-terminal-json-everywhere-else">output</a>.</td></tr>
+</tbody>
+</table>
+</div>
+<p>Otherwise only the <a href="../global-flags.html">global flags</a> (<code>--root</code>, <code>--model</code>).</p>
+<p>On a terminal this prints the phase, the last run’s counts, the
+refactor log, and the recent entries. <code>instructions</code> is left out
+there: it is guidance written to brief a model, and <code>spec state</code> is
+the command you run to find out what phase you are in. A pipe and
+<code>--json</code> still get it.</p>
 <h2 id="examples"><a class="header" href="#examples">Examples</a></h2>
 <pre><code class="language-bash">spec state
 </code></pre>

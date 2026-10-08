@@ -5,6 +5,7 @@
 
 use serde::Serialize;
 
+use crate::domain::human::{Human, bullets, columns, counted, sections, titled};
 use crate::domain::tdd::{ImplementAttempt, StateEntry, TddStateMachine};
 use crate::ports::{RunnerError, StateStore, TestFilter, TestRunner};
 
@@ -20,6 +21,42 @@ pub struct TestReport {
     pub failure_details: Vec<String>,
     #[serde(rename = "nextStep")]
     pub next_step: String,
+}
+
+impl Human for TestReport {
+    fn human(&self) -> String {
+        sections(&[
+            format!(
+                "{}  {}",
+                self.phase,
+                counts(self.tests, self.failures, self.errors, self.skipped)
+            ),
+            bullets(&self.failure_details),
+        ])
+    }
+
+    fn next_step(&self) -> Option<&str> {
+        Some(&self.next_step)
+    }
+}
+
+/// A test run as one line.
+///
+/// Zeroes are left out: `12 tests, 2 failures` is the whole story, and
+/// printing `0 errors, 0 skipped` beside it buries the two numbers that
+/// changed under two that did not.
+fn counts(tests: u32, failures: u32, errors: u32, skipped: u32) -> String {
+    let mut parts = vec![counted(tests as usize, "test", "tests")];
+    for (count, singular, plural) in [
+        (failures, "failure", "failures"),
+        (errors, "error", "errors"),
+        (skipped, "skipped", "skipped"),
+    ] {
+        if count > 0 {
+            parts.push(counted(count as usize, singular, plural));
+        }
+    }
+    parts.join(", ")
 }
 
 /// The `get_tdd_state` reply. `lastRun` intentionally omits the failure
@@ -44,6 +81,55 @@ pub struct StateReport {
     /// At most the three latest dated entries. Older history stays on disk.
     pub entries: Vec<ReportedStateEntry>,
     pub instructions: String,
+}
+
+impl Human for StateReport {
+    /// The phase, the last run, and the recent history.
+    ///
+    /// `instructions` is left out on purpose: it is ~900 characters of
+    /// unchanging guidance written to brief a model, and `spec state`
+    /// is the command a stuck student is sent to. Printing it would
+    /// answer "what phase am I in?" with a page of prose. Anything
+    /// reading the JSON still gets it.
+    fn human(&self) -> String {
+        let history: Vec<Vec<String>> = self
+            .entries
+            .iter()
+            .map(|entry| {
+                vec![
+                    entry.timestamp.clone(),
+                    entry.phase.clone(),
+                    counts(
+                        entry.last_run.tests,
+                        entry.last_run.failures,
+                        entry.last_run.errors,
+                        entry.last_run.skipped,
+                    ),
+                ]
+            })
+            .collect();
+        let header = columns(&[
+            vec!["Phase".to_string(), self.phase.clone()],
+            vec![
+                "Last run".to_string(),
+                counts(
+                    self.last_run.tests,
+                    self.last_run.failures,
+                    self.last_run.errors,
+                    self.last_run.skipped,
+                ),
+            ],
+        ]);
+        sections(&[
+            header,
+            titled("Refactor log", &bullets(&self.refactor_log)),
+            titled("Recent states", &columns(&history)),
+        ])
+    }
+
+    fn next_step(&self) -> Option<&str> {
+        Some(&self.next_step)
+    }
 }
 
 /// One dated state as an agent/LLM sees it: counts only, no stack traces.
@@ -122,6 +208,16 @@ pub struct RefactorReport {
     pub phase: String,
     #[serde(rename = "nextStep")]
     pub next_step: String,
+}
+
+impl Human for RefactorReport {
+    fn human(&self) -> String {
+        format!("Phase  {}", self.phase)
+    }
+
+    fn next_step(&self) -> Option<&str> {
+        Some(&self.next_step)
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -528,6 +624,110 @@ mod tests {
                 .record_attempt(ImplementAttempt::default())
                 .unwrap_err(),
             TddError::Other("state boom".into())
+        );
+    }
+
+    fn test_report(failures: u32, details: Vec<String>) -> TestReport {
+        TestReport {
+            phase: "RED".into(),
+            tests: 12,
+            failures,
+            errors: 0,
+            skipped: 0,
+            failure_details: details,
+            next_step: "Run spec implement REQ-001.".into(),
+        }
+    }
+
+    /// Zeroes beside the numbers that changed bury them. A green run
+    /// is "12 tests" and nothing else.
+    #[test]
+    fn a_green_run_reports_only_the_count_that_matters() {
+        assert_eq!(test_report(0, Vec::new()).human(), "RED  12 tests");
+    }
+
+    #[test]
+    fn a_failing_run_names_its_failures() {
+        let rendered = test_report(2, vec!["adds: expected 3 but was 0".into()]).human();
+        assert_eq!(
+            rendered,
+            "RED  12 tests, 2 failures\n\n  - adds: expected 3 but was 0"
+        );
+    }
+
+    #[test]
+    fn errors_and_skips_are_reported_when_there_are_any() {
+        let mut report = test_report(0, Vec::new());
+        report.errors = 1;
+        report.skipped = 3;
+        assert_eq!(report.human(), "RED  12 tests, 1 error, 3 skipped");
+        assert_eq!(report.next_step(), Some("Run spec implement REQ-001."));
+    }
+
+    fn state_report(refactor_log: Vec<String>, entries: Vec<ReportedStateEntry>) -> StateReport {
+        StateReport {
+            phase: "GREEN".into(),
+            last_run: LastRun {
+                tests: 12,
+                failures: 0,
+                errors: 0,
+                skipped: 0,
+            },
+            next_step: "Run spec refactor.".into(),
+            refactor_log,
+            entries,
+            instructions: "A very long brief written for a model. ".repeat(30),
+        }
+    }
+
+    /// `spec state` is where a stuck student is sent, and the brief is
+    /// ~900 characters of guidance written for a model. Printing it
+    /// would answer "what phase am I in?" with a page of prose.
+    #[test]
+    fn the_model_brief_never_reaches_the_terminal() {
+        let rendered = state_report(Vec::new(), Vec::new()).human();
+        assert!(!rendered.contains("written for a model"), "{rendered}");
+        assert_eq!(rendered, "Phase     GREEN\nLast run  12 tests");
+        assert_eq!(
+            state_report(Vec::new(), Vec::new()).next_step(),
+            Some("Run spec refactor.")
+        );
+    }
+
+    /// `spec refactor --manual` marks the phase and stops, so the
+    /// phase it moved to is the whole reply.
+    #[test]
+    fn a_marked_refactor_reports_the_phase_it_moved_to() {
+        let report = RefactorReport {
+            phase: "REFACTOR".into(),
+            next_step: "Clean up, then run spec test.".into(),
+        };
+        assert_eq!(report.human(), "Phase  REFACTOR");
+        assert_eq!(report.next_step(), Some("Clean up, then run spec test."));
+    }
+
+    #[test]
+    fn the_refactor_log_and_recent_states_appear_when_there_are_any() {
+        let entry = ReportedStateEntry {
+            timestamp: "2026-10-05".into(),
+            phase: "RED".into(),
+            last_run: LastRun {
+                tests: 12,
+                failures: 2,
+                errors: 0,
+                skipped: 0,
+            },
+            refactor_log: Vec::new(),
+            attempt_log: Vec::new(),
+        };
+        let rendered = state_report(vec!["extracted a helper".into()], vec![entry]).human();
+        assert!(
+            rendered.contains("Refactor log\n  - extracted a helper"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("Recent states\n2026-10-05  RED  12 tests, 2 failures"),
+            "{rendered}"
         );
     }
 }

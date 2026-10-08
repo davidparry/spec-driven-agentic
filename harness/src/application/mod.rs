@@ -6,6 +6,7 @@ pub mod agent_service;
 pub(crate) mod assets;
 pub mod command_service;
 pub mod decision_service;
+pub mod diff_service;
 pub mod generation_service;
 pub mod implement_service;
 pub mod init_service;

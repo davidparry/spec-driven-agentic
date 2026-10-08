@@ -19,10 +19,11 @@ pub enum Caller {
     Refactor,
     Status,
     Ask,
+    Diff,
 }
 
 impl Caller {
-    pub const ALL: [Caller; 10] = [
+    pub const ALL: [Caller; 11] = [
         Caller::SpecDraft,
         Caller::SpecReword,
         Caller::ScenarioGenerate,
@@ -33,6 +34,7 @@ impl Caller {
         Caller::Refactor,
         Caller::Status,
         Caller::Ask,
+        Caller::Diff,
     ];
 
     pub fn key(self) -> &'static str {
@@ -47,6 +49,7 @@ impl Caller {
             Caller::Refactor => "refactor",
             Caller::Status => "status",
             Caller::Ask => "ask",
+            Caller::Diff => "diff",
         }
     }
 
@@ -63,6 +66,7 @@ impl Caller {
             Caller::Refactor => "spec refactor",
             Caller::Status => "spec status",
             Caller::Ask => "spec ask",
+            Caller::Diff => "spec diff",
         }
     }
 
@@ -77,6 +81,7 @@ impl Caller {
             Caller::Refactor => "refactor",
             Caller::Status => "next_step",
             Caller::Ask => "ask",
+            Caller::Diff => "diff",
         }
     }
 
@@ -146,6 +151,17 @@ pub fn default_profile(caller: Caller) -> &'static [&'static str] {
             "feature_list",
             "feature_read",
             "step_definitions_find",
+        ],
+        // The diff itself is already in the prompt; these are for
+        // reading around it. A requirements diff names ids and feature
+        // files, and a summary that can look those up describes what
+        // the change means rather than which lines moved.
+        Caller::Diff => &[
+            "git_diff",
+            "project_root",
+            "list_requirements",
+            "get_requirement",
+            "feature_read",
         ],
     }
 }
@@ -277,6 +293,7 @@ mod tests {
             "step_definitions_find",
             "step_definition_create",
             "unit_test_create",
+            "git_diff",
         ]
     }
 

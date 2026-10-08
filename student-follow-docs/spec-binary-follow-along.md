@@ -42,6 +42,14 @@ reading, but none of it is an instruction — so from Step 1 onward, **if a
 code block is not under "Do this", do not type it.** Unlabeled blocks are
 output, file contents, or an aside.
 
+One thing about the **Expect** blocks: `spec list`, `spec show`,
+`spec validate`, `spec refine`, `spec status`, `spec state`,
+`spec test`, and `spec refactor` print a readable summary when you run
+them in a terminal, and the JSON shown here when their output is piped
+somewhere. The JSON is the reply; the summary is the same reply laid
+out for reading. Add `--json` to any of them to see the JSON on your
+terminal and compare it line for line with this page.
+
 What you actually have to do:
 
 - **Steps 1, 2 and 3 are the workshop.** They are the hands-on hour.

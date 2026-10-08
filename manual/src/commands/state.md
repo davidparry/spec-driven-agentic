@@ -12,7 +12,17 @@ MCP tool equivalent: `get_tdd_state`.
 
 ## Flags
 
-Only the [global flags](../global-flags.md) (`--root`, `--model`).
+| Flag | Description |
+| --- | --- |
+| `--json` | Print the JSON reply on a terminal too. See [output](../global-flags.md#output-readable-on-a-terminal-json-everywhere-else). |
+
+Otherwise only the [global flags](../global-flags.md) (`--root`, `--model`).
+
+On a terminal this prints the phase, the last run's counts, the
+refactor log, and the recent entries. `instructions` is left out
+there: it is guidance written to brief a model, and `spec state` is
+the command you run to find out what phase you are in. A pipe and
+`--json` still get it.
 
 ## Examples
 

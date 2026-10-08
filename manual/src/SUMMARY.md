@@ -35,3 +35,4 @@
 - [spec mcp](commands/mcp.md)
 - [spec tools](commands/tools.md)
 - [spec ask](commands/ask.md)
+- [spec diff](commands/diff.md)

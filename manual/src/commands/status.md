@@ -28,6 +28,16 @@ spec status
 }
 ```
 
+## Flags
+
+| Flag | Description |
+| --- | --- |
+| `--json` | Print the JSON reply on a terminal too. See [output](../global-flags.md#output-readable-on-a-terminal-json-everywhere-else). |
+
+Otherwise only the [global flags](../global-flags.md). On a terminal
+the reply above is laid out as a table of requirements under the
+phase, with each requirement's findings beneath its id.
+
 ## How the next step is chosen
 
 The priority order mirrors the loop itself:

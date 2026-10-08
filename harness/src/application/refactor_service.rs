@@ -15,6 +15,7 @@ use crate::application::assets::{find_requirement, load_spec, production_path};
 use crate::application::generation_service::ResolvedLlm;
 use crate::application::spec_service::ServiceError;
 use crate::domain::generation::implementation_target_path;
+use crate::domain::human::{Human, bullets, columns, counted, sections, titled};
 use crate::domain::language::Language;
 use crate::domain::memory::ProjectStructure;
 use crate::domain::model::{Requirement, TestRunSummary};
@@ -50,6 +51,44 @@ pub struct RefactorReport {
     pub warning: Option<String>,
     #[serde(rename = "nextStep")]
     pub next_step: String,
+}
+
+impl Human for RefactorReport {
+    fn human(&self) -> String {
+        // What happened to the working tree is the first thing anyone
+        // wants, and `applied`/`reverted` as two booleans makes it a
+        // deduction rather than a statement.
+        let outcome = match (self.applied, self.reverted) {
+            (true, _) => "applied",
+            (false, true) => "reverted",
+            (false, false) => "nothing changed",
+        };
+        let mut facts = vec![
+            vec!["Phase".to_string(), self.phase.clone()],
+            vec!["Outcome".to_string(), outcome.to_string()],
+            vec![
+                "Rounds".to_string(),
+                format!("{} ({} attempts)", self.rounds, self.attempts),
+            ],
+            vec![
+                "Tests".to_string(),
+                counted(self.tests as usize, "test", "tests"),
+            ],
+            vec!["Source".to_string(), self.source.clone()],
+        ];
+        if let Some(goal) = &self.goal {
+            facts.insert(1, vec!["Goal".to_string(), goal.clone()]);
+        }
+        sections(&[
+            columns(&facts),
+            titled("Changed", &bullets(&self.targets)),
+            self.warning.clone().unwrap_or_default(),
+        ])
+    }
+
+    fn next_step(&self) -> Option<&str> {
+        Some(&self.next_step)
+    }
 }
 
 pub struct RefactorService<S, C, R, L, B = crate::application::agent_service::NullBroker>
@@ -956,5 +995,77 @@ mod tests {
             .unwrap();
         assert_eq!(report.attempts, 1);
         assert!(report.applied, "report: {report:?}");
+    }
+
+    fn refactor_report(applied: bool, reverted: bool) -> RefactorReport {
+        RefactorReport {
+            phase: "REFACTOR".into(),
+            goal: None,
+            rounds: 2,
+            attempts: 3,
+            targets: Vec::new(),
+            tests: 12,
+            applied,
+            reverted,
+            source: "model".into(),
+            warning: None,
+            next_step: "Run spec test.".into(),
+        }
+    }
+
+    /// `applied` and `reverted` as two booleans make the outcome a
+    /// deduction. It is the first thing anyone wants, so it is stated.
+    #[test]
+    fn the_outcome_is_stated_rather_than_left_to_two_booleans() {
+        assert!(
+            refactor_report(true, false)
+                .human()
+                .contains("Outcome  applied")
+        );
+        assert!(
+            refactor_report(false, true)
+                .human()
+                .contains("Outcome  reverted")
+        );
+        assert!(
+            refactor_report(false, false)
+                .human()
+                .contains("Outcome  nothing changed")
+        );
+    }
+
+    #[test]
+    fn a_refactor_reports_its_rounds_tests_and_source() {
+        let rendered = refactor_report(true, false).human();
+        assert!(rendered.contains("Phase    REFACTOR"), "{rendered}");
+        assert!(rendered.contains("Rounds   2 (3 attempts)"), "{rendered}");
+        assert!(rendered.contains("Tests    12 tests"), "{rendered}");
+        assert!(rendered.contains("Source   model"), "{rendered}");
+        assert_eq!(
+            refactor_report(true, false).next_step(),
+            Some("Run spec test.")
+        );
+    }
+
+    #[test]
+    fn a_goal_a_warning_and_changed_files_appear_only_when_there_are_any() {
+        let bare = refactor_report(false, false).human();
+        assert!(!bare.contains("Goal"), "{bare}");
+        assert!(!bare.contains("Changed"), "{bare}");
+
+        let mut report = refactor_report(true, false);
+        report.goal = Some("extract the parser".into());
+        report.targets = vec!["src/parser.rs".into()];
+        report.warning = Some("one file was left alone".into());
+        let rendered = report.human();
+        assert!(
+            rendered.contains("Goal     extract the parser"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("Changed\n  - src/parser.rs"),
+            "{rendered}"
+        );
+        assert!(rendered.contains("one file was left alone"), "{rendered}");
     }
 }

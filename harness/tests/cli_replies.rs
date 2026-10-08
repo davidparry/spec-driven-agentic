@@ -315,3 +315,63 @@ fn a_half_given_draft_is_told_which_flags_are_missing() {
         "{complaint}"
     );
 }
+
+/// The commands that render themselves for a reader on a terminal.
+/// `spec test` and `spec refactor` reply through the same helper as
+/// `spec state` and need a runner and a GREEN phase to reach it.
+const READABLE: [&[&str]; 6] = [
+    &["list"],
+    &["show", "REQ-001"],
+    &["validate"],
+    &["refine", "REQ-001"],
+    &["status"],
+    &["state"],
+];
+
+/// A project `spec status` will survey, which needs a build file to
+/// recognise as a project at all.
+fn detectable_project() -> tempfile::TempDir {
+    let dir = project(VALID);
+    fs::write(
+        dir.path().join("Cargo.toml"),
+        "[package]\nname = \"demo\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+    )
+    .unwrap();
+    dir
+}
+
+/// The readable rendering must never reach anything that parses the
+/// output: `spec deliver` reading a step, an agent reading a reply, a
+/// CI gate reading a verdict, `| jq`. Every one of those is a pipe,
+/// and a pipe gets JSON whatever the reply looks like on a terminal.
+#[test]
+fn every_readable_command_still_replies_in_json_through_a_pipe() {
+    let dir = detectable_project();
+    for args in READABLE {
+        let reply = stdout(&spec_run(dir.path(), args));
+        serde_json::from_str::<serde_json::Value>(&reply).unwrap_or_else(|e| {
+            panic!(
+                "spec {} answered a pipe with something other than JSON: {e}\n{reply}",
+                args.join(" ")
+            )
+        });
+    }
+}
+
+/// `--json` forces on a terminal what a pipe gets anyway, so through a
+/// pipe the flag changes nothing. Said as a test because the opposite,
+/// a flag that quietly reshapes piped output, is exactly the
+/// regression that would break a scripted caller.
+#[test]
+fn the_json_flag_changes_nothing_a_pipe_was_already_getting() {
+    let dir = detectable_project();
+    for args in READABLE {
+        let plain = stdout(&spec_run(dir.path(), args));
+        let forced = {
+            let mut with_flag = args.to_vec();
+            with_flag.push("--json");
+            stdout(&spec_run(dir.path(), &with_flag))
+        };
+        assert_eq!(plain, forced, "spec {} disagreed", args.join(" "));
+    }
+}

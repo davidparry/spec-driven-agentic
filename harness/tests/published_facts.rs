@@ -184,7 +184,7 @@ fn versions_in(text: &str) -> Vec<String> {
 fn every_documented_tool_count_is_the_number_the_server_serves() {
     let served = tools_the_server_lists();
     assert_eq!(
-        served, 21,
+        served, 22,
         "the server's tool count moved. Every page that states it needs the new \
          number before this assertion is changed to match"
     );
@@ -262,8 +262,8 @@ fn counts_of_tools_in(text: &str) -> Vec<(usize, usize)> {
 
     for pair in words.windows(2) {
         let noun = pair[1].1.trim_matches(|c: char| !c.is_ascii_alphabetic());
-        // "21 names" is how the README states the same count, and
-        // "a 22nd tool fails" is how it states the one after. Matching
+        // "22 names" is how the README states the same count, and
+        // "a 23rd tool fails" is how it states the one after. Matching
         // only the plural let a stale 25 sit in both for months.
         if !matches!(noun, "tools" | "tool" | "names") {
             continue;

@@ -468,6 +468,31 @@ pub trait Vcs {
 pub struct VcsError(pub String);
 string_error!(VcsError);
 
+/// What version control says changed: the working tree against the last
+/// commit, plus the files it is not tracking yet.
+///
+/// Untracked files are named and never read. A diff against `HEAD`
+/// cannot see them at all, so a summary built from the diff alone would
+/// call a brand-new file no change; naming them is enough for a reader
+/// to go and look.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct DiffOutput {
+    /// The unified diff as git printed it, without colour escapes.
+    pub diff: String,
+    /// Project-relative paths of files git is not tracking.
+    pub untracked: Vec<String>,
+}
+
+/// Reading what changed out of the project's version control.
+///
+/// Separate from [`Vcs`] because it is the one question that needs a
+/// working git. The state probe answers for a project without one; a
+/// diff that cannot run has nothing to report but why.
+pub trait VcsDiff {
+    /// The working tree against `HEAD`, narrowed to `path` when given.
+    fn diff(&self, path: Option<&str>) -> Result<DiffOutput, VcsError>;
+}
+
 /// A long-running step in progress. Hold it while the work runs and
 /// drop it when the work is done; an interactive implementation
 /// animates until then. The inert form does nothing on drop.

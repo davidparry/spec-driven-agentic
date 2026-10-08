@@ -12,7 +12,7 @@ use serde::Serialize;
 const PROMPTS_TOML: &str = include_str!("../../prompts/prompts.toml");
 
 /// The sections the catalog must hold, one per LLM call.
-pub const SECTIONS: [&str; 11] = [
+pub const SECTIONS: [&str; 12] = [
     "proposal",
     "rewording",
     "scenario",
@@ -23,6 +23,7 @@ pub const SECTIONS: [&str; 11] = [
     "advice",
     "next_step",
     "ask",
+    "diff",
     "layout",
 ];
 
@@ -201,6 +202,27 @@ pub fn ask_prompt(task: &str) -> RenderedPrompt {
     render(
         "ask",
         minijinja::context! { task, instructions => mcp_instructions() },
+    )
+}
+
+/// `spec diff`: one uncommitted change, for explaining in prose. The
+/// diff travels in the user prompt rather than through a tool call, so
+/// the model is summarizing the same bytes the developer would see.
+pub fn diff_prompt(
+    path: Option<&str>,
+    diff: &str,
+    truncated: bool,
+    untracked: &[String],
+) -> RenderedPrompt {
+    render(
+        "diff",
+        minijinja::context! {
+            path,
+            diff,
+            truncated,
+            untracked,
+            instructions => mcp_instructions(),
+        },
     )
 }
 

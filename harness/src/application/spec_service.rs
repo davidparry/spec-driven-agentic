@@ -5,6 +5,7 @@
 use serde::Serialize;
 
 use crate::application::assets::load_spec;
+use crate::domain::human::{Human, bullets, columns, counted, sections, titled};
 use crate::domain::model::Requirement;
 use crate::domain::refiner::RequirementRefiner;
 use crate::domain::spec_validator::{SpecValidator, is_structural_issue, structural_repair};
@@ -41,6 +42,28 @@ pub struct ValidationReport {
     pub next_step: String,
 }
 
+impl Human for ValidationReport {
+    /// The issues, or nothing at all when there are none.
+    ///
+    /// Nothing, rather than "the spec is valid", because the advice
+    /// that prints directly beneath already opens with that sentence -
+    /// it has to, since an agent reading the JSON sees the advice
+    /// alone. Saying it twice in a row is worse than saying it once.
+    fn human(&self) -> String {
+        if self.valid {
+            return String::new();
+        }
+        sections(&[
+            counted(self.issues.len(), "issue", "issues"),
+            bullets(&self.issues),
+        ])
+    }
+
+    fn next_step(&self) -> Option<&str> {
+        Some(&self.next_step)
+    }
+}
+
 /// `clean`, `findings`, `source`, and `nextStep` are the deterministic
 /// verdict and are produced without a model.
 ///
@@ -75,6 +98,46 @@ pub struct RefinementReport {
     /// tell "nothing to report" from "nobody asked".
     #[serde(rename = "judgmentNote", skip_serializing_if = "Option::is_none")]
     pub judgment_note: Option<String>,
+}
+
+impl Human for RefinementReport {
+    /// The verdict, the findings, and what the decision model made of
+    /// them.
+    ///
+    /// `judgments` is deliberately left out: it is the audit record -
+    /// model tag, threshold, provenance, token usage - and the reader
+    /// watching a terminal wants the sentence it produced, which is
+    /// what `judgment_advisories` already holds. The record is still
+    /// there in full for anything reading the JSON.
+    fn human(&self) -> String {
+        let verdict = if self.clean {
+            format!("{} is clean.", self.id)
+        } else {
+            format!(
+                "{}: {}",
+                self.id,
+                counted(self.findings.len(), "finding", "findings")
+            )
+        };
+        let advisories = if self.judgment_advisories.is_empty() {
+            String::new()
+        } else {
+            sections(&[
+                "The decision model could not measure these:".to_string(),
+                bullets(&self.judgment_advisories),
+            ])
+        };
+        let judgment = match (&self.judgment_action, &self.judgment_note) {
+            (Some(action), _) => format!("Judgment: {action}"),
+            (None, Some(note)) => format!("No judgment: {note}"),
+            (None, None) => String::new(),
+        };
+        sections(&[verdict, bullets(&self.findings), advisories, judgment])
+    }
+
+    fn next_step(&self) -> Option<&str> {
+        Some(&self.next_step)
+    }
 }
 
 /// What to do about a refinement, given its verdict.
@@ -125,6 +188,35 @@ pub struct EnrichedRequirement {
     pub production_location: String,
     #[serde(rename = "workflowHint")]
     pub workflow_hint: String,
+}
+
+impl Human for EnrichedRequirement {
+    fn human(&self) -> String {
+        let criteria: Vec<String> = self
+            .acceptance_criteria
+            .iter()
+            .enumerate()
+            .map(|(index, criterion)| format!("  {}. {criterion}", index + 1))
+            .collect();
+        let mut locations = vec![
+            vec!["Steps".to_string(), self.step_definitions.clone()],
+            vec!["Tests".to_string(), self.test_location.clone()],
+            vec!["Production".to_string(), self.production_location.clone()],
+        ];
+        // A requirement with no scenario yet has no feature file, and a
+        // blank line against the label would read as one that is
+        // missing rather than one that was never written.
+        if let Some(feature) = &self.feature_location {
+            locations.insert(0, vec!["Feature".to_string(), feature.clone()]);
+        }
+        sections(&[
+            format!("{}: {}\nStatus: {}", self.id, self.title, self.status),
+            self.story.clone(),
+            titled("Acceptance criteria", &criteria.join("\n")),
+            columns(&locations),
+            self.workflow_hint.clone(),
+        ])
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -657,5 +749,152 @@ mod tests {
              requirements file by hand - then run validate_spec and call \
              refine_requirement again. Iterate until there are no findings."
         );
+    }
+
+    fn refinement(id: &str, clean: bool, findings: Vec<String>) -> RefinementReport {
+        RefinementReport {
+            id: id.into(),
+            clean,
+            findings,
+            next_step: "Run spec reword REQ-001.".into(),
+            judgments: Vec::new(),
+            judgment_advisories: Vec::new(),
+            judgment_action: None,
+            judgment_note: None,
+        }
+    }
+
+    /// The advice beneath already opens with "The spec is valid.", so
+    /// a body saying the same thing would print it twice in a row.
+    #[test]
+    fn a_valid_spec_leaves_the_answer_to_its_advice() {
+        let report = ValidationReport {
+            valid: true,
+            issues: Vec::new(),
+            next_step: "The spec is valid. Run spec list.".into(),
+        };
+        assert_eq!(report.human(), "");
+        assert_eq!(
+            report.next_step(),
+            Some("The spec is valid. Run spec list.")
+        );
+    }
+
+    #[test]
+    fn an_invalid_spec_counts_its_issues_and_lists_them() {
+        let report = ValidationReport {
+            valid: false,
+            issues: vec![
+                "REQ-001 has no criteria".into(),
+                "REQ-002 has no story".into(),
+            ],
+            next_step: "Run spec reword.".into(),
+        };
+        assert_eq!(
+            report.human(),
+            "2 issues\n\n  - REQ-001 has no criteria\n  - REQ-002 has no story"
+        );
+    }
+
+    #[test]
+    fn a_clean_refinement_reads_as_one_sentence() {
+        let report = refinement("REQ-001", true, Vec::new());
+        assert_eq!(report.human(), "REQ-001 is clean.");
+        assert_eq!(report.next_step(), Some("Run spec reword REQ-001."));
+    }
+
+    #[test]
+    fn an_unclean_refinement_counts_its_findings_and_lists_them() {
+        let report = refinement("REQ-001", false, vec!["criterion 1 is vague".into()]);
+        assert_eq!(
+            report.human(),
+            "REQ-001: 1 finding\n\n  - criterion 1 is vague"
+        );
+    }
+
+    /// The advisory is the sentence the judgment produced; the audit
+    /// record behind it belongs to the JSON, not to a terminal.
+    #[test]
+    fn advisories_are_shown_and_the_audit_record_is_not() {
+        let mut report = refinement("REQ-001", true, Vec::new());
+        report.judgment_advisories = vec!["criterion 2 has no observable outcome".into()];
+        report.judgment_action = Some(crate::domain::decision::Transition::Rework);
+        let rendered = report.human();
+        assert!(
+            rendered.contains("criterion 2 has no observable outcome"),
+            "{rendered}"
+        );
+        assert!(rendered.contains("Judgment: REWORK"), "{rendered}");
+        assert!(!rendered.contains("threshold"), "{rendered}");
+    }
+
+    /// "Nothing to report" and "nobody asked" are different answers, so
+    /// the note is said rather than left as a blank.
+    #[test]
+    fn a_missing_judgment_says_why_instead_of_going_quiet() {
+        let mut report = refinement("REQ-001", true, Vec::new());
+        report.judgment_note = Some("the decision model did not answer".into());
+        assert!(
+            report
+                .human()
+                .contains("No judgment: the decision model did not answer"),
+            "{}",
+            report.human()
+        );
+    }
+
+    #[test]
+    fn a_refinement_nobody_judged_says_nothing_about_judgments() {
+        let rendered = refinement("REQ-001", true, Vec::new()).human();
+        assert_eq!(rendered, "REQ-001 is clean.");
+    }
+
+    fn enriched(feature: Option<&str>) -> EnrichedRequirement {
+        EnrichedRequirement {
+            id: "REQ-001".into(),
+            title: "Add two numbers".into(),
+            status: "pending".into(),
+            story: "As a user I want to add numbers".into(),
+            acceptance_criteria: vec!["Given 1 and 2 Then 3".into(), "Given 0 and 0 Then 0".into()],
+            feature_location: feature.map(str::to_string),
+            step_definitions: "features/steps".into(),
+            test_location: "tests".into(),
+            production_location: "src".into(),
+            workflow_hint: "Write the scenario first.".into(),
+        }
+    }
+
+    #[test]
+    fn a_requirement_numbers_its_criteria_and_lines_up_its_locations() {
+        let rendered = enriched(Some("features/add.feature")).human();
+        assert!(
+            rendered.starts_with("REQ-001: Add two numbers\nStatus: pending"),
+            "{rendered}"
+        );
+        // The heading hugs its list; a blank line between them reads as
+        // two sections rather than one.
+        assert!(
+            rendered.contains("Acceptance criteria\n  1. Given 1 and 2 Then 3"),
+            "{rendered}"
+        );
+        assert!(rendered.contains("  2. Given 0 and 0 Then 0"), "{rendered}");
+        assert!(
+            rendered.contains("Feature     features/add.feature"),
+            "{rendered}"
+        );
+        assert!(rendered.contains("Production  src"), "{rendered}");
+    }
+
+    /// A requirement with no scenario yet has no feature file, and an
+    /// empty value beside the label would read as one that went
+    /// missing.
+    #[test]
+    fn a_requirement_without_a_feature_file_omits_the_label() {
+        let rendered = enriched(None).human();
+        assert!(!rendered.contains("Feature"), "{rendered}");
+        assert!(rendered.contains("features/steps"), "{rendered}");
+        // A requirement is an answer, not a step in a loop; the
+        // workflow hint it already carries is the guidance.
+        assert_eq!(enriched(None).next_step(), None);
     }
 }

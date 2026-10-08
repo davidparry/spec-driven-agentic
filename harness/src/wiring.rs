@@ -21,6 +21,7 @@ use crate::adapters::git_cli::GitCli;
 use crate::adapters::ollama::OllamaCatalog;
 use crate::adapters::ollama_decision::OllamaDecision;
 use crate::application::decision_service::DecisionService;
+use crate::application::diff_service::DiffService;
 use crate::application::generation_service::{GenerationService, ResolvedLlm};
 use crate::application::implement_service::ImplementService;
 use crate::application::memory_service::{MemoryAwareConversation, MemoryService};
@@ -198,6 +199,11 @@ pub fn project_memory_service(
 /// The project's version control, wired to the `git` on PATH.
 pub fn vcs(root: &Path) -> GitCli {
     GitCli::new(root.to_path_buf())
+}
+
+/// Reading what changed, wired to the same `git` on PATH.
+pub fn diff_service(root: &Path) -> DiffService<GitCli> {
+    DiffService::new(vcs(root))
 }
 
 /// `llm` with the project's memory brief prepended to every system prompt,

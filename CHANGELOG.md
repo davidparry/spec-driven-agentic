@@ -2,6 +2,66 @@
 
 ## Unreleased
 
+- **Eight commands now read like a reply instead of a document when a
+  person is the one reading.** `spec list`, `spec show`, `spec
+  validate`, `spec refine`, `spec status`, `spec state`, `spec test`,
+  and `spec refactor` print a laid-out summary on a terminal: columns
+  that line up, findings under the id they belong to, counts in words.
+  `spec state` leaves out `instructions` there — ~900 characters of
+  guidance written to brief a model, printed in answer to "what phase
+  am I in?" — and `spec refine` shows the advisory sentence a judgment
+  produced rather than its audit record of model tags and thresholds.
+
+  Nothing that parses the output changes. A pipe gets byte-for-byte
+  the JSON it always got, which is what `spec deliver` reads between
+  steps, what an agent reads, what a CI gate reads, and what `| jq`
+  reads. The choice is made once, at the single place the CLI prints a
+  reply, from whether stdout is a terminal; `--json` forces JSON on a
+  terminal and is a no-op anywhere else. Two tests in
+  `harness/tests/cli_replies.rs` hold that line.
+
+- **`spec refine` shows a `working ...` line while the decision model
+  answers.** Every other command that calls a model says so and then
+  goes quiet; refine asked one question per acceptance criterion in
+  complete silence, which reads as a hang. It now names the work and
+  the number of questions: `Asking the decision model about 4 criteria
+  - working ...`.
+
+  Only when there is really a wait. The deterministic wording review is
+  instant, so the line appears once a decision model is resolved and
+  `[decision] mode` is not `off` — the same `when_asking` gate the
+  `refine_requirement` MCP tool uses, which the CLI path had been
+  relying on a no-op further down to reproduce. And only when someone
+  is watching: the indicator settles onto stdout, where refine writes
+  its JSON, so off a terminal nothing is printed and a piped reply is
+  the same bytes it always was.
+
+- **`git_diff` and `spec diff` read the work that is not committed
+  yet.** The harness could say what the spec claims and what the bar is
+  doing, but nothing could answer "what have I actually changed?" — the
+  one question a developer asks before committing. Both surfaces run
+  `git diff HEAD` under a project-relative path, so staged and unstaged
+  edits count alike; either half alone answers it wrong.
+
+  The 22nd MCP tool returns the raw diff for the host's model to read.
+  `spec diff requirements` sends the same diff to the local model with
+  instructions to explain what behavior changed, name the requirement
+  ids it touches, and call out anything that looks unintended.
+
+  Read-only, and the path goes through the jail every write already
+  uses, so a pathspec can never reach outside the project root. Git
+  that is missing, a directory that is not a repository, and a
+  repository with no commits are three different replies rather than
+  one `fatal:`. Files git is not tracking have no diff to show, so they
+  are named under `untracked` and the model is told to report them as
+  added rather than invent their contents. A very large diff is cut on
+  a line boundary with `truncated` set, because half a hunk line reads
+  as a change nobody made.
+
+  Unlike `spec ask`, no model is not a refusal: the diff is the thing
+  being asked about and the harness already has it, so it prints
+  unexplained rather than failing. `--raw` asks for that on purpose.
+
 - **`spec deliver --judge-draft` puts the decision model in the draft
   loop, as feedback rather than as a gate.** Delivering from a
   description writes a spec with nobody reading it, which made it the

@@ -178,6 +178,35 @@ build time).
 Every command and subcommand answers `--help` with its synopsis,
 arguments, and flags.
 
+## Output: readable on a terminal, JSON everywhere else
+
+Some commands answer two audiences, so they print for whichever one
+is actually reading:
+
+| Where the output goes | What is printed |
+| --- | --- |
+| A terminal | A readable summary |
+| A pipe, a file, a CI step, an agent | The JSON reply |
+
+The commands that do this are [`spec list`](commands/spec.md#spec-list),
+[`spec show`](commands/spec.md#spec-show),
+[`spec validate`](commands/spec.md#spec-validate),
+[`spec refine`](commands/spec.md#spec-refine),
+[`spec status`](commands/status.md), [`spec state`](commands/state.md),
+[`spec test`](commands/test.md), and
+[`spec refactor`](commands/refactor.md). Each one takes `--json` to
+print the JSON on a terminal too.
+
+Two things follow. Nothing that parses `spec` output has to change:
+`spec validate | jq`, a CI gate, and an agent reading a reply are all
+pipes, and a pipe gets exactly the JSON it always got. And the JSON
+examples throughout this manual are what a pipe sees — on a terminal
+the same reply is laid out for reading.
+
+`--json` is not a global flag. `spec config`, `spec ask`, `spec diff`,
+`spec judge`, `spec mcp`, and `spec tools` have their own `--json`
+with meanings described on their own pages.
+
 ## Exit status
 
 - `0` — success (including replies whose JSON reports e.g. an invalid

@@ -12,6 +12,7 @@ use crate::application::assets::{asset_survey, load_spec};
 use crate::application::generation_service::ResolvedLlm;
 use crate::application::spec_service::ServiceError;
 use crate::domain::generation::strip_code_fences;
+use crate::domain::human::{Human, bullets, columns, sections, titled};
 use crate::domain::language::Language;
 use crate::domain::memory::ProjectStructure;
 use crate::domain::model::{ROOT_SPEC_FILE, SpecCatalog};
@@ -49,6 +50,45 @@ pub struct StatusReport {
     pub next_id: String,
     #[serde(rename = "nextStep")]
     pub next_step: String,
+}
+
+impl Human for StatusReport {
+    fn human(&self) -> String {
+        let rows: Vec<Vec<String>> = self
+            .requirements
+            .iter()
+            .map(|requirement| {
+                vec![
+                    requirement.id.clone(),
+                    requirement.status.clone(),
+                    requirement.title.clone(),
+                ]
+            })
+            .collect();
+        // Findings hang under the requirement they belong to rather
+        // than in a list of their own, so a reader never has to match
+        // a finding back to an id.
+        let findings: Vec<String> = self
+            .requirements
+            .iter()
+            .filter(|requirement| !requirement.findings.is_empty())
+            .map(|requirement| {
+                titled(
+                    &format!("{}:", requirement.id),
+                    &bullets(&requirement.findings),
+                )
+            })
+            .collect();
+        let header = columns(&[
+            vec!["Phase".to_string(), self.phase.clone()],
+            vec!["Next id".to_string(), self.next_id.clone()],
+        ]);
+        sections(&[header, columns(&rows), findings.join("\n\n")])
+    }
+
+    fn next_step(&self) -> Option<&str> {
+        Some(&self.next_step)
+    }
 }
 
 pub struct StatusService<F, S, R, L, B = crate::application::agent_service::NullBroker>
@@ -380,6 +420,68 @@ mod tests {
             error.0.contains("empty") || error.0.contains("invalid"),
             "got: {}",
             error.0
+        );
+    }
+
+    fn status_report(findings: Vec<String>) -> StatusReport {
+        StatusReport {
+            phase: "RED".into(),
+            requirements: vec![
+                RequirementStatus {
+                    id: "REQ-001".into(),
+                    title: "Add two numbers".into(),
+                    status: "implemented".into(),
+                    findings: Vec::new(),
+                },
+                RequirementStatus {
+                    id: "HARNESS-012".into(),
+                    title: "Serve the spec".into(),
+                    status: "pending".into(),
+                    findings,
+                },
+            ],
+            next_id: "REQ-003".into(),
+            next_step: "Run spec draft.".into(),
+        }
+    }
+
+    #[test]
+    fn status_lines_up_its_requirements_under_the_phase() {
+        let rendered = status_report(Vec::new()).human();
+        assert!(
+            rendered.starts_with("Phase    RED\nNext id  REQ-003"),
+            "{rendered}"
+        );
+        // Ids of different lengths still start their status in the
+        // same column.
+        assert!(
+            rendered.contains("REQ-001      implemented  Add two numbers"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("HARNESS-012  pending      Serve the spec"),
+            "{rendered}"
+        );
+    }
+
+    /// A finding hangs under the id it belongs to, so a reader never
+    /// has to match one back to a requirement.
+    #[test]
+    fn findings_are_attributed_to_the_requirement_that_has_them() {
+        let rendered = status_report(vec!["no scenario yet".into()]).human();
+        assert!(
+            rendered.contains("HARNESS-012:\n  - no scenario yet"),
+            "{rendered}"
+        );
+    }
+
+    #[test]
+    fn a_status_with_no_findings_says_nothing_about_findings() {
+        let rendered = status_report(Vec::new()).human();
+        assert!(!rendered.contains("  - "), "{rendered}");
+        assert_eq!(
+            status_report(Vec::new()).next_step(),
+            Some("Run spec draft.")
         );
     }
 }

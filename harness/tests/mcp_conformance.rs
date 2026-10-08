@@ -175,13 +175,14 @@ async fn the_server_identifies_as_the_workshop_server_and_lists_all_tools() {
         "step_definitions_find",
         "step_definition_create",
         "unit_test_create",
+        "git_diff",
     ] {
         assert!(
             names.contains(&additive),
             "additive tool {additive} missing: {names:?}"
         );
     }
-    assert_eq!(tools.len(), 21, "tools: {names:?}");
+    assert_eq!(tools.len(), 22, "tools: {names:?}");
 
     let root_body = call_json(&client, "project_root", json!({})).await;
     let expected_root = std::path::absolute(dir.path()).unwrap();
@@ -1170,6 +1171,102 @@ async fn command_run_refuses_disallowed_programs_and_escapes() {
     .await;
     assert_eq!(is_error, Some(true));
     assert!(text.contains("arbitrary code"), "got: {text}");
+
+    client.cancel().await.unwrap();
+}
+
+/// `git init` plus one commit, so the project has a HEAD to diff against.
+fn commit_project(root: &Path) {
+    for args in [
+        vec!["init", "--initial-branch=main"],
+        vec!["config", "user.email", "t@example.com"],
+        vec!["config", "user.name", "Test"],
+        vec!["add", "."],
+        vec!["commit", "-m", "first"],
+    ] {
+        let status = std::process::Command::new("git")
+            .args(&args)
+            .current_dir(root)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .expect("git is on PATH for these tests");
+        assert!(status.success(), "git {args:?} failed");
+    }
+}
+
+#[tokio::test]
+async fn git_diff_reports_the_uncommitted_change_under_a_path() {
+    let dir = tempfile::tempdir().unwrap();
+    write_project(dir.path());
+    commit_project(dir.path());
+    fs::write(
+        dir.path().join("requirements/requirements.json"),
+        SPEC.replace("Kata", "Renamed"),
+    )
+    .unwrap();
+    let client = connect_default(dir.path()).await;
+
+    let body = call_json(&client, "git_diff", json!({"path": "requirements"})).await;
+    assert_eq!(body["path"], "requirements");
+    assert_eq!(body["against"], "HEAD");
+    assert_eq!(body["truncated"], false);
+    let diff = body["diff"].as_str().expect("a diff");
+    assert!(diff.contains("+"), "got: {diff}");
+    assert!(diff.contains("Renamed"), "got: {diff}");
+    assert!(body["nextStep"].as_str().unwrap().contains("requirements"));
+
+    // A path with no change is the same empty answer as a path that is
+    // spelled wrong, so the reply has to say which to check.
+    let body = call_json(&client, "git_diff", json!({"path": "features"})).await;
+    assert_eq!(body["diff"], "");
+    assert!(
+        body["nextStep"]
+            .as_str()
+            .unwrap()
+            .contains("check the path")
+    );
+
+    client.cancel().await.unwrap();
+}
+
+/// `git diff HEAD` is blind to a file git has never been told about,
+/// and the one that matters here is a brand-new spec.
+#[tokio::test]
+async fn git_diff_names_untracked_files_without_reading_them() {
+    let dir = tempfile::tempdir().unwrap();
+    write_project(dir.path());
+    commit_project(dir.path());
+    fs::write(dir.path().join("requirements/extra.json"), "{}\n").unwrap();
+    let client = connect_default(dir.path()).await;
+
+    let body = call_json(&client, "git_diff", json!({})).await;
+    assert_eq!(body["path"], Value::Null);
+    assert_eq!(body["untracked"], json!(["requirements/extra.json"]));
+    assert!(body["nextStep"].as_str().unwrap().contains("no diff yet"));
+
+    client.cancel().await.unwrap();
+}
+
+#[tokio::test]
+async fn git_diff_refuses_a_path_outside_the_project_and_a_project_without_git() {
+    let dir = tempfile::tempdir().unwrap();
+    write_project(dir.path());
+    commit_project(dir.path());
+    let client = connect_default(dir.path()).await;
+
+    let (is_error, text) = call(&client, "git_diff", json!({"path": "../elsewhere"})).await;
+    assert_eq!(is_error, Some(true));
+    assert!(text.contains(".."), "got: {text}");
+    client.cancel().await.unwrap();
+
+    // The same tool against a directory git knows nothing about.
+    let bare = tempfile::tempdir().unwrap();
+    write_project(bare.path());
+    let client = connect_default(bare.path()).await;
+    let (is_error, text) = call(&client, "git_diff", json!({})).await;
+    assert_eq!(is_error, Some(true));
+    assert!(text.contains("not inside a git work tree"), "got: {text}");
 
     client.cancel().await.unwrap();
 }

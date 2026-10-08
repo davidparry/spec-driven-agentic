@@ -25,7 +25,7 @@ class LiveSpecServerTest {
         try (SdkToolClient client = new SdkToolClient(project, spec)) {
             ToolSweep.SweepReport report = new ToolSweep().run(client, new Narrator(line -> {
             }), false);
-            assertThat(report.discovered()).hasSize(21);
+            assertThat(report.discovered()).hasSize(22);
             assertThat(report.missing()).isEmpty();
             assertThat(report.unexpected()).isEmpty();
             assertThat(report.failures()).isEmpty();
@@ -36,25 +36,7 @@ class LiveSpecServerTest {
     static void seedProject(Path root) throws IOException {
         Files.createDirectories(root.resolve("requirements"));
         Files.createDirectories(root.resolve("features"));
-        Files.writeString(
-                root.resolve("requirements/requirements.json"),
-                """
-                {
-                  "project": "Sweep",
-                  "requirements": [
-                    {
-                      "id": "REQ-001",
-                      "title": "Adds two numbers",
-                      "status": "pending",
-                      "story": "As a user, I want sums so that I can add.",
-                      "acceptanceCriteria": [
-                        "Given the input \\"1,2\\", when add is called, then the result is 3"
-                      ],
-                      "featureFile": "features/calc.feature"
-                    }
-                  ]
-                }
-                """);
+        Files.writeString(root.resolve("requirements/requirements.json"), spec("Adds two numbers"));
         Files.writeString(
                 root.resolve("features/calc.feature"),
                 """
@@ -67,5 +49,57 @@ class LiveSpecServerTest {
                     Then the result is 3
                 """);
         Files.writeString(root.resolve("pom.xml"), "<project/>");
+
+        // A workshop project is a git checkout, and git_diff reads what
+        // is uncommitted in one. Without a repository here the sweep
+        // would only ever see the tool's "not a repository" refusal, and
+        // the reword leaves it something real to report.
+        commitEverything(root);
+        Files.writeString(root.resolve("requirements/requirements.json"), spec("Adds two integers"));
+    }
+
+    private static String spec(String title) {
+        return """
+                {
+                  "project": "Sweep",
+                  "requirements": [
+                    {
+                      "id": "REQ-001",
+                      "title": "%s",
+                      "status": "pending",
+                      "story": "As a user, I want sums so that I can add.",
+                      "acceptanceCriteria": [
+                        "Given the input \\"1,2\\", when add is called, then the result is 3"
+                      ],
+                      "featureFile": "features/calc.feature"
+                    }
+                  ]
+                }
+                """.formatted(title);
+    }
+
+    private static void commitEverything(Path root) throws IOException {
+        String[][] commands = {
+            {"git", "init", "--initial-branch=main"},
+            {"git", "config", "user.email", "smoke@example.com"},
+            {"git", "config", "user.name", "Smoke"},
+            {"git", "add", "."},
+            {"git", "commit", "-m", "seed"},
+        };
+        for (String[] command : commands) {
+            try {
+                Process git = new ProcessBuilder(command)
+                        .directory(root.toFile())
+                        .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+                        .redirectError(ProcessBuilder.Redirect.DISCARD)
+                        .start();
+                if (git.waitFor() != 0) {
+                    throw new IOException("`" + String.join(" ", command) + "` failed in " + root);
+                }
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new IOException("interrupted running " + String.join(" ", command), interrupted);
+            }
+        }
     }
 }

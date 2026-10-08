@@ -33,6 +33,7 @@ use spec_harness::adapters::spinner::{HushingPrompter, Spinner};
 use spec_harness::adapters::tool_cache::CachedDiscovery;
 use spec_harness::application::DEFAULT_LLM_ATTEMPTS;
 use spec_harness::application::agent_service::AgentConfig;
+use spec_harness::application::decision_service::DecisionService;
 use spec_harness::application::generation_service::{GenerationService, ResolvedLlm};
 use spec_harness::application::implement_service::ImplementService;
 use spec_harness::application::init_service::InitService;
@@ -41,7 +42,7 @@ use spec_harness::application::memory_service::MemoryAwareConversation;
 use spec_harness::application::model_service::{
     DecisionReadiness, ModelResolution, ModelService, ModelSource, SessionDecision, SessionModel,
 };
-use spec_harness::application::refactor_service::{RefactorReport, RefactorService};
+use spec_harness::application::refactor_service::RefactorService;
 use spec_harness::application::spec_mutation_service::SpecMutationService;
 use spec_harness::application::status_service::StatusService;
 use spec_harness::application::tdd_service::TddError;
@@ -51,6 +52,7 @@ use spec_harness::bootstrap::{prompt_language, refresh_project_memory, settle_pr
 use spec_harness::deliver::{DEFAULT_ATTEMPTS, Deliver, DeliverOptions, parse_target};
 use spec_harness::domain::config_report::{ConfigSource, LLM_MODEL_KEY};
 use spec_harness::domain::decision::{DECISION_PLANE_HELP, Transition};
+use spec_harness::domain::human::{Human, counted};
 use spec_harness::domain::language::Language;
 use spec_harness::domain::mcp_registry::ServerSpec;
 use spec_harness::domain::prompts::ask_prompt;
@@ -190,9 +192,17 @@ enum Command {
     /// Run tests and update the RED/GREEN/REFACTOR phase (run_tests)
     Test(TestArgs),
     /// Show the current TDD phase and last run (get_tdd_state)
-    State,
+    State {
+        /// Print the raw JSON reply instead of the readable summary
+        #[arg(long)]
+        json: bool,
+    },
     /// Where every requirement stands on the road to implemented, and the next step
-    Status,
+    Status {
+        /// Print the raw JSON reply instead of the readable summary
+        #[arg(long)]
+        json: bool,
+    },
     /// Begin a refactor step; only allowed on GREEN (start_refactor)
     Refactor(RefactorArgs),
     /// LLM model discovery and selection (Ollama)
@@ -220,14 +230,34 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Explain the uncommitted change under a path (git_diff)
+    Diff {
+        /// Path to diff, relative to the project root, e.g.
+        /// requirements. Omit for the whole project.
+        path: Option<String>,
+        /// Print the diff itself instead of asking the model to explain it
+        #[arg(long)]
+        raw: bool,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
 enum SpecCommand {
     /// List every requirement with id, title, and status (list_requirements)
-    List,
+    List {
+        /// Print the raw JSON reply instead of the readable summary
+        #[arg(long)]
+        json: bool,
+    },
     /// Show one requirement, enriched with locations and a workflow hint (get_requirement)
-    Show { req_id: String },
+    Show {
+        req_id: String,
+        /// Print the raw JSON reply instead of the readable summary
+        #[arg(long)]
+        json: bool,
+    },
     /// Draft a requirement. Flags skip the interactive wizard.
     Draft {
         #[arg(long)]
@@ -243,12 +273,19 @@ enum SpecCommand {
         file: Option<String>,
     },
     /// Validate the requirements spec on disk (validate_spec)
-    Validate,
+    Validate {
+        /// Print the raw JSON reply instead of the readable summary
+        #[arg(long)]
+        json: bool,
+    },
     /// Review one requirement's wording for quality (refine_requirement)
     #[command(long_about = refine_help())]
     Refine {
         /// The requirement to review, e.g. REQ-003
         req_id: String,
+        /// Print the raw JSON reply instead of the readable summary
+        #[arg(long)]
+        json: bool,
     },
     /// Reword an existing requirement. Flags skip the wizard.
     Reword {
@@ -410,6 +447,9 @@ struct TestArgs {
     /// Run only one scenario
     #[arg(long)]
     scenario: Option<String>,
+    /// Print the raw JSON reply instead of the readable summary
+    #[arg(long)]
+    json: bool,
 }
 
 #[derive(Args)]
@@ -425,6 +465,9 @@ struct RefactorArgs {
     /// Mark the phase and stop - the cleanup stays in your hands
     #[arg(long)]
     manual: bool,
+    /// Print the raw JSON reply instead of the readable summary
+    #[arg(long)]
+    json: bool,
 }
 
 #[derive(Subcommand)]
@@ -761,15 +804,25 @@ fn execute(
         Command::Ask { task, json } => {
             run_ask(root, model, attempts, tools, max_rounds, task, *json)
         }
+        Command::Diff { path, raw, json } => run_diff(
+            root,
+            model,
+            attempts,
+            tools,
+            max_rounds,
+            path.as_deref(),
+            *raw,
+            *json,
+        ),
         Command::Test(args) => run_test(root, args),
-        Command::State => tdd_reply(tdd_service(root).state()),
-        Command::Status => {
+        Command::State { json } => tdd_reply(tdd_service(root).state(), *json),
+        Command::Status { json } => {
             let state = tdd_service(root)
                 .state()
                 .map_err(|e| anyhow::anyhow!(tdd_error_message(e)))?;
             let service = status_service(root, model, attempts, tools, max_rounds)?;
             let report = service.status(&state.phase)?;
-            print_json(&report)?;
+            print_report(&report, *json)?;
             // Deterministic nextStep already names the command for asset
             // gaps. Do not let the model override that with spec draft.
             if service.has_model() && !deterministic_status_gap(&report.next_step) {
@@ -796,18 +849,18 @@ fn execute(
             // agreed a refactor is legitimate here.
             let marked = tdd_service(root).refactor(args.note.as_deref());
             if args.manual {
-                return tdd_reply(marked);
+                return tdd_reply(marked, args.json);
             }
             let phase = match marked {
                 Ok(phase) => phase,
-                Err(error) => return tdd_reply(Err::<RefactorReport, _>(error)),
+                Err(error) => return tdd_error_reply(error, args.json),
             };
             let service = refactor_service(root, model, attempts, tools, max_rounds)?;
             if !service.has_model() {
                 // No model, no loop: the phase is marked and the cleanup
                 // is the developer's, which is the whole behaviour this
                 // command used to have.
-                return print_json(&phase);
+                return print_report(&phase, args.json);
             }
             let runner = detect_runner(root).map_err(|message| anyhow::anyhow!(message))?;
             let mut prompter = interactive_prompter(Prompts::Incidental);
@@ -820,7 +873,7 @@ fn execute(
             if let Some(warning) = &report.warning {
                 println!("{RED}{warning}{RESET}");
             }
-            print_json(&report)
+            print_report(&report, args.json)
         }
         Command::Steps(command) => {
             let service = generation_service(
@@ -1367,7 +1420,10 @@ fn run_test(root: &Path, args: &TestArgs) -> anyhow::Result<()> {
         feature: args.feature.clone(),
         scenario: args.scenario.clone(),
     };
-    tdd_reply(tdd_service(root).run_tests(runner.as_ref(), &filter))
+    tdd_reply(
+        tdd_service(root).run_tests(runner.as_ref(), &filter),
+        args.json,
+    )
 }
 
 /// After `spec implement` writes its files, close the loop. On a
@@ -1416,25 +1472,61 @@ fn implement_follow_up(root: &Path, req_id: &str) -> anyhow::Result<()> {
             }
             Ok(())
         }
-        Err(e) => tdd_reply::<serde_json::Value>(Err(e)),
+        Err(e) => tdd_error_reply(e, false),
     }
 }
 
 /// Print a TDD reply, turning a missing runtime into the structured
 /// `runtime_missing` refusal with a nonzero exit (signalled, not
 /// `process::exit`, so the interactive shell survives it).
-fn tdd_reply<T: serde::Serialize>(result: Result<T, TddError>) -> anyhow::Result<()> {
+fn tdd_reply<T: serde::Serialize + Human>(
+    result: Result<T, TddError>,
+    json: bool,
+) -> anyhow::Result<()> {
     match result {
-        Ok(report) => print_json(&report),
-        Err(TddError::RuntimeMissing { runtime, hint }) => {
-            print_json(&serde_json::json!({
-                "error": "runtime_missing",
-                "runtime": runtime,
-                "hint": hint,
-            }))?;
+        Ok(report) => print_report(&report, json),
+        Err(error) => tdd_error_reply(error, json),
+    }
+}
+
+/// The error half of a TDD reply.
+///
+/// Split out because a command whose own reply is not a TDD report
+/// still refuses the same way, and it has no report type to name.
+fn tdd_error_reply(error: TddError, json: bool) -> anyhow::Result<()> {
+    match error {
+        TddError::RuntimeMissing { runtime, hint } => {
+            print_report(
+                &RuntimeMissing {
+                    error: "runtime_missing",
+                    runtime,
+                    hint,
+                },
+                json,
+            )?;
             Err(NonzeroExit.into())
         }
-        Err(TddError::Other(message)) => anyhow::bail!(message),
+        TddError::Other(message) => anyhow::bail!(message),
+    }
+}
+
+/// The refusal when the tests cannot run because the toolchain is not
+/// installed. Field order and names are the shape a scripted caller
+/// already matches on.
+#[derive(serde::Serialize)]
+struct RuntimeMissing {
+    error: &'static str,
+    runtime: String,
+    hint: String,
+}
+
+impl Human for RuntimeMissing {
+    fn human(&self) -> String {
+        format!("The {} runtime is not installed.", self.runtime)
+    }
+
+    fn next_step(&self) -> Option<&str> {
+        Some(&self.hint)
     }
 }
 
@@ -1510,15 +1602,15 @@ fn run_spec(
 ) -> anyhow::Result<()> {
     let service = spec_service(root);
     match command {
-        SpecCommand::List => {
+        SpecCommand::List { json } => {
             let requirements = mutation_service(root, attempts).list_requirements()?;
-            print_json(&requirements)
+            print_report(&requirements, *json)
         }
-        SpecCommand::Show { req_id } => {
+        SpecCommand::Show { req_id, json } => {
             let requirement = service.get_requirement(req_id)?;
-            print_json(&requirement)
+            print_report(&requirement, *json)
         }
-        SpecCommand::Validate => {
+        SpecCommand::Validate { json } => {
             let mut report = service.validate_spec();
             // The service words its next step for the MCP agent; the
             // shell gets the same advice naming commands. Catalog
@@ -1537,7 +1629,7 @@ fn run_spec(
                 None => "Run spec reword to fix the issues, then run spec validate again.".into(),
             };
             let valid = report.valid;
-            print_json(&report)?;
+            print_report(&report, *json)?;
             // A gate scripted on this used to pass on an invalid spec:
             // the report said "valid": false and the exit status said
             // 0. `spec list` already exits 1 on a circular include, so
@@ -1548,7 +1640,7 @@ fn run_spec(
                 Err(NonzeroExit.into())
             }
         }
-        SpecCommand::Refine { req_id } => {
+        SpecCommand::Refine { req_id, json } => {
             let mut report = service.refine_requirement(req_id)?;
             // Judged before the advice is worded, not after: a gating
             // judgment adds its findings and clears `clean`, and advice
@@ -1564,7 +1656,7 @@ fn run_spec(
                      spec refine {req_id} again. Iterate until there are no findings."
                 );
             }
-            print_json(&report)?;
+            print_report(&report, *json)?;
             if gated {
                 // The judgment asked for rework or a human. The reply is
                 // already on stdout; the exit code is the gate.
@@ -1732,12 +1824,33 @@ fn cached_chat(root: &Path, model_flag: Option<&str>) -> Option<(String, CachedC
 /// caller words its advice from the merged verdict. With no decision
 /// model configured this does nothing at all and the reply is
 /// byte-for-byte what it has always been.
+/// A progress indicator, but only when someone is there to read it.
+///
+/// The spinner settles onto stdout, and `spec refine` writes its report
+/// to stdout as JSON. On a terminal that line is the human's answer to
+/// "has it hung?"; through a pipe it would be a line of prose in front
+/// of the JSON, so off a terminal there is nothing watching and nothing
+/// is printed.
+fn watched_spinner(message: &str) -> Option<Spinner> {
+    use std::io::IsTerminal as _;
+    std::io::stdout()
+        .is_terminal()
+        .then(|| Spinner::start(message))
+}
+
 fn judge_refinement(
     root: &Path,
     flag: Option<&str>,
     report: &mut spec_harness::application::spec_service::RefinementReport,
 ) -> anyhow::Result<bool> {
-    let Some(service) = wiring::decision_service(root, flag) else {
+    // `when_asking` is what makes `off` mean off here: the judgment in
+    // `spec refine` is one the workflow takes on its own initiative,
+    // not one a human typed the way `spec judge` is. Taking the service
+    // from there rather than relying on the no-op inside
+    // `judge_refinement` is also what keeps the indicator below honest
+    // - under `off` there is no model call to announce.
+    let Some(service) = wiring::decision_service(root, flag).and_then(DecisionService::when_asking)
+    else {
         return Ok(false);
     };
     let criteria = match spec_service(root).criteria(&report.id) {
@@ -1746,6 +1859,14 @@ fn judge_refinement(
         // here is not worth turning into the command's error.
         Err(_) => return Ok(false),
     };
+    // Started only once a model is resolved and there is something to
+    // ask it about: the deterministic review is instant, and a
+    // "working" line in front of it would be claiming a wait that
+    // never happens.
+    let _work = watched_spinner(&format!(
+        "Asking the decision model about {} - working",
+        counted(criteria.len(), "criterion", "criteria")
+    ));
     match service.judge_refinement(report, &criteria) {
         Ok(action) => Ok(action != Transition::Continue),
         // Enforcing mode with no answer. Never silently an approval:
@@ -2168,6 +2289,47 @@ fn piped_stdin_warning(prompts: Prompts) -> String {
 fn print_json<T: serde::Serialize>(value: &T) -> anyhow::Result<()> {
     println!("{}", speak_cli(&serde_json::to_string_pretty(value)?));
     Ok(())
+}
+
+/// A reply, printed for whoever is reading it.
+///
+/// JSON when something is parsing the output, prose when a person is
+/// watching a terminal. The same reply either way - only the rendering
+/// differs, so a reader and a script never disagree about what
+/// happened.
+fn print_report<T: serde::Serialize + Human>(value: &T, json: bool) -> anyhow::Result<()> {
+    use std::io::IsTerminal as _;
+    if wants_json(json, std::io::stdout().is_terminal()) {
+        return print_json(value);
+    }
+    // A reply whose whole answer is its advice renders as nothing, and
+    // a blank line in front of it would read as output that went
+    // missing.
+    let body = value.human();
+    if !body.is_empty() {
+        println!("{body}");
+    }
+    // The advice arrives worded for the agent; the CLI says it in
+    // commands. Done here rather than in the rendering so that
+    // translation stays at the one place the CLI prints a reply.
+    if let Some(step) = value.next_step() {
+        let gap = if body.is_empty() { "" } else { "\n" };
+        println!("{gap}Next step: {}", cli_next_step(step));
+    }
+    Ok(())
+}
+
+/// Which rendering a reply gets.
+///
+/// Off a terminal nothing but JSON will do: that is `spec deliver`
+/// reading a step, an agent reading a reply, a CI gate reading a
+/// verdict, and `| jq`. On a terminal the reader is a person, unless
+/// they asked for JSON anyway with `--json`.
+///
+/// A function of its two inputs rather than a read of the real stdout,
+/// so the policy is covered by tests that have no terminal to offer.
+fn wants_json(flag: bool, stdout_is_terminal: bool) -> bool {
+    flag || !stdout_is_terminal
 }
 
 /// What is wrong with a half-given `spec draft`, said in terms of the
@@ -2759,9 +2921,110 @@ fn ask_once(
     }
 }
 
+/// `spec diff`: what changed under a path since the last commit, in prose.
+///
+/// Unlike `spec ask`, a missing model is not the end of the command.
+/// The diff is the thing being asked about and the harness already has
+/// it, so an unexplained diff is printed rather than refused - the
+/// developer still learns what changed.
+#[allow(clippy::too_many_arguments)]
+fn run_diff(
+    root: &Path,
+    model: Option<&str>,
+    attempts: u32,
+    tools: Option<&str>,
+    max_rounds: Option<u32>,
+    path: Option<&str>,
+    raw: bool,
+    json: bool,
+) -> anyhow::Result<()> {
+    let report = wiring::diff_service(root).diff(path)?;
+
+    // Nothing to explain, and the reply already says what to check. A
+    // model asked to summarize an empty diff invents a change.
+    let nothing_changed = report.diff.is_empty() && report.untracked.is_empty();
+    let llm = (!raw && !nothing_changed)
+        .then(|| connected_llm(root, model, Caller::Diff, attempts, tools, max_rounds))
+        .flatten();
+
+    let Some(llm) = llm else {
+        if json {
+            return print_json(&report);
+        }
+        if !report.diff.is_empty() {
+            print!("{}", report.diff);
+        }
+        for file in &report.untracked {
+            println!("untracked: {file}");
+        }
+        println!("{}", report.next_step);
+        return Ok(());
+    };
+
+    let prompt = spec_harness::domain::prompts::diff_prompt(
+        report.path.as_deref(),
+        &report.diff,
+        report.truncated,
+        &report.untracked,
+    );
+    let mut prompter = interactive_prompter(Prompts::Incidental);
+    let work = Spinner::start("Reading the diff - working");
+    let summary = llm.ask(
+        prompter.as_mut(),
+        &prompt,
+        |text| {
+            let body = text.trim();
+            if body.is_empty() {
+                Err("the summary was empty".into())
+            } else {
+                Ok(body.to_string())
+            }
+        },
+        |_, _, _| {},
+    );
+    drop(work);
+    let summary = summary.map_err(|e| match e {
+        spec_harness::application::LlmReplyError::Call(error) => anyhow::anyhow!(error.0),
+        spec_harness::application::LlmReplyError::Invalid { reason } => anyhow::anyhow!(reason),
+    })?;
+
+    if json {
+        let mut body = serde_json::to_value(&report)?;
+        body["summary"] = serde_json::Value::String(summary);
+        print_json(&body)
+    } else {
+        println!("{summary}");
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The indicator names how many questions are going to the model,
+    /// and a requirement with one criterion is the common case.
+    #[test]
+    fn the_judgment_indicator_counts_criteria_in_the_readers_grammar() {
+        assert_eq!(counted(1, "criterion", "criteria"), "1 criterion");
+        assert_eq!(counted(4, "criterion", "criteria"), "4 criteria");
+        assert_eq!(counted(0, "criterion", "criteria"), "0 criteria");
+    }
+
+    /// Off a terminal nothing but JSON will do - that is `spec
+    /// deliver` reading a step, an agent reading a reply, a CI gate
+    /// reading a verdict, and `| jq`. On a terminal the reader is a
+    /// person, unless they asked for JSON anyway.
+    #[test]
+    fn anything_that_is_not_a_person_reading_gets_json() {
+        assert!(wants_json(false, false), "a pipe must still get JSON");
+        assert!(wants_json(true, false), "--json through a pipe is JSON");
+        assert!(wants_json(true, true), "--json on a terminal is JSON");
+        assert!(
+            !wants_json(false, true),
+            "a person on a terminal gets the readable reply"
+        );
+    }
 
     /// The wording the student guides quote verbatim, for the command
     /// they quote it about.
