@@ -9,8 +9,17 @@
   that line up, findings under the id they belong to, counts in words.
   `spec state` leaves out `instructions` there — ~900 characters of
   guidance written to brief a model, printed in answer to "what phase
-  am I in?" — and `spec refine` shows the advisory sentence a judgment
-  produced rather than its audit record of model tags and thresholds.
+  am I in?" — and `spec refine` lays its judgments out one criterion
+  per row, each with the verdict and the answer that decided it.
+
+  Every judgment, including the ones that passed. Showing only the
+  criteria that complained leaves out the denominator: three judged
+  and two reported reads as two problems out of two, and the criterion
+  that satisfied the question disappears. The row block is named as a
+  second review so it does not read as contradicting `clean`, which is
+  still the deterministic wording rules and nothing else, and an
+  advisory `CONTINUE` standing over a `FAILS` says that advisory mode
+  is why rather than leaving it to be inferred.
 
   Nothing that parses the output changes. A pipe gets byte-for-byte
   the JSON it always got, which is what `spec deliver` reads between

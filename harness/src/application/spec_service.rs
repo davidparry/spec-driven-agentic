@@ -5,7 +5,7 @@
 use serde::Serialize;
 
 use crate::application::assets::load_spec;
-use crate::domain::human::{Human, bullets, columns, counted, sections, titled};
+use crate::domain::human::{Human, bullets, columns, counted, indent, sections, titled};
 use crate::domain::model::Requirement;
 use crate::domain::refiner::RequirementRefiner;
 use crate::domain::spec_validator::{SpecValidator, is_structural_issue, structural_repair};
@@ -101,14 +101,16 @@ pub struct RefinementReport {
 }
 
 impl Human for RefinementReport {
-    /// The verdict, the findings, and what the decision model made of
-    /// them.
+    /// The deterministic verdict, its findings, and every judgment the
+    /// decision model returned.
     ///
-    /// `judgments` is deliberately left out: it is the audit record -
-    /// model tag, threshold, provenance, token usage - and the reader
-    /// watching a terminal wants the sentence it produced, which is
-    /// what `judgment_advisories` already holds. The record is still
-    /// there in full for anything reading the JSON.
+    /// Every judgment, not only the ones that complained. Showing the
+    /// complaints alone leaves out the denominator: three criteria
+    /// judged and two reported reads as two problems out of two, and
+    /// the criterion that satisfied the question disappears. The
+    /// advisory sentences are left out instead - each quotes its whole
+    /// criterion, and when a judgment actually gates, that same wording
+    /// is already in `findings` above.
     fn human(&self) -> String {
         let verdict = if self.clean {
             format!("{} is clean.", self.id)
@@ -119,24 +121,69 @@ impl Human for RefinementReport {
                 counted(self.findings.len(), "finding", "findings")
             )
         };
-        let advisories = if self.judgment_advisories.is_empty() {
-            String::new()
-        } else {
-            sections(&[
-                "The decision model could not measure these:".to_string(),
-                bullets(&self.judgment_advisories),
-            ])
-        };
         let judgment = match (&self.judgment_action, &self.judgment_note) {
-            (Some(action), _) => format!("Judgment: {action}"),
+            (Some(action), _) => format!("Judgment: {action}{}", self.blocking_note()),
             (None, Some(note)) => format!("No judgment: {note}"),
             (None, None) => String::new(),
         };
-        sections(&[verdict, bullets(&self.findings), advisories, judgment])
+        sections(&[verdict, bullets(&self.findings), self.judged(), judgment])
     }
 
     fn next_step(&self) -> Option<&str> {
         Some(&self.next_step)
+    }
+}
+
+impl RefinementReport {
+    /// Every judgment as one row: which criterion, how it was read, and
+    /// the answer that decided it.
+    ///
+    /// Named as a second review so the reader can hold it beside
+    /// `clean` without the two contradicting each other - `clean` is
+    /// the deterministic rules, and these are a different question
+    /// asked by a different model.
+    fn judged(&self) -> String {
+        let Some(first) = self.judgments.first() else {
+            return String::new();
+        };
+        let rows: Vec<Vec<String>> = self
+            .judgments
+            .iter()
+            .map(|judgment| {
+                vec![
+                    judgment.provenance.input.clone(),
+                    judgment.verdict.to_string(),
+                    judgment.answer.summary(),
+                ]
+            })
+            .collect();
+        titled(
+            &format!(
+                "A second review ({}, {}) judged {}:",
+                first.gate,
+                first.question,
+                counted(self.judgments.len(), "criterion", "criteria")
+            ),
+            &indent(&columns(&rows)),
+        )
+    }
+
+    /// Why a verdict that read badly still carried on.
+    ///
+    /// Without it, two `FAILS` above a `CONTINUE` look like a harness
+    /// ignoring its own review. In advisory mode that is exactly the
+    /// configured behaviour, so it is said rather than left to be
+    /// inferred.
+    fn blocking_note(&self) -> &'static str {
+        let advisory = self
+            .judgments
+            .iter()
+            .all(|judgment| judgment.mode == crate::domain::decision::Mode::Advisory);
+        if advisory && !self.judgments.is_empty() {
+            " - advisory mode, so nothing here blocks"
+        } else {
+            ""
+        }
     }
 }
 
@@ -812,20 +859,91 @@ mod tests {
         );
     }
 
-    /// The advisory is the sentence the judgment produced; the audit
-    /// record behind it belongs to the JSON, not to a terminal.
+    fn judgment(
+        criterion: u8,
+        verdict: crate::domain::decision::Verdict,
+        probability: f64,
+        mode: crate::domain::decision::Mode,
+    ) -> crate::domain::decision::Judgment {
+        use crate::domain::decision::{Answer, Provenance, Transition, Usage};
+        crate::domain::decision::Judgment {
+            gate: "CRITERION_MEASURABLE",
+            question: "measurable/v2",
+            model: "nimble:latest".into(),
+            verdict,
+            action: Transition::Continue,
+            mode,
+            threshold: 0.8,
+            answer: Answer::Noul { noul: probability },
+            provenance: Provenance {
+                input: format!("REQ-001 acceptance criterion {criterion}"),
+                state: "sha256:abc".into(),
+                state_bytes: 275,
+            },
+            usage: Usage {
+                input_tokens: 487,
+                output_tokens: 1,
+            },
+        }
+    }
+
+    /// The defect this replaced: only the criteria that complained were
+    /// shown, so three judged and two reported read as two problems out
+    /// of two, and the criterion that satisfied the question vanished.
     #[test]
-    fn advisories_are_shown_and_the_audit_record_is_not() {
+    fn every_judged_criterion_is_shown_not_only_the_ones_that_complained() {
+        use crate::domain::decision::{Mode, Verdict};
         let mut report = refinement("REQ-001", true, Vec::new());
-        report.judgment_advisories = vec!["criterion 2 has no observable outcome".into()];
-        report.judgment_action = Some(crate::domain::decision::Transition::Rework);
+        report.judgments = vec![
+            judgment(1, Verdict::Fails, 0.055, Mode::Advisory),
+            judgment(2, Verdict::Fails, 0.077, Mode::Advisory),
+            judgment(3, Verdict::Holds, 0.935, Mode::Advisory),
+        ];
+        report.judgment_advisories = vec!["criterion 1 has no observable outcome".into()];
+        report.judgment_action = Some(crate::domain::decision::Transition::Continue);
         let rendered = report.human();
+
         assert!(
-            rendered.contains("criterion 2 has no observable outcome"),
+            rendered.contains(
+                "A second review (CRITERION_MEASURABLE, measurable/v2) judged 3 criteria:"
+            ),
             "{rendered}"
         );
+        for row in [
+            "  REQ-001 acceptance criterion 1  FAILS  probability of true 0.055",
+            "  REQ-001 acceptance criterion 2  FAILS  probability of true 0.077",
+            "  REQ-001 acceptance criterion 3  HOLDS  probability of true 0.935",
+        ] {
+            assert!(rendered.contains(row), "missing {row:?} in:\n{rendered}");
+        }
+    }
+
+    /// Two `FAILS` above a `CONTINUE` look like a harness ignoring its
+    /// own review until the mode is named.
+    #[test]
+    fn an_advisory_run_says_why_a_bad_verdict_still_carried_on() {
+        use crate::domain::decision::{Mode, Transition, Verdict};
+        let mut report = refinement("REQ-001", true, Vec::new());
+        report.judgments = vec![judgment(1, Verdict::Fails, 0.055, Mode::Advisory)];
+        report.judgment_action = Some(Transition::Continue);
+        let rendered = report.human();
+        assert!(
+            rendered.contains("Judgment: CONTINUE - advisory mode, so nothing here blocks"),
+            "{rendered}"
+        );
+    }
+
+    /// In enforce mode the verdict is the gate, so there is nothing to
+    /// explain away.
+    #[test]
+    fn an_enforcing_run_states_the_action_without_excusing_it() {
+        use crate::domain::decision::{Mode, Transition, Verdict};
+        let mut report = refinement("REQ-001", false, vec!["criterion 1 is vague".into()]);
+        report.judgments = vec![judgment(1, Verdict::Fails, 0.055, Mode::Enforce)];
+        report.judgment_action = Some(Transition::Rework);
+        let rendered = report.human();
         assert!(rendered.contains("Judgment: REWORK"), "{rendered}");
-        assert!(!rendered.contains("threshold"), "{rendered}");
+        assert!(!rendered.contains("nothing here blocks"), "{rendered}");
     }
 
     /// "Nothing to report" and "nobody asked" are different answers, so

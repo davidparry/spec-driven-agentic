@@ -94,6 +94,17 @@ pub fn counted(count: usize, singular: &str, plural: &str) -> String {
     }
 }
 
+/// A block moved in under the heading above it.
+///
+/// The same two spaces [`bullets`] uses, so an indented table and an
+/// indented list sit at the same depth.
+pub fn indent(body: &str) -> String {
+    body.lines()
+        .map(|line| format!("  {line}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// A heading glued to the body beneath it, or nothing at all when the
 /// body is empty.
 ///
@@ -205,6 +216,12 @@ mod tests {
         assert_eq!(counted(0, "issue", "issues"), "0 issues");
         assert_eq!(counted(1, "issue", "issues"), "1 issue");
         assert_eq!(counted(2, "issue", "issues"), "2 issues");
+    }
+
+    #[test]
+    fn an_indented_block_sits_where_a_bulleted_one_does() {
+        assert_eq!(indent("a\nb"), "  a\n  b");
+        assert_eq!(indent(""), "");
     }
 
     /// A heading over nothing reads as a bug in the heading.

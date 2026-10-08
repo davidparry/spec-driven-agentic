@@ -291,21 +291,43 @@ for your judgment.
 
 ### The review that is not a rule
 
-Run `refine --json` again on your reworded version and read the
-`judgments` block properly this time — the audit record is in the JSON
-reply, and a terminal run prints the advisory sentences instead. Four
-criteria, four answers:
+Run `spec refine HARNESS-019` again on your reworded version, this
+time *without* `--json`, and the second review lays out what it made
+of each criterion:
 
-| Your assertion | |
-| --- | --- |
-| `then the reply is an error naming "REQ-999"` | `HOLDS` 0.998 |
-| `then 1 criterion is reported uncovered` | `INCONCLUSIVE` 0.709 |
-| `then the verdict is "uncovered"` | `INCONCLUSIVE` 0.672 |
-| `then the verdict is "covered"` | `FAILS` 0.211 |
+```text
+HARNESS-019 is clean.
 
-Three of four it will not sign off, and the last one it rejects
-outright — about criteria you and the room would both call testable.
-Before you write the whole thing off, see what it is for. One
+A second review (CRITERION_MEASURABLE, measurable/v2) judged 4 criteria:
+  HARNESS-019 acceptance criterion 1  INCONCLUSIVE  probability of true 0.211
+  HARNESS-019 acceptance criterion 2  INCONCLUSIVE  probability of true 0.583
+  HARNESS-019 acceptance criterion 3  HOLDS         probability of true 0.985
+  HARNESS-019 acceptance criterion 4  INCONCLUSIVE  probability of true 0.315
+
+Judgment: CONTINUE - advisory mode, so nothing here blocks
+```
+
+Every criterion is listed, not only the ones it complained about:
+three complaints out of four is a different fact from three out of
+three, and the complaints alone cannot tell you which you are looking
+at — the criterion that satisfied the question leaves no line. The
+denominator is the point of the block. `--json` puts
+the audit record behind each row — model tag, threshold, token count —
+and that is the reply `spec deliver` and any agent reads.
+
+Line the rows up against the clauses you actually wrote:
+
+| # | The clause after `then` | |
+| --- | --- | --- |
+| 3 | `the reply is an error naming "REQ-999"` | `HOLDS` 0.985 |
+| 2 | `1 criterion is reported uncovered` | `INCONCLUSIVE` 0.583 |
+| 4 | `the verdict is "uncovered"` | `INCONCLUSIVE` 0.315 |
+| 1 | `the verdict is "covered"` | `INCONCLUSIVE` 0.211 |
+
+Three of four it will not sign off on, and the lowest sits a hair
+above outright rejection — about criteria you and the room would both
+call testable. Before you write the whole thing off, see what it is
+for. One
 deterministic rule asks whether the clause after `then` *looks*
 concrete — a number, a quoted value, a named error. Any number
 satisfies it, so `refine` reports **nothing at all** about either of
@@ -384,6 +406,71 @@ is "covered"` scores 0.058 — same literal, and the only difference is
 `is` instead of `naming`. `then the X is "Y"` reads to this model as
 describing a state rather than asserting one, and that is the most
 common assertion shape in the whole spec.
+
+### What wording would make yours HOLDS
+
+Both defects are now in front of you, so turn them on your own four.
+Nothing below is rhetorical — `spec judge criterion --text '…'` asks
+the question one clause at a time, and you can reproduce every line of
+it in about two minutes.
+
+Criteria 2 and 4 are defect two, and defect two has a cure. Swap the
+copula for a verb that reports, and the same assertion goes green:
+
+| Criterion 2, as you wrote it and reworded | |
+| --- | --- |
+| `then 1 criterion is reported uncovered` | `INCONCLUSIVE` 0.583 |
+| `then the reply names 1 criterion "uncovered"` | **`HOLDS` 0.879** |
+| `then there is 1 uncovered criterion` | **`HOLDS` 0.954** |
+
+| Criterion 4, as you wrote it and reworded | |
+| --- | --- |
+| `then the verdict is "uncovered"` | `INCONCLUSIVE` 0.315 |
+| `then the reply names the verdict "uncovered"` | **`HOLDS` 0.917** |
+
+Criterion 1 is where it gets interesting, because the identical cure
+does nothing at all: `names the verdict` 0.262, `is a verdict naming`
+0.296, `names every criterion` 0.236. Still inconclusive, every one —
+and criterion 4's assertion has the same shape and the same reword
+lifted it to 0.917.
+
+So it is not the assertion. Leave that byte-identical at `then the
+verdict is "covered"` and change only the setup in front of it:
+
+| `Given …` *(assertion never changes)* | |
+| --- | --- |
+| `a requirement whose every criterion is matched by a tagged scenario` | `FAILS` 0.187 |
+| `a requirement whose every criterion is matched by a tagged scenario and an asserting test` | `INCONCLUSIVE` 0.211 |
+| `a requirement with 3 criteria and 3 tagged scenarios` | `INCONCLUSIVE` 0.742 |
+| `a fully covered requirement` | **`HOLDS` 0.920** |
+
+That is defect one with the lid off, on your own wording: a five-fold
+swing in the score of a clause that never changed.
+
+So yes — there is wording that turns all three holdouts green. Now
+look hard at what it cost, because this is the part to take home.
+
+Criterion 1 got to `HOLDS` by having its setup blurred from "every
+criterion matched by a tagged scenario **and an asserting test**" down
+to "a fully covered requirement". The first one names the two
+conditions a test has to build. The second makes the reader guess
+them, using the very word the requirement exists to define. The score
+went up and **the criterion got worse** — and the model cannot tell,
+because it was never asked that question.
+
+Criteria 2 and 4 are the honest half of the same lesson: `names 1
+criterion "uncovered"` really is a shade sharper than `is reported
+uncovered`, and if you prefer it, keep it. The test is whether you
+would have made the edit with the score hidden.
+
+That is the line. A flagged criterion is worth re-reading, and
+sometimes the reword it prompts is a real improvement. Rewording a
+criterion you already judged sound, in order to move a number, is
+fitting the work to the measurement. This repository went through the
+same exercise on its own spec — 24 flagged criteria read one at a
+time, 15 of them left exactly as they were, one of which quotes a
+forty-character exact string — and that is why the number you are
+looking at is advisory.
 
 Sit with what this is an example of, because it is this morning's
 argument pointed back at the harness. A gate was built, measured, and
