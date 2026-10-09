@@ -932,6 +932,22 @@ impl Deliver {
                 if let Some(warning) = &attempt.warning {
                     prompter.warn(warning);
                 }
+                // Remember where this attempt put the production code,
+                // so the next one writes there instead of re-deriving a
+                // target from whatever the scenarios reach today. The
+                // same thing `scenario generate` does with featureFile.
+                // Losing the record is not a reason to lose the attempt
+                // that earned it, so a failure here is narrated.
+                if !attempt.production.is_empty()
+                    && let Err(error) = self
+                        .mutation_service()
+                        .record_production(req_id, &attempt.production)
+                {
+                    prompter.warn(&format!(
+                        "{req_id} still does not record where its production code lives - {}",
+                        error.0
+                    ));
+                }
                 tdd.record_attempt(ImplementAttempt {
                     requirement: req_id.to_string(),
                     targets: attempt.targets.clone(),
@@ -1952,6 +1968,7 @@ mod tests {
             story: "As a user, I want this so that history is honest.".into(),
             feature_file: Some("features/kata.feature".into()),
             acceptance_criteria: vec!["Given a, when b, then c".into()],
+            ..Default::default()
         });
         std::fs::write(
             dir.path().join(SPEC_PATH),

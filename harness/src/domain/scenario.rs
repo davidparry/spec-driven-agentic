@@ -193,6 +193,7 @@ mod tests {
                 r#"Given "10,20", when add is called, then the result is 30"#.into(),
             ],
             feature_file: Some("features/calc.feature".into()),
+            ..Default::default()
         }
     }
 

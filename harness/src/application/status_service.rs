@@ -323,6 +323,7 @@ mod tests {
                 story: "As a user, I want sums so that I can add.".into(),
                 acceptance_criteria: vec!["Given a, when b, then 3".into()],
                 feature_file: Some("features/calc.feature".into()),
+                ..Default::default()
             }],
             ..Spec::default()
         };

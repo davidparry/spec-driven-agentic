@@ -584,8 +584,14 @@ pub fn implementation_prompt(
     history: &[ImplementAttempt],
     states: &[StateEntry],
     files: &[(String, String)],
-    production_path: &str,
+    targets: &[String],
 ) -> RenderedPrompt {
+    // Every rule in the template reads correctly about one file, so the
+    // first target stays the one they all name and the rest arrive as a
+    // single additive line. A requirement whose code is one file - which
+    // is nearly all of them - renders exactly the prompt it always did.
+    let (production_path, rest) = targets.split_first().expect("a production target");
+    let also_write = rest.join(", ");
     let omitted = history.len().saturating_sub(PROMPT_HISTORY_ATTEMPTS);
     let history_context: Vec<AttemptContext> = history[omitted..]
         .iter()
@@ -615,7 +621,7 @@ pub fn implementation_prompt(
     // failures point at; everything else is only worth sending insofar
     // as it explains those. Walking out from them keeps the prompt
     // about this change instead of about the whole project.
-    let mut seeds = vec![production_path];
+    let mut seeds: Vec<&str> = targets.iter().map(String::as_str).collect();
     seeds.extend(implicated.iter().copied());
     let selected = neighborhood::select(language, files, &seeds, PROMPT_SOURCE_BUDGET);
     let files_context: Vec<FileContext> = selected
@@ -649,6 +655,7 @@ pub fn implementation_prompt(
             language => language.display(),
             practices => best_practices(language),
             production_path,
+            also_write,
             id => requirement.id,
             title => requirement.title,
             story => requirement.story,
@@ -884,17 +891,80 @@ pub fn looks_like_step_fragment(language: Language, fragment: &str, expected: &[
     kept.len() == expected.len() && expected.iter().all(|pattern| kept.contains(pattern))
 }
 
+/// The text every generated TODO placeholder carries, whatever quote
+/// its ecosystem wrapped it in - Java and Rust use `"`, the JS family
+/// `'`. Named once so the readers below cannot disagree about it.
+const TODO_ASSERT: &str = "TODO: assert";
+
 /// Every `fail("TODO: assert ...")` placeholder a generated unit test
 /// fragment carries. These are the assertions the developer is meant to
 /// sharpen by hand, so the polish pass may not quietly resolve them.
 pub fn todo_placeholders(code: &str) -> Vec<String> {
-    const OPEN: &str = "\"TODO: assert";
-    code.match_indices(OPEN)
+    let open = format!("\"{TODO_ASSERT}");
+    code.match_indices(open.as_str())
         .filter_map(|(start, _)| {
             let tail = &code[start + 1..];
             tail.find('"').map(|end| tail[..end].to_string())
         })
         .collect()
+}
+
+/// Which of `criteria` the file at `path` still carries a generated
+/// placeholder for, once `updates` are applied.
+///
+/// Scoped to this requirement's own criteria rather than to everything
+/// in the file, because the file is usually shared: the kata's single
+/// test class holds every requirement's tests, and the *next*
+/// requirement's untouched placeholder is not this attempt's to answer
+/// for. Asking "is there a placeholder here" would block REQ-001 over
+/// REQ-002's stub, which no reply to this prompt could ever clear.
+///
+/// A file the reply left out is read from `files` as it stands.
+/// Declining to answer about the test is not the same as filling it in,
+/// and that is the attempt worth catching - it is what six measured
+/// attempts actually did.
+///
+/// Matching on the criterion text rather than on the failing call keeps
+/// this free of both the language and the quote it was wrapped in:
+/// [`unit_test_case`] writes the same `TODO: assert - <criterion>` into
+/// `fail("...")`, `assert.fail('...')`, `Assert.Fail("...")` and
+/// `unimplemented!("...")` alike.
+pub fn unasserted_criteria(
+    files: &[(String, String)],
+    updates: &[FileUpdate],
+    path: &str,
+    criteria: &[String],
+) -> Vec<String> {
+    let after = updates
+        .iter()
+        .find(|update| update.path == path)
+        .map(|update| update.content.as_str())
+        .or_else(|| {
+            files
+                .iter()
+                .find(|(known, _)| known == path)
+                .map(|(_, content)| content.as_str())
+        });
+    // A path nothing has written yet carries nothing.
+    let Some(after) = after else {
+        return Vec::new();
+    };
+    let written = unescaped(after);
+    criteria
+        .iter()
+        .filter(|criterion| written.contains(&unescaped(&format!("{TODO_ASSERT} - {criterion}"))))
+        .cloned()
+        .collect()
+}
+
+/// A criterion as it reads with every escape taken back out.
+///
+/// The generator writes criteria through `escape_literal`, so a
+/// criterion holding `"` reaches the file as `\"` and one holding `\n`
+/// as `\\n`. Dropping backslashes from both sides compares the two
+/// without needing to know which ecosystem's quote did the escaping.
+fn unescaped(text: &str) -> String {
+    text.replace('\\', "")
 }
 
 /// How many test cases a fragment declares.
@@ -1377,6 +1447,7 @@ mod tests {
                 "Given an empty string \"\", when add is called, then the result is 0".into(),
             ],
             feature_file: None,
+            ..Default::default()
         }
     }
 
@@ -1941,6 +2012,83 @@ mod tests {
         assert!(todo_placeholders("assertEquals(1, 1);").is_empty());
     }
 
+    /// What the generator actually writes is what this has to recognise,
+    /// so the template supplies the input rather than an imitation of
+    /// it. The criterion here carries the `""` that `escape_literal`
+    /// rewrites on the way in, and every ecosystem quotes the call its
+    /// own way - the JS family with `'`, which is the case
+    /// [`todo_placeholders`] cannot see at all.
+    #[test]
+    fn a_generated_unit_test_leaves_its_criterion_unasserted_in_every_ecosystem() {
+        let requirement = requirement();
+        for language in Language::ALL {
+            let files = vec![(
+                "test".to_string(),
+                unit_test_template(language, &requirement),
+            )];
+            assert_eq!(
+                unasserted_criteria(&files, &[], "test", &requirement.acceptance_criteria),
+                requirement.acceptance_criteria,
+                "{} hid its placeholder from the reader",
+                language.display()
+            );
+        }
+    }
+
+    #[test]
+    fn a_body_with_the_assertion_written_reads_as_asserted() {
+        let criteria = requirement().acceptance_criteria;
+        let filled = "void a() { assertEquals(0, calc.add(\"\")); }".to_string();
+        let files = vec![("test".to_string(), filled)];
+        assert!(unasserted_criteria(&files, &[], "test", &criteria).is_empty());
+    }
+
+    /// The test class is shared in the kata layout, so the question has
+    /// to be about *this* requirement's criteria. Asking "does the file
+    /// hold a placeholder" would block REQ-001 over REQ-002's stub,
+    /// which no reply to REQ-001's prompt could ever clear.
+    #[test]
+    fn another_requirements_placeholder_in_the_same_file_is_not_this_ones_problem() {
+        let mine = "Given a, when b, then 3".to_string();
+        let theirs = "Given c, when d, then 7".to_string();
+        let shared = format!(
+            "class KataTest {{\n  void a() {{ assertEquals(3, add()); }}\n\
+             \x20 void b() {{ fail(\"TODO: assert - {theirs}\"); }}\n}}\n"
+        );
+        let files = vec![("KataTest.java".to_string(), shared)];
+        let only_mine = std::slice::from_ref(&mine);
+        assert!(unasserted_criteria(&files, &[], "KataTest.java", only_mine).is_empty());
+        assert_eq!(
+            unasserted_criteria(&files, &[], "KataTest.java", &[mine, theirs.clone()]),
+            vec![theirs]
+        );
+    }
+
+    /// The reply decides for a file it answered about; the working tree
+    /// decides for one it passed over. An attempt that simply ignores
+    /// the test has not filled it in, and that is the attempt worth
+    /// catching - it is what six measured attempts actually did.
+    #[test]
+    fn an_update_asserts_a_criterion_and_a_file_left_out_still_counts() {
+        let criteria = vec!["Given a, when b, then 3".to_string()];
+        let files = vec![(
+            "tests/a_test.rs".to_string(),
+            format!("unimplemented!(\"TODO: assert - {}\");", criteria[0]),
+        )];
+        assert_eq!(
+            unasserted_criteria(&files, &[], "tests/a_test.rs", &criteria),
+            criteria,
+            "a reply that passed the file over has not filled it in"
+        );
+        let updates = vec![FileUpdate {
+            path: "tests/a_test.rs".into(),
+            content: "assert_eq!(3, add(\"1,2\"));".into(),
+        }];
+        assert!(unasserted_criteria(&files, &updates, "tests/a_test.rs", &criteria).is_empty());
+        // A path nothing has written yet carries nothing.
+        assert!(unasserted_criteria(&[], &[], "tests/gone.rs", &criteria).is_empty());
+    }
+
     #[test]
     fn appending_nothing_new_leaves_the_file_untouched() {
         let existing = "import io.cucumber.java.en.Given;\n\
@@ -2046,6 +2194,7 @@ mod tests {
             story: "As a user, I want sums so that I can add.".into(),
             acceptance_criteria: vec!["Given a, when b, then 3".into()],
             feature_file: None,
+            ..Default::default()
         };
         let code = append_unit_tests(existing, Language::Java, &requirement);
         assert!(code.contains("package com.example;"));
@@ -2491,7 +2640,7 @@ mod tests {
                 "src/test/java/Req001Test.java".into(),
                 "class Req001Test {}".into(),
             )],
-            "src/main/java/Kata.java",
+            &["src/main/java/Kata.java".to_string()],
         );
         assert!(prompt.user.contains("REQ-001: Empty string returns zero"));
         assert!(prompt.user.contains("Req001Test.case: TODO: assert"));
@@ -2520,6 +2669,43 @@ mod tests {
             !prompt.user.contains("How to interpret the TDD state"),
             "no dated states means no state section"
         );
+        assert!(
+            !prompt.system.contains("also this requirement's production"),
+            "one target means the prompt reads exactly as it always did"
+        );
+    }
+
+    /// Five rules name the primary and every one of them reads correctly
+    /// about a single file, so the rest of a requirement's production
+    /// code arrives as one added line rather than by rewording them.
+    #[test]
+    fn a_requirement_with_more_than_one_production_file_names_the_others() {
+        let prompt = implementation_prompt(
+            Language::Java,
+            &requirement(),
+            &[],
+            &[],
+            &[],
+            &[],
+            &[
+                "src/main/java/Port.java".to_string(),
+                "src/main/java/Adapter.java".to_string(),
+            ],
+        );
+        assert!(
+            prompt
+                .system
+                .contains("Write the production code at src/main/java/Port.java"),
+            "the first target is still the primary every rule names"
+        );
+        assert!(
+            prompt.system.contains(
+                "may appear in the reply, whether or not they exist yet: \
+                           src/main/java/Adapter.java."
+            ),
+            "{}",
+            prompt.system
+        );
     }
 
     #[test]
@@ -2545,7 +2731,7 @@ mod tests {
                     "class Req001Test {}".into(),
                 ),
             ],
-            "src/main/java/Kata.java",
+            &["src/main/java/Kata.java".to_string()],
         );
         assert!(
             prompt
@@ -2580,7 +2766,7 @@ mod tests {
                 "src/test/java/Req001Test.java".into(),
                 "class Req001Test {}".into(),
             )],
-            "src/main/java/Kata.java",
+            &["src/main/java/Kata.java".to_string()],
         );
         assert!(
             !prompt
@@ -2620,7 +2806,7 @@ io.cucumber.junit.platform.engine.UndefinedStepException: The step 'the result i
                     "class Req001Test {}".into(),
                 ),
             ],
-            "src/main/java/StringCalculator.java",
+            &["src/main/java/StringCalculator.java".to_string()],
         );
         assert!(
             prompt
@@ -2655,7 +2841,7 @@ io.cucumber.junit.platform.engine.UndefinedStepException: The step 'the result i
                 "src/test/java/GeneratedSteps.java".into(),
                 "public class GeneratedSteps {}".into(),
             )],
-            "src/main/java/Kata.java",
+            &["src/main/java/Kata.java".to_string()],
         );
         assert!(
             prompt
@@ -2689,7 +2875,7 @@ io.cucumber.junit.platform.engine.UndefinedStepException: The step 'the result i
             &[],
             &[],
             &files,
-            "src/lib.rs",
+            &["src/lib.rs".to_string()],
         );
         assert!(
             prompt.user.contains("--- src/lib.rs ---"),
@@ -2740,7 +2926,7 @@ io.cucumber.junit.platform.engine.UndefinedStepException: The step 'the result i
             &history,
             &[],
             &[],
-            "src/main/java/Kata.java",
+            &["src/main/java/Kata.java".to_string()],
         );
         assert!(
             prompt
@@ -2803,7 +2989,7 @@ io.cucumber.junit.platform.engine.UndefinedStepException: The step 'the result i
             &history,
             &[],
             &[],
-            "src/main/java/Kata.java",
+            &["src/main/java/Kata.java".to_string()],
         );
         assert!(
             prompt
@@ -2849,7 +3035,7 @@ io.cucumber.junit.platform.engine.UndefinedStepException: The step 'the result i
             &[],
             &states,
             &[],
-            "src/main/java/Kata.java",
+            &["src/main/java/Kata.java".to_string()],
         );
         assert!(
             prompt

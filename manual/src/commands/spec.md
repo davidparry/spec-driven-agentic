@@ -11,7 +11,8 @@ merged view of the whole tree.
 spec list             spec refine <REQ_ID>
 spec show <REQ_ID>    spec reword <REQ_ID>
 spec draft            spec set-feature <REQ_ID> --file <FILE>
-spec validate         spec mark-implemented <REQ_ID>
+spec validate         spec set-production <REQ_ID> --file <FILE>
+                      spec mark-implemented <REQ_ID>
                       spec include add <PATH>
 ```
 
@@ -397,6 +398,36 @@ on an extracted project. `spec scenario add` already updates
 ```bash
 spec set-feature REQ-003 --file src/test/resources/features/string_calculator.feature
 ```
+
+---
+
+## spec set-production
+
+Declare where a requirement's production code lives. Without it,
+`spec implement` infers a conventional path from the project name —
+right for a kata, wrong for anything with a package layout of its own,
+and wrong every time for a requirement whose code is more than one
+file.
+
+```text
+Usage: spec set-production [OPTIONS] <REQ_ID> --file <FILE>
+```
+
+Repeat `--file` for each file; the list replaces whatever was declared
+before, so naming one file after naming two means the second is no
+longer part of this requirement.
+
+```bash
+spec set-production REQ-003 \
+  --file src/main/java/com/example/StringCalculator.java \
+  --file src/main/java/com/example/DelimiterParser.java
+```
+
+A delivery records what it actually wrote here too, adding to the list
+rather than replacing it — so the second attempt at a requirement is
+briefed with the files the first one touched instead of guessing again.
+Paths are project-relative; one that could reach outside the project
+root is refused by either route.
 
 ---
 

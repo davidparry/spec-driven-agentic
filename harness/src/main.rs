@@ -304,6 +304,13 @@ enum SpecCommand {
         #[arg(long)]
         file: String,
     },
+    /// Declare where a requirement's production code lives; repeat
+    /// --file for a requirement whose code is more than one file
+    SetProduction {
+        req_id: String,
+        #[arg(long, required = true)]
+        file: Vec<String>,
+    },
     /// Flip a requirement's status to implemented (requirement_mark_implemented)
     MarkImplemented { req_id: String },
     /// Manage the spec catalog's included files
@@ -1727,6 +1734,10 @@ fn run_spec(
         }
         SpecCommand::SetFeature { req_id, file } => {
             let report = mutation_service(root, attempts).set_feature(req_id, file)?;
+            print_json(&report)
+        }
+        SpecCommand::SetProduction { req_id, file } => {
+            let report = mutation_service(root, attempts).set_production(req_id, file)?;
             print_json(&report)
         }
         SpecCommand::MarkImplemented { req_id } => {

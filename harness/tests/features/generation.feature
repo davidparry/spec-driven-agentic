@@ -260,4 +260,4 @@ Feature: Hybrid generation
       [{"path": "/etc/passwd", "content": "nope"}]
       """
     When generating an implementation for "REQ-001" with the model fails
-    Then the generation error is "The model's reply held no usable file update."
+    Then the generation error contains "the reply held no usable file update for this project"

@@ -233,6 +233,7 @@ mod tests {
             story: "As a user, I want things so that value.".into(),
             acceptance_criteria: vec!["Given a, when b, then 3".into()],
             feature_file: Some("features/x.feature".into()),
+            ..Default::default()
         }
     }
 

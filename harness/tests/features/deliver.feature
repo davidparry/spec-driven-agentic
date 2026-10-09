@@ -233,6 +233,7 @@ Feature: Deliver mode
       """
       [{"path": "src/main/java/Kata.java", "content": "public class Kata { int add(String input) { return 0; } }"}]
       """
+    And the model will also fill in the generated unit test
     And the delivery skips the refactor
     And the delivery budget is 3 attempts
     And the test runs will report:
@@ -308,6 +309,7 @@ Feature: Deliver mode
       """
       [{"path": "src/main/java/Kata.java", "content": "public class Kata { int add( }"}]
       """
+    And the model will also fill in the generated unit test
     And the delivery skips the refactor
     And the delivery budget is 1 attempt
     And the test runs will report:

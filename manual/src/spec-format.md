@@ -57,6 +57,7 @@ requirements.json  →  spec / MCP tools  →  .feature + tests  →  Cucumber/J
 | `story` | yes | The user story, `As a …, I want … so that …`. `spec refine` reviews it for a missing actor, missing benefit, and ambiguous words. |
 | `acceptanceCriteria` | at least one | Each criterion must be phrased Given/When/Then. This is the load-bearing field: agents translate these lines into the Gherkin scenarios and unit tests you then implement. |
 | `featureFile` | when implemented | Repo-root-relative path to the feature file carrying the scenario. Optional while `pending`; once `implemented`, validation requires the file to exist *and* to contain a scenario tagged `@<id>`. `spec mark-implemented` records it automatically. |
+| `productionFiles` | no | Where this requirement's production code lives, as an array — one requirement's code is not always one file. Declared with [`spec set-production`](commands/spec.md#spec-set-production) and added to by a delivery recording what it wrote. When absent, `spec implement` infers a conventional path from `project` instead. |
 
 ## The catalog: splitting the spec across files
 
@@ -92,9 +93,9 @@ The rules:
   including a file twice, including a file that does not exist, or
   escaping the spec directory each report a single actionable issue.
 - **Mutations write back to the declaring file.** `spec reword`,
-  `set-feature`, and `mark-implemented` find the file a requirement
-  lives in and stage only that file. `spec draft` appends to the
-  root by default, or to a chosen file with `--file`.
+  `set-feature`, `set-production`, and `mark-implemented` find the file
+  a requirement lives in and stage only that file. `spec draft` appends
+  to the root by default, or to a chosen file with `--file`.
 
 ### Growing the catalog
 

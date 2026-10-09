@@ -172,6 +172,10 @@ where
             &self.layout,
             "",
             None,
+            requirement
+                .as_ref()
+                .map(|r| r.production_files.as_slice())
+                .unwrap_or_default(),
         )
         .unwrap_or_else(|| implementation_target_path(self.language, &spec.project));
         let manifests = self.manifests()?;
@@ -682,6 +686,7 @@ mod tests {
                     "Given \"1,2\", when add is called, then the result is 3".into(),
                 ],
                 feature_file: None,
+                ..Default::default()
             }],
             ..Spec::default()
         }

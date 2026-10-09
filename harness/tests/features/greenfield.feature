@@ -358,6 +358,7 @@ Feature: Greenfield mode
       """
       [{"path": "src/main/java/Kata.java", "content": "public class Kata { int add(String input) { return 0; } }"}]
       """
+    And the model will also fill in the generated unit test
     And a greenfield model is resolved
     And the greenfield test runs will report:
       """
@@ -401,6 +402,7 @@ Feature: Greenfield mode
       1 tests and 1 failures detailed "Req001Test.empty_string_returns_zero: expected 0 but was 1"
       1 tests and 1 failures detailed "Req001Test.empty_string_returns_zero: expected 0 but was 1"
       """
+    And the model will also fill in the generated unit test
     And the developer will answer:
       """
       <empty>
@@ -463,6 +465,7 @@ Feature: Greenfield mode
       1 tests and 1 failures detailed "Req001Test.empty_string_returns_zero: TODO: assert"
       1 tests and 1 failures detailed "Req001Test.empty_string_returns_zero: expected 0 but was 1"
       """
+    And the model will also fill in the generated unit test
     And the developer will answer:
       """
       <empty>
@@ -507,7 +510,7 @@ Feature: Greenfield mode
       """
     When the greenfield loop runs
     Then the greenfield run completes with phase "GREEN"
-    And the developer was told a finding containing "The model's reply held no usable file update. Implement by hand instead."
+    And the developer was told a finding containing "The model's reply was refused: the reply was not a JSON array"
     And the working tree file "src/main/java/Kata.java" does not exist
 
   Scenario: Steps that are already defined are not regenerated

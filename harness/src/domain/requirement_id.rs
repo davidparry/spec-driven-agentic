@@ -113,6 +113,7 @@ mod tests {
             story: "s".into(),
             acceptance_criteria: Vec::new(),
             feature_file: None,
+            ..Default::default()
         }
     }
 

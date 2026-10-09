@@ -318,6 +318,7 @@ where
             &self.layout,
             "",
             None,
+            &requirement.production_files,
         )
         .unwrap_or_else(|| implementation_target_path(self.language, &spec.project));
         let production_type = production_type_name(&production);

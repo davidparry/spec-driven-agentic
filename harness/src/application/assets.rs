@@ -151,6 +151,7 @@ pub(crate) fn asset_survey(
         layout,
         &evidence,
         explicit,
+        &requirement.production_files,
     );
     if production.is_none() {
         findings.push(format!(
@@ -352,8 +353,9 @@ pub(crate) fn unit_test_path(
 /// `evidence` is code that shows where the behavior is missing — the
 /// bodies of the step definitions this requirement's scenarios run
 /// through. When it is given, the production file whose symbols it
-/// mentions most wins. `explicit` is the developer's own answer and
-/// outranks everything.
+/// mentions most wins. `explicit` is the developer's own answer for
+/// this run and outranks everything; `declared` is the requirement's
+/// own `productionFiles`, which outranks everything inferred.
 ///
 /// Convention is the last resort and is trusted only where it cannot be
 /// wrong: a conventional path that already exists, a project with no
@@ -370,10 +372,20 @@ pub(crate) fn production_path(
     layout: &ProjectStructure,
     evidence: &str,
     explicit: Option<&str>,
+    declared: &[String],
 ) -> Option<String> {
     // The developer's own answer ends the question.
     if let Some(path) = explicit {
         return Some(path.to_string());
+    }
+    // Then what the requirement records - declared by hand or recorded
+    // by the run that last wrote it. Either way it is a standing answer
+    // to this question, and it outranks inference for the same reason
+    // `--into` outranks it: somebody decided, rather than the code
+    // guessing. It also keeps the second attempt writing where the
+    // first one did.
+    if let Some(path) = declared.first() {
+        return Some(path.clone());
     }
     let root = layout.production.as_deref();
     let under_root = |path: &str| match root {
@@ -494,6 +506,7 @@ mod tests {
             story: "As a user, I want sums so that I can add.".into(),
             acceptance_criteria: vec!["Given a, when b, then 3".into()],
             feature_file: Some("features/calc.feature".into()),
+            ..Default::default()
         }
     }
 
@@ -683,6 +696,7 @@ mod tests {
                 &flat_layout(Language::Java),
                 "",
                 None,
+                &[],
             )
             .as_deref(),
             Some("src/main/java/com/example/StringCalculator.java")
@@ -705,6 +719,7 @@ mod tests {
                 &flat_layout(Language::Java),
                 "",
                 None,
+                &[],
             )
             .is_some()
         );
@@ -733,6 +748,7 @@ mod tests {
                 &flat_layout(Language::Java),
                 "",
                 None,
+                &[],
             ),
             None
         );
@@ -761,6 +777,7 @@ mod tests {
                 &flat_layout(Language::Rust),
                 "",
                 None,
+                &[],
             ),
             None
         );
@@ -788,6 +805,7 @@ mod tests {
                 &flat_layout(Language::Java),
                 "",
                 None,
+                &[],
             )
             .as_deref(),
             Some("src/main/java/StringCalculatorKata.java")
@@ -810,6 +828,55 @@ mod tests {
                 &flat_layout(Language::Java),
                 "",
                 Some("src/main/java/com/example/Elsewhere.java"),
+                &[],
+            )
+            .as_deref(),
+            Some("src/main/java/com/example/Elsewhere.java")
+        );
+    }
+
+    /// What the requirement records outranks what the code implies. A
+    /// run that settled on a file, or a developer who declared one, has
+    /// answered a question the evidence can only guess at - and the
+    /// second attempt has to write where the first one did rather than
+    /// re-deriving the target from whatever the scenarios reach today.
+    #[test]
+    fn a_declared_file_outranks_the_evidence() {
+        let files = vec![SourceFile {
+            path: "src/main/java/com/example/StringCalculator.java".into(),
+            content: "class StringCalculator {}".into(),
+        }];
+        let declared = ["src/main/java/com/example/Declared.java".to_string()];
+        assert_eq!(
+            production_path(
+                &files,
+                Language::Java,
+                "String Calculator Kata",
+                &flat_layout(Language::Java),
+                "",
+                None,
+                &declared,
+            )
+            .as_deref(),
+            Some("src/main/java/com/example/Declared.java")
+        );
+    }
+
+    /// `--into` is this run's answer and the declared list is the
+    /// standing one, so the flag still wins - that is what makes it the
+    /// way out of a wrong declaration.
+    #[test]
+    fn an_explicit_target_outranks_a_declared_one() {
+        let declared = ["src/main/java/com/example/Declared.java".to_string()];
+        assert_eq!(
+            production_path(
+                &[],
+                Language::Java,
+                "String Calculator Kata",
+                &flat_layout(Language::Java),
+                "",
+                Some("src/main/java/com/example/Elsewhere.java"),
+                &declared,
             )
             .as_deref(),
             Some("src/main/java/com/example/Elsewhere.java")

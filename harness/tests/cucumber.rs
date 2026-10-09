@@ -144,6 +144,7 @@ struct SpecWorld {
     implement_advice: Option<String>,
     generation_error: Option<String>,
     llm_reply: Option<String>,
+    llm_fills_placeholders: bool,
     llm_failure: Option<String>,
     greenfield_runs: Vec<Result<TestRunSummary, RunnerError>>,
     greenfield_factory_error: Option<String>,
@@ -319,6 +320,7 @@ fn base_requirement(id: &str) -> Requirement {
         story: "As a user, I want things so that value.".into(),
         acceptance_criteria: vec!["Given a, when b, then 3".into()],
         feature_file: Some(FEATURE_FILE.into()),
+        ..Default::default()
     }
 }
 
@@ -397,6 +399,16 @@ impl SpecWorld {
 
     fn feature_catalog(&mut self) -> GherkinFeatureCatalog {
         GherkinFeatureCatalog::new(self.project_root())
+    }
+
+    /// The scripted model this scenario asked for, told where to read
+    /// placeholders from when it is also meant to fill them in.
+    fn scripted_llm(&mut self) -> ScriptedLlm {
+        let reply = self.llm_reply.clone().expect("a scripted model reply");
+        match self.llm_fills_placeholders {
+            true => ScriptedLlm::filling_placeholders_under(reply, self.project_root()),
+            false => ScriptedLlm::new(reply),
+        }
     }
 
     fn scenario_doc(&self, name: &str) -> &spec_harness::domain::feature::ScenarioDoc {
@@ -1252,7 +1264,7 @@ fn requirement_drafted_assisted(world: &mut SpecWorld) {
         answers: world.prompt_answers.drain(..).collect(),
         transcript: Vec::new(),
     };
-    let llm = ScriptedLlm(world.llm_reply.clone().expect("a scripted model reply"));
+    let llm = world.scripted_llm();
     let service = world.real_mutation_service();
     world.draft_report = Some(
         service
@@ -2185,7 +2197,35 @@ fn the_feature_error_contains(world: &mut SpecWorld, fragment: String) {
 // ---- step discovery and hybrid generation steps ------------------------------
 
 /// [`LlmConversation`] replying with one scripted text turn.
-struct ScriptedLlm(String);
+///
+/// A reply that stages file updates can also be asked to fill in the
+/// generated unit test, which is what a correct implementation attempt
+/// does and what `spec implement` now refuses a reply for skipping.
+/// Composing that update here rather than in the feature file keeps the
+/// generator's own class and method names out of Gherkin, where a
+/// rename would read as an unrelated failure.
+struct ScriptedLlm {
+    reply: String,
+    /// The project root to read placeholders from, when the scenario
+    /// asked for a reply that fills them in.
+    filling_from: Option<PathBuf>,
+}
+
+impl ScriptedLlm {
+    fn new(reply: String) -> Self {
+        Self {
+            reply,
+            filling_from: None,
+        }
+    }
+
+    fn filling_placeholders_under(reply: String, root: PathBuf) -> Self {
+        Self {
+            reply,
+            filling_from: Some(root),
+        }
+    }
+}
 
 impl LlmConversation for ScriptedLlm {
     fn chat(
@@ -2194,8 +2234,66 @@ impl LlmConversation for ScriptedLlm {
         _messages: &[ChatMessage],
         _tools: &[ToolDefinition],
     ) -> Result<ChatTurn, LlmError> {
-        Ok(text_turn(self.0.clone()))
+        Ok(text_turn(match &self.filling_from {
+            Some(root) => with_placeholders_filled(&self.reply, root),
+            None => self.reply.clone(),
+        }))
     }
+}
+
+/// `reply` with an update appended for every file under `root` still
+/// holding a generated placeholder, each placeholder call swapped for
+/// an assertion.
+///
+/// Only the placeholder line changes, so the replacement declares
+/// everything the file declares today and the reply guard has nothing
+/// to object to. The assertion is a tautology because no scenario here
+/// compiles anything - the test runs are scripted, and what is under
+/// test is that the attempt answered for the placeholder at all.
+fn with_placeholders_filled(reply: &str, root: &std::path::Path) -> String {
+    let Ok(mut updates) = serde_json::from_str::<Vec<serde_json::Value>>(reply) else {
+        return reply.to_string();
+    };
+    for (path, content) in placeholder_files(root, root) {
+        let filled = content
+            .lines()
+            .map(|line| match line.contains("TODO: assert") {
+                true => format!(
+                    "{}org.junit.jupiter.api.Assertions.assertEquals(0, 0);",
+                    &line[..line.len() - line.trim_start().len()]
+                ),
+                false => line.to_string(),
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        updates.push(serde_json::json!({ "path": path, "content": filled }));
+    }
+    serde_json::to_string(&updates).expect("a JSON array of file updates")
+}
+
+/// Every file under `dir` holding a generated placeholder, by its path
+/// relative to `root` - which is how a reply has to name it.
+fn placeholder_files(root: &std::path::Path, dir: &std::path::Path) -> Vec<(String, String)> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    entries
+        .filter_map(Result::ok)
+        .flat_map(|entry| {
+            let path = entry.path();
+            if path.is_dir() {
+                return placeholder_files(root, &path);
+            }
+            let Ok(content) = std::fs::read_to_string(&path) else {
+                return Vec::new();
+            };
+            let relative = path.strip_prefix(root).unwrap_or(&path);
+            match content.contains("TODO: assert") {
+                true => vec![(relative.to_string_lossy().into_owned(), content)],
+                false => Vec::new(),
+            }
+        })
+        .collect()
 }
 
 /// A model whose every call fails, for the paths that have to carry on
@@ -2229,12 +2327,7 @@ impl SpecWorld {
             .first()
             .copied()
             .expect("a project marker was written");
-        let llm = with_model.then(|| {
-            ResolvedLlm::new(
-                "scripted-model",
-                ScriptedLlm(self.llm_reply.clone().expect("a scripted model reply")),
-            )
-        });
+        let llm = with_model.then(|| ResolvedLlm::new("scripted-model", self.scripted_llm()));
         let layout = spec_harness::workspace::project_layout(&root);
         GenerationService::new(
             GherkinFeatureCatalog::new(root.clone()),
@@ -2262,12 +2355,7 @@ impl SpecWorld {
             .first()
             .copied()
             .expect("a project marker was written");
-        let llm = with_model.then(|| {
-            ResolvedLlm::new(
-                "scripted-model",
-                ScriptedLlm(self.llm_reply.clone().expect("a scripted model reply")),
-            )
-        });
+        let llm = with_model.then(|| ResolvedLlm::new("scripted-model", self.scripted_llm()));
         let layout = spec_harness::workspace::project_layout(&root);
         ImplementService::new(
             GherkinFeatureCatalog::new(root.clone()),
@@ -2339,6 +2427,16 @@ fn the_model_will_reply(world: &mut SpecWorld, step: &Step) {
             .trim_matches('\n')
             .to_string(),
     );
+}
+
+/// What a correct implementation attempt does beyond writing the
+/// production code: it answers for the `TODO: assert` the generator
+/// left. The filled test is composed from whatever is on disk when the
+/// model is called, so no feature file has to carry the generated class
+/// and method names.
+#[given("the model will also fill in the generated unit test")]
+fn the_model_will_fill_the_unit_test(world: &mut SpecWorld) {
+    world.llm_fills_placeholders = true;
 }
 
 #[when("missing steps are reported")]
@@ -2669,6 +2767,18 @@ fn generation_error_is(world: &mut SpecWorld, expected: String) {
     assert_eq!(world.generation_error.as_deref(), Some(expected.as_str()));
 }
 
+/// For a refusal that carries the model's own reason: the reason is the
+/// point, and the retry count trailing it is not worth pinning in a
+/// feature file.
+#[then(regex = r#"^the generation error contains "(.+)"$"#)]
+fn generation_error_contains(world: &mut SpecWorld, expected: String) {
+    let error = world
+        .generation_error
+        .as_deref()
+        .expect("a generation error was recorded");
+    assert!(error.contains(&expected), "got: {error}");
+}
+
 // ---- greenfield orchestration steps ------------------------------------------
 
 /// A [`TestRunner`] that replays a queue of scripted outcomes, one per run.
@@ -2768,9 +2878,7 @@ fn the_greenfield_loop_runs(world: &mut SpecWorld) {
     let llm = world.greenfield_llm.then(|| {
         (
             "scripted-model".to_string(),
-            Arc::new(ScriptedLlm(
-                world.llm_reply.clone().expect("a scripted model reply"),
-            )) as DynLlm,
+            Arc::new(world.scripted_llm()) as DynLlm,
         )
     });
     let mut prompter = ScriptedPrompter {
@@ -2950,11 +3058,9 @@ fn run_delivery(world: &mut SpecWorld, target: Option<&str>) {
         None => Ok(Box::new(QueuedRunner(runs.clone())) as Box<dyn TestRunner>),
     });
     let llm = world.greenfield_llm.then(|| {
-        let conversation = match &world.llm_failure {
-            Some(message) => Arc::new(FailingLlm(message.clone())) as DynLlm,
-            None => Arc::new(ScriptedLlm(
-                world.llm_reply.clone().expect("a scripted model reply"),
-            )) as DynLlm,
+        let conversation = match world.llm_failure.clone() {
+            Some(message) => Arc::new(FailingLlm(message)) as DynLlm,
+            None => Arc::new(world.scripted_llm()) as DynLlm,
         };
         ("scripted-model".to_string(), conversation)
     });

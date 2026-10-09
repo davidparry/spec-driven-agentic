@@ -595,6 +595,7 @@ mod tests {
                 "Given \"1,2\", when add is called, then the result is 3".into(),
             ],
             feature_file: None,
+            ..Default::default()
         }
     }
 

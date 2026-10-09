@@ -219,6 +219,7 @@ mod tests {
             story: story.into(),
             acceptance_criteria: criteria.into_iter().map(String::from).collect(),
             feature_file: None,
+            ..Default::default()
         }
     }
 

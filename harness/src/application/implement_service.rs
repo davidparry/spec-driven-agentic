@@ -7,17 +7,17 @@ use serde::Serialize;
 
 use crate::application::LlmReplyError;
 use crate::application::assets::{
-    asset_survey, find_requirement, load_spec, production_path, scenario_evidence,
+    asset_survey, find_requirement, load_spec, production_path, scenario_evidence, unit_test_path,
 };
 use crate::application::generation_service::ResolvedLlm;
 use crate::application::spec_service::ServiceError;
 use crate::domain::coverage::covers_all;
 use crate::domain::generation::{
     FileUpdate, ImplementAsset, advice_prompt, implementation_file_name, implementation_prompt,
-    parse_file_updates_checked, strip_code_fences,
+    parse_file_updates_checked, strip_code_fences, unasserted_criteria,
 };
 use crate::domain::language::Language;
-use crate::domain::layout::in_production_root;
+use crate::domain::layout::{allowed_targets, in_production_root};
 use crate::domain::memory::ProjectStructure;
 use crate::domain::model::Spec;
 use crate::domain::reply_guard::{Damage, damage};
@@ -31,6 +31,11 @@ use crate::ports::{
 #[derive(Debug, Serialize, PartialEq, Eq)]
 pub struct ImplementationReport {
     pub targets: Vec<String>,
+    /// Which of `targets` were production files rather than tests or
+    /// step definitions. A delivery records these on the requirement so
+    /// the next attempt writes where this one did.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub production: Vec<String>,
     pub written: bool,
     pub source: String,
     /// Set when the reply left the production code untouched - the
@@ -127,6 +132,7 @@ where
     /// not this service's.
     pub fn target(&self, req_id: &str) -> Result<ImplementTarget, ServiceError> {
         let spec = load_spec(&self.spec)?;
+        let declared = find_requirement(&spec, req_id)?.production_files.as_slice();
         let sources = self.sources.sources(source_extension(self.language))?;
         let evidence = scenario_evidence(
             &self.features,
@@ -141,6 +147,7 @@ where
             &self.layout,
             &evidence,
             None,
+            declared,
         );
         Ok(match resolved {
             Some(path) => ImplementTarget::Resolved(path),
@@ -194,6 +201,7 @@ where
             &self.layout,
             &evidence,
             into,
+            &requirement.production_files,
         ) else {
             return Err(ServiceError(format!(
                 "Cannot tell which production file {req_id} belongs in - no step \
@@ -202,6 +210,10 @@ where
                  first so they point at the code."
             )));
         };
+        // The primary plus whatever else the requirement declares. A
+        // declared file that does not exist yet is the one an attempt is
+        // there to create, so it has to survive the reply filter below.
+        let allowed = allowed_targets(&production, &requirement.production_files);
         let prompt = implementation_prompt(
             self.language,
             requirement,
@@ -209,8 +221,19 @@ where
             history,
             states,
             &files,
-            &production,
+            &allowed,
         );
+        // The assertions this attempt is expected to write. The prompt
+        // has always asked for them; nothing checked, and six measured
+        // attempts left every placeholder standing while the failure
+        // count climbed.
+        //
+        // Scoped to this requirement's own criteria, not to the file:
+        // the kata's test class is shared, and refusing over the next
+        // requirement's stub would be a complaint no reply to this
+        // prompt could answer.
+        let unit_test = unit_test_path(&sources, self.language, req_id, &self.layout);
+        let criteria = requirement.acceptance_criteria.as_slice();
         tracing::debug!(requirement = %req_id, "calling LLM for an implementation attempt");
         let updates = match llm.ask(
             prompter,
@@ -219,15 +242,26 @@ where
                 let updates: Vec<FileUpdate> = parse_file_updates_checked(reply)?
                     .into_iter()
                     .filter(|update| {
-                        update.path == production
+                        allowed.contains(&update.path)
                             || files.iter().any(|(path, _)| *path == update.path)
                     })
                     .collect();
                 if updates.is_empty() {
-                    Err("the reply held no usable file update for this project".into())
-                } else {
-                    Ok(updates)
+                    return Err("the reply held no usable file update for this project".into());
                 }
+                let unasserted = unasserted_criteria(&files, &updates, &unit_test, criteria);
+                if !unasserted.is_empty() {
+                    return Err(format!(
+                        "{unit_test} still carries the generated placeholder for {} - replace \
+                         each one with an assertion that calls the production code",
+                        unasserted
+                            .iter()
+                            .map(|criterion| format!("{criterion:?}"))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ));
+                }
+                Ok(updates)
             },
             |_, _, _| {},
         ) {
@@ -235,10 +269,12 @@ where
             Err(LlmReplyError::Call(e)) => {
                 return Err(ServiceError(LlmReplyError::call_failed(&e)));
             }
-            Err(LlmReplyError::Invalid { .. }) => {
-                return Err(ServiceError(
-                    "The model's reply held no usable file update.".into(),
-                ));
+            // The reason names the file still holding a stub, which is
+            // the one thing a developer rerunning this by hand needs.
+            Err(LlmReplyError::Invalid { reason }) => {
+                return Err(ServiceError(format!(
+                    "The model's reply was refused: {reason}"
+                )));
             }
         };
         let summary = format!("implementation attempt for {req_id} (llm)");
@@ -261,31 +297,43 @@ where
             self.store.write(&update.path, &update.content, &summary)?;
             targets.push(update.path.clone());
         }
-        let production_written = targets.contains(&production);
-        let production_refused = refused.iter().any(|(path, _)| *path == production);
+        // One of three declared files written is not an incomplete
+        // attempt - the test run decides that. Only an attempt that
+        // touched none of them has demonstrably left the bar where it
+        // was.
+        let written_production: Vec<String> = allowed
+            .iter()
+            .filter(|path| targets.contains(path))
+            .cloned()
+            .collect();
+        let production_refused = refused
+            .iter()
+            .any(|(path, _)| allowed.contains(&(*path).to_string()));
         let mut warnings: Vec<String> = refused
             .iter()
             .map(|(path, damage)| damage.describe(path))
             .collect();
-        // A reply without the production file is an incomplete attempt:
+        // A reply without the production code is an incomplete attempt:
         // the tests will stay RED. Stage what arrived, but say so. A
         // refusal has already said it, and said more.
-        if !production_written && !production_refused {
+        if written_production.is_empty() && !production_refused {
             warnings.push(if targets.is_empty() {
                 format!(
                     "The model left every file as it found it, including the \
-                     production code ({production}) - nothing was written."
+                     production code ({}) - nothing was written.",
+                    allowed.join(", ")
                 )
             } else {
                 format!(
-                    "The model left the production code untouched ({production}) - \
+                    "The model left the production code untouched ({}) - \
                      it only wrote: {}.",
+                    allowed.join(", "),
                     targets.join(", ")
                 )
             });
         }
         warnings.extend(ran_ahead_of_the_spec(&updates, &spec, req_id));
-        let next_step = if production_written {
+        let next_step = if !written_production.is_empty() {
             "Run spec test - the run decides.".to_string()
         } else if targets.is_empty() {
             format!(
@@ -301,6 +349,7 @@ where
         Ok(ImplementationReport {
             written: !targets.is_empty(),
             targets,
+            production: written_production,
             source: "llm".into(),
             warning: (!warnings.is_empty()).then(|| warnings.join(" ")),
             next_step,
@@ -490,6 +539,34 @@ mod tests {
             FakeSources(sources),
             InMemoryWorkTree::default(),
             InMemorySpecRepository(Ok(calculator_spec())),
+            Language::Java,
+            flat_layout(Language::Java),
+            llm,
+        )
+    }
+
+    /// The same service with REQ-001 declaring where its production code
+    /// lives - a port and the adapter beside it, which is the case one
+    /// path cannot describe.
+    fn service_declaring(
+        declared: &[&str],
+        sources: Vec<SourceFile>,
+        llm: Option<ResolvedLlm<FakeLlm>>,
+    ) -> ImplementService<
+        InMemoryFeatureCatalog,
+        FakeSources,
+        InMemoryWorkTree,
+        InMemorySpecRepository,
+        FakeLlm,
+    > {
+        let mut spec = calculator_spec();
+        spec.requirements[0].production_files =
+            declared.iter().map(|path| (*path).to_string()).collect();
+        ImplementService::new(
+            calculator_catalog(),
+            FakeSources(sources),
+            InMemoryWorkTree::default(),
+            InMemorySpecRepository(Ok(spec)),
             Language::Java,
             flat_layout(Language::Java),
             llm,
@@ -917,17 +994,230 @@ mod tests {
         );
     }
 
+    /// The refusal names what was wrong with the reply. Flattening every
+    /// rejection to one sentence left a developer rerunning this by hand
+    /// nothing to act on.
     #[test]
-    fn an_unusable_implementation_reply_is_refused() {
-        for reply in [
-            "Sure, here you go!",
-            r#"[{"path": "not/a/project/file.java", "content": "x"}]"#,
+    fn an_unusable_implementation_reply_is_refused_with_the_reason() {
+        // Two replies, two different faults. Each one's own reason has
+        // to survive the trip out, which is the whole point.
+        for (reply, expected) in [
+            ("Sure, here you go!", "not a JSON array"),
+            (
+                r#"[{"path": "not/a/project/file.java", "content": "x"}]"#,
+                "no usable file update for this project",
+            ),
         ] {
             let error = service(vec![], Some(FakeLlm::replying(reply)))
                 .generate(&mut NullPrompter, "REQ-001", &[], &[], &[], None)
                 .unwrap_err();
-            assert_eq!(error.0, "The model's reply held no usable file update.");
+            assert!(
+                error.0.starts_with("The model's reply was refused:"),
+                "{}",
+                error.0
+            );
+            assert!(error.0.contains(expected), "{}", error.0);
         }
+    }
+
+    /// A generated unit test as `spec unittest generate` leaves it: a
+    /// failing placeholder carrying REQ-001's criterion where the
+    /// assertion belongs. It names REQ-001, so `unit_test_path` resolves
+    /// to it. The criterion quotes `"1,2"`, so the file holds it escaped
+    /// the way Java quotes it - which is the case worth fixturing.
+    fn generated_test() -> SourceFile {
+        let placeholder =
+            r#"fail("TODO: assert - Given \"1,2\", when add is called, then the result is 3");"#;
+        SourceFile {
+            path: "src/test/java/Req001Test.java".into(),
+            content: format!(
+                "/** Generated from REQ-001: Adds two numbers */\n\
+                 class Req001Test {{\n\
+                 \x20   @Test\n\
+                 \x20   void addsNumbers() {{\n\
+                 \x20       {placeholder}\n\
+                 \x20   }}\n\
+                 }}\n"
+            ),
+        }
+    }
+
+    /// Observed across six measured attempts: the model writes the
+    /// production code and hands the generated `fail("TODO: assert")`
+    /// back untouched, so the bar stays red for a reason the attempt
+    /// never addressed. The prompt has always asked for the assertion -
+    /// this is the first thing that checks it arrived.
+    #[test]
+    fn a_reply_that_leaves_the_placeholders_standing_is_refused_and_asked_again() {
+        let reply = r#"[{"path": "src/main/java/Kata.java",
+            "content": "public class Kata { int add(String in) { return 0; } }"}]"#;
+        let service = service(vec![generated_test()], Some(FakeLlm::replying(reply)));
+        let error = service
+            .generate(
+                &mut NullPrompter,
+                "REQ-001",
+                &["boom".into()],
+                &[],
+                &[],
+                None,
+            )
+            .unwrap_err();
+        assert!(
+            error.0.contains("src/test/java/Req001Test.java"),
+            "the refusal names the file still holding the stub: {}",
+            error.0
+        );
+        assert!(
+            error.0.contains("still carries the generated placeholder")
+                && error.0.contains("when add is called"),
+            "the refusal names the criterion left unasserted: {}",
+            error.0
+        );
+        assert!(
+            service.llm.as_ref().unwrap().chat().prompts.borrow().len() > 1,
+            "a refused reply is asked again rather than handed back"
+        );
+    }
+
+    /// A declared file that does not exist yet is exactly the file an
+    /// attempt is there to create. The reply filter used to admit one
+    /// new path - the primary - so the second one was dropped without a
+    /// word, and the requirement could never gain its adapter.
+    #[test]
+    fn a_declared_file_that_does_not_exist_yet_is_still_written() {
+        let filled = "class Req001Test { @Test void t() { assertEquals(3, new Port().add()); } }";
+        let reply = format!(
+            r#"[{{"path": "src/main/java/Port.java", "content": "public class Port {{}}"}},
+                {{"path": "src/main/java/Adapter.java", "content": "public class Adapter {{}}"}},
+                {{"path": "src/test/java/Req001Test.java", "content": {}}}]"#,
+            serde_json::to_string(filled).unwrap()
+        );
+        let service = service_declaring(
+            &["src/main/java/Port.java", "src/main/java/Adapter.java"],
+            vec![generated_test()],
+            Some(FakeLlm::replying(&reply)),
+        );
+        let report = service
+            .generate(
+                &mut NullPrompter,
+                "REQ-001",
+                &["boom".into()],
+                &[],
+                &[],
+                None,
+            )
+            .unwrap();
+        assert!(
+            report
+                .targets
+                .contains(&"src/main/java/Adapter.java".to_string()),
+            "{:?}",
+            report.targets
+        );
+        assert_eq!(
+            report.production,
+            ["src/main/java/Port.java", "src/main/java/Adapter.java"],
+            "the report names which of the targets were production code"
+        );
+        assert_eq!(report.warning, None, "both declared files were written");
+    }
+
+    /// One of two declared files is not an incomplete attempt - the test
+    /// run decides that. Touching none of them is, and the warning has
+    /// to name the whole set so the developer knows what was expected.
+    #[test]
+    fn the_untouched_warning_fires_only_when_no_declared_file_was_written() {
+        let one = r#"[{"path": "src/main/java/Port.java", "content": "public class Port {}"}]"#;
+        let partial = service_declaring(
+            &["src/main/java/Port.java", "src/main/java/Adapter.java"],
+            vec![],
+            Some(FakeLlm::replying(one)),
+        );
+        let report = partial
+            .generate(
+                &mut NullPrompter,
+                "REQ-001",
+                &["boom".into()],
+                &[],
+                &[],
+                None,
+            )
+            .unwrap();
+        assert_eq!(report.warning, None, "one of two written is not a finding");
+        assert_eq!(report.next_step, "Run spec test - the run decides.");
+
+        let steps = r#"[{"path": "src/test/java/Steps.java", "content": "class Steps { real }"}]"#;
+        let none = service_declaring(
+            &["src/main/java/Port.java", "src/main/java/Adapter.java"],
+            vec![SourceFile {
+                path: "src/test/java/Steps.java".into(),
+                content: "old steps".into(),
+            }],
+            Some(FakeLlm::replying(steps)),
+        );
+        let warning = none
+            .generate(
+                &mut NullPrompter,
+                "REQ-001",
+                &["boom".into()],
+                &[],
+                &[],
+                None,
+            )
+            .unwrap()
+            .warning
+            .expect("an attempt that wrote no production code warns");
+        assert!(
+            warning.contains("left the production code untouched"),
+            "{warning}"
+        );
+        assert!(
+            warning.contains("src/main/java/Port.java")
+                && warning.contains("src/main/java/Adapter.java"),
+            "the warning names every file that was expected: {warning}"
+        );
+    }
+
+    /// The gate is satisfied by writing the assertion, and a reply that
+    /// does is written as normal and asked for only once.
+    #[test]
+    fn a_reply_that_writes_the_assertion_is_accepted() {
+        let filled = "/** Generated from REQ-001: Adds two numbers */\n\
+                      class Req001Test {\n\
+                      \x20   @Test\n\
+                      \x20   void addsNumbers() {\n\
+                      \x20       assertEquals(3, new Kata().add(\"1,2\"));\n\
+                      \x20   }\n\
+                      }\n";
+        let reply = format!(
+            r#"[{{"path": "src/main/java/Kata.java",
+                  "content": "public class Kata {{ int add(String in) {{ return 0; }} }}"}},
+                {{"path": "src/test/java/Req001Test.java", "content": {}}}]"#,
+            serde_json::to_string(filled).unwrap()
+        );
+        let service = service(vec![generated_test()], Some(FakeLlm::replying(&reply)));
+        let report = service
+            .generate(
+                &mut NullPrompter,
+                "REQ-001",
+                &["boom".into()],
+                &[],
+                &[],
+                None,
+            )
+            .unwrap();
+        assert!(
+            report
+                .targets
+                .contains(&"src/test/java/Req001Test.java".to_string()),
+            "{:?}",
+            report.targets
+        );
+        assert_eq!(
+            service.llm.as_ref().unwrap().chat().prompts.borrow().len(),
+            1,
+            "a reply that satisfied the gate is not asked again"
+        );
     }
 
     #[test]

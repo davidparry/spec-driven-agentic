@@ -198,6 +198,9 @@ Rules:
 - Replace TODO/pending placeholders in the test and step-definition files with real bodies that call the production code. Keep every scenario, step expression, and test case - never delete or weaken one.
 - Reply with ONLY a JSON array - no prose, no markdown, no code fences, no <think> tags. Each element: {"path": "<one of the listed paths>", "content": "<the complete file>"}.
 - Only these paths may appear: {{ production_path }} and the project files below.
+{% if also_write -%}
+- These paths are also this requirement's production code and may appear in the reply, whether or not they exist yet: {{ also_write }}.
+{% endif -%}
 '''
 user = '''
 The requirement:

@@ -457,6 +457,7 @@ pub fn calculator_spec() -> Spec {
                     "Given \"1,2\", when add is called, then the result is 3".into(),
                 ],
                 feature_file: Some("features/calc.feature".into()),
+                ..Default::default()
             },
             // No scenario carries @REQ-002: the readiness preflight
             // reports the missing tag.
@@ -469,6 +470,7 @@ pub fn calculator_spec() -> Spec {
                     "Given \"3,1\", when subtract is called, then the result is 2".into(),
                 ],
                 feature_file: None,
+                ..Default::default()
             },
             Requirement {
                 id: "REQ-003".into(),
@@ -477,6 +479,7 @@ pub fn calculator_spec() -> Spec {
                 story: "As a user, I want the done thing so that it stays done.".into(),
                 acceptance_criteria: vec!["Given done, when checked, then it is done".into()],
                 feature_file: None,
+                ..Default::default()
             },
         ],
         ..Spec::default()

@@ -236,6 +236,25 @@ pub fn in_production_root(structure: &ProjectStructure, file_name: &str) -> Stri
     )
 }
 
+/// Every production file an implementation attempt may write to: the
+/// one the prompt is built around, plus the rest of what the
+/// requirement declares.
+///
+/// A requirement whose code is a port and its adapter has two targets,
+/// and only one of them can be the primary the prompt names. Without
+/// the rest, the second file is filtered out of the reply for the
+/// reason that it does not exist yet - which is exactly the file an
+/// attempt is there to create.
+///
+/// `primary` leads, because that is the file every message about the
+/// attempt names; the declared order holds after it, and a declared
+/// file that *is* the primary is not repeated.
+pub fn allowed_targets(primary: &str, declared: &[String]) -> Vec<String> {
+    let mut targets = vec![primary.to_string()];
+    targets.extend(declared.iter().filter(|path| *path != primary).cloned());
+    targets
+}
+
 /// [`in_test_root`] for Gherkin, without the package directories: a
 /// `.feature` file does not live under `com/example/` even in the
 /// ecosystems that mirror namespaces onto source paths.
@@ -516,6 +535,24 @@ mod tests {
         assert_eq!(
             in_feature_root(&structure, "calc.feature"),
             "tests/features/calc.feature"
+        );
+    }
+
+    /// The primary leads because it is the file every message about the
+    /// attempt names, and a declared file that is already the primary is
+    /// not said twice.
+    #[test]
+    fn allowed_targets_lead_with_the_primary_and_keep_each_file_once() {
+        let port = "src/main/java/Port.java".to_string();
+        let adapter = "src/main/java/Adapter.java".to_string();
+        assert_eq!(allowed_targets(&port, &[]), [port.clone()]);
+        assert_eq!(
+            allowed_targets(&port, &[adapter.clone(), port.clone()]),
+            [port.clone(), adapter.clone()]
+        );
+        assert_eq!(
+            allowed_targets(&adapter, &[port.clone(), adapter.clone()]),
+            [adapter, port]
         );
     }
 

@@ -13,7 +13,7 @@ pub const ROOT_SPEC_FILE: &str = "requirements.json";
 
 /// One requirement of the spec: the unit the whole workflow revolves
 /// around (draft -> validate -> refine -> scenario -> tests -> code).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Requirement {
     pub id: String,
     #[serde(default)]
@@ -30,6 +30,22 @@ pub struct Requirement {
         skip_serializing_if = "Option::is_none"
     )]
     pub feature_file: Option<String>,
+    /// Where this requirement's production code lives, as the developer
+    /// declared it or as a delivery recorded it. The mirror image of
+    /// `feature_file`, plural because one requirement's code is not
+    /// always one file - a port and its adapter, a type and its
+    /// registration.
+    ///
+    /// Empty is the honest default: nothing has been declared and
+    /// nothing has been written yet, and the conventional path is
+    /// inferred instead. It stays out of the JSON when empty so an
+    /// untouched spec is byte-for-byte what it was.
+    #[serde(
+        rename = "productionFiles",
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub production_files: Vec<String>,
 }
 
 impl Requirement {
@@ -561,6 +577,43 @@ mod tests {
         );
     }
 
+    /// The field is new, and every spec on disk predates it. Reading one
+    /// has to be unremarkable, and writing it back has to leave the file
+    /// as it was - a spec that gains a `"productionFiles": []` line it
+    /// never asked for is a diff in every student's working tree.
+    #[test]
+    fn production_files_are_absent_from_a_spec_that_declares_none() {
+        let json = r#"{"project": "Kata", "requirements": [{"id": "REQ-001"}]}"#;
+        let spec: Spec = serde_json::from_str(json).unwrap();
+        assert!(spec.requirements[0].production_files.is_empty());
+        assert!(
+            !render(&spec).unwrap().contains("productionFiles"),
+            "an untouched spec gains nothing"
+        );
+    }
+
+    /// Plural from the start: one requirement's code is not always one
+    /// file, and a list that round-trips is the whole point of storing
+    /// it rather than inferring it every time.
+    #[test]
+    fn declared_production_files_round_trip_under_the_workshop_field_name() {
+        let json = r#"{
+            "project": "Kata",
+            "requirements": [{
+                "id": "REQ-001",
+                "productionFiles": ["src/main/java/Calc.java", "src/main/java/Parser.java"]
+            }]
+        }"#;
+        let spec: Spec = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            spec.requirements[0].production_files,
+            ["src/main/java/Calc.java", "src/main/java/Parser.java"]
+        );
+        let written = render(&spec).unwrap();
+        assert!(written.contains("productionFiles"), "{written}");
+        assert_eq!(serde_json::from_str::<Spec>(&written).unwrap(), spec);
+    }
+
     pub fn requirement(id: &str) -> Requirement {
         Requirement {
             id: id.into(),
@@ -569,6 +622,7 @@ mod tests {
             story: "As a user, I want things so that value.".into(),
             acceptance_criteria: vec!["Given a, when b, then 3".into()],
             feature_file: Some("features/x.feature".into()),
+            ..Default::default()
         }
     }
 }

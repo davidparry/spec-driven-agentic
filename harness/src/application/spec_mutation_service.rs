@@ -3,6 +3,8 @@
 //! GREEN-gated `mark-implemented`. Every mutation writes the project's
 //! files directly; git is the review gate.
 
+use std::collections::HashSet;
+
 use serde::Serialize;
 
 use crate::application::agent_service::{Agent, AgentConfig, DEFAULT_MAX_ROUNDS, NullBroker};
@@ -13,6 +15,7 @@ use crate::application::{DEFAULT_LLM_ATTEMPTS, LlmReplyError};
 use crate::domain::decision::Verdict;
 use crate::domain::human::{Human, columns, counted, sections};
 use crate::domain::model::{Requirement, Spec, SpecCatalog, SpecFile};
+use crate::domain::paths::confine;
 use crate::domain::prompts::RenderedPrompt;
 use crate::domain::proposal::{
     ProposedRequirement, missing_edge_case, parse_proposals_checked, parse_rewording_checked,
@@ -153,6 +156,16 @@ pub struct SetFeatureReport {
     pub id: String,
     #[serde(rename = "featureFile")]
     pub feature_file: String,
+    pub written: bool,
+    #[serde(rename = "nextStep")]
+    pub next_step: String,
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+pub struct SetProductionReport {
+    pub id: String,
+    #[serde(rename = "productionFiles")]
+    pub production_files: Vec<String>,
     pub written: bool,
     #[serde(rename = "nextStep")]
     pub next_step: String,
@@ -550,6 +563,7 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: WorkTree, S: StateS
                 story,
                 acceptance_criteria,
                 feature_file: None,
+                production_files: Vec::new(),
             };
             merged.requirements.push(requirement.clone());
             file_mut_or_err(&mut catalog, &target)?
@@ -761,6 +775,7 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: WorkTree, S: StateS
             story: story.to_string(),
             acceptance_criteria: criteria,
             feature_file: None,
+            production_files: Vec::new(),
         };
         self.stage_direct(&mut catalog, &target, candidate, false)
     }
@@ -889,6 +904,94 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: WorkTree, S: StateS
             feature_file: path.to_string(),
             written: true,
             next_step: format!("{id} now names {path}. Add its scenario with spec scenario add."),
+        })
+    }
+
+    /// Declare where a requirement's production code lives, replacing
+    /// whatever was recorded before. The developer's own answer, and so
+    /// the one that outranks both the recorded history and the
+    /// conventional path.
+    pub fn set_production(
+        &self,
+        id: &str,
+        paths: &[String],
+    ) -> Result<SetProductionReport, ServiceError> {
+        if paths.is_empty() {
+            return Err(ServiceError(format!(
+                "Name at least one file for {id}: spec set-production {id} --file <path>."
+            )));
+        }
+        self.rewrite_production(id, paths, |_, declared| declared.to_vec())
+    }
+
+    /// Remember files a delivery actually wrote, keeping what was there.
+    /// Unions rather than replaces: the run that adds an adapter has not
+    /// learned that the port it was added to is no longer production
+    /// code.
+    pub fn record_production(
+        &self,
+        id: &str,
+        paths: &[String],
+    ) -> Result<SetProductionReport, ServiceError> {
+        self.rewrite_production(id, paths, |known, written| {
+            let mut all = known.to_vec();
+            all.extend(written.iter().cloned());
+            all
+        })
+    }
+
+    /// The one write both of the above are: confine the paths offered,
+    /// resolve the requirement, let `next` decide the list from what is
+    /// recorded and what was offered, and write only when that changes
+    /// something.
+    ///
+    /// Confining here rather than at each caller is what keeps the two
+    /// honest: a recorded path is a path `spec implement` is afterwards
+    /// allowed to write, so one that could reach outside the project
+    /// root must not be storable by either route.
+    fn rewrite_production(
+        &self,
+        id: &str,
+        paths: &[String],
+        next: impl FnOnce(&[String], &[String]) -> Vec<String>,
+    ) -> Result<SetProductionReport, ServiceError> {
+        let offered = paths
+            .iter()
+            .map(|path| {
+                confine(path).map_err(|why| ServiceError(format!("Cannot record {path:?}: {why}")))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let _claim = self.store.claim()?;
+        let mut catalog = self.spec_catalog()?;
+        let target = catalog.source_of(id).map(str::to_string).ok_or_else(|| {
+            ServiceError(format!(
+                "No requirement with id '{id}'. Call spec list to see valid ids."
+            ))
+        })?;
+        let requirement = requirement_mut_or_err(&mut catalog, &target, id)?;
+        let files = distinct(next(&requirement.production_files, &offered));
+        if files == requirement.production_files {
+            return Ok(SetProductionReport {
+                next_step: format!("{id} already names {}.", naming(&files)),
+                id: id.to_string(),
+                production_files: files,
+                written: false,
+            });
+        }
+        requirement.production_files = files.clone();
+        self.write_file(
+            &catalog,
+            &target,
+            &format!("set {id} productionFiles to {}", files.join(", ")),
+        )?;
+        Ok(SetProductionReport {
+            next_step: format!(
+                "{id} now names {}. spec implement writes there instead of guessing.",
+                naming(&files)
+            ),
+            id: id.to_string(),
+            production_files: files,
+            written: true,
         })
     }
 
@@ -1053,6 +1156,10 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: WorkTree, S: StateS
                     story,
                     acceptance_criteria: criteria,
                     feature_file: prior.as_ref().and_then(|p| p.feature_file.clone()),
+                    production_files: prior
+                        .as_ref()
+                        .map(|p| p.production_files.clone())
+                        .unwrap_or_default(),
                 };
                 let findings = self.findings_for(&merged, &candidate);
                 if findings.is_empty() {
@@ -1636,7 +1743,9 @@ fn nothing_written(id: String, title: String, replace: bool, findings: Vec<Strin
 }
 
 /// The requirement a rewording proposal stands for: the model owns the
-/// wording, the draft keeps its identity, status, and feature file.
+/// wording, the draft keeps its identity, status, and the files it is
+/// bound to. Rewording a story is not a reason to forget where its
+/// scenario or its code lives.
 fn reworded_from(candidate: &Requirement, proposal: ProposedRequirement) -> Requirement {
     Requirement {
         id: candidate.id.clone(),
@@ -1645,6 +1754,7 @@ fn reworded_from(candidate: &Requirement, proposal: ProposedRequirement) -> Requ
         story: proposal.story,
         acceptance_criteria: proposal.acceptance_criteria,
         feature_file: candidate.feature_file.clone(),
+        production_files: candidate.production_files.clone(),
     }
 }
 
@@ -1765,6 +1875,24 @@ fn covers(dir: &str, working: &str) -> bool {
             .is_some_and(|rest| rest.starts_with('/'))
 }
 
+/// `paths` with repeats dropped, in the order they were first named.
+///
+/// A requirement naming the same file twice is noise in a diff nobody
+/// asked for, and the recording path hands back whatever a delivery
+/// wrote - which is often the file it already knew about.
+fn distinct(paths: Vec<String>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    paths
+        .into_iter()
+        .filter(|p| seen.insert(p.clone()))
+        .collect()
+}
+
+/// A list of paths as a sentence reads it.
+fn naming(paths: &[String]) -> String {
+    paths.join(", ")
+}
+
 /// `target` (relative to the root document's directory) expressed
 /// relative to `dir` — the form an include entry is written in.
 fn relative_to(dir: &str, target: &str) -> String {
@@ -1882,6 +2010,7 @@ mod tests {
                 "Given an empty string \"\", when add is called, then the result is 0".into(),
             ],
             feature_file: None,
+            ..Default::default()
         }
     }
 
@@ -3518,6 +3647,119 @@ mod tests {
             .set_feature("REQ-001", "src/test/resources/features/calc.feature")
             .unwrap();
         assert!(!noop.written);
+    }
+
+    /// Declaring is the developer's word on the matter, so it replaces:
+    /// naming one file after naming two means the second is no longer
+    /// where this requirement's code lives.
+    #[test]
+    fn set_production_replaces_what_was_declared_before() {
+        let service = service(Ok(spec()), green());
+        let both = [
+            "src/main/java/Calc.java".to_string(),
+            "src/main/java/Parser.java".to_string(),
+        ];
+        let report = service.set_production("REQ-001", &both).unwrap();
+        assert!(report.written);
+        assert_eq!(report.production_files, both);
+
+        let one = ["src/main/java/Calc.java".to_string()];
+        let narrowed = service.set_production("REQ-001", &one).unwrap();
+        assert!(narrowed.written);
+        assert_eq!(narrowed.production_files, one);
+        assert!(!service.set_production("REQ-001", &one).unwrap().written);
+
+        let written: Spec = serde_json::from_str(&service.store.get(SPEC_PATH).unwrap()).unwrap();
+        assert_eq!(written.requirements[0].production_files, one);
+    }
+
+    /// Recording is a delivery reporting what it wrote, which is never
+    /// the whole truth about a requirement - so it adds, and adding a
+    /// file already known changes nothing worth a write.
+    #[test]
+    fn record_production_unions_and_keeps_each_file_once() {
+        let service = service(Ok(spec()), green());
+        let calc = ["src/main/java/Calc.java".to_string()];
+        service.record_production("REQ-001", &calc).unwrap();
+        let report = service
+            .record_production(
+                "REQ-001",
+                &[calc[0].clone(), "src/main/java/Parser.java".to_string()],
+            )
+            .unwrap();
+        assert!(report.written);
+        assert_eq!(
+            report.production_files,
+            ["src/main/java/Calc.java", "src/main/java/Parser.java"]
+        );
+        assert!(!service.record_production("REQ-001", &calc).unwrap().written);
+        assert!(
+            !service.record_production("REQ-001", &[]).unwrap().written,
+            "a delivery that wrote no production code has nothing to add"
+        );
+    }
+
+    /// A recorded path is one `spec implement` is afterwards allowed to
+    /// write, so the jail has to hold at the point it is stored - by
+    /// either route, since a delivery records without a human in the
+    /// loop.
+    #[test]
+    fn a_production_path_reaching_outside_the_project_is_refused() {
+        let service = service(Ok(spec()), green());
+        for path in ["/etc/passwd", "../outside.java", "~/.ssh/id_rsa"] {
+            let offered = [path.to_string()];
+            assert!(
+                service.set_production("REQ-001", &offered).is_err(),
+                "set allowed {path}"
+            );
+            assert!(
+                service.record_production("REQ-001", &offered).is_err(),
+                "record allowed {path}"
+            );
+        }
+        let written: Spec = serde_json::from_str(&service.store.get(SPEC_PATH).unwrap()).unwrap();
+        assert!(written.requirements[0].production_files.is_empty());
+    }
+
+    #[test]
+    fn set_production_without_a_file_names_the_command_to_run() {
+        let service = service(Ok(spec()), green());
+        let error = service.set_production("REQ-001", &[]).unwrap_err();
+        assert!(error.0.contains("--file"), "got: {}", error.0);
+    }
+
+    #[test]
+    fn set_production_of_an_unknown_id_names_the_recovery_command() {
+        let service = service(Ok(spec()), green());
+        let error = service
+            .set_production("REQ-999", &["src/main/java/Calc.java".to_string()])
+            .unwrap_err();
+        assert!(
+            error.0.contains("No requirement with id 'REQ-999'"),
+            "got: {}",
+            error.0
+        );
+    }
+
+    /// Rewording is about words. Forgetting where the code lives because
+    /// the story was rephrased would send the next attempt back to
+    /// guessing a conventional path.
+    #[test]
+    fn rewording_keeps_the_declared_production_files() {
+        let service = service(Ok(spec()), green());
+        let declared = ["src/main/java/Calc.java".to_string()];
+        service.set_production("REQ-001", &declared).unwrap();
+        service
+            .reword_direct(
+                "REQ-001",
+                Some("Comma sums".into()),
+                Some(CLEAN_STORY.into()),
+                vec![CLEAN_CRITERION.into(), EDGE_CRITERION.into()],
+            )
+            .unwrap();
+        let written: Spec = serde_json::from_str(&service.store.get(SPEC_PATH).unwrap()).unwrap();
+        assert_eq!(written.requirements[0].title, "Comma sums");
+        assert_eq!(written.requirements[0].production_files, declared);
     }
 
     #[test]
