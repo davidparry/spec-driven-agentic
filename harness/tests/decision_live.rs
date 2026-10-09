@@ -28,8 +28,11 @@
 use spec_harness::adapters::ollama::OllamaCatalog;
 use spec_harness::adapters::ollama_decision::OllamaDecision;
 use spec_harness::domain::decision::{
-    Answer, CRITERION_MEASURABLE, DECISION_CAPABILITY, DEFAULT_MIN_CONFIDENCE, GateKind, Mode,
-    Policy, Request, Verdict, measurable_state,
+    Answer, CRITERION_MEASURABLE, DECISION_CAPABILITY, DEFAULT_MIN_CONFIDENCE, GateKind,
+    IMPLEMENTATION_COMPLETE, Mode, Policy, REFACTOR_PRESERVES_BEHAVIOUR, Request,
+    SCENARIO_EXERCISES_CRITERION, STEPS_BIND_SCENARIO, TaskGate, UNIT_TEST_ASSERTS, Verdict,
+    implementation_state, measurable_state, refactor_state, scenario_state, steps_state,
+    test_asserts_state,
 };
 use spec_harness::ports::{DecisionModel, ModelCatalog};
 
@@ -600,6 +603,369 @@ fn the_measurable_question_is_evaluated_against_labeled_criteria() {
          per-criterion lines above before adjusting anything.",
         score.false_alarms,
         KNOWN_FALSE_ALARMS
+    );
+}
+
+/// One labelled brief for a gate that is not `measurable`: what to send,
+/// what the author says the answer should be, and why.
+///
+/// `holds` rather than a three-way label: these questions are about work
+/// a model just produced, where "would reviewers disagree" is not the
+/// interesting axis - either the test asserts the criterion or it does
+/// not. The ambiguous bucket stays with `measurable`, which is about
+/// human wording and genuinely has one.
+struct GateCase {
+    what: &'static str,
+    state: serde_json::Value,
+    holds: bool,
+    note: &'static str,
+}
+
+/// A labelled set for one gate, with the bar it has to clear.
+struct GateSet {
+    gate: &'static TaskGate,
+    cases: Vec<GateCase>,
+}
+
+fn case(what: &'static str, state: serde_json::Value, holds: bool, note: &'static str) -> GateCase {
+    GateCase {
+        what,
+        state,
+        holds,
+        note,
+    }
+}
+
+/// The labelled sets for the five gates added with the deliver verify
+/// pass, each written the way its failure actually shows up.
+///
+/// Smaller than the 32-criterion `measurable` set and deliberately so:
+/// every one of these ships at `advisory`
+/// ([`spec_harness::domain::decision::TaskGate::ships_at`]), so the set
+/// is here to say whether the question is worth asking at all, not to
+/// justify a threshold. A gate is promoted to `enforce` only after
+/// somebody grows its set and runs the sweep, which is the precedent
+/// `measurable` set.
+fn gate_sets() -> Vec<GateSet> {
+    const CRITERION: &str = "Given the input \"1,2\", when add is called, then the result is 3";
+    vec![
+        GateSet {
+            gate: &SCENARIO_EXERCISES_CRITERION,
+            cases: vec![
+                case(
+                    "a scenario that checks the stated result",
+                    scenario_state(
+                        CRITERION,
+                        "  Scenario: Two numbers\n    Given the input \"1,2\"\n    \
+                         When add is called\n    Then the result is 3\n",
+                    ),
+                    true,
+                    "sets up, acts, and asserts the stated value",
+                ),
+                case(
+                    "a scenario worded differently but checking the same thing",
+                    scenario_state(
+                        CRITERION,
+                        "  Scenario: Summing a pair\n    Given a calculator\n    \
+                         And the text \"1,2\"\n    When the sum is computed\n    \
+                         Then it equals 3\n",
+                    ),
+                    true,
+                    "different words, same setup, action and assertion",
+                ),
+                case(
+                    "a scenario that only checks the call returned",
+                    scenario_state(
+                        CRITERION,
+                        "  Scenario: Two numbers\n    Given the input \"1,2\"\n    \
+                         When add is called\n    Then no error is raised\n",
+                    ),
+                    false,
+                    "a weaker property than the criterion states",
+                ),
+                case(
+                    "a scenario about different inputs",
+                    scenario_state(
+                        CRITERION,
+                        "  Scenario: Empty input\n    Given the input \"\"\n    \
+                         When add is called\n    Then the result is 0\n",
+                    ),
+                    false,
+                    "asserts an outcome for inputs the criterion is not about",
+                ),
+                case(
+                    "a scenario missing the action",
+                    scenario_state(
+                        CRITERION,
+                        "  Scenario: Two numbers\n    Given the input \"1,2\"\n    \
+                         Then the result is 3\n",
+                    ),
+                    false,
+                    "never performs the action the criterion names",
+                ),
+            ],
+        },
+        GateSet {
+            gate: &STEPS_BIND_SCENARIO,
+            cases: vec![
+                case(
+                    "an expression capturing the line's literal",
+                    steps_state("Given the input \"1,2\"", "the input {string}"),
+                    true,
+                    "matches the line and captures the quoted literal",
+                ),
+                case(
+                    "a regular expression capturing the same literal",
+                    steps_state("Then the result is 3", "^the result is (\\d+)$"),
+                    true,
+                    "a capture group does the same job as {int}",
+                ),
+                case(
+                    "an expression hard-coding a value the line varies",
+                    steps_state("Given the input \"1,2\"", "the input \"3,4\""),
+                    false,
+                    "the literal in the expression is not the line's",
+                ),
+                case(
+                    "an expression for a different step",
+                    steps_state("When add is called", "the result is {int}"),
+                    false,
+                    "the words diverge beyond the parameters",
+                ),
+                case(
+                    "an expression with no parameter for the line's literal",
+                    steps_state("Then the result is 3", "the result is correct"),
+                    false,
+                    "a literal in the line has no counterpart",
+                ),
+            ],
+        },
+        GateSet {
+            gate: &UNIT_TEST_ASSERTS,
+            cases: vec![
+                case(
+                    "a body asserting the stated value",
+                    test_asserts_state(CRITERION, "assertEquals(3, new Kata().add(\"1,2\"));"),
+                    true,
+                    "a wrong answer from the production code fails it",
+                ),
+                case(
+                    "a body asserting more than the criterion requires",
+                    test_asserts_state(
+                        CRITERION,
+                        "Kata kata = new Kata();\nassertNotNull(kata);\n\
+                         assertEquals(3, kata.add(\"1,2\"));",
+                    ),
+                    true,
+                    "extra assertions do not stop it asserting this one",
+                ),
+                case(
+                    "a body asserting a constant",
+                    test_asserts_state(CRITERION, "assertTrue(true);"),
+                    false,
+                    "passes whatever the production code returns",
+                ),
+                case(
+                    "a body that calls and asserts nothing",
+                    test_asserts_state(CRITERION, "new Kata().add(\"1,2\");"),
+                    false,
+                    "no assertion at all",
+                ),
+                case(
+                    "a body left as a placeholder",
+                    test_asserts_state(CRITERION, "fail(\"TODO: assert - then the result is 3\");"),
+                    false,
+                    "a deliberate failure is not an assertion of the criterion",
+                ),
+                case(
+                    "a body asserting a value equals itself",
+                    test_asserts_state(CRITERION, "int expected = 3;\nassertEquals(expected, 3);"),
+                    false,
+                    "never calls the production code",
+                ),
+            ],
+        },
+        GateSet {
+            gate: &IMPLEMENTATION_COMPLETE,
+            cases: vec![
+                case(
+                    "code that computes the stated outcome",
+                    implementation_state(
+                        CRITERION,
+                        "int add(String input) {\n    int total = 0;\n    \
+                         for (String part : input.split(\",\")) total += \
+                         Integer.parseInt(part.trim());\n    return total;\n}",
+                    ),
+                    true,
+                    "computes the sum for the inputs the criterion is about",
+                ),
+                case(
+                    "code that returns a constant",
+                    implementation_state(CRITERION, "int add(String input) {\n    return 0;\n}"),
+                    false,
+                    "a fixed value regardless of input is a stub",
+                ),
+                case(
+                    "code that throws not-implemented",
+                    implementation_state(
+                        CRITERION,
+                        "int add(String input) {\n    throw new \
+                         UnsupportedOperationException(\"not implemented\");\n}",
+                    ),
+                    false,
+                    "does not attempt the behaviour",
+                ),
+                case(
+                    "code that hard-codes this one input",
+                    implementation_state(
+                        CRITERION,
+                        "int add(String input) {\n    if (input.equals(\"1,2\")) return 3;\n    \
+                         return 0;\n}",
+                    ),
+                    false,
+                    "answers the example rather than computing the outcome",
+                ),
+            ],
+        },
+        GateSet {
+            gate: &REFACTOR_PRESERVES_BEHAVIOUR,
+            cases: vec![
+                case(
+                    "an extracted helper",
+                    refactor_state(
+                        "int add(String input) {\n    int total = 0;\n    \
+                         for (String p : input.split(\",\")) total += Integer.parseInt(p.trim());\n    \
+                         return total;\n}",
+                        "int add(String input) {\n    int total = 0;\n    \
+                         for (String p : input.split(\",\")) total += parse(p);\n    \
+                         return total;\n}\n\nprivate int parse(String p) {\n    \
+                         return Integer.parseInt(p.trim());\n}",
+                    ),
+                    true,
+                    "the same computation, named differently",
+                ),
+                case(
+                    "an early return in place of nesting",
+                    refactor_state(
+                        "int add(String input) {\n    if (input.isEmpty()) {\n        \
+                         return 0;\n    } else {\n        return sum(input);\n    }\n}",
+                        "int add(String input) {\n    if (input.isEmpty()) return 0;\n    \
+                         return sum(input);\n}",
+                    ),
+                    true,
+                    "the same branches, read differently",
+                ),
+                case(
+                    "a boundary moved",
+                    refactor_state(
+                        "int clamp(int n) {\n    if (n > 100) return 100;\n    return n;\n}",
+                        "int clamp(int n) {\n    if (n >= 100) return 100;\n    return n;\n}",
+                    ),
+                    false,
+                    "n == 100 is now treated differently",
+                ),
+                case(
+                    "an error now swallowed",
+                    refactor_state(
+                        "int parse(String p) {\n    return Integer.parseInt(p);\n}",
+                        "int parse(String p) {\n    try {\n        \
+                         return Integer.parseInt(p);\n    } catch (NumberFormatException e) {\n        \
+                         return 0;\n    }\n}",
+                    ),
+                    false,
+                    "a caller that relied on the throw sees 0 instead",
+                ),
+                case(
+                    "a branch dropped",
+                    refactor_state(
+                        "int add(String input) {\n    if (input.isEmpty()) return 0;\n    \
+                         return sum(input);\n}",
+                        "int add(String input) {\n    return sum(input);\n}",
+                    ),
+                    false,
+                    "the empty case no longer has its own answer",
+                ),
+            ],
+        },
+    ]
+}
+
+/// Every new gate put to a real model against its labelled set.
+///
+/// Prints the same per-case lines and sweep the `measurable` evaluation
+/// prints, so a gate is promoted on evidence of the same shape. The
+/// assertion is weak on purpose: these sets are small, so the bar is
+/// "the question is worth asking", not "this model is good at it".
+#[test]
+#[ignore = "needs Ollama 0.35+ serving a decision-capable model"]
+fn every_gate_is_evaluated_against_its_labeled_set() {
+    let Some(model) = decision_model() else {
+        return skip("no decision-capable model installed (`ollama pull nimble`)");
+    };
+    let client = OllamaDecision::new(ENDPOINT.to_string());
+    let policy = Policy::new(Mode::Advisory, DEFAULT_MIN_CONFIDENCE);
+    println!("\nmodel: {model}");
+
+    let mut wrong_overall = Vec::new();
+    for set in gate_sets() {
+        println!("\n=== {} ({}) ===", set.gate.gate, set.gate.version());
+        let mut wrong = 0usize;
+        let mut unsure = 0usize;
+        for case in &set.cases {
+            let request = Request::single(
+                set.gate.answer_key(),
+                set.gate.question(),
+                case.state.clone(),
+            );
+            let outcome = client
+                .decide(&model, &request)
+                .unwrap_or_else(|error| panic!("{}: {error}", case.what));
+            let answer = outcome
+                .answers
+                .get(set.gate.answer_key())
+                .unwrap_or_else(|| panic!("no answer for {}", case.what));
+            let verdict = policy.verdict_for(answer, set.gate.kind);
+            let mark = match (verdict, case.holds) {
+                (Verdict::Inconclusive, _) => "  ",
+                (Verdict::Holds, true) | (Verdict::Fails, false) => "ok",
+                _ => "XX",
+            };
+            println!(
+                "{mark} {verdict:<12} expected {:<5} {:<50} {}",
+                case.holds,
+                truncate(case.what, 50),
+                answer.summary()
+            );
+            match mark {
+                "XX" => {
+                    println!("     labeled that way because: {}", case.note);
+                    wrong += 1;
+                }
+                "  " => unsure += 1,
+                _ => {}
+            }
+        }
+        println!(
+            "{}: {wrong} wrong, {unsure} unsure of {}",
+            set.gate.gate,
+            set.cases.len()
+        );
+        // Half is a low bar, and it is the right one for a set this
+        // small: it catches a question the model reads backwards or
+        // cannot read at all, and says nothing about a question that is
+        // merely imperfect. That is what `advisory` is for.
+        if wrong * 2 >= set.cases.len() {
+            wrong_overall.push(format!(
+                "{} got {wrong} of {} wrong",
+                set.gate.gate,
+                set.cases.len()
+            ));
+        }
+    }
+    assert!(
+        wrong_overall.is_empty(),
+        "a question this model cannot read is a question not worth asking: {}",
+        wrong_overall.join("; ")
     );
 }
 
