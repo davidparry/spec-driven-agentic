@@ -6,6 +6,7 @@
 use serde::Serialize;
 
 use crate::domain::language::{Language, detect_languages};
+use crate::domain::memory::ProjectStructure;
 use crate::ports::{GitState, ProjectFiles, RuntimeProbe, Vcs};
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
@@ -22,6 +23,41 @@ pub struct LanguageReport {
     pub note: Option<String>,
 }
 
+/// Where this project keeps its code, as the layout resolver settled
+/// it. Reported so an agent writes to the paths the harness reads back
+/// instead of guessing a conventional one — the mismatch that made
+/// scenarios land outside the project.
+///
+/// A projection of [`ProjectStructure`] rather than the type itself:
+/// this reply shape is frozen, and it should not shift because
+/// `.spec/memory.json` gained a field.
+#[derive(Debug, Default, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LayoutReport {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub module_root: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub production: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tests: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub features: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub step_definitions: Option<String>,
+}
+
+impl From<&ProjectStructure> for LayoutReport {
+    fn from(structure: &ProjectStructure) -> Self {
+        Self {
+            module_root: structure.module_root.clone(),
+            production: structure.production.clone(),
+            tests: structure.tests.clone(),
+            features: structure.features.clone(),
+            step_definitions: structure.step_definitions.clone(),
+        }
+    }
+}
+
 #[derive(Debug, Serialize, PartialEq, Eq)]
 pub struct InspectionReport {
     pub languages: Vec<LanguageReport>,
@@ -30,6 +66,7 @@ pub struct InspectionReport {
     /// greenfield` and `spec deliver` can offer a branch, and whether
     /// what they write is undoable at all.
     pub git: GitState,
+    pub layout: LayoutReport,
     #[serde(rename = "nextStep")]
     pub next_step: String,
 }
@@ -38,11 +75,20 @@ pub struct InspectService<P: ProjectFiles, R: RuntimeProbe, V: Vcs> {
     files: P,
     probe: R,
     vcs: V,
+    /// Injected, not read: resolving the layout is filesystem work the
+    /// composition roots already do, and a service that fetched it
+    /// could not be tested without one.
+    structure: ProjectStructure,
 }
 
 impl<P: ProjectFiles, R: RuntimeProbe, V: Vcs> InspectService<P, R, V> {
-    pub fn new(files: P, probe: R, vcs: V) -> Self {
-        Self { files, probe, vcs }
+    pub fn new(files: P, probe: R, vcs: V, structure: ProjectStructure) -> Self {
+        Self {
+            files,
+            probe,
+            vcs,
+            structure,
+        }
     }
 
     pub fn inspect(&self) -> InspectionReport {
@@ -64,6 +110,7 @@ impl<P: ProjectFiles, R: RuntimeProbe, V: Vcs> InspectService<P, R, V> {
         InspectionReport {
             languages,
             git,
+            layout: LayoutReport::from(&self.structure),
             next_step,
         }
     }
@@ -155,6 +202,16 @@ mod tests {
     use super::*;
     use std::collections::{HashMap, HashSet};
 
+    /// Most of these tests are about runtimes, not layout, so they get
+    /// an unresolved one.
+    fn inspect_service<V: Vcs>(
+        files: FakeFiles,
+        probe: FakeProbe,
+        vcs: V,
+    ) -> InspectService<FakeFiles, FakeProbe, V> {
+        InspectService::new(files, probe, vcs, ProjectStructure::default())
+    }
+
     #[derive(Default)]
     struct FakeFiles(HashSet<&'static str>, HashSet<&'static str>);
 
@@ -209,7 +266,7 @@ mod tests {
 
     #[test]
     fn a_java_project_with_a_jdk_reports_present_with_version() {
-        let service = InspectService::new(
+        let service = inspect_service(
             FakeFiles(["pom.xml"].into(), HashSet::new()),
             FakeProbe([("mvn", "Apache Maven 3.9.9"), ("java", "openjdk 21.0.2")].into()),
             OnABranch,
@@ -242,7 +299,7 @@ mod tests {
 
     #[test]
     fn a_java_project_with_maven_but_no_jdk_notes_the_missing_jdk() {
-        let service = InspectService::new(
+        let service = inspect_service(
             FakeFiles(["pom.xml"].into(), HashSet::new()),
             FakeProbe([("mvn", "Apache Maven 3.9.9")].into()),
             OnABranch,
@@ -263,7 +320,7 @@ mod tests {
 
     #[test]
     fn a_gradle_java_project_uses_the_gradle_runtime() {
-        let service = InspectService::new(
+        let service = inspect_service(
             FakeFiles(["build.gradle"].into(), HashSet::new()),
             FakeProbe([("gradle", "Gradle 8.14"), ("java", "21")].into()),
             OnABranch,
@@ -275,7 +332,7 @@ mod tests {
 
     #[test]
     fn a_missing_runtime_disables_execution_but_not_authoring() {
-        let service = InspectService::new(
+        let service = inspect_service(
             FakeFiles(HashSet::new(), ["csproj"].into()),
             FakeProbe::default(),
             OnABranch,
@@ -299,7 +356,7 @@ mod tests {
 
     #[test]
     fn an_empty_directory_lists_every_supported_ecosystem() {
-        let service = InspectService::new(FakeFiles::default(), FakeProbe::default(), OnABranch);
+        let service = inspect_service(FakeFiles::default(), FakeProbe::default(), OnABranch);
         let report = service.inspect();
         assert!(report.languages.is_empty());
         assert_eq!(
@@ -312,7 +369,7 @@ mod tests {
 
     #[test]
     fn a_polyglot_project_reports_each_ecosystem_with_its_own_runtime_state() {
-        let service = InspectService::new(
+        let service = inspect_service(
             FakeFiles(
                 ["package.json", "tsconfig.json", "Cargo.toml"].into(),
                 HashSet::new(),
@@ -331,7 +388,7 @@ mod tests {
 
     #[test]
     fn the_report_serializes_with_camel_case_field_names() {
-        let service = InspectService::new(
+        let service = inspect_service(
             FakeFiles(["package.json"].into(), HashSet::new()),
             FakeProbe([("node", "v22.1.0")].into()),
             OnABranch,
@@ -343,11 +400,51 @@ mod tests {
         assert!(json.contains("nextStep"));
     }
 
+    /// The report answers "where do I write?" so an agent does not have
+    /// to guess a path for feature_create.
+    #[test]
+    fn the_report_names_the_roots_the_layout_resolved() {
+        let service = InspectService::new(
+            FakeFiles(["Cargo.toml"].into(), HashSet::new()),
+            FakeProbe([("cargo", "cargo 1.97.0")].into()),
+            OnABranch,
+            ProjectStructure {
+                production: Some("src".into()),
+                tests: Some("tests".into()),
+                features: Some("tests/features".into()),
+                step_definitions: Some("tests/steps/generated.rs".into()),
+                ..ProjectStructure::default()
+            },
+        );
+        let report = service.inspect();
+        assert_eq!(report.layout.features.as_deref(), Some("tests/features"));
+        assert_eq!(report.layout.production.as_deref(), Some("src"));
+        assert_eq!(
+            report.layout.step_definitions.as_deref(),
+            Some("tests/steps/generated.rs")
+        );
+        let json = serde_json::to_string(&report).unwrap();
+        assert!(json.contains("stepDefinitions"), "{json}");
+        assert!(json.contains(r#""features":"tests/features""#), "{json}");
+    }
+
+    /// An unresolved layout reports nothing rather than inventing
+    /// defaults: a path in this reply is one the harness will actually
+    /// read back.
+    #[test]
+    fn an_unresolved_layout_reports_no_roots_at_all() {
+        let service = inspect_service(FakeFiles::default(), FakeProbe::default(), OnABranch);
+        let report = service.inspect();
+        assert_eq!(report.layout, LayoutReport::default());
+        let json = serde_json::to_string(&report).unwrap();
+        assert!(json.contains(r#""layout":{}"#), "{json}");
+    }
+
     /// Outside a repository the harness's writes have no undo, and
     /// that outranks whichever runtime happens to be installed.
     #[test]
     fn a_project_outside_a_repository_is_told_so_before_anything_else() {
-        let service = InspectService::new(
+        let service = inspect_service(
             FakeFiles(["pom.xml"].into(), HashSet::new()),
             FakeProbe([("mvn", "3.9.9"), ("java", "21")].into()),
             NoRepository,
@@ -367,7 +464,7 @@ mod tests {
 
     #[test]
     fn a_repository_is_reported_with_the_branch_it_is_on() {
-        let service = InspectService::new(
+        let service = inspect_service(
             FakeFiles(["pom.xml"].into(), HashSet::new()),
             FakeProbe([("mvn", "3.9.9"), ("java", "21")].into()),
             OnABranch,

@@ -42,6 +42,12 @@ spec inspect
       "runtimeVersion": "cargo 1.97.0"
     }
   ],
+  "layout": {
+    "production": "src",
+    "tests": "tests",
+    "features": "tests/features",
+    "stepDefinitions": "tests/steps/generated.rs"
+  },
   "nextStep": "The runtime is present. 'spec test' will execute the suite."
 }
 ```
@@ -65,6 +71,26 @@ A Java project without Maven on the PATH:
 
 An empty directory reports no languages and points you at
 [`spec init`](init.md).
+
+## Layout
+
+`layout` is where this project keeps its code, as the resolver settled
+it and as `.spec/memory.json` records it — not a convention guessed per
+language. Every path the harness writes comes from here, so it is also
+the answer to "where do I put this?": a feature file created anywhere
+else is one the harness will not read back.
+
+| Field | What it names |
+| --- | --- |
+| `moduleRoot` | The directory whose build file the test runner is pointed at. Absent when that is the project root. |
+| `production` | The production source root. |
+| `tests` | The test source root. |
+| `features` | Where `.feature` files live — `tests/features` for Rust, `src/test/resources/features` for Maven, `features` elsewhere. |
+| `stepDefinitions` | The file generated step definitions are appended to. |
+
+A field is absent when the layout has not been resolved yet, which is
+the honest answer: a path in this reply is one the harness will
+actually read back.
 
 ## Project memory
 

@@ -1,6 +1,12 @@
 //! Workspace layout shared by every composition root (`main.rs`,
 //! [`crate::mcp`], and [`crate::greenfield`]), so the spec location and
 //! the kata layout are defined exactly once.
+//!
+//! This module is itself a composition root: [`project_layout`] names
+//! `FsMemoryStore` and `FsProjectInventory` directly and reads the
+//! filesystem. It is listed with the others in the README's dependency
+//! rule for that reason — resolving a layout is IO, and every caller
+//! that needs one would otherwise wire it a different way.
 
 use std::fs;
 use std::path::{Path, PathBuf};

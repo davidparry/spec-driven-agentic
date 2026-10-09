@@ -33,6 +33,9 @@ Feature: Greenfield mode
     And the working tree file "pom.xml" contains "cucumber-junit-platform-engine"
     And the working tree file ".spec/memory.json" contains "Java"
     And the working tree file ".spec/memory.json" contains "cucumber-java"
+    # The Java scaffold writes features/.gitkeep and points the JUnit
+    # runner at @SelectDirectories("features"), so a scaffolded project
+    # genuinely keeps its Gherkin here - and the resolver agrees.
     And the working tree file "features/empty-string-returns-zero.feature" contains "@REQ-001"
     And the working tree file "requirements/requirements.json" contains "implemented"
     And the developer was told a finding containing "Generating the unit test for REQ-001 - working ..."
@@ -93,7 +96,7 @@ Feature: Greenfield mode
     Then the greenfield run is not completed
     And the greenfield next step starts with "Authoring is complete"
     And the developer was told a finding containing "Runtime missing (JDK): Install a JDK 17+ and Maven."
-    And the working tree file "features/empty-string-returns-zero.feature" contains "@REQ-001"
+    And the working tree file "src/test/resources/features/empty-string-returns-zero.feature" contains "@REQ-001"
 
   Scenario: No detectable build tool stops execution but authoring stands
     Given a Java project marker
@@ -235,7 +238,7 @@ Feature: Greenfield mode
     And the developer was told a finding containing "Splitting the description into requirements with scripted-model - working ..."
     And the developer was told a finding containing "The description gave no complete requirement - drafting manually."
     And the developer was told a finding containing "Skipping criterion"
-    And the working tree file "features/comma-separated-numbers-are-summed.feature" contains "@REQ-001"
+    And the working tree file "src/test/resources/features/comma-separated-numbers-are-summed.feature" contains "@REQ-001"
 
   Scenario: A described feature drives the wizard from proposals to GREEN
     Given a Java project marker
@@ -266,7 +269,7 @@ Feature: Greenfield mode
     Then the greenfield run completes with phase "GREEN"
     And the developer was told a finding containing "The description holds 1 requirement(s):"
     And the developer was asked "REQ-001 title [Empty string returns zero] (Enter keeps it):"
-    And the working tree file "features/empty-string-returns-zero.feature" contains "@REQ-001"
+    And the working tree file "src/test/resources/features/empty-string-returns-zero.feature" contains "@REQ-001"
     And the working tree file "requirements/requirements.json" contains "implemented"
     And the developer was told a finding containing "Saving status - working ..."
     And the developer was told a finding containing "REQ-001 is implemented. Loop closed."
@@ -312,7 +315,7 @@ Feature: Greenfield mode
     And the developer was told a finding containing "1. REQ-002 Blank input is rejected"
     And the developer was asked "Which pending requirement next? [1-1, Enter for 1] (n stops):"
     And the developer was told a finding containing "REQ-002 is implemented. Loop closed."
-    And the working tree file "features/blank-input-is-rejected.feature" contains "@REQ-002"
+    And the working tree file "src/test/resources/features/blank-input-is-rejected.feature" contains "@REQ-002"
     And the working tree file "requirements/requirements.json" contains "implemented"
 
   Scenario: Declining the pending-requirement offer ends the run with the loop closed

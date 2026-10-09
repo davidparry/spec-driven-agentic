@@ -46,6 +46,11 @@ impl ResolvedLayout {
     }
 }
 
+/// The feature directory every ecosystem's [`Conventions`] list ends
+/// with, and so the one [`in_feature_root`] uses when the layout has not
+/// been resolved yet.
+const FEATURES_FALLBACK: &str = "features";
+
 /// Directory names, relative to the module root, that each ecosystem
 /// keeps things in. Listed most conventional first: the resolver takes
 /// the first one the tree actually has, and falls back to the first
@@ -231,6 +236,20 @@ pub fn in_production_root(structure: &ProjectStructure, file_name: &str) -> Stri
     )
 }
 
+/// [`in_test_root`] for Gherkin, without the package directories: a
+/// `.feature` file does not live under `com/example/` even in the
+/// ecosystems that mirror namespaces onto source paths.
+///
+/// An unresolved layout falls back to `features`, which is the last
+/// candidate every ecosystem's [`conventions`] list ends with and what
+/// `spec init` scaffolds.
+pub fn in_feature_root(structure: &ProjectStructure, file_name: &str) -> String {
+    join(
+        structure.features.as_deref().unwrap_or(FEATURES_FALLBACK),
+        file_name,
+    )
+}
+
 fn in_root(root: Option<&str>, package: Option<&str>, file_name: &str) -> String {
     let dir = join(root.unwrap_or_default(), &package_dirs(package));
     join(&dir, file_name)
@@ -248,6 +267,20 @@ fn package_dirs(package: Option<&str>) -> String {
 /// counting it would let a gate go green over a bar that cannot pass.
 pub fn within_module(structure: &ProjectStructure, path: &str) -> bool {
     is_within(path, structure.module_root.as_deref().unwrap_or_default())
+}
+
+/// Whether a feature file at `path` sits outside the features root the
+/// layout recorded, and so whether memory has gone stale.
+///
+/// A `.feature` written anywhere else is one the catalog will not list,
+/// which is how a scenario comes to exist on disk and read as missing.
+/// An unresolved layout counts as outside: there is no recorded root to
+/// be inside of.
+pub fn outside_feature_root(structure: &ProjectStructure, path: &str) -> bool {
+    match structure.features.as_deref() {
+        Some(features) => !is_within(path, features),
+        None => true,
+    }
 }
 
 /// Every directory holding a build manifest for this ecosystem, `""`
@@ -472,6 +505,105 @@ mod tests {
             tree: &tree(paths),
             spec_features: &[],
         })
+    }
+
+    #[test]
+    fn in_feature_root_joins_the_resolved_features_directory() {
+        let structure = ProjectStructure {
+            features: Some("tests/features".into()),
+            ..ProjectStructure::default()
+        };
+        assert_eq!(
+            in_feature_root(&structure, "calc.feature"),
+            "tests/features/calc.feature"
+        );
+    }
+
+    #[test]
+    fn in_feature_root_falls_back_when_the_layout_is_unresolved() {
+        assert_eq!(
+            in_feature_root(&ProjectStructure::default(), "calc.feature"),
+            "features/calc.feature"
+        );
+    }
+
+    /// Unlike [`in_test_root`], a package never joins the path: Gherkin
+    /// is not namespaced even where the source it exercises is.
+    #[test]
+    fn in_feature_root_ignores_the_package() {
+        let structure = ProjectStructure {
+            features: Some("src/test/resources/features".into()),
+            package: Some("com.example".into()),
+            ..ProjectStructure::default()
+        };
+        assert_eq!(
+            in_feature_root(&structure, "calc.feature"),
+            "src/test/resources/features/calc.feature"
+        );
+    }
+
+    #[test]
+    fn a_feature_under_the_recorded_root_leaves_memory_alone() {
+        let structure = ProjectStructure {
+            features: Some("tests/features".into()),
+            ..ProjectStructure::default()
+        };
+        assert!(!outside_feature_root(
+            &structure,
+            "tests/features/calc.feature"
+        ));
+    }
+
+    /// The exact shape of last night's failure: written to `features/`
+    /// on a project that keeps them in `tests/features/`.
+    #[test]
+    fn a_feature_written_beside_the_recorded_root_is_outside_it() {
+        let structure = ProjectStructure {
+            features: Some("tests/features".into()),
+            ..ProjectStructure::default()
+        };
+        assert!(outside_feature_root(&structure, "features/calc.feature"));
+    }
+
+    /// A prefix is not a parent: `tests/features-old` is its own
+    /// directory, not something inside `tests/features`.
+    #[test]
+    fn a_sibling_sharing_a_prefix_is_not_inside_the_root() {
+        let structure = ProjectStructure {
+            features: Some("tests/features".into()),
+            ..ProjectStructure::default()
+        };
+        assert!(outside_feature_root(
+            &structure,
+            "tests/features-old/calc.feature"
+        ));
+    }
+
+    #[test]
+    fn an_unresolved_layout_has_no_root_to_be_inside_of() {
+        assert!(outside_feature_root(
+            &ProjectStructure::default(),
+            "features/calc.feature"
+        ));
+    }
+
+    /// Every ecosystem's list ends with the fallback, so an unresolved
+    /// layout never writes somewhere the resolver would not have chosen.
+    #[test]
+    fn every_ecosystem_ends_its_feature_conventions_with_the_fallback() {
+        for language in [
+            Language::Java,
+            Language::JavaScript,
+            Language::TypeScript,
+            Language::DotNet,
+            Language::Rust,
+        ] {
+            assert_eq!(
+                conventions(language, None).features.last(),
+                Some(&FEATURES_FALLBACK),
+                "{language:?} does not end with {FEATURES_FALLBACK}"
+            );
+        }
     }
 
     fn resolve_with_spec(language: Language, paths: &[&str], features: &[&str]) -> ResolvedLayout {

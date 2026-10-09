@@ -119,6 +119,31 @@ mod tests {
         assert_eq!(summaries[0].scenario_count, 1);
     }
 
+    /// The contract every caller comparing a written path against a
+    /// summary depends on: discovery starts at the features root, but a
+    /// summary's path is relative to the *project* root. Deliver's
+    /// "has this feature been created already?" check is a string
+    /// equality against this, and when the two disagreed a scenario
+    /// could be written and then read back as missing.
+    #[test]
+    fn summaries_are_relative_to_the_project_root_not_the_search_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let features = dir.path().join("tests").join("features");
+        fs::create_dir_all(&features).unwrap();
+        fs::write(features.join("calc.feature"), FEATURE).unwrap();
+        fs::write(
+            dir.path().join("Cargo.toml"),
+            "[package]\nname = \"demo\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+
+        let catalog = GherkinFeatureCatalog::new(dir.path().to_path_buf());
+        let summaries = catalog.list().unwrap();
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].path, "tests/features/calc.feature");
+        assert!(catalog.exists("tests/features/calc.feature"));
+    }
+
     #[test]
     fn read_returns_the_full_parsed_document() {
         let (_dir, catalog) = catalog_with_feature();

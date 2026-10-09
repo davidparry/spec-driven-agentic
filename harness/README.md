@@ -596,10 +596,10 @@ pick stands and the shell says which one it used.
 
 Clean architecture; the dependency rule points inward, and only the
 composition roots (`main.rs`, the MCP delivery in `src/mcp.rs`, and the
-shared wiring in `src/wiring.rs` and `src/bootstrap.rs`) name concrete
-adapters. The orchestrators in `src/greenfield.rs` and `src/deliver.rs`
-hold flow and ask `wiring` for every service, so two of them cannot wire
-one service two ways:
+shared wiring in `src/wiring.rs`, `src/bootstrap.rs`, and
+`src/workspace.rs`) name concrete adapters. The orchestrators in
+`src/greenfield.rs` and `src/deliver.rs` hold flow and ask `wiring` for
+every service, so two of them cannot wire one service two ways:
 
 | Layer | Module | Contents |
 | --- | --- | --- |
@@ -767,9 +767,13 @@ cargo llvm-cov --ignore-filename-regex 'main\.rs' --summary-only
     (`map_readline`, history persistence) is unit-tested.
 
   Accepted architecture trade-offs (reviewed, kept as-is):
-  - `wiring.rs`, `bootstrap.rs`, and `mcp.rs` construct filesystem
-    adapters directly — they are composition roots like `main.rs`, wiring
-    the same services onto a different delivery mechanism.
+  - `wiring.rs`, `bootstrap.rs`, `mcp.rs`, and `workspace.rs` construct
+    filesystem adapters directly — they are composition roots like
+    `main.rs`, wiring the same services onto a different delivery
+    mechanism. `workspace.rs` earns it by owning layout resolution:
+    `project_layout()` is the one place that decides where a project
+    keeps its code, and every caller is handed the answer rather than
+    computing its own.
   - `deliver.rs` keeps a verification after each step that re-reads the
     asset survey, and those "the command returned Ok and did not do it"
     branches cannot be reached through the real services. They are kept
@@ -895,8 +899,11 @@ test-first:
 2. **Respect the dependency rule.** Domain code takes no IO and imports
    nothing from `adapters/`; anything the inner layers need from the
    outside world enters through a trait in `src/ports.rs`. Only the
-   composition roots — `main.rs`, `mcp.rs`, `wiring.rs`, and
-   `bootstrap.rs` — may name concrete adapter types.
+   composition roots — `main.rs`, `mcp.rs`, `wiring.rs`,
+   `bootstrap.rs`, and `workspace.rs` — may name concrete adapter
+   types. Services take what they need as constructor arguments; a
+   service that resolves its own layout or spec path cannot be tested
+   without a filesystem.
 3. **Keep the tool contracts frozen.** The seven adopted tools
    (`list_requirements`, `get_requirement`, `validate_spec`,
    `refine_requirement`, `run_tests`, `get_tdd_state`, `start_refactor`)

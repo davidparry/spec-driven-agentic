@@ -13,10 +13,11 @@ use crate::application::generation_service::ResolvedLlm;
 use crate::application::spec_service::ServiceError;
 use crate::domain::coverage::covers_all;
 use crate::domain::generation::{
-    FileUpdate, ImplementAsset, advice_prompt, implementation_prompt, parse_file_updates_checked,
-    strip_code_fences,
+    FileUpdate, ImplementAsset, advice_prompt, implementation_file_name, implementation_prompt,
+    parse_file_updates_checked, strip_code_fences,
 };
 use crate::domain::language::Language;
+use crate::domain::layout::in_production_root;
 use crate::domain::memory::ProjectStructure;
 use crate::domain::model::Spec;
 use crate::domain::reply_guard::{Damage, damage};
@@ -38,6 +39,15 @@ pub struct ImplementationReport {
     pub warning: Option<String>,
     #[serde(rename = "nextStep")]
     pub next_step: String,
+}
+
+/// What [`ImplementService::target`] found: the file the evidence
+/// names, or the admission that nothing does, carrying the conventional
+/// path so a caller that must still choose has something to choose.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ImplementTarget {
+    Resolved(String),
+    Unresolved { conventional: String },
 }
 
 /// The implement preflight: whether every prerequisite of an
@@ -103,6 +113,44 @@ where
     /// when one will actually happen.
     pub fn has_model(&self) -> bool {
         self.llm.is_some()
+    }
+
+    /// Which production file an attempt would write to, asked before
+    /// attempting.
+    ///
+    /// [`production_path`] answers "which file does the evidence point
+    /// at?" and refuses to guess when nothing does. That refusal is
+    /// right for `spec implement`, where a developer can answer
+    /// `--into`. It leaves an unattended caller with a question and
+    /// nobody to ask, so the refusal is reported alongside the
+    /// conventional path - what to do about it is the caller's policy,
+    /// not this service's.
+    pub fn target(&self, req_id: &str) -> Result<ImplementTarget, ServiceError> {
+        let spec = load_spec(&self.spec)?;
+        let sources = self.sources.sources(source_extension(self.language))?;
+        let evidence = scenario_evidence(
+            &self.features,
+            &sources,
+            self.language,
+            &format!("@{req_id}"),
+        )?;
+        let resolved = production_path(
+            &sources,
+            self.language,
+            &spec.project,
+            &self.layout,
+            &evidence,
+            None,
+        );
+        Ok(match resolved {
+            Some(path) => ImplementTarget::Resolved(path),
+            None => ImplementTarget::Unresolved {
+                conventional: in_production_root(
+                    &self.layout,
+                    &implementation_file_name(self.language, &spec.project),
+                ),
+            },
+        })
     }
 
     /// Ask the model to make the failing tests pass: production code plus
@@ -446,6 +494,45 @@ mod tests {
             flat_layout(Language::Java),
             llm,
         )
+    }
+
+    /// Two production files and no step definition pointing at either.
+    /// `spec implement` stops here and asks for `--into`; the service
+    /// still has to hand back a usable conventional path so an
+    /// unattended caller is not left with only the refusal.
+    #[test]
+    fn an_unresolvable_target_comes_back_with_the_conventional_path() {
+        let sources = vec![
+            SourceFile {
+                path: "src/main/java/Alpha.java".into(),
+                content: "public class Alpha {}".into(),
+            },
+            SourceFile {
+                path: "src/main/java/Beta.java".into(),
+                content: "public class Beta {}".into(),
+            },
+        ];
+        assert_eq!(
+            service(sources, None).target("REQ-001").unwrap(),
+            ImplementTarget::Unresolved {
+                conventional: "src/main/java/Kata.java".into()
+            }
+        );
+    }
+
+    /// Evidence still decides. The fallback is only reached when
+    /// nothing points anywhere, so a project with a single production
+    /// file resolves without it.
+    #[test]
+    fn a_single_production_file_resolves_without_the_fallback() {
+        let sources = vec![SourceFile {
+            path: "src/main/java/Only.java".into(),
+            content: "public class Only {}".into(),
+        }];
+        assert_eq!(
+            service(sources, None).target("REQ-001").unwrap(),
+            ImplementTarget::Resolved("src/main/java/Only.java".into())
+        );
     }
 
     #[test]

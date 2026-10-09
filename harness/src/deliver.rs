@@ -43,7 +43,7 @@ use crate::adapters::runners::detect_runner;
 use crate::application::DEFAULT_LLM_ATTEMPTS;
 use crate::application::assets::{asset_survey, load_spec};
 use crate::application::generation_service::GenerationService;
-use crate::application::implement_service::ImplementService;
+use crate::application::implement_service::{ImplementService, ImplementTarget};
 use crate::application::refactor_service::RefactorService;
 use crate::application::scenario_service::ScenarioService;
 use crate::application::spec_mutation_service::SpecMutationService;
@@ -53,6 +53,8 @@ use crate::bootstrap::{
     project_detected, refresh_project_memory, run_and_narrate,
 };
 use crate::domain::language::Language;
+use crate::domain::layout::in_feature_root;
+use crate::domain::memory::ProjectStructure;
 use crate::domain::model::{Requirement, Spec};
 use crate::domain::requirement_id::{DEFAULT_PREFIX, is_id_shape, split_id};
 use crate::domain::scaffold::slug;
@@ -498,7 +500,10 @@ impl Deliver {
             return Ok(Outcome::AlreadyImplemented);
         }
 
-        if let Some(stopped) = self.author_scenarios(prompter, language, req_id, requirement)? {
+        let structure = project_layout(&self.root);
+        if let Some(stopped) =
+            self.author_scenarios(prompter, language, req_id, requirement, &structure)?
+        {
             return Ok(stopped);
         }
         if let Some(stopped) = self.author_steps(prompter, language, req_id)? {
@@ -555,15 +560,15 @@ impl Deliver {
         language: Language,
         req_id: &str,
         requirement: &Requirement,
+        structure: &ProjectStructure,
     ) -> Result<Option<Outcome>, String> {
         if !self.scenario_missing(language, req_id)? {
             prompter.tell(&format!("A scenario tagged @{req_id} is already in place."));
             return Ok(None);
         }
-        let feature_path = requirement
-            .feature_file
-            .clone()
-            .unwrap_or_else(|| format!("features/{}.feature", slug(&requirement.title)));
+        let feature_path = requirement.feature_file.clone().unwrap_or_else(|| {
+            in_feature_root(structure, &format!("{}.feature", slug(&requirement.title)))
+        });
         let scenarios = self.scenario_service();
         let known = self
             .feature_catalog()
@@ -867,16 +872,29 @@ impl Deliver {
         req_id: &str,
     ) -> Result<(), String> {
         let brief = tdd.implementation_brief(req_id).map_err(tdd_message)?;
+        // Nobody is at the keyboard to answer --into. Evidence still
+        // decides wherever it can; only when it names nothing does an
+        // unattended run fall back to convention, and say which file it
+        // settled on so the choice is in the transcript.
+        let into = match implement.target(req_id) {
+            Ok(ImplementTarget::Resolved(_)) => None,
+            Ok(ImplementTarget::Unresolved { conventional }) => {
+                prompter.warn(&unattended_target(req_id, &conventional));
+                Some(conventional)
+            }
+            Err(error) => {
+                prompter.warn(&format!("{} Implement by hand instead.", error.0));
+                return Ok(());
+            }
+        };
         let work = prompter.working(IMPLEMENT_ATTEMPT_WORK);
-        // Nobody is at the keyboard to answer --into; an unresolvable
-        // target surfaces as the refusal this returns.
         let outcome = implement.generate(
             prompter,
             req_id,
             &brief.failures,
             &brief.history,
             &brief.states,
-            None,
+            into.as_deref(),
         );
         drop(work);
         match outcome {
@@ -1175,6 +1193,18 @@ fn undefined_steps_remain(req_id: &str, count: usize) -> String {
     )
 }
 
+/// Said when no step definition points at a production file and the run
+/// picks the conventional one anyway. A warning rather than a quiet
+/// `tell`: the choice is convention, not evidence, and the next reader
+/// of the transcript should know which it was.
+fn unattended_target(req_id: &str, conventional: &str) -> String {
+    format!(
+        "No step definition {req_id}'s scenarios run through names a production file. \
+         Implementing into {conventional} by convention - rerun with \
+         spec implement {req_id} --into <path> to put it elsewhere."
+    )
+}
+
 fn steps_retry_notice(count: usize, round: u32) -> String {
     format!(
         "{count} step(s) are still undefined - generating again (round {round} of {VERIFY_ROUNDS})."
@@ -1199,6 +1229,16 @@ mod tests {
 
     fn known(ids: &[&str]) -> Vec<String> {
         ids.iter().map(|id| id.to_string()).collect()
+    }
+
+    /// The transcript has to show both halves: which file was written,
+    /// and that convention rather than evidence chose it.
+    #[test]
+    fn the_unattended_target_notice_names_the_file_and_why_it_was_picked() {
+        let notice = unattended_target("REQ-001", "src/main/java/Kata.java");
+        assert!(notice.contains("src/main/java/Kata.java"), "{notice}");
+        assert!(notice.contains("by convention"), "{notice}");
+        assert!(notice.contains("spec implement REQ-001 --into"), "{notice}");
     }
 
     #[test]

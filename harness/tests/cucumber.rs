@@ -870,6 +870,7 @@ fn the_runtime_is_installed(world: &mut SpecWorld, command: String, version: Str
 
 #[when("the project is inspected")]
 fn the_project_is_inspected(world: &mut SpecWorld) {
+    let structure = spec_harness::workspace::project_layout(&world.project_root());
     let service = InspectService::new(
         InMemoryProject {
             markers: world.project_markers.clone(),
@@ -881,6 +882,7 @@ fn the_project_is_inspected(world: &mut SpecWorld) {
             refuses: false,
             created: Arc::clone(&world.branches_created),
         },
+        structure,
     );
     world.inspection = Some(service.inspect());
 }
@@ -1337,6 +1339,18 @@ fn developer_told_finding(world: &mut SpecWorld, fragment: String) {
             .iter()
             .any(|l| l.contains(&fragment)),
         "transcript: {:#?}",
+        world.prompt_transcript
+    );
+}
+
+#[then(regex = r#"^the developer was not told a finding containing "(.+)"$"#)]
+fn developer_not_told_finding(world: &mut SpecWorld, fragment: String) {
+    assert!(
+        !world
+            .prompt_transcript
+            .iter()
+            .any(|l| l.contains(&fragment)),
+        "{fragment:?} was in the transcript: {:#?}",
         world.prompt_transcript
     );
 }

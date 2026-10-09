@@ -27,13 +27,15 @@ use crate::bootstrap::{
     run_and_narrate,
 };
 use crate::domain::language::Language;
+use crate::domain::layout::in_feature_root;
+use crate::domain::memory::ProjectStructure;
 use crate::domain::model::Spec;
 use crate::domain::scaffold::slug;
 use crate::domain::steps::criterion_to_steps;
 use crate::domain::tdd::ImplementAttempt;
 use crate::ports::{Prompter, WorkTree as _};
 use crate::wiring::{DynLlm, ProjectFeatures, ProjectTree, RunnerFactory};
-use crate::workspace::SPEC_PATH;
+use crate::workspace::{SPEC_PATH, project_layout};
 
 /// The questions this loop asks, named so the end-to-end driver in
 /// `tests/greenfield_e2e.rs` answers the bytes this module prints. See
@@ -251,7 +253,8 @@ impl Greenfield {
         language: Language,
         req_id: &str,
     ) -> Result<GreenfieldReport, String> {
-        let feature_path = self.author_scenarios(prompter, req_id)?;
+        let structure = project_layout(&self.root);
+        let feature_path = self.author_scenarios(prompter, req_id, &structure)?;
         prompter.tell(&format!("Scenarios written to {feature_path}."));
 
         // Generation, then gate 2: read what was written before going on.
@@ -429,6 +432,7 @@ impl Greenfield {
         &self,
         prompter: &mut dyn Prompter,
         req_id: &str,
+        structure: &ProjectStructure,
     ) -> Result<String, String> {
         let spec: Spec = {
             let repository = FsSpecRepository::new(self.root.join(SPEC_PATH));
@@ -440,7 +444,7 @@ impl Greenfield {
             .find(|r| r.id == req_id)
             .ok_or_else(|| format!("{req_id} disappeared from the committed spec"))?;
         let title = requirement.title.as_str();
-        let feature_path = format!("features/{}.feature", slug(title));
+        let feature_path = in_feature_root(structure, &format!("{}.feature", slug(title)));
         let scenarios = self.scenario_service();
         scenarios
             .create_feature(&feature_path, title)

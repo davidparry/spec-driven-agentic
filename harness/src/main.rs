@@ -54,6 +54,7 @@ use spec_harness::domain::config_report::{ConfigSource, LLM_MODEL_KEY};
 use spec_harness::domain::decision::{DECISION_PLANE_HELP, Transition};
 use spec_harness::domain::human::{Human, counted};
 use spec_harness::domain::language::Language;
+use spec_harness::domain::layout::outside_feature_root;
 use spec_harness::domain::mcp_registry::ServerSpec;
 use spec_harness::domain::prompts::ask_prompt;
 use spec_harness::domain::spec_validator::{is_structural_issue, structural_repair};
@@ -787,6 +788,7 @@ fn execute(
                 FsProjectFiles::new(root.to_path_buf()),
                 ProcessRuntimeProbe,
                 spec_harness::wiring::vcs(root),
+                spec_harness::workspace::project_layout(root),
             );
             print_json(&service.inspect())
         }
@@ -1772,8 +1774,22 @@ fn run_feature(root: &Path, command: &FeatureCommand) -> anyhow::Result<()> {
         }
         FeatureCommand::Create { path, name } => {
             let report = scenario_service(root).create_feature(path, name)?;
+            note_new_feature_root(root, path);
             print_json(&report)
         }
+    }
+}
+
+/// Rescan after a feature file lands outside the recorded features
+/// root, so the catalog that reads features back is looking where they
+/// now are. Done here rather than in `ScenarioService`: the service
+/// writes a file and should not also own project memory.
+///
+/// A feature inside the recorded root changes nothing, so the common
+/// case costs one comparison instead of a filesystem walk.
+fn note_new_feature_root(root: &Path, path: &str) {
+    if outside_feature_root(&spec_harness::workspace::project_layout(root), path) {
+        refresh_project_memory(root, None);
     }
 }
 

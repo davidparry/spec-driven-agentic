@@ -384,6 +384,19 @@ impl WorkflowServer {
         wiring::scenario_service(&self.root)
     }
 
+    /// Rescan after a feature file lands outside the recorded features
+    /// root, so the catalog that reads it back looks where it now is.
+    /// Here rather than in `ScenarioService`: the service writes a file
+    /// and should not also own project memory.
+    fn note_new_feature_root(&self, path: &str) {
+        if crate::domain::layout::outside_feature_root(
+            &crate::workspace::project_layout(&self.root),
+            path,
+        ) {
+            crate::bootstrap::refresh_project_memory(&self.root, None);
+        }
+    }
+
     fn tdd_service(&self) -> TddService<FsStateStore> {
         wiring::tdd_service(&self.root)
     }
@@ -580,7 +593,9 @@ impl WorkflowServer {
 
     #[tool(
         description = "Detect the project's languages, BDD frameworks, runtimes, and \
-        whether test execution is possible. Authoring never requires a runtime."
+        whether test execution is possible, and report where the project keeps its \
+        production code, tests, features, and step definitions. Authoring never \
+        requires a runtime."
     )]
     async fn project_inspect(&self) -> Result<CallToolResult, McpError> {
         let _span = tool_call("project_inspect");
@@ -588,6 +603,7 @@ impl WorkflowServer {
             FsProjectFiles::new(self.root.clone()),
             ProcessRuntimeProbe,
             wiring::vcs(&self.root),
+            crate::workspace::project_layout(&self.root),
         );
         Ok(json_result(&service.inspect_mcp()))
     }
@@ -627,7 +643,10 @@ impl WorkflowServer {
                 .scenario_service()
                 .create_feature(&params.path, &params.name)
             {
-                Ok(report) => json_result(&report),
+                Ok(report) => {
+                    self.note_new_feature_root(&params.path);
+                    json_result(&report)
+                }
                 Err(e) => error_result(e),
             },
         )

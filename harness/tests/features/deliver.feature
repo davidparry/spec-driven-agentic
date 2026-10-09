@@ -101,7 +101,7 @@ Feature: Deliver mode
     And the delivery planned "REQ-001"
     And the developer was told a finding containing "The description holds 1 requirement(s):"
     And the developer was told a finding containing "REQ-001 title [Empty string returns zero] (Enter keeps it): kept"
-    And the working tree file "features/empty-string-returns-zero.feature" contains "@REQ-001"
+    And the working tree file "src/test/resources/features/empty-string-returns-zero.feature" contains "@REQ-001"
     And the working tree file "requirements/requirements.json" contains "implemented"
 
   Scenario: Every requirement a description holds is planned, not only the first
@@ -460,6 +460,31 @@ Feature: Deliver mode
     Then the delivery completes
     And the developer was told a finding containing "Skipping the refactor."
     And the working tree file "requirements/requirements.json" contains "implemented"
+
+  # The failure this guards against: deliver wrote the Gherkin to
+  # features/<slug>.feature while the catalog read the project's own
+  # features root, so a scenario could be written and then read back as
+  # missing. A drafted requirement carries no featureFile, which is the
+  # only case where deliver chooses the path itself.
+  Scenario: A drafted requirement's scenarios land in the project's own features root
+    Given a Java project marker
+    And an empty working spec
+    And a model is resolved
+    And the model will reply:
+      """
+      [{"title": "Empty string returns zero", "story": "As a calculator user, I want an empty string to return 0 so that no input is a safe default.", "acceptanceCriteria": ["Given an empty string \"\", when add is called, then the result is 0"]}]
+      """
+    And the delivery skips the refactor
+    And the test runs will report:
+      """
+      1 tests and 0 failures
+      """
+    When the delivery runs for "empty input means zero"
+    Then the delivery completes
+    And the delivery delivered "REQ-001"
+    And the working tree file "src/test/resources/features/empty-string-returns-zero.feature" contains "@REQ-001"
+    And the working tree file "features/empty-string-returns-zero.feature" does not exist
+    And the developer was not told a finding containing "can be read back"
 
   Scenario: A requirement whose criteria are not Given/When/Then cannot be delivered
     Given a Java project marker
