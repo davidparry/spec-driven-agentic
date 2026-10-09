@@ -49,6 +49,23 @@ pub fn scenario_template(requirement: &Requirement) -> Vec<ProposedScenario> {
         .collect()
 }
 
+/// The criteria [`scenario_template`] produces a scenario for, in the
+/// order it produces them.
+///
+/// A criterion that is not Given/When/Then shaped yields no scenario, so
+/// the scenarios a model is asked for line up with *these* criteria and
+/// not with the requirement's whole list. Anything pairing the two - a
+/// judgment about whether scenario N exercises criterion N - has to pair
+/// against this, or it reads a scenario against a criterion that was
+/// never asked about.
+pub fn scenarios_criteria(requirement: &Requirement) -> Vec<&String> {
+    requirement
+        .acceptance_criteria
+        .iter()
+        .filter(|criterion| criterion_to_steps(criterion).is_some())
+        .collect()
+}
+
 /// The scenarios as Gherkin, for the `<template>` block of the prompt and
 /// for anything else that wants to show them the way they will be written.
 pub fn as_gherkin(scenarios: &[ProposedScenario]) -> String {
@@ -220,6 +237,23 @@ mod tests {
         let mut requirement = requirement();
         requirement.acceptance_criteria = vec!["the calculator is fast".into()];
         assert!(scenario_template(&requirement).is_empty());
+    }
+
+    #[test]
+    fn the_criteria_to_pair_against_skip_the_ones_that_yield_no_scenario() {
+        let mut requirement = requirement();
+        requirement
+            .acceptance_criteria
+            .insert(1, "it is fast".into());
+
+        let criteria = scenarios_criteria(&requirement);
+
+        assert_eq!(criteria.len(), scenario_template(&requirement).len());
+        assert!(
+            !criteria.iter().any(|criterion| *criterion == "it is fast"),
+            "pairing against a criterion with no scenario reads scenario 2 \
+             against the wrong line: {criteria:?}"
+        );
     }
 
     #[test]

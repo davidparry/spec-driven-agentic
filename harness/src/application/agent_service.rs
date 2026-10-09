@@ -106,11 +106,21 @@ impl<C: LlmConversation, B: ToolBroker> Agent<C, B> {
         &self.model
     }
 
+    /// Ask once, and keep asking while `parse` refuses the reply - each
+    /// retry carrying the reason back to the model.
+    ///
+    /// `parse` is `FnMut`, matching `on_retry` below it: a validator
+    /// that has to remember something across rounds - a judgment it
+    /// made, a rejection it has already spent - is the ordinary case
+    /// here, and it is called once per round with no other borrow live.
+    /// Every `Fn` is already an `FnMut`, so this costs existing callers
+    /// nothing and saves the ones that need state from reaching for a
+    /// `RefCell`.
     pub fn ask<T>(
         &self,
         prompter: &mut dyn Prompter,
         prompt: &RenderedPrompt,
-        parse: impl Fn(&str) -> Result<T, String>,
+        mut parse: impl FnMut(&str) -> Result<T, String>,
         mut on_retry: impl FnMut(u32, u32, &str),
     ) -> Result<T, LlmReplyError> {
         let mut messages = vec![
@@ -539,6 +549,49 @@ mod tests {
             .unwrap();
         assert_eq!(value, "now valid");
         assert_eq!(*notices.borrow(), vec![(2, 3, "empty".into())]);
+    }
+
+    /// A validator that has to remember what it already did - judging a
+    /// reply once and spending that judgment, rather than paying for it
+    /// again on every retry - needs to own its state, not borrow it.
+    /// `FnMut` is what lets it, and the count below is only ever right
+    /// if the same closure is the one called on both rounds.
+    #[test]
+    fn a_validator_keeps_its_own_state_across_a_retry() {
+        let agent = make_agent(
+            vec![
+                Ok(ChatTurn {
+                    content: String::new(),
+                    tool_calls: vec![],
+                }),
+                Ok(ChatTurn {
+                    content: "now valid".into(),
+                    tool_calls: vec![],
+                }),
+            ],
+            FakeBroker::default(),
+            vec![],
+            3,
+            12,
+        );
+        let mut prompter = silent();
+        let mut judged = 0u32;
+        let value = agent
+            .ask(
+                &mut prompter,
+                &prompt(),
+                |reply| {
+                    judged += 1;
+                    match judged {
+                        1 => Err("judged once already".to_string()),
+                        _ => Ok(reply.to_string()),
+                    }
+                },
+                |_, _, _| {},
+            )
+            .unwrap();
+        assert_eq!(value, "now valid");
+        assert_eq!(judged, 2, "the same validator saw both rounds");
     }
 
     #[test]

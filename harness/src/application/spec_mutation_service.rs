@@ -9,10 +9,10 @@ use serde::Serialize;
 
 use crate::application::agent_service::{Agent, AgentConfig, DEFAULT_MAX_ROUNDS, NullBroker};
 use crate::application::assets::{feature_tagged, load_catalog};
-use crate::application::decision_service::CriterionJudge;
+use crate::application::decision_service::TaskJudge;
 use crate::application::spec_service::ServiceError;
 use crate::application::{DEFAULT_LLM_ATTEMPTS, LlmReplyError};
-use crate::domain::decision::Verdict;
+use crate::domain::decision::{CRITERION_MEASURABLE, Verdict};
 use crate::domain::human::{Human, columns, counted, sections};
 use crate::domain::model::{Requirement, Spec, SpecCatalog, SpecFile};
 use crate::domain::paths::confine;
@@ -49,7 +49,7 @@ fn ask_llm<T>(
     call: LlmCall<'_>,
     prompter: &mut dyn Prompter,
     prompt: &RenderedPrompt,
-    parse: impl Fn(&str) -> Result<T, String>,
+    parse: impl FnMut(&str) -> Result<T, String>,
     on_retry: impl FnMut(u32, u32, &str),
 ) -> Result<T, LlmReplyError> {
     Agent::new(
@@ -255,7 +255,7 @@ pub struct SpecMutationService<
     broker: Option<Box<dyn ToolBroker>>,
     /// Asked about drafted criteria during an assisted draft, when the
     /// caller has a decision model and the policy lets it ask.
-    judge: Option<Box<dyn CriterionJudge>>,
+    judge: Option<Box<dyn TaskJudge>>,
 }
 
 /// Rewording passes before the wizard stops looping on its own and asks
@@ -330,7 +330,7 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: WorkTree, S: StateS
     /// whether to ask at all is the policy's call and
     /// [`crate::application::decision_service::DecisionService::when_asking`]
     /// has already made it by the time there is anything to pass here.
-    pub fn with_criterion_judge(mut self, judge: Box<dyn CriterionJudge>) -> Self {
+    pub fn with_judge(mut self, judge: Box<dyn TaskJudge>) -> Self {
         self.judge = Some(judge);
         self
     }
@@ -453,7 +453,7 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: WorkTree, S: StateS
         let rejections = std::cell::Cell::new(0u32);
         let attempts = self.llm_attempts;
         // The decision model gets one rejection and no more. It is the
-        // unreliable half of this check - see `with_criterion_judge` -
+        // unreliable half of this check - see `with_judge` -
         // so it nudges a draft once and then takes what it is given,
         // leaving the remaining budget to the rule that is always
         // right about what it finds.
@@ -1680,7 +1680,7 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: WorkTree, S: StateS
 /// further is asked, because a decision model that has stopped
 /// responding will not start between one criterion and the next.
 fn unmeasurable_criteria(
-    judge: &dyn CriterionJudge,
+    judge: &dyn TaskJudge,
     proposals: &[ProposedRequirement],
 ) -> Option<String> {
     let mut flagged = Vec::new();
@@ -1691,7 +1691,8 @@ fn unmeasurable_criteria(
                 proposal.title,
                 index + 1
             );
-            match judge.judge(&input, criterion) {
+            let state = crate::domain::decision::measurable_state(criterion);
+            match judge.judge_task(&CRITERION_MEASURABLE, &input, state) {
                 Ok(judgment) if judgment.verdict == Verdict::Holds => {}
                 Ok(judgment) => {
                     flagged.push(format!("{criterion:?} ({})", judgment.answer.summary()))
@@ -1935,10 +1936,11 @@ fn duplicate_warning(spec: &Spec, candidate: &Requirement) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::decision::Mode;
     use crate::domain::tdd::TddSnapshot;
     use crate::ports::{LlmConversation, PromptError, SpecError};
     use crate::test_support::{
-        FixedStateStore, InMemoryFeatureCatalog, SharedSpecRepository, SharedTree,
+        FixedStateStore, InMemoryFeatureCatalog, ScriptedJudge, SharedSpecRepository, SharedTree,
         calculator_catalog,
     };
     use std::collections::VecDeque;
@@ -2757,58 +2759,6 @@ mod tests {
         );
     }
 
-    /// [`CriterionJudge`] answering a fixed probability to everything,
-    /// counting what it was asked. `Err` for a model that cannot be
-    /// reached.
-    struct ScriptedJudge {
-        answer: Result<f64, ()>,
-        asked: std::cell::RefCell<Vec<String>>,
-    }
-
-    impl ScriptedJudge {
-        fn saying(probability: f64) -> std::rc::Rc<Self> {
-            std::rc::Rc::new(Self {
-                answer: Ok(probability),
-                asked: std::cell::RefCell::new(Vec::new()),
-            })
-        }
-
-        fn unreachable() -> std::rc::Rc<Self> {
-            std::rc::Rc::new(Self {
-                answer: Err(()),
-                asked: std::cell::RefCell::new(Vec::new()),
-            })
-        }
-    }
-
-    impl CriterionJudge for std::rc::Rc<ScriptedJudge> {
-        fn judge(
-            &self,
-            _input: &str,
-            criterion: &str,
-        ) -> Result<crate::domain::decision::Judgment, crate::ports::DecisionError> {
-            self.asked.borrow_mut().push(criterion.to_string());
-            let probability = self
-                .answer
-                .map_err(|()| crate::ports::DecisionError::Unavailable("no model".into()))?;
-            Ok(
-                crate::domain::decision::Policy::new(crate::domain::decision::Mode::Advisory, 0.8)
-                    .judge(
-                        crate::domain::decision::CRITERION_MEASURABLE,
-                        crate::domain::decision::measurable_version(),
-                        "test-judge",
-                        crate::domain::decision::Answer::Noul { noul: probability },
-                        crate::domain::decision::Provenance {
-                            input: "draft".into(),
-                            state: "sha256:0".into(),
-                            state_bytes: 0,
-                        },
-                        crate::domain::decision::Usage::default(),
-                    ),
-            )
-        }
-    }
-
     /// The payoff the whole attachment exists for: a judgment the
     /// drafting model never sees as a verdict, only as something to fix
     /// before the draft is kept.
@@ -2822,8 +2772,8 @@ mod tests {
             "story": "As a user, I want comma sums so that totals come from one input.",
             "acceptanceCriteria": ["Given the input \"1,2\", when add is called, then the result is 3",
                                    "Given an empty string \"\", when add is called, then the result is 0"]}]"#;
-        let judge = ScriptedJudge::saying(0.05);
-        let service = service(Ok(spec()), green()).with_criterion_judge(Box::new(judge.clone()));
+        let judge = ScriptedJudge::saying(Mode::Advisory, 0.05);
+        let service = service(Ok(spec()), green()).with_judge(Box::new(judge.clone()));
         let llm = ScriptedLlm {
             replies: vec![vague.into(), clean.into()],
             calls: std::cell::Cell::new(0),
@@ -2843,7 +2793,7 @@ mod tests {
         );
         // Both criteria are named. A reason listing one of two leaves
         // the model to guess about the other.
-        assert_eq!(judge.asked.borrow().len(), 2);
+        assert_eq!(judge.asked().len(), 2);
         let written: Spec = serde_json::from_str(&service.store.get(SPEC_PATH).unwrap()).unwrap();
         assert_eq!(
             written.requirements.last().unwrap().acceptance_criteria,
@@ -2857,8 +2807,8 @@ mod tests {
     /// its draft too.
     #[test]
     fn a_model_that_stands_by_its_wording_still_gets_its_draft_written() {
-        let judge = ScriptedJudge::saying(0.05);
-        let service = service(Ok(spec()), green()).with_criterion_judge(Box::new(judge.clone()));
+        let judge = ScriptedJudge::saying(Mode::Advisory, 0.05);
+        let service = service(Ok(spec()), green()).with_judge(Box::new(judge.clone()));
         let llm = ScriptedLlm {
             replies: vec![WITH_EDGE.into()],
             calls: std::cell::Cell::new(0),
@@ -2874,7 +2824,7 @@ mod tests {
             "one rejection and no more - the judgment never spends the last attempt"
         );
         assert_eq!(
-            judge.asked.borrow().len(),
+            judge.asked().len(),
             2,
             "asked once about the draft, never again"
         );
@@ -2884,8 +2834,8 @@ mod tests {
     /// a run with nobody watching least of all.
     #[test]
     fn an_unreachable_decision_model_costs_the_draft_nothing() {
-        let judge = ScriptedJudge::unreachable();
-        let service = service(Ok(spec()), green()).with_criterion_judge(Box::new(judge.clone()));
+        let judge = ScriptedJudge::unreachable(Mode::Advisory);
+        let service = service(Ok(spec()), green()).with_judge(Box::new(judge.clone()));
         let llm = ScriptedLlm {
             replies: vec![WITH_EDGE.into()],
             calls: std::cell::Cell::new(0),
@@ -2896,11 +2846,7 @@ mod tests {
             .unwrap();
         assert!(report.written, "report: {report:?}");
         assert_eq!(llm.calls.get(), 1, "no retry was asked for");
-        assert_eq!(
-            judge.asked.borrow().len(),
-            1,
-            "the first failure stops the asking"
-        );
+        assert_eq!(judge.asked().len(), 1, "the first failure stops the asking");
     }
 
     /// A question the loop has no round left to act on is a question
@@ -2909,10 +2855,10 @@ mod tests {
     /// all of it.
     #[test]
     fn the_judgment_is_not_asked_when_no_round_is_left_to_act_on_it() {
-        let judge = ScriptedJudge::saying(0.05);
+        let judge = ScriptedJudge::saying(Mode::Advisory, 0.05);
         let service = service(Ok(spec()), green())
             .with_llm_attempts(2)
-            .with_criterion_judge(Box::new(judge.clone()));
+            .with_judge(Box::new(judge.clone()));
         let llm = ScriptedLlm {
             replies: vec![HAPPY_ONLY.into(), WITH_EDGE.into()],
             calls: std::cell::Cell::new(0),
@@ -2924,9 +2870,9 @@ mod tests {
         assert!(report.written, "report: {report:?}");
         assert_eq!(llm.calls.get(), 2, "the edge-case rule spent both rounds");
         assert!(
-            judge.asked.borrow().is_empty(),
+            judge.asked().is_empty(),
             "nothing left to redraft, so nothing worth asking: {:?}",
-            judge.asked.borrow()
+            judge.asked()
         );
     }
 
@@ -2950,7 +2896,7 @@ mod tests {
     /// One criterion flagged reads as one, not as a list of one.
     #[test]
     fn a_single_flagged_criterion_is_named_in_the_singular() {
-        let judge = ScriptedJudge::saying(0.05);
+        let judge = ScriptedJudge::saying(Mode::Advisory, 0.05);
         let proposals = crate::domain::proposal::parse_proposals_checked(HAPPY_ONLY).unwrap();
         let reason = unmeasurable_criteria(&judge, &proposals).unwrap();
         assert!(
@@ -2966,7 +2912,7 @@ mod tests {
     /// Nothing to say is said as nothing, not as an empty complaint.
     #[test]
     fn criteria_the_decision_model_reads_as_measurable_earn_no_reason() {
-        let judge = ScriptedJudge::saying(0.99);
+        let judge = ScriptedJudge::saying(Mode::Advisory, 0.99);
         let proposals = crate::domain::proposal::parse_proposals_checked(WITH_EDGE).unwrap();
         assert_eq!(unmeasurable_criteria(&judge, &proposals), None);
     }

@@ -118,7 +118,10 @@ whether a requirement is implemented. Set `[decision] mode` to \
 /// it: a mode is a setting that round-trips with the `mode = "enforce"`
 /// line in `.spec/config.toml`, while those two name states in the
 /// workflow.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
+/// Ordered by how much a judgment may interrupt, so the weaker of two
+/// modes is `min` of the two. [`Policies::policy_for`] reads a gate's
+/// own ceiling that way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Mode {
     /// No questions are asked, nothing is reported.
@@ -539,7 +542,16 @@ impl Policy {
     /// `choice` and `score` carry Ollama's concentration figure, which
     /// has to clear the threshold before the top option counts as an
     /// answer at all.
-    pub fn verdict_for(&self, answer: &Answer) -> Verdict {
+    ///
+    /// A grade needs the gate's own [`GateKind::Graded`] floor as well:
+    /// concentration says only how sure the model is, never which way
+    /// it went. Reading concentration alone - which this did until the
+    /// method was made total - returns `Holds` for a confident grade of
+    /// *unusable*, so the gate most worth catching is the one it waves
+    /// through. `kind` is a parameter rather than a second method
+    /// because an overload that silently cannot fail its worst case is
+    /// worse than no overload.
+    pub fn verdict_for(&self, answer: &Answer, kind: GateKind) -> Verdict {
         match answer {
             Answer::Noul { noul } => {
                 if *noul >= self.threshold {
@@ -550,14 +562,35 @@ impl Policy {
                     Verdict::Inconclusive
                 }
             }
-            Answer::Choice { confidence, .. } | Answer::Score { confidence, .. } => {
-                if *confidence >= self.threshold {
-                    Verdict::Holds
-                } else {
-                    Verdict::Inconclusive
-                }
+            Answer::Choice { confidence, .. } | Answer::Score { confidence, .. }
+                if *confidence < self.threshold =>
+            {
+                Verdict::Inconclusive
             }
+            Answer::Score { score, .. } => match kind {
+                GateKind::Graded { floor, .. } if *score < floor as f64 => Verdict::Fails,
+                // A gate that asked a boolean question and got a grade
+                // has no floor to read it against, so it has no verdict
+                // either. Saying so beats inventing one.
+                GateKind::Did => Verdict::Inconclusive,
+                GateKind::Graded { .. } => Verdict::Holds,
+            },
+            Answer::Choice { .. } => Verdict::Holds,
         }
+    }
+
+    /// Whether a question that could not be answered at all - the model
+    /// unreachable, the reply unreadable - is allowed to pass as though
+    /// it had been.
+    ///
+    /// The invariant the plane opens by stating: a question that did not
+    /// answer is never an approval. Under `enforce` the failure is the
+    /// caller's problem; under `advisory` or `off` nothing was gating
+    /// anyway, so the work carries on with a note. One predicate rather
+    /// than the rule written once per gate, so the places that read it
+    /// cannot drift apart.
+    pub fn tolerates_silence(&self) -> bool {
+        self.mode != Mode::Enforce
     }
 
     /// The transition a verdict earns.
@@ -578,19 +611,23 @@ impl Policy {
     }
 
     /// One answer read into a recorded judgment.
+    ///
+    /// The gate arrives whole rather than as a name and a version, which
+    /// were two chances to pass a mismatched pair - and a judgment
+    /// filed under one question's version while reading another's
+    /// wording is not evidence about either.
     pub fn judge(
         &self,
-        gate: &'static str,
-        question: &'static str,
+        gate: &'static TaskGate,
         model: &str,
         answer: Answer,
         provenance: Provenance,
         usage: Usage,
     ) -> Judgment {
-        let verdict = self.verdict_for(&answer);
+        let verdict = self.verdict_for(&answer, gate.kind);
         Judgment {
-            gate,
-            question,
+            gate: gate.gate,
+            question: gate.version(),
             model: model.to_string(),
             verdict,
             action: self.transition_for(verdict),
@@ -609,8 +646,8 @@ impl Policy {
     /// and nowhere else's. Any disagreement is inconclusive rather than
     /// a majority vote: two gauges reading differently means the part
     /// goes to a person.
-    pub fn agreed(&self, answers: &[Answer]) -> Verdict {
-        let mut verdicts = answers.iter().map(|answer| self.verdict_for(answer));
+    pub fn agreed(&self, answers: &[Answer], kind: GateKind) -> Verdict {
+        let mut verdicts = answers.iter().map(|answer| self.verdict_for(answer, kind));
         match verdicts.next() {
             None => Verdict::Inconclusive,
             Some(first) => {
@@ -624,30 +661,209 @@ impl Policy {
     }
 }
 
-/// The gate name for "is this acceptance criterion measurable".
-pub const CRITERION_MEASURABLE: &str = "CRITERION_MEASURABLE";
-
-/// The name of the `[decision.*]` table holding this question.
-const MEASURABLE_PROMPT: &str = "measurable";
-
-/// The question set and version behind [`measurable_question`], e.g.
-/// `measurable/v2`.
+/// A [`Policy`] per gate, over one plane-wide default.
 ///
-/// Read from the same table as the wording rather than declared here,
-/// so the two cannot drift: any change to the wording is a new version,
-/// because a threshold calibrated against one phrasing is not evidence
-/// about another.
-pub fn measurable_version() -> &'static str {
-    crate::domain::prompts::decision_prompt(MEASURABLE_PROMPT)
-        .version
-        .as_str()
+/// Gates do not deserve the same policy. A question calibrated against a
+/// labelled set with a measured miss rate has earned `enforce`; one
+/// shipped this week has not, and the honest way to say so is per gate
+/// rather than per plane. Without this, turning the plane up to
+/// `enforce` for the gate that is ready turns it up for the gate that is
+/// guessing, and the first false rework teaches the owner to turn the
+/// whole plane off.
+///
+/// Absent an entry a gate takes `default`, so an owner configures only
+/// what they want to differ.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Policies {
+    pub default: Policy,
+    by_gate: BTreeMap<String, Policy>,
 }
 
-/// The name the answer comes back under.
-pub const MEASURABLE_ANSWER: &str = "measurable";
+impl Policies {
+    /// Every gate on the plane-wide policy, which is the shipped state.
+    pub fn uniform(default: Policy) -> Self {
+        Self {
+            default,
+            by_gate: BTreeMap::new(),
+        }
+    }
 
-/// One bounded question: can this acceptance criterion be checked by a
-/// test with a single unambiguous result?
+    /// `gate` read against `policy` from here on.
+    pub fn with(mut self, gate: &str, policy: Policy) -> Self {
+        self.by_gate.insert(gate.to_string(), policy);
+        self
+    }
+
+    /// What `gate`'s answers are read against.
+    ///
+    /// An explicit entry is taken at its word - a project that says a
+    /// gate enforces has said so about that gate. Otherwise the gate
+    /// gets the weaker of the plane's mode and its own
+    /// [`TaskGate::ships_at`] ceiling, so an uncalibrated question
+    /// cannot start reworking work because the plane was turned up for a
+    /// calibrated one.
+    pub fn policy_for(&self, gate: &TaskGate) -> Policy {
+        match self.by_gate.get(gate.gate) {
+            Some(configured) => *configured,
+            None => Policy::new(self.default.mode.min(gate.ships_at), self.default.threshold),
+        }
+    }
+
+    /// Whether anything on this plane asks a question. A plane whose
+    /// default is off but which still enforces one gate is still a plane
+    /// that talks to a model.
+    pub fn asks(&self) -> bool {
+        self.default.asks() || self.by_gate.values().any(Policy::asks)
+    }
+
+    /// The gates configured away from the default, named for the log so
+    /// an owner can see what the file did without reading it back.
+    pub fn overrides(&self) -> impl Iterator<Item = (&str, &Policy)> {
+        self.by_gate
+            .iter()
+            .map(|(gate, policy)| (gate.as_str(), policy))
+    }
+}
+
+/// How an answer to a gate is read.
+///
+/// The distinction is not cosmetic: a boolean has no confidence field
+/// and so earns a symmetric dead band, while a grade has both a level
+/// and a concentration and has to clear each. [`Policy::verdict_for`]
+/// needs to be told which, because an answer alone cannot say.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GateKind {
+    /// Did it? A probability read against the policy's dead band.
+    Did,
+    /// How well? Ordered levels worst-first, and the index of the
+    /// lowest one that still passes.
+    Graded {
+        levels: &'static [&'static str],
+        floor: usize,
+    },
+}
+
+/// One bounded question the workflow puts to the decision model about
+/// work the writing model just produced.
+///
+/// Everything is `&'static`, matching [`Judgment::gate`], so a gate is a
+/// plain `const` and the set of them is readable in one place. The brief
+/// is deliberately *not* a field: a closure would cost the `const`, and
+/// the briefs genuinely differ in input type - a `&str` criterion for
+/// one gate, parsed file updates for another - so a uniform function
+/// pointer would force an erasure that buys nothing. The brief stays a
+/// plain function at the call site, where its types are already in
+/// scope.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TaskGate {
+    /// Recorded in the judgment, e.g. `CRITERION_MEASURABLE`.
+    pub gate: &'static str,
+    /// The `[decision.<name>]` table in `prompts.toml` holding the
+    /// wording and the version. Also the name the answer comes back
+    /// under - one name for one question, so a reply cannot be read
+    /// against the wrong table.
+    pub prompt: &'static str,
+    /// What the question is about, as a finding names it: `criterion`,
+    /// `unit test`, `step expression`.
+    pub subject: &'static str,
+    /// What is wrong when the answer goes against the property.
+    pub complaint: &'static str,
+    /// What to do about it, named when the answer cannot say which way
+    /// it went - that gates under `enforce`, and a gate saying only
+    /// "the model was unsure" leaves the loop nothing to act on.
+    pub remedy: &'static str,
+    pub kind: GateKind,
+    /// The strictest mode this question's calibration justifies.
+    ///
+    /// A ceiling, not a setting: the plane's mode still applies, and the
+    /// weaker of the two wins. A question shipped this week has a
+    /// measured miss rate of nobody-knows, and turning the plane up to
+    /// `enforce` for the gate that earned it must not turn it up for the
+    /// gate that is guessing - the first false rework is what teaches an
+    /// owner to switch the whole plane off.
+    ///
+    /// Raised only by a threshold sweep in `tests/decision_live.rs`
+    /// against a labelled set, which is the precedent `measurable` set.
+    /// A project that disagrees says so per gate in `.spec/config.toml`,
+    /// and an explicit setting is taken at its word.
+    pub ships_at: Mode,
+}
+
+impl TaskGate {
+    /// The question set and version, e.g. `measurable/v2`.
+    ///
+    /// Read from the same table as the wording rather than declared
+    /// here, so the two cannot drift: any change to the wording is a new
+    /// version, because a threshold calibrated against one phrasing is
+    /// not evidence about another.
+    pub fn version(&self) -> &'static str {
+        crate::domain::prompts::decision_prompt(self.prompt)
+            .version
+            .as_str()
+    }
+
+    /// The name the answer comes back under.
+    pub fn answer_key(&self) -> &'static str {
+        self.prompt
+    }
+
+    /// The question as the server reads it.
+    ///
+    /// Both outcomes of a boolean are described rather than left as
+    /// Yes/No, so the model is choosing between two stated criteria
+    /// instead of guessing what the question meant.
+    pub fn question(&self) -> Question {
+        let prompt = crate::domain::prompts::decision_prompt(self.prompt);
+        match self.kind {
+            GateKind::Did => {
+                let (when_true, when_false) = prompt.outcomes(self.prompt);
+                Question::Noul {
+                    instructions: prompt.instructions.clone(),
+                    criteria: Some(Outcomes {
+                        when_false: when_false.to_string(),
+                        when_true: when_true.to_string(),
+                    }),
+                }
+            }
+            GateKind::Graded { levels, .. } => Question::Score {
+                instructions: prompt.instructions.clone(),
+                criteria: levels.iter().map(|level| (*level).to_string()).collect(),
+            },
+        }
+    }
+
+    /// The finding for work a judgment did not read as satisfying this
+    /// question. Prefixed so a reader can always tell a probabilistic
+    /// finding from the deterministic ones beside it - they share a list
+    /// once the judgment gates.
+    ///
+    /// [`Verdict::Inconclusive`] earns the remedy rather than borrowing
+    /// the failure's line: it gates under `enforce` too, and the way out
+    /// is the same either way, so the line names it.
+    ///
+    /// `None` for [`Verdict::Holds`]: there is nothing to report about
+    /// work the question was satisfied by.
+    pub fn finding(&self, input: &str, judgment: &Judgment) -> Option<String> {
+        let (complaint, remedy) = match judgment.verdict {
+            Verdict::Holds => return None,
+            Verdict::Fails => (self.complaint, String::new()),
+            Verdict::Inconclusive => (
+                "the answer is too unclear to judge either way",
+                format!("; {}", self.remedy),
+            ),
+        };
+        Some(format!(
+            "judgment ({}): {} {input:?}: {complaint} - {} says {}{remedy}",
+            judgment.question,
+            self.subject,
+            judgment.model,
+            judgment.answer.summary()
+        ))
+    }
+}
+
+/// Can this acceptance criterion be checked by a test with a single
+/// unambiguous result?
 ///
 /// This is the gap the regex refiner cannot close.
 /// `RequirementRefiner` asks whether the outcome clause *looks*
@@ -681,18 +897,19 @@ pub const MEASURABLE_ANSWER: &str = "measurable";
 /// The wording itself lives in `prompts/prompts.toml` under
 /// `[decision.measurable]`, with every other prompt the harness sends
 /// and beside the version that names it.
-pub fn measurable_question() -> Question {
-    let prompt = crate::domain::prompts::decision_prompt(MEASURABLE_PROMPT);
-    Question::Noul {
-        instructions: prompt.instructions.clone(),
-        criteria: Some(Outcomes {
-            when_false: prompt.when_false.clone(),
-            when_true: prompt.when_true.clone(),
-        }),
-    }
-}
+pub const CRITERION_MEASURABLE: TaskGate = TaskGate {
+    gate: "CRITERION_MEASURABLE",
+    prompt: "measurable",
+    subject: "criterion",
+    complaint: "the outcome may not be measurable",
+    remedy: "reword it so the clause after \"then\" names the literal value a test \
+             would assert",
+    kind: GateKind::Did,
+    ships_at: Mode::Enforce,
+};
 
-/// The brief for [`measurable_question`]: the criterion and nothing else.
+/// The brief for [`CRITERION_MEASURABLE`]: the criterion and nothing
+/// else.
 ///
 /// The minimum relevant state, on purpose. The question is about this
 /// sentence's own wording, so the story, the project, and the rest of
@@ -702,35 +919,145 @@ pub fn measurable_state(criterion: &str) -> serde_json::Value {
     serde_json::json!({ "acceptance_criterion": criterion })
 }
 
-/// The finding wording for a criterion a judgment did not read as
-/// measurable. Prefixed so a reader can always tell a probabilistic
-/// finding from the deterministic ones beside it — they share a list
-/// once the judgment gates.
+/// Does this scenario put its criterion to the test?
 ///
-/// [`Verdict::Inconclusive`] earns a line of its own rather than
-/// borrowing the failure's. It gates in `enforce` mode, and a gate that
-/// says only "the model was unsure" leaves the loop nothing to act on;
-/// the remedy is the same reword either way, so the line names it.
-///
-/// Returns `None` for [`Verdict::Holds`]: there is nothing to report
-/// about a criterion the question was satisfied by.
-pub fn measurable_finding(criterion: &str, judgment: &Judgment) -> Option<String> {
-    let (complaint, remedy) = match judgment.verdict {
-        Verdict::Holds => return None,
-        Verdict::Fails => ("the outcome may not be measurable", ""),
-        Verdict::Inconclusive => (
-            "the outcome is too unclear to judge either way",
-            "; reword it so the clause after \"then\" names the literal value a \
-             test would assert",
-        ),
-    };
-    Some(format!(
-        "judgment ({}): criterion {criterion:?}: {complaint} - {} says {}{remedy}",
-        judgment.question,
-        judgment.model,
-        judgment.answer.summary()
-    ))
+/// The deterministic rule beside it checks that a scenario exists, is
+/// valid Gherkin, and is tagged with the requirement. None of that can
+/// see whether the Then step checks the outcome the criterion states or
+/// merely that the call returned, which is the way a generated scenario
+/// goes wrong.
+pub const SCENARIO_EXERCISES_CRITERION: TaskGate = TaskGate {
+    gate: "SCENARIO_EXERCISES_CRITERION",
+    prompt: "scenario_exercises",
+    subject: "scenario for",
+    complaint: "it may not exercise what the criterion states",
+    remedy: "make the Then step check the outcome the criterion names, for the \
+             inputs the criterion is about",
+    kind: GateKind::Did,
+    ships_at: Mode::Advisory,
+};
+
+/// The brief for [`SCENARIO_EXERCISES_CRITERION`].
+pub fn scenario_state(criterion: &str, scenario: &str) -> serde_json::Value {
+    serde_json::json!({ "acceptance_criterion": criterion, "scenario": scenario })
 }
+
+/// Would this step expression match that step line?
+///
+/// The step runner answers this exactly, but only by running, which is
+/// after the attempt has been spent. Asking first turns an undefined
+/// step into a correction the writing model gets while it still has the
+/// scenario in hand.
+pub const STEPS_BIND_SCENARIO: TaskGate = TaskGate {
+    gate: "STEPS_BIND_SCENARIO",
+    prompt: "steps_bind",
+    subject: "step expression for",
+    complaint: "it may not match the step line it was written for",
+    remedy: "make the expression match the line as written, with a parameter for \
+             each literal the line carries",
+    kind: GateKind::Did,
+    ships_at: Mode::Advisory,
+};
+
+/// The brief for [`STEPS_BIND_SCENARIO`].
+pub fn steps_state(line: &str, expression: &str) -> serde_json::Value {
+    serde_json::json!({ "step_line": line, "step_expression": expression })
+}
+
+/// Does this test body assert the criterion, or pass regardless?
+///
+/// The gap [`crate::domain::generation::unasserted_criteria`] cannot
+/// close. That rule catches a literal `TODO: assert` left standing,
+/// cheaply and with certainty; it cannot tell `assertEquals(3, add())`
+/// from `assertTrue(true)`, and the second is what a model writes when
+/// it is told to replace a placeholder and has nothing to say.
+///
+/// Asked after an implement attempt and never after `unittest generate`:
+/// at generation time the placeholders are supposed to be there, and
+/// that contract is deliberately untouched.
+pub const UNIT_TEST_ASSERTS: TaskGate = TaskGate {
+    gate: "UNIT_TEST_ASSERTS",
+    prompt: "test_asserts",
+    subject: "unit test for",
+    complaint: "it may pass whatever the production code returns",
+    remedy: "assert the value the criterion names against the result of calling the \
+             production code",
+    kind: GateKind::Did,
+    ships_at: Mode::Advisory,
+};
+
+/// The brief for [`UNIT_TEST_ASSERTS`]: the criterion and the one test
+/// body, never the file it lives in.
+pub fn test_asserts_state(criterion: &str, body: &str) -> serde_json::Value {
+    serde_json::json!({ "acceptance_criterion": criterion, "unit_test_body": body })
+}
+
+/// How completely does this code implement its criterion?
+///
+/// The one graded gate, and the reason the kind exists. "Did it
+/// implement the behaviour" has no honest boolean answer: the failure
+/// this catches is a model that wrote the easy half and stopped, which
+/// is neither yes nor no. A grade says which, and the floor says how
+/// much is enough.
+///
+/// The floor is `complete` rather than `partial`. A test run is the
+/// authority on whether code works, and it runs straight after; this
+/// gate exists to catch the attempt that would waste that run, so
+/// accepting a known-partial implementation would leave it with nothing
+/// to catch.
+pub const IMPLEMENTATION_COMPLETE: TaskGate = TaskGate {
+    gate: "IMPLEMENTATION_COMPLETE",
+    prompt: "implementation_complete",
+    subject: "implementation of",
+    complaint: "it may not implement what the criterion describes",
+    remedy: "implement the behaviour for every case the criterion names, rather than \
+             returning a fixed value or leaving a case out",
+    kind: GateKind::Graded {
+        levels: &["stub", "partial", "complete"],
+        floor: 2,
+    },
+    ships_at: Mode::Advisory,
+};
+
+/// The brief for [`IMPLEMENTATION_COMPLETE`]: the criterion and the one
+/// function, never the file.
+pub fn implementation_state(criterion: &str, code: &str) -> serde_json::Value {
+    serde_json::json!({ "acceptance_criterion": criterion, "production_code": code })
+}
+
+/// Did this refactoring leave behaviour alone?
+///
+/// The test suite answers this too, and better - but only for behaviour
+/// it covers. A refactor that quietly moves a boundary nothing asserts
+/// goes green, and the next requirement is written against code that no
+/// longer does what the last one agreed it would.
+pub const REFACTOR_PRESERVES_BEHAVIOUR: TaskGate = TaskGate {
+    gate: "REFACTOR_PRESERVES_BEHAVIOUR",
+    prompt: "refactor_preserves",
+    subject: "refactoring of",
+    complaint: "it may change what the code does, not just how it reads",
+    remedy: "keep every branch, boundary and default as it was, and make the change \
+             to the wording of the code alone",
+    kind: GateKind::Did,
+    ships_at: Mode::Advisory,
+};
+
+/// The brief for [`REFACTOR_PRESERVES_BEHAVIOUR`]: one function's before
+/// and after, never the whole diff.
+pub fn refactor_state(before: &str, after: &str) -> serde_json::Value {
+    serde_json::json!({ "before": before, "after": after })
+}
+
+/// Every gate the harness can ask about, for the tests and reports that
+/// have to cover all of them rather than the ones someone remembered.
+pub const GATES: &[&TaskGate] = &[
+    &CRITERION_MEASURABLE,
+    &SCENARIO_EXERCISES_CRITERION,
+    &STEPS_BIND_SCENARIO,
+    &UNIT_TEST_ASSERTS,
+    &IMPLEMENTATION_COMPLETE,
+    &REFACTOR_PRESERVES_BEHAVIOUR,
+];
 
 #[cfg(test)]
 mod tests {
@@ -744,6 +1071,28 @@ mod tests {
         Answer::Choice {
             choice: "a".into(),
             probabilities: BTreeMap::from([("a".to_string(), 0.9), ("b".to_string(), 0.1)]),
+            confidence,
+        }
+    }
+
+    /// A gate that is not one of the shipped ones, for asking what a
+    /// policy does about a name it has never heard.
+    fn gate(name: &'static str) -> TaskGate {
+        TaskGate {
+            gate: name,
+            ..CRITERION_MEASURABLE
+        }
+    }
+
+    fn score(level: f64, confidence: f64) -> Answer {
+        Answer::Score {
+            score: level,
+            legend: BTreeMap::from([
+                ("0".to_string(), "unusable".to_string()),
+                ("1".to_string(), "partial".to_string()),
+                ("2".to_string(), "complete".to_string()),
+            ]),
+            probabilities: BTreeMap::new(),
             confidence,
         }
     }
@@ -777,20 +1126,195 @@ mod tests {
     fn a_boolean_answer_has_a_dead_band_rather_than_a_confidence() {
         let policy = Policy::new(Mode::Advisory, 0.70);
         assert_eq!(noul(0.5).confidence(), None);
-        assert_eq!(policy.verdict_for(&noul(0.97)), Verdict::Holds);
-        assert_eq!(policy.verdict_for(&noul(0.70)), Verdict::Holds);
-        assert_eq!(policy.verdict_for(&noul(0.08)), Verdict::Fails);
-        assert_eq!(policy.verdict_for(&noul(0.30)), Verdict::Fails);
-        assert_eq!(policy.verdict_for(&noul(0.55)), Verdict::Inconclusive);
-        assert_eq!(policy.verdict_for(&noul(0.45)), Verdict::Inconclusive);
+        assert_eq!(
+            policy.verdict_for(&noul(0.97), GateKind::Did),
+            Verdict::Holds
+        );
+        assert_eq!(
+            policy.verdict_for(&noul(0.70), GateKind::Did),
+            Verdict::Holds
+        );
+        assert_eq!(
+            policy.verdict_for(&noul(0.08), GateKind::Did),
+            Verdict::Fails
+        );
+        assert_eq!(
+            policy.verdict_for(&noul(0.30), GateKind::Did),
+            Verdict::Fails
+        );
+        assert_eq!(
+            policy.verdict_for(&noul(0.55), GateKind::Did),
+            Verdict::Inconclusive
+        );
+        assert_eq!(
+            policy.verdict_for(&noul(0.45), GateKind::Did),
+            Verdict::Inconclusive
+        );
     }
 
     #[test]
     fn a_choice_answer_must_clear_the_threshold_on_concentration() {
         let policy = Policy::new(Mode::Advisory, 0.70);
         assert_eq!(choice(0.92).confidence(), Some(0.92));
-        assert_eq!(policy.verdict_for(&choice(0.92)), Verdict::Holds);
-        assert_eq!(policy.verdict_for(&choice(0.04)), Verdict::Inconclusive);
+        assert_eq!(
+            policy.verdict_for(&choice(0.92), GateKind::Did),
+            Verdict::Holds
+        );
+        assert_eq!(
+            policy.verdict_for(&choice(0.04), GateKind::Did),
+            Verdict::Inconclusive
+        );
+    }
+
+    /// Concentration says how sure the model is, never which way it
+    /// went. Reading it alone - which this did until `verdict_for` was
+    /// made total - returns `Holds` for a confident grade of *unusable*,
+    /// so the very answer the gate exists to catch is the one it waved
+    /// through. A grade has to clear the threshold *and* reach the
+    /// gate's floor.
+    #[test]
+    fn a_confident_grade_below_the_floor_fails_rather_than_holding() {
+        let policy = Policy::new(Mode::Advisory, 0.70);
+        let graded = GateKind::Graded {
+            levels: &["unusable", "partial", "complete"],
+            floor: 2,
+        };
+        assert_eq!(
+            policy.verdict_for(&score(0.0, 0.95), graded),
+            Verdict::Fails
+        );
+        assert_eq!(
+            policy.verdict_for(&score(1.4, 0.95), graded),
+            Verdict::Fails
+        );
+        assert_eq!(
+            policy.verdict_for(&score(2.0, 0.95), graded),
+            Verdict::Holds
+        );
+        assert_eq!(
+            policy.verdict_for(&score(0.0, 0.30), graded),
+            Verdict::Inconclusive,
+            "an unconcentrated answer is no answer, whatever level it points at"
+        );
+        assert_eq!(
+            policy.verdict_for(&score(2.0, 0.95), GateKind::Did),
+            Verdict::Inconclusive,
+            "a boolean gate has no floor to read a grade against"
+        );
+    }
+
+    /// A gate names the table its wording comes from, and the version
+    /// it records comes from that same table. Asserted over every gate
+    /// rather than the ones someone remembered, because the failure
+    /// mode is a gate added without its table - which would record a
+    /// judgment under a question nobody can read back.
+    #[test]
+    fn every_gate_reads_its_wording_and_version_from_its_own_table() {
+        let mut seen = std::collections::BTreeSet::new();
+        for gate in GATES {
+            assert!(seen.insert(gate.gate), "{} is declared twice", gate.gate);
+            assert!(
+                gate.version().starts_with(&format!("{}/", gate.prompt)),
+                "{} records {:?}, which does not name its own table {:?}",
+                gate.gate,
+                gate.version(),
+                gate.prompt
+            );
+            // Asking builds the question from the table, so a boolean
+            // gate whose table describes no outcomes panics here rather
+            // than in front of a developer mid-delivery.
+            match (gate.kind, gate.question()) {
+                (GateKind::Did, Question::Noul { criteria, .. }) => {
+                    assert!(criteria.is_some(), "{} states no outcomes", gate.gate);
+                }
+                (GateKind::Graded { levels, floor }, Question::Score { criteria, .. }) => {
+                    assert_eq!(criteria, levels, "{} asks for other levels", gate.gate);
+                    assert!(
+                        floor < levels.len(),
+                        "{}'s floor names a level it does not have",
+                        gate.gate
+                    );
+                }
+                (kind, question) => panic!("{} is {kind:?} but asks {question:?}", gate.gate),
+            }
+        }
+    }
+
+    /// A gate calibrated against a labelled set has earned `enforce`;
+    /// one shipped this week has not. Per-gate policy is what lets both
+    /// ship at once, instead of the plane being turned off the first
+    /// time the unready gate reworks good work.
+    #[test]
+    fn a_gate_without_an_entry_of_its_own_takes_the_plane_wide_policy() {
+        let plane = Policies::uniform(Policy::new(Mode::Advisory, 0.70));
+        assert_eq!(plane.policy_for(&CRITERION_MEASURABLE).mode, Mode::Advisory);
+
+        let mixed = plane.with("CRITERION_MEASURABLE", Policy::new(Mode::Enforce, 0.90));
+        let measurable = mixed.policy_for(&CRITERION_MEASURABLE);
+        assert_eq!(measurable.mode, Mode::Enforce);
+        assert_eq!(measurable.threshold, 0.90);
+        assert_eq!(
+            mixed.policy_for(&gate("UNNAMED")).mode,
+            Mode::Advisory,
+            "an unnamed gate still takes the default"
+        );
+        assert_eq!(
+            mixed.overrides().collect::<Vec<_>>().len(),
+            1,
+            "only what differs is recorded"
+        );
+    }
+
+    /// A gate ships no stricter than its calibration justifies. Turning
+    /// the plane up for the question that earned it must not turn it up
+    /// for the one shipped this week - the first false rework is what
+    /// teaches an owner to switch the whole plane off.
+    #[test]
+    fn an_uncalibrated_gate_stays_advisory_on_a_plane_that_enforces() {
+        let plane = Policies::uniform(Policy::new(Mode::Enforce, 0.70));
+        assert_eq!(
+            plane.policy_for(&CRITERION_MEASURABLE).mode,
+            Mode::Enforce,
+            "the calibrated gate takes the plane's mode"
+        );
+        for gate in GATES.iter().filter(|gate| gate.ships_at != Mode::Enforce) {
+            assert_eq!(
+                plane.policy_for(gate).mode,
+                Mode::Advisory,
+                "{} has not earned enforce",
+                gate.gate
+            );
+        }
+        assert_eq!(
+            Policies::uniform(Policy::new(Mode::Off, 0.70))
+                .policy_for(&CRITERION_MEASURABLE)
+                .mode,
+            Mode::Off,
+            "a ceiling never raises a mode"
+        );
+    }
+
+    /// The ceiling is a default, not a veto: a project that measured a
+    /// question against its own wording and wants it enforcing says so,
+    /// and is taken at its word.
+    #[test]
+    fn a_gate_configured_by_hand_overrides_its_own_ceiling() {
+        let plane = Policies::uniform(Policy::new(Mode::Advisory, 0.70))
+            .with("UNIT_TEST_ASSERTS", Policy::new(Mode::Enforce, 0.95));
+        assert_eq!(plane.policy_for(&UNIT_TEST_ASSERTS).mode, Mode::Enforce);
+        assert_eq!(plane.policy_for(&UNIT_TEST_ASSERTS).threshold, 0.95);
+    }
+
+    /// A plane whose default is off but which still enforces one gate is
+    /// still a plane that talks to a model, and has to be wired as one.
+    #[test]
+    fn a_plane_that_is_off_by_default_still_asks_for_a_gate_that_is_not() {
+        let off = Policies::uniform(Policy::new(Mode::Off, 0.70));
+        assert!(!off.asks());
+        assert!(
+            off.with("CRITERION_MEASURABLE", Policy::new(Mode::Advisory, 0.70))
+                .asks()
+        );
     }
 
     /// The whole promise of advisory mode: the answer is recorded and
@@ -827,21 +1351,26 @@ mod tests {
     #[test]
     fn answers_that_disagree_are_inconclusive_rather_than_voted_on() {
         let policy = Policy::new(Mode::Advisory, 0.70);
-        assert_eq!(policy.agreed(&[noul(0.97), noul(0.95)]), Verdict::Holds);
-        assert_eq!(policy.agreed(&[noul(0.02), noul(0.05)]), Verdict::Fails);
         assert_eq!(
-            policy.agreed(&[noul(0.97), noul(0.02)]),
+            policy.agreed(&[noul(0.97), noul(0.95)], GateKind::Did),
+            Verdict::Holds
+        );
+        assert_eq!(
+            policy.agreed(&[noul(0.02), noul(0.05)], GateKind::Did),
+            Verdict::Fails
+        );
+        assert_eq!(
+            policy.agreed(&[noul(0.97), noul(0.02)], GateKind::Did),
             Verdict::Inconclusive
         );
-        assert_eq!(policy.agreed(&[]), Verdict::Inconclusive);
+        assert_eq!(policy.agreed(&[], GateKind::Did), Verdict::Inconclusive);
     }
 
     #[test]
     fn a_judgment_records_the_model_question_threshold_and_provenance() {
         let policy = Policy::new(Mode::Advisory, 0.70);
         let judgment = policy.judge(
-            CRITERION_MEASURABLE,
-            measurable_version(),
+            &CRITERION_MEASURABLE,
             "nimble:latest",
             noul(0.04),
             provenance(),
@@ -875,8 +1404,7 @@ mod tests {
     #[test]
     fn a_judgment_serializes_the_same_words_it_prints() {
         let judgment = Policy::new(Mode::Enforce, 0.70).judge(
-            "REQ-007",
-            measurable_version(),
+            &CRITERION_MEASURABLE,
             "nimble:latest",
             Answer::Noul { noul: 0.02 },
             Provenance {
@@ -896,8 +1424,8 @@ mod tests {
     #[test]
     fn the_measurable_question_serializes_as_a_noul_with_both_outcomes_described() {
         let request = Request::single(
-            MEASURABLE_ANSWER,
-            measurable_question(),
+            CRITERION_MEASURABLE.answer_key(),
+            CRITERION_MEASURABLE.question(),
             measurable_state("Given \"1,2\", when add is called, then the result is 3"),
         );
         assert_eq!(request.fault(), None);
@@ -938,18 +1466,18 @@ mod tests {
     #[test]
     fn a_state_digest_is_stable_for_the_same_brief_and_differs_for_another() {
         let one = Request::single(
-            MEASURABLE_ANSWER,
-            measurable_question(),
+            CRITERION_MEASURABLE.answer_key(),
+            CRITERION_MEASURABLE.question(),
             measurable_state("a"),
         );
         let same = Request::single(
-            MEASURABLE_ANSWER,
-            measurable_question(),
+            CRITERION_MEASURABLE.answer_key(),
+            CRITERION_MEASURABLE.question(),
             measurable_state("a"),
         );
         let other = Request::single(
-            MEASURABLE_ANSWER,
-            measurable_question(),
+            CRITERION_MEASURABLE.answer_key(),
+            CRITERION_MEASURABLE.question(),
             measurable_state("b"),
         );
         assert_eq!(one.state_digest(), same.state_digest());
@@ -972,7 +1500,7 @@ mod tests {
     #[test]
     fn more_than_sixty_four_questions_is_refused() {
         let questions = (0..=MAX_QUESTIONS)
-            .map(|n| (format!("q{n}"), measurable_question()))
+            .map(|n| (format!("q{n}"), CRITERION_MEASURABLE.question()))
             .collect();
         let request = Request {
             state: serde_json::json!("x"),
@@ -988,7 +1516,11 @@ mod tests {
             serde_json::json!(true),
             serde_json::json!(null),
         ] {
-            let request = Request::single(MEASURABLE_ANSWER, measurable_question(), value);
+            let request = Request::single(
+                CRITERION_MEASURABLE.answer_key(),
+                CRITERION_MEASURABLE.question(),
+                value,
+            );
             assert_eq!(
                 request.fault(),
                 Some("state: must be a string, object, or array".into())
@@ -999,8 +1531,8 @@ mod tests {
     #[test]
     fn a_blank_state_string_is_refused() {
         let request = Request::single(
-            MEASURABLE_ANSWER,
-            measurable_question(),
+            CRITERION_MEASURABLE.answer_key(),
+            CRITERION_MEASURABLE.question(),
             serde_json::json!("  "),
         );
         assert_eq!(
@@ -1029,7 +1561,7 @@ mod tests {
     fn a_blank_question_name_is_refused() {
         let request = Request {
             state: serde_json::json!("x"),
-            questions: BTreeMap::from([(" ".to_string(), measurable_question())]),
+            questions: BTreeMap::from([(" ".to_string(), CRITERION_MEASURABLE.question())]),
         };
         assert_eq!(
             request.fault(),
@@ -1095,7 +1627,7 @@ mod tests {
 
     #[test]
     fn every_question_type_reports_its_wire_name() {
-        assert_eq!(measurable_question().type_name(), "noul");
+        assert_eq!(CRITERION_MEASURABLE.question().type_name(), "noul");
         assert_eq!(
             Question::Choice {
                 instructions: "x".into(),
@@ -1148,15 +1680,15 @@ mod tests {
     fn a_measurable_finding_names_the_question_version_and_the_model() {
         let policy = Policy::new(Mode::Advisory, 0.70);
         let judgment = policy.judge(
-            CRITERION_MEASURABLE,
-            measurable_version(),
+            &CRITERION_MEASURABLE,
             "nimble:latest",
             noul(0.04),
             provenance(),
             Usage::default(),
         );
-        let finding =
-            measurable_finding("Given a, when b, then it works", &judgment).expect("a failure");
+        let finding = CRITERION_MEASURABLE
+            .finding("Given a, when b, then it works", &judgment)
+            .expect("a failure");
         assert!(finding.starts_with("judgment (measurable/v2):"));
         assert!(finding.contains("Given a, when b, then it works"));
         assert!(finding.contains("nimble:latest"));
@@ -1172,22 +1704,22 @@ mod tests {
         let policy = Policy::new(Mode::Enforce, 0.70);
         let judge = |probability| {
             policy.judge(
-                CRITERION_MEASURABLE,
-                measurable_version(),
+                &CRITERION_MEASURABLE,
                 "nimble:latest",
                 noul(probability),
                 provenance(),
                 Usage::default(),
             )
         };
-        let unsure = measurable_finding("Given a, when b, then it is valid", &judge(0.55))
+        let unsure = CRITERION_MEASURABLE
+            .finding("Given a, when b, then it is valid", &judge(0.55))
             .expect("an inconclusive answer gates, so it has to say something");
         assert!(unsure.starts_with("judgment (measurable/v2):"));
         assert!(unsure.contains("too unclear to judge either way"));
         assert!(unsure.contains("after \"then\""));
         assert!(unsure.contains("probability of true 0.550"));
         assert_eq!(
-            measurable_finding("Given a, when b, then the result is 3", &judge(0.97)),
+            CRITERION_MEASURABLE.finding("Given a, when b, then the result is 3", &judge(0.97)),
             None,
             "nothing to report about a criterion the question was satisfied by"
         );

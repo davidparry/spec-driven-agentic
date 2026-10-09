@@ -1092,7 +1092,7 @@ impl Deliver {
     /// for asking here and not the argument for obeying the answer:
     /// the judgment arrives as a rejection reason the drafting model
     /// gets one round to address, never as a gate. See
-    /// [`SpecMutationService::with_criterion_judge`].
+    /// [`SpecMutationService::with_judge`].
     ///
     /// Opt-in rather than on, and the reason is the measured one. A
     /// drafting model writes `then the roll-up verdict is "covered"`,
@@ -1118,7 +1118,7 @@ impl Deliver {
         match crate::wiring::decision_service(&self.root, self.decision_model.as_deref())
             .and_then(|service| service.when_asking())
         {
-            Some(judge) => service.with_criterion_judge(Box::new(judge)),
+            Some(judge) => service.with_judge(Box::new(judge)),
             None => service,
         }
     }

@@ -14,9 +14,9 @@ use crate::domain::config_report::{
     ConfigFileStatus, ConfigReport, DEFAULT_DECISION_TIMEOUT_SECONDS, DEFAULT_LLM_ENDPOINT,
     DEFAULT_REFACTOR_ATTEMPTS, DEFAULT_TOOLS_CACHE_TTL_SECONDS, DEFAULT_TOOLS_CALL_TIMEOUT_SECONDS,
     DEFAULT_TOOLS_CONFIRM, DEFAULT_TOOLS_DISCOVERY_TIMEOUT_SECONDS, DEFAULT_TOOLS_MAX_ROUNDS,
-    PresentValues, build_report,
+    GateOverride, PresentValues, build_report,
 };
-use crate::domain::decision::{DEFAULT_MIN_CONFIDENCE, Mode, Policy};
+use crate::domain::decision::{DEFAULT_MIN_CONFIDENCE, Mode, Policies, Policy};
 use crate::domain::tool_profile::ProfileOverrides;
 use crate::ports::{LlmError, ModelStore, ToolError, ToolStore};
 
@@ -121,8 +121,26 @@ fn present_from_table(table: &toml::Table) -> PresentValues {
             .filter(|raw| crate::domain::decision::Mode::parse(raw).is_some());
         present.decision_min_confidence =
             toml_f64(decision, "min_confidence").filter(|n| (0.0..=1.0).contains(n));
+        if let Some(gates) = decision.get("gates").and_then(|v| v.as_table()) {
+            present.decision_gates = gates
+                .iter()
+                .filter_map(|(gate, value)| Some((gate.clone(), gate_override(value.as_table()?))))
+                .filter(|(_, over)| *over != GateOverride::default())
+                .collect();
+        }
     }
     present
+}
+
+/// One `[decision.gates.<GATE>]` table, read on the same terms as the
+/// plane-wide keys it overrides: an unspellable mode is no mode, and a
+/// threshold outside 0..=1 is no threshold. Both then fall back to the
+/// plane rather than to a value nobody wrote.
+fn gate_override(table: &toml::Table) -> GateOverride {
+    GateOverride {
+        mode: toml_string(table, "mode").filter(|raw| Mode::parse(raw).is_some()),
+        min_confidence: toml_f64(table, "min_confidence").filter(|n| (0.0..=1.0).contains(n)),
+    }
 }
 
 fn toml_string(table: &toml::Table, key: &str) -> Option<String> {
@@ -225,7 +243,16 @@ pub struct DecisionSettings {
     pub model: Option<String>,
     pub endpoint: String,
     pub timeout: Duration,
-    pub policy: Policy,
+    /// The plane-wide policy and whatever gates were configured away
+    /// from it. A gate the file never names reads against the default.
+    pub policies: Policies,
+}
+
+impl DecisionSettings {
+    /// The plane-wide policy, for the callers that have no gate in hand.
+    pub fn policy(&self) -> Policy {
+        self.policies.default
+    }
 }
 
 /// The `[decision]` block as the harness will act on it.
@@ -247,6 +274,23 @@ pub fn decision_settings(path: &Path) -> DecisionSettings {
     let threshold = present
         .decision_min_confidence
         .unwrap_or(DEFAULT_MIN_CONFIDENCE);
+    let default = Policy::new(mode, threshold);
+    // Each half of an override falls back to the plane rather than to a
+    // built-in, so a gate that names only a mode keeps the threshold the
+    // owner set once.
+    let policies =
+        present
+            .decision_gates
+            .iter()
+            .fold(Policies::uniform(default), |policies, (gate, over)| {
+                policies.with(
+                    gate,
+                    Policy::new(
+                        over.mode.as_deref().and_then(Mode::parse).unwrap_or(mode),
+                        over.min_confidence.unwrap_or(threshold),
+                    ),
+                )
+            });
     let settings = DecisionSettings {
         model: present.decision_model.clone(),
         endpoint,
@@ -255,13 +299,14 @@ pub fn decision_settings(path: &Path) -> DecisionSettings {
                 .decision_timeout_seconds
                 .unwrap_or(DEFAULT_DECISION_TIMEOUT_SECONDS),
         ),
-        policy: Policy::new(mode, threshold),
+        policies,
     };
     tracing::debug!(
         model = ?settings.model,
         endpoint = %settings.endpoint,
-        mode = %settings.policy.mode,
-        threshold = settings.policy.threshold,
+        mode = %default.mode,
+        threshold = default.threshold,
+        gates = ?settings.policies.overrides().map(|(gate, _)| gate).collect::<Vec<_>>(),
         "config: decision settings"
     );
     settings
@@ -1032,8 +1077,11 @@ mod tests {
         let settings = decision_settings(&dir.path().join(CONFIG_FILE));
         assert_eq!(settings.model, None);
         assert_eq!(settings.endpoint, DEFAULT_LLM_ENDPOINT);
-        assert_eq!(settings.policy.mode, crate::domain::decision::Mode::Enforce);
-        assert_eq!(settings.policy.threshold, DEFAULT_MIN_CONFIDENCE);
+        assert_eq!(
+            settings.policy().mode,
+            crate::domain::decision::Mode::Enforce
+        );
+        assert_eq!(settings.policy().threshold, DEFAULT_MIN_CONFIDENCE);
     }
 
     #[test]
@@ -1078,8 +1126,11 @@ mod tests {
         )
         .unwrap();
         let settings = decision_settings(&path);
-        assert_eq!(settings.policy.mode, crate::domain::decision::Mode::Enforce);
-        assert_eq!(settings.policy.threshold, DEFAULT_MIN_CONFIDENCE);
+        assert_eq!(
+            settings.policy().mode,
+            crate::domain::decision::Mode::Enforce
+        );
+        assert_eq!(settings.policy().threshold, DEFAULT_MIN_CONFIDENCE);
     }
 
     #[test]
@@ -1095,8 +1146,11 @@ mod tests {
         .unwrap();
         let settings = decision_settings(&path);
         assert_eq!(settings.model, Some("nimble:test".into()));
-        assert_eq!(settings.policy.mode, crate::domain::decision::Mode::Enforce);
-        assert_eq!(settings.policy.threshold, 0.85);
+        assert_eq!(
+            settings.policy().mode,
+            crate::domain::decision::Mode::Enforce
+        );
+        assert_eq!(settings.policy().threshold, 0.85);
         assert_eq!(settings.timeout, std::time::Duration::from_secs(30));
     }
 
@@ -1108,6 +1162,66 @@ mod tests {
         let path = dir.path().join(CONFIG_FILE);
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(&path, "[decision]\nmin_confidence = 1\n").unwrap();
-        assert_eq!(decision_settings(&path).policy.threshold, 1.0);
+        assert_eq!(decision_settings(&path).policy().threshold, 1.0);
+    }
+
+    /// A gate that has been calibrated can enforce while the rest of the
+    /// plane stays advisory. Each half of an override falls back to the
+    /// plane rather than to a built-in, so naming only a mode keeps the
+    /// threshold the project set once.
+    #[test]
+    fn a_gate_table_overrides_only_the_keys_it_names() {
+        use crate::domain::decision::{CRITERION_MEASURABLE, Mode, TaskGate};
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(CONFIG_FILE);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(
+            &path,
+            "[decision]\nmode = \"advisory\"\nmin_confidence = 0.75\n\
+             [decision.gates.CRITERION_MEASURABLE]\nmode = \"enforce\"\n\
+             [decision.gates.UNIT_TEST_ASSERTS]\nmin_confidence = 0.95\n",
+        )
+        .unwrap();
+        let policies = decision_settings(&path).policies;
+        assert_eq!(policies.default.mode, Mode::Advisory);
+
+        let measurable = policies.policy_for(&CRITERION_MEASURABLE);
+        assert_eq!(measurable.mode, Mode::Enforce);
+        assert_eq!(
+            measurable.threshold, 0.75,
+            "an unnamed threshold stays the plane's"
+        );
+
+        let asserts = policies.policy_for(&TaskGate {
+            gate: "UNIT_TEST_ASSERTS",
+            ..CRITERION_MEASURABLE
+        });
+        assert_eq!(asserts.mode, Mode::Advisory);
+        assert_eq!(asserts.threshold, 0.95);
+    }
+
+    /// Unreadable keys take the plane's values on the same terms the
+    /// plane-wide ones take the built-ins, and a gate left with nothing
+    /// usable is not recorded as an override at all.
+    #[test]
+    fn a_gate_table_of_nonsense_leaves_the_plane_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(CONFIG_FILE);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(
+            &path,
+            "[decision]\nmode = \"advisory\"\n\
+             [decision.gates.CRITERION_MEASURABLE]\nmode = \"enfroce\"\n\
+             min_confidence = 7\n",
+        )
+        .unwrap();
+        let policies = decision_settings(&path).policies;
+        assert_eq!(policies.overrides().count(), 0);
+        assert_eq!(
+            policies
+                .policy_for(&crate::domain::decision::CRITERION_MEASURABLE)
+                .mode,
+            crate::domain::decision::Mode::Advisory
+        );
     }
 }

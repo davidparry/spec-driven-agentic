@@ -5,7 +5,11 @@
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 
+use crate::application::decision_service::TaskJudge;
 use crate::application::generation_service::ResolvedLlm;
+use crate::domain::decision::{
+    Answer, DEFAULT_MIN_CONFIDENCE, Judgment, Mode, Policy, Provenance, TaskGate, Usage,
+};
 use crate::domain::feature::{self, FeatureDoc, FeatureSummary};
 use crate::domain::language::Language;
 use crate::domain::layout::{LayoutInput, resolve_layout};
@@ -14,10 +18,97 @@ use crate::domain::model::{Requirement, Spec, SpecCatalog, resolve_catalog};
 use crate::domain::tdd::TddSnapshot;
 use crate::domain::tools::{ChatMessage, ChatTurn, ToolDefinition, text_turn};
 use crate::ports::{
-    FeatureCatalog, FeatureError, FeatureFiles, FileChange, LlmConversation, LlmError,
-    RuntimeProbe, SourceError, SourceFile, SourceFiles, SpecError, SpecRepository, StateError,
-    StateStore, WorkTree, WriteError,
+    DecisionError, FeatureCatalog, FeatureError, FeatureFiles, FileChange, LlmConversation,
+    LlmError, RuntimeProbe, SourceError, SourceFile, SourceFiles, SpecError, SpecRepository,
+    StateError, StateStore, WorkTree, WriteError,
 };
+
+/// [`TaskJudge`] answering from a script, recording what it was asked.
+///
+/// Honours the same contract [`crate::application::decision_service::DecisionService`]
+/// does rather than a convenient subset: every judgment comes out of the
+/// real [`Policy::judge`] applied to the real gate, so it carries that
+/// gate's name and its question version, its verdict is read against a
+/// real threshold, and it can fail outright. A fake that always answered
+/// would leave the never-approve path reasoned about instead of
+/// exercised.
+///
+/// Shared through an [`std::rc::Rc`] so a test can keep reading `asked`
+/// after handing the judge to a service.
+pub struct ScriptedJudge {
+    answer: Result<Answer, String>,
+    policy: Policy,
+    asked: RefCell<Vec<(String, serde_json::Value)>>,
+}
+
+impl ScriptedJudge {
+    /// Answers every question with the same probability of true.
+    pub fn saying(mode: Mode, probability: f64) -> std::rc::Rc<Self> {
+        Self::answering(mode, Ok(Answer::Noul { noul: probability }))
+    }
+
+    /// Answers every graded question at the same level, fully
+    /// concentrated, so a test picks the verdict by picking the level.
+    pub fn grading(mode: Mode, level: usize) -> std::rc::Rc<Self> {
+        Self::answering(
+            mode,
+            Ok(Answer::Score {
+                score: level as f64,
+                legend: std::collections::BTreeMap::new(),
+                probabilities: std::collections::BTreeMap::new(),
+                confidence: 1.0,
+            }),
+        )
+    }
+
+    /// A model that cannot be reached, for the question that never gets
+    /// an answer.
+    pub fn unreachable(mode: Mode) -> std::rc::Rc<Self> {
+        Self::answering(mode, Err("no model".to_string()))
+    }
+
+    fn answering(mode: Mode, answer: Result<Answer, String>) -> std::rc::Rc<Self> {
+        std::rc::Rc::new(Self {
+            answer,
+            policy: Policy::new(mode, DEFAULT_MIN_CONFIDENCE),
+            asked: RefCell::new(Vec::new()),
+        })
+    }
+
+    /// Every (input, brief) pair put to it, in order.
+    pub fn asked(&self) -> Vec<(String, serde_json::Value)> {
+        self.asked.borrow().clone()
+    }
+
+    /// The briefs alone, for a test asserting what the question was
+    /// shown rather than how often.
+    pub fn briefs(&self) -> Vec<serde_json::Value> {
+        self.asked().into_iter().map(|(_, brief)| brief).collect()
+    }
+}
+
+impl TaskJudge for std::rc::Rc<ScriptedJudge> {
+    fn judge_task(
+        &self,
+        gate: &'static TaskGate,
+        input: &str,
+        state: serde_json::Value,
+    ) -> Result<Judgment, DecisionError> {
+        self.asked.borrow_mut().push((input.to_string(), state));
+        let answer = self.answer.clone().map_err(DecisionError::Unavailable)?;
+        Ok(self.policy.judge(
+            gate,
+            "test-judge",
+            answer,
+            Provenance {
+                input: input.to_string(),
+                state: "sha256:0".into(),
+                state_bytes: 0,
+            },
+            Usage::default(),
+        ))
+    }
+}
 
 /// [`WorkTree`] over a map. `failing` makes every write fail, for
 /// error-propagation tests.

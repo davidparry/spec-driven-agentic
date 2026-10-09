@@ -330,7 +330,7 @@ impl WorkflowServer {
         // thread. Held for the panicked-task arm below, which has to
         // refuse on the mode the project configured rather than on a
         // guess.
-        let configured = wiring::resolved_decision(&self.root, None).policy;
+        let configured = wiring::resolved_decision(&self.root, None).policy();
 
         // Everything from here goes to the blocking pool, including
         // working out which model answers: resolving it asks the

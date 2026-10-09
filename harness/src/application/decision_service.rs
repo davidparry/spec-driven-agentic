@@ -12,26 +12,40 @@ use serde::Serialize;
 
 use crate::application::spec_service::{RefinementReport, refinement_next_step};
 use crate::domain::decision::{
-    CRITERION_MEASURABLE, Judgment, MEASURABLE_ANSWER, Mode, Policy, Request, Transition,
-    measurable_finding, measurable_question, measurable_state, measurable_version,
+    CRITERION_MEASURABLE, Judgment, Policies, Policy, Request, TaskGate, Transition,
+    measurable_state,
 };
 use crate::ports::{DecisionError, DecisionModel};
 
-/// One criterion, judged, for a caller that wants the answer without
-/// owning the model.
+/// One gate, judged, for a caller that wants the verdict without owning
+/// the model.
 ///
 /// [`DecisionService`] is generic over its client, which makes it
-/// awkward to store beside the unrelated generics a drafting service
-/// already carries. This is the narrow slice the draft loop needs: ask
-/// about one sentence, get one [`Judgment`] back. Nothing here decides
-/// what the answer means.
-pub trait CriterionJudge {
-    fn judge(&self, input: &str, criterion: &str) -> Result<Judgment, DecisionError>;
+/// awkward to store beside the unrelated generics a generating service
+/// already carries. This is the narrow slice those services need: name
+/// a gate, hand over a brief, get one [`Judgment`] back. Nothing here
+/// decides what the answer means.
+///
+/// An application-layer interface rather than a port in `ports.rs`: it
+/// does not cross to the outside world, it narrows something already
+/// inside. [`crate::ports::DecisionModel`] is the port.
+pub trait TaskJudge {
+    fn judge_task(
+        &self,
+        gate: &'static TaskGate,
+        input: &str,
+        state: serde_json::Value,
+    ) -> Result<Judgment, DecisionError>;
 }
 
-impl<D: DecisionModel> CriterionJudge for DecisionService<D> {
-    fn judge(&self, input: &str, criterion: &str) -> Result<Judgment, DecisionError> {
-        self.judge_criterion(input, criterion)
+impl<D: DecisionModel> TaskJudge for DecisionService<D> {
+    fn judge_task(
+        &self,
+        gate: &'static TaskGate,
+        input: &str,
+        state: serde_json::Value,
+    ) -> Result<Judgment, DecisionError> {
+        self.judge(gate, input, state)
     }
 }
 
@@ -46,7 +60,7 @@ impl<D: DecisionModel> CriterionJudge for DecisionService<D> {
 pub struct DecisionService<D: DecisionModel> {
     model: String,
     client: D,
-    policy: Policy,
+    policies: Policies,
 }
 
 /// What a refinement pass learned from the decision model, in the shape
@@ -65,11 +79,11 @@ pub struct CriteriaReview {
 }
 
 impl<D: DecisionModel> DecisionService<D> {
-    pub fn new(model: String, client: D, policy: Policy) -> Self {
+    pub fn new(model: String, client: D, policies: Policies) -> Self {
         Self {
             model,
             client,
-            policy,
+            policies,
         }
     }
 
@@ -77,8 +91,16 @@ impl<D: DecisionModel> DecisionService<D> {
         &self.model
     }
 
+    /// The plane-wide policy, for callers reporting what the plane is
+    /// set to rather than reading one gate's answer.
     pub fn policy(&self) -> Policy {
-        self.policy
+        self.policies.default
+    }
+
+    /// What `gate`'s answers are read against, which is the plane-wide
+    /// policy unless the project configured that gate on its own.
+    pub fn policy_for(&self, gate: &TaskGate) -> Policy {
+        self.policies.policy_for(gate)
     }
 
     /// The service, but only on the surfaces that judge automatically.
@@ -91,19 +113,21 @@ impl<D: DecisionModel> DecisionService<D> {
     /// automatic caller says so by taking its service from here:
     /// `None` leaves it nothing to call.
     pub fn when_asking(self) -> Option<Self> {
-        self.policy.asks().then_some(self)
+        self.policies.asks().then_some(self)
     }
 
-    /// One bounded judgment: can this acceptance criterion be checked by
-    /// a test with a single unambiguous result?
+    /// One bounded judgment: put `gate`'s question to the model about
+    /// `state`, and record what came back.
     ///
     /// `input` names what was summarized, for the provenance record.
-    pub fn judge_criterion(&self, input: &str, criterion: &str) -> Result<Judgment, DecisionError> {
-        let request = Request::single(
-            MEASURABLE_ANSWER,
-            measurable_question(),
-            measurable_state(criterion),
-        );
+    pub fn judge(
+        &self,
+        gate: &'static TaskGate,
+        input: &str,
+        state: serde_json::Value,
+    ) -> Result<Judgment, DecisionError> {
+        let key = gate.answer_key();
+        let request = Request::single(key, gate.question(), state);
         let provenance = crate::domain::decision::Provenance {
             input: input.to_string(),
             state: request.state_digest(),
@@ -112,17 +136,16 @@ impl<D: DecisionModel> DecisionService<D> {
         let outcome = self.client.decide(&self.model, &request)?;
         let answer = outcome
             .answers
-            .get(MEASURABLE_ANSWER)
+            .get(key)
             .cloned()
             // The adapter already refused a mismatched answer set, so
             // reaching here would be a bug rather than a bad reply.
             .ok_or_else(|| DecisionError::UnexpectedAnswers {
-                missing: vec![MEASURABLE_ANSWER.to_string()],
+                missing: vec![key.to_string()],
                 unexpected: outcome.answers.keys().cloned().collect(),
             })?;
-        let judgment = self.policy.judge(
-            CRITERION_MEASURABLE,
-            measurable_version(),
+        let judgment = self.policy_for(gate).judge(
+            gate,
             // The tag the server echoed, not the one that was asked
             // for: `nimble` and `nimble:latest` are one request and two
             // different records.
@@ -173,8 +196,9 @@ impl<D: DecisionModel> DecisionService<D> {
             } else {
                 format!("{id} acceptance criterion {}", index + 1)
             };
-            let judgment = self.judge_criterion(&input, criterion)?;
-            advisories.extend(measurable_finding(criterion, &judgment));
+            let judgment =
+                self.judge(&CRITERION_MEASURABLE, &input, measurable_state(criterion))?;
+            advisories.extend(CRITERION_MEASURABLE.finding(criterion, &judgment));
             action = stronger(action, judgment.action);
             judgments.push(judgment);
         }
@@ -199,11 +223,11 @@ impl<D: DecisionModel> DecisionService<D> {
     ) -> Result<Transition, DecisionError> {
         // `off` is the one mode that asks nothing. Checked here rather
         // than at each call site so no future caller can forget it.
-        if !self.policy.asks() {
+        if !self.policies.asks() {
             return Ok(Transition::Continue);
         }
         let review = self.review_criteria(&report.id, criteria);
-        apply_review(self.policy, report, review)
+        apply_review(self.policy_for(&CRITERION_MEASURABLE), report, review)
     }
 }
 
@@ -250,11 +274,117 @@ pub fn apply_review(
             );
             Ok(review.action)
         }
-        Err(error) if policy.mode == Mode::Enforce => Err(error),
+        Err(error) if !policy.tolerates_silence() => Err(error),
         Err(error) => {
             tracing::warn!(error = %error, "no judgment: carrying on with the deterministic verdict");
             report.judgment_note = Some(format!("no judgment - {error}"));
             Ok(Transition::Continue)
+        }
+    }
+}
+
+/// One thing to ask a gate's question about: what it is, for the
+/// provenance record, and the curated state the question is answered
+/// from.
+///
+/// A reply often carries several - a scenario per criterion, a test body
+/// per criterion - and each gets its own narrow question rather than one
+/// broad one about the lot. That is the lesson
+/// [`crate::domain::decision::CRITERION_MEASURABLE`] records at length:
+/// an open question invites a judgment of the whole reply's style, and
+/// style is what a convincing-looking reply gets right.
+pub struct Brief {
+    pub input: String,
+    pub state: serde_json::Value,
+}
+
+impl Brief {
+    pub fn new(input: impl Into<String>, state: serde_json::Value) -> Self {
+        Self {
+            input: input.into(),
+            state,
+        }
+    }
+}
+
+/// A deterministic validator with a gate on top: the reply has to parse
+/// *and* satisfy `gate`'s question about every brief it carries before
+/// it is accepted. Judgments land in `recorded` as they are made.
+///
+/// One combinator rather than the same twenty lines at each stage. The
+/// shape is deliberate: it returns the plain `Result<T, String>` that
+/// [`crate::application::agent_service::Agent::ask`] already understands,
+/// so a `REWORK` becomes an `Err` carrying the finding and rides the
+/// retry that is already there - the writing model is re-asked with the
+/// complaint through the existing `[correction]` template. No second
+/// loop, no second service.
+///
+/// `ESCALATE` does not retry. An answer too unclear to read is not one a
+/// re-ask makes clearer, and the plane's own doctrine reads it as a
+/// human's problem; the judgment is recorded and the parsed value is
+/// returned, leaving the caller to see the escalation in `recorded` and
+/// stop the requirement rather than spend attempts on it.
+///
+/// A question that could not be answered is never an approval - under
+/// `enforce` the error is a refusal, and under the other modes it is a
+/// logged note. The rule is read off [`Policy::tolerates_silence`], the
+/// same predicate [`apply_review`] reads, so the two cannot drift.
+///
+/// `judge` is `None` when the plane is off for this gate or there is no
+/// model; the validator is then exactly the one passed in.
+pub fn gated<'a, T>(
+    judge: Option<&'a dyn TaskJudge>,
+    policy: Policy,
+    gate: &'static TaskGate,
+    recorded: &'a mut Vec<Judgment>,
+    briefs: impl Fn(&T) -> Vec<Brief> + 'a,
+    mut parse: impl FnMut(&str) -> Result<T, String> + 'a,
+) -> impl FnMut(&str) -> Result<T, String> + 'a {
+    move |reply| {
+        let parsed = parse(reply)?;
+        let Some(judge) = judge else {
+            return Ok(parsed);
+        };
+        let mut complaints = Vec::new();
+        for brief in briefs(&parsed) {
+            match judge.judge_task(gate, &brief.input, brief.state) {
+                Ok(judgment) => {
+                    let finding = gate.finding(&brief.input, &judgment);
+                    let reworks = judgment.action == Transition::Rework;
+                    recorded.push(judgment);
+                    if reworks {
+                        // A rework with nothing to say would re-ask the
+                        // model with no complaint to act on. `finding`
+                        // only returns `None` for a verdict that holds,
+                        // which never reworks, so this is unreachable
+                        // rather than merely unlikely - but a silent
+                        // retry is a worse way to find that out.
+                        complaints.push(finding.expect("a reworking judgment has a finding"));
+                    }
+                }
+                // One unanswered question stops the rest being asked: a
+                // model that has stopped responding will not start
+                // between one brief and the next.
+                Err(error) if policy.tolerates_silence() => {
+                    tracing::warn!(
+                        gate = gate.gate,
+                        error = %error,
+                        "no judgment: accepting the deterministic verdict"
+                    );
+                    break;
+                }
+                Err(error) => {
+                    return Err(format!(
+                        "{} could not be judged ({error}) and this gate is enforcing - \
+                         set [decision.gates.{}] mode = \"advisory\" to carry on without it",
+                        gate.gate, gate.gate
+                    ));
+                }
+            }
+        }
+        match complaints.is_empty() {
+            true => Ok(parsed),
+            false => Err(complaints.join("; ")),
         }
     }
 }
@@ -281,7 +411,8 @@ fn stronger(left: Transition, right: Transition) -> Transition {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::decision::{Answer, Outcome, Usage, Verdict};
+    use crate::domain::decision::{Answer, Mode, Outcome, Usage, Verdict};
+    use crate::test_support::ScriptedJudge;
     use std::cell::RefCell;
     use std::collections::BTreeMap;
 
@@ -303,7 +434,7 @@ mod tests {
                             Ok(Outcome {
                                 model: "nimble:test".into(),
                                 answers: BTreeMap::from([(
-                                    MEASURABLE_ANSWER.to_string(),
+                                    CRITERION_MEASURABLE.answer_key().to_string(),
                                     Answer::Noul { noul: *p },
                                 )]),
                                 usage: Usage {
@@ -338,7 +469,11 @@ mod tests {
     }
 
     fn service(client: ScriptedDecision, mode: Mode) -> DecisionService<ScriptedDecision> {
-        DecisionService::new("nimble:test".into(), client, Policy::new(mode, 0.70))
+        DecisionService::new(
+            "nimble:test".into(),
+            client,
+            Policies::uniform(Policy::new(mode, 0.70)),
+        )
     }
 
     fn report() -> RefinementReport {
@@ -358,9 +493,10 @@ mod tests {
     fn a_confident_yes_is_a_recorded_judgment_that_holds() {
         let service = service(ScriptedDecision::answering(&[0.97]), Mode::Advisory);
         let judgment = service
-            .judge_criterion(
+            .judge(
+                &CRITERION_MEASURABLE,
                 "REQ-007 acceptance criterion 1",
-                "Given \"1,2\", when add is called, then the result is 3",
+                measurable_state("Given \"1,2\", when add is called, then the result is 3"),
             )
             .unwrap();
         assert_eq!(judgment.verdict, Verdict::Holds);
@@ -381,7 +517,11 @@ mod tests {
     fn the_question_carries_only_the_criterion_being_judged() {
         let service = service(ScriptedDecision::answering(&[0.9]), Mode::Advisory);
         service
-            .judge_criterion("REQ-007 criterion 1", "then the result is 3")
+            .judge(
+                &CRITERION_MEASURABLE,
+                "REQ-007 criterion 1",
+                measurable_state("then the result is 3"),
+            )
             .unwrap();
         let asked = service.client.asked.borrow();
         assert_eq!(asked.len(), 1);
@@ -396,7 +536,11 @@ mod tests {
     fn a_confident_no_is_a_recorded_judgment_that_fails() {
         let service = service(ScriptedDecision::answering(&[0.04]), Mode::Advisory);
         let judgment = service
-            .judge_criterion("REQ-007 criterion 1", "then it works")
+            .judge(
+                &CRITERION_MEASURABLE,
+                "REQ-007 criterion 1",
+                measurable_state("then it works"),
+            )
             .unwrap();
         assert_eq!(judgment.verdict, Verdict::Fails);
         assert_eq!(
@@ -410,7 +554,11 @@ mod tests {
     fn an_answer_in_the_dead_band_is_inconclusive() {
         let service = service(ScriptedDecision::answering(&[0.55]), Mode::Advisory);
         let judgment = service
-            .judge_criterion("REQ-007 criterion 1", "then it is valid")
+            .judge(
+                &CRITERION_MEASURABLE,
+                "REQ-007 criterion 1",
+                measurable_state("then it is valid"),
+            )
             .unwrap();
         assert_eq!(judgment.verdict, Verdict::Inconclusive);
     }
@@ -691,7 +839,11 @@ mod tests {
             asked: RefCell::new(Vec::new()),
         };
         let error = service(client, Mode::Advisory)
-            .judge_criterion("REQ-007 criterion 1", "then the result is 3")
+            .judge(
+                &CRITERION_MEASURABLE,
+                "REQ-007 criterion 1",
+                measurable_state("then the result is 3"),
+            )
             .unwrap_err();
         assert!(
             matches!(&error, DecisionError::UnexpectedAnswers { missing, .. }
@@ -763,6 +915,185 @@ mod tests {
             1,
             "the question was actually put"
         );
+    }
+
+    /// The point of the combinator: a judgment asking for rework leaves
+    /// through the same `Err` a failed parse does, so the reply rides
+    /// the retry that already exists and the writing model is re-asked
+    /// with the complaint rather than with silence.
+    #[test]
+    fn a_reworking_judgment_leaves_as_the_rejection_reason() {
+        let judge = ScriptedJudge::saying(Mode::Enforce, 0.01);
+        let mut recorded = Vec::new();
+        let mut check = gated(
+            Some(&judge),
+            Policy::new(Mode::Enforce, 0.70),
+            &CRITERION_MEASURABLE,
+            &mut recorded,
+            |parsed: &String| vec![Brief::new("REQ-007 criterion 1", measurable_state(parsed))],
+            |reply: &str| Ok(reply.to_string()),
+        );
+        let reason = check("then it works").unwrap_err();
+        assert!(reason.contains("judgment (measurable/"), "{reason}");
+        assert!(
+            reason.contains("the outcome may not be measurable"),
+            "{reason}"
+        );
+        drop(check);
+        assert_eq!(recorded.len(), 1);
+        assert_eq!(recorded[0].gate, "CRITERION_MEASURABLE");
+        assert_eq!(recorded[0].action, Transition::Rework);
+        assert_eq!(
+            judge.briefs(),
+            vec![measurable_state("then it works")],
+            "the brief is the criterion and nothing else"
+        );
+    }
+
+    /// An answer too unclear to read is not one a re-ask makes clearer.
+    /// The judgment is recorded and the work is handed back, leaving the
+    /// caller to see the escalation rather than spend attempts on it.
+    #[test]
+    fn an_escalating_judgment_is_recorded_without_asking_again() {
+        let judge = ScriptedJudge::saying(Mode::Enforce, 0.55);
+        let mut recorded = Vec::new();
+        let mut check = gated(
+            Some(&judge),
+            Policy::new(Mode::Enforce, 0.70),
+            &CRITERION_MEASURABLE,
+            &mut recorded,
+            |parsed: &String| vec![Brief::new("REQ-007 criterion 1", measurable_state(parsed))],
+            |reply: &str| Ok(reply.to_string()),
+        );
+        assert_eq!(check("then it works").unwrap(), "then it works");
+        drop(check);
+        assert_eq!(recorded[0].verdict, Verdict::Inconclusive);
+        assert_eq!(recorded[0].action, Transition::Escalate);
+    }
+
+    /// A deterministic refusal never reaches the model. Paying for a
+    /// judgment on a reply that did not parse buys nothing, and judging
+    /// a half-read reply would be evidence about neither.
+    #[test]
+    fn a_reply_that_does_not_parse_is_not_judged_at_all() {
+        let judge = ScriptedJudge::saying(Mode::Enforce, 0.99);
+        let mut recorded = Vec::new();
+        let mut check = gated(
+            Some(&judge),
+            Policy::new(Mode::Enforce, 0.70),
+            &CRITERION_MEASURABLE,
+            &mut recorded,
+            |parsed: &String| vec![Brief::new("REQ-007 criterion 1", measurable_state(parsed))],
+            |_: &str| Err::<String, _>("the reply was not a JSON array".to_string()),
+        );
+        assert_eq!(check("{").unwrap_err(), "the reply was not a JSON array");
+        drop(check);
+        assert!(recorded.is_empty());
+        assert!(judge.asked().is_empty(), "nothing was asked");
+    }
+
+    /// The invariant the plane opens by stating: a question that did not
+    /// answer is never an approval. Under `enforce` the silence is a
+    /// refusal naming the way out; under the softer modes nothing was
+    /// gating, so the work carries on unjudged.
+    #[test]
+    fn an_unreachable_model_refuses_under_enforce_and_is_waved_through_otherwise() {
+        for (mode, approves) in [
+            (Mode::Enforce, false),
+            (Mode::Advisory, true),
+            (Mode::Off, true),
+        ] {
+            let judge = ScriptedJudge::unreachable(mode);
+            let mut recorded = Vec::new();
+            let mut check = gated(
+                Some(&judge),
+                Policy::new(mode, 0.70),
+                &CRITERION_MEASURABLE,
+                &mut recorded,
+                |parsed: &String| vec![Brief::new("REQ-007 criterion 1", measurable_state(parsed))],
+                |reply: &str| Ok(reply.to_string()),
+            );
+            let outcome = check("then the result is 3");
+            drop(check);
+            assert_eq!(outcome.is_ok(), approves, "{mode}");
+            assert!(recorded.is_empty(), "there was no judgment to record");
+            if let Err(reason) = outcome {
+                assert!(reason.contains("CRITERION_MEASURABLE"), "{reason}");
+                assert!(reason.contains("no model"), "{reason}");
+                assert!(
+                    reason.contains("mode = \"advisory\""),
+                    "the refusal names the way out: {reason}"
+                );
+            }
+        }
+    }
+
+    /// A reply carrying several things to judge gets a narrow question
+    /// about each, not one broad question about the lot, and every
+    /// complaint reaches the writing model in the one correction.
+    #[test]
+    fn each_brief_in_a_reply_is_asked_about_on_its_own() {
+        let judge = ScriptedJudge::saying(Mode::Enforce, 0.01);
+        let mut recorded = Vec::new();
+        let mut check = gated(
+            Some(&judge),
+            Policy::new(Mode::Enforce, 0.70),
+            &CRITERION_MEASURABLE,
+            &mut recorded,
+            |parsed: &Vec<String>| {
+                parsed
+                    .iter()
+                    .enumerate()
+                    .map(|(index, criterion)| {
+                        Brief::new(
+                            format!("REQ-007 criterion {}", index + 1),
+                            measurable_state(criterion),
+                        )
+                    })
+                    .collect()
+            },
+            |reply: &str| Ok(reply.split('|').map(str::to_string).collect()),
+        );
+        let reason = check("then it works|then it is valid").unwrap_err();
+        drop(check);
+        assert_eq!(recorded.len(), 2, "each was asked about on its own");
+        assert!(reason.contains("criterion 1"), "{reason}");
+        assert!(
+            reason.contains("criterion 2"),
+            "one correction carries every complaint: {reason}"
+        );
+        assert_eq!(
+            judge.briefs(),
+            vec![
+                measurable_state("then it works"),
+                measurable_state("then it is valid")
+            ]
+        );
+    }
+
+    /// `None` is how the composition root says "ask nothing", so the
+    /// validator has to be exactly the one it was handed.
+    #[test]
+    fn without_a_judge_the_validator_is_the_one_that_was_passed_in() {
+        let mut recorded = Vec::new();
+        let mut check = gated(
+            None,
+            Policy::new(Mode::Enforce, 0.70),
+            &CRITERION_MEASURABLE,
+            &mut recorded,
+            |parsed: &String| vec![Brief::new("REQ-007 criterion 1", measurable_state(parsed))],
+            |reply: &str| match reply.is_empty() {
+                true => Err("empty".to_string()),
+                false => Ok(reply.to_string()),
+            },
+        );
+        assert_eq!(
+            check("then the result is 3").unwrap(),
+            "then the result is 3"
+        );
+        assert_eq!(check("").unwrap_err(), "empty");
+        drop(check);
+        assert!(recorded.is_empty());
     }
 
     /// When several criteria disagree about what should happen, the most

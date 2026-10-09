@@ -127,7 +127,7 @@ pub fn decision_service(
     Some(DecisionService::new(
         model,
         OllamaDecision::with_timeout(settings.endpoint, settings.timeout),
-        settings.policy,
+        settings.policies,
     ))
 }
 
@@ -377,7 +377,7 @@ mod tests {
         let overridden = resolved_decision(dir.path(), Some("from-flag"));
         assert_eq!(overridden.model, Some("from-flag".into()));
         assert_eq!(
-            overridden.policy.mode,
+            overridden.policy().mode,
             crate::domain::decision::Mode::Enforce,
             "the flag names a model; it does not change the mode"
         );

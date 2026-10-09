@@ -123,12 +123,39 @@ fn environment() -> &'static Environment<'static> {
 /// calibrated against one phrasing is not evidence about another, so
 /// wording that can change without its version changing turns a
 /// published figure into a claim nobody can reproduce.
+/// `when_true` and `when_false` describe the two outcomes of a boolean
+/// question. A graded question has no two outcomes to describe - its
+/// levels are the answer schema, and they live on the gate beside the
+/// floor they are indexed against, so that a floor cannot name a level
+/// that is not there. The pair is therefore optional, and absent
+/// together: half an outcome pair describes nothing.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
 pub struct DecisionPrompt {
     pub version: String,
     pub instructions: String,
-    pub when_true: String,
-    pub when_false: String,
+    #[serde(default)]
+    pub when_true: Option<String>,
+    #[serde(default)]
+    pub when_false: Option<String>,
+}
+
+impl DecisionPrompt {
+    /// The two outcomes of a boolean question.
+    ///
+    /// Panics like the rest of this module: asking a graded table for
+    /// outcomes it does not have is a gate declared with the wrong
+    /// [`crate::domain::decision::GateKind`], which is a build defect
+    /// and not something a caller could act on.
+    pub fn outcomes(&self, name: &str) -> (&str, &str) {
+        match (&self.when_true, &self.when_false) {
+            (Some(when_true), Some(when_false)) => (when_true, when_false),
+            _ => panic!(
+                "prompts/prompts.toml [decision.{name}] describes no outcomes, so it \
+                 cannot answer a boolean question - give it when_true and when_false, \
+                 or declare the gate as graded"
+            ),
+        }
+    }
 }
 
 #[derive(serde::Deserialize)]
@@ -149,12 +176,20 @@ fn decision_catalog() -> &'static std::collections::BTreeMap<String, DecisionPro
         let catalog: DecisionCatalog = toml::from_str(PROMPTS_TOML)
             .expect("prompts/prompts.toml is a compile-time asset and must parse");
         for (name, question) in &catalog.decision {
+            if question.when_true.is_some() != question.when_false.is_some() {
+                panic!(
+                    "prompts/prompts.toml [decision.{name}] describes one outcome and \
+                     not the other - a boolean question needs both, a graded one needs \
+                     neither"
+                );
+            }
             for (field, text) in [
-                ("version", &question.version),
-                ("instructions", &question.instructions),
-                ("when_true", &question.when_true),
-                ("when_false", &question.when_false),
+                ("version", Some(&question.version)),
+                ("instructions", Some(&question.instructions)),
+                ("when_true", question.when_true.as_ref()),
+                ("when_false", question.when_false.as_ref()),
             ] {
+                let Some(text) = text else { continue };
                 if text.trim().is_empty() {
                     panic!("prompts/prompts.toml [decision.{name}] needs a {field}");
                 }
@@ -316,8 +351,22 @@ mod tests {
         let question = decision_prompt("measurable");
         assert_eq!(question.version, "measurable/v2");
         assert!(question.instructions.contains("after \"then\""));
-        assert!(question.when_true.contains("literal value"));
-        assert!(question.when_false.contains("vague"));
+        let (when_true, when_false) = question.outcomes("measurable");
+        assert!(when_true.contains("literal value"));
+        assert!(when_false.contains("vague"));
+    }
+
+    /// A graded question has no two outcomes to describe, so it carries
+    /// none - and asking it for them is a gate declared with the wrong
+    /// kind, which says so rather than sending an empty criterion.
+    #[test]
+    fn a_graded_question_carries_no_outcomes_and_says_so_when_asked() {
+        let question = decision_prompt("implementation_complete");
+        assert_eq!(question.when_true, None);
+        assert_eq!(question.when_false, None);
+        assert!(question.instructions.contains("Grade `stub`"));
+        let asked = std::panic::catch_unwind(|| question.outcomes("implementation_complete"));
+        assert!(asked.is_err(), "a graded table cannot answer a boolean");
     }
 
     /// The bytes sent are the bytes the published evaluation measured.
@@ -329,12 +378,18 @@ mod tests {
         let catalog = decision_catalog();
         assert!(!catalog.is_empty(), "the decision plane needs a question");
         for (name, question) in catalog {
+            assert_eq!(
+                question.when_true.is_some(),
+                question.when_false.is_some(),
+                "[decision.{name}] describes one outcome and not the other"
+            );
             for (field, text) in [
-                ("version", &question.version),
-                ("instructions", &question.instructions),
-                ("when_true", &question.when_true),
-                ("when_false", &question.when_false),
+                ("version", Some(&question.version)),
+                ("instructions", Some(&question.instructions)),
+                ("when_true", question.when_true.as_ref()),
+                ("when_false", question.when_false.as_ref()),
             ] {
+                let Some(text) = text else { continue };
                 assert!(
                     !text.trim().is_empty(),
                     "[decision.{name}] {field} is blank"

@@ -159,6 +159,17 @@ impl fmt::Display for ConfigReport {
     }
 }
 
+/// One `[decision.gates.<GATE>]` table, as far as it was spelled.
+///
+/// Both halves are optional and taken separately: a gate that names only
+/// a mode is the common case, and inventing a threshold for it would
+/// silently recalibrate a question the owner did not mention.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct GateOverride {
+    pub mode: Option<String>,
+    pub min_confidence: Option<f64>,
+}
+
 /// Keys that were actually present and valid in the TOML file.
 ///
 /// `PartialEq` only: `decision.min_confidence` is a float, and a
@@ -182,6 +193,10 @@ pub(crate) struct PresentValues {
     pub decision_timeout_seconds: Option<u64>,
     pub decision_mode: Option<String>,
     pub decision_min_confidence: Option<f64>,
+    /// `[decision.gates.<GATE>]`, keyed by gate name. Only the keys the
+    /// file set are here, so a gate naming a mode and no threshold keeps
+    /// the plane-wide threshold.
+    pub decision_gates: BTreeMap<String, GateOverride>,
     pub profiles: BTreeMap<String, Vec<String>>,
     pub enabled: BTreeMap<String, Vec<String>>,
     pub disabled: BTreeMap<String, Vec<String>>,
@@ -266,6 +281,29 @@ pub(crate) fn build_report(file: ConfigFileStatus, present: PresentValues) -> Co
         None => (format!("{DEFAULT_MIN_CONFIDENCE}"), false),
     };
     push(&mut settings, &file, "decision.min_confidence", value, set);
+    // Only the gates the file named. Listing every gate at its inherited
+    // policy would triple this report to say nothing, and the point of
+    // an override is that it is the exception worth reading.
+    for (gate, over) in &present.decision_gates {
+        if let Some(mode) = &over.mode {
+            push(
+                &mut settings,
+                &file,
+                &format!("decision.gates.{gate}.mode"),
+                mode.clone(),
+                true,
+            );
+        }
+        if let Some(threshold) = over.min_confidence {
+            push(
+                &mut settings,
+                &file,
+                &format!("decision.gates.{gate}.min_confidence"),
+                format!("{threshold}"),
+                true,
+            );
+        }
+    }
     for caller in Caller::ALL {
         let key = format!("tools.profiles.{}", caller.key());
         match present.profiles.get(caller.key()) {

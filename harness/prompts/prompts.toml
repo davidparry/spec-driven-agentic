@@ -533,3 +533,41 @@ version = 'measurable/v2'
 instructions = 'Read only the text after "then" in this acceptance criterion. That clause is the assertion a test would make. Does it name a specific value, state, status, or error that could be written into an assert statement exactly as stated, without anyone first deciding what the words mean?'
 when_true = 'Yes - the clause after "then" names a literal value, an exact status code, a named error type, or an exact relation between stated inputs, and two engineers reading it would write the same assertion. Text in quotation marks is always a literal: the assertion is that those exact characters appear, whatever the quoted word would mean as prose. A count is a literal too. Judge the clause on its own; what the Given and When describe cannot make an exact assertion vague.'
 when_false = 'No - the clause after "then" uses an unquoted word whose meaning a reader has to settle first (correct, proper, relevant, acceptable, improved, timely, successful, intuitive, as specified, best practice), or it refers to a document, standard, threshold or test suite that is not quoted here, or it restates the goal instead of naming a value. A number in the sentence does not count unless the assertion itself is that number: a percentage of a quantity nobody measured, or a placeholder such as an SLO or a limit named but not given, is still vague.'
+
+# The questions below gate work a writing model just produced, rather than
+# wording a human just typed. Each is asked about one curated brief - the
+# criterion plus the one artefact - never a file and never the repository:
+# MAX_REQUEST_BYTES is 64KB and the shipped decision models load an 8,192
+# token context, so a brief that grows is a brief that gets truncated.
+#
+# Every one of them ships at `advisory` until its own threshold sweep in
+# harness/tests/decision_live.rs justifies otherwise, on the precedent
+# `measurable` set.
+
+[decision.scenario_exercises]
+version = 'scenario_exercises/v1'
+instructions = 'Below are one acceptance criterion and one Gherkin scenario written to cover it. Ignore whether the scenario is well written. Does the scenario actually put the criterion to the test - do its steps set up the situation the criterion describes, perform the action it names, and check the outcome it states?'
+when_true = 'Yes - the scenario sets up the stated situation, performs the stated action, and its Then step checks the outcome the criterion states. The wording need not match: a scenario may name the same value differently, use different example data of the same kind, or split the criterion across several steps, and still be exercising it. Judge what the steps do, not how they read.'
+when_false = 'No - the scenario checks something else, checks only that the action ran without checking its result, or checks a weaker property than the criterion states (that a reply arrived rather than what it contained, that no error was raised rather than what was produced). It is also No when the scenario omits the action the criterion names, or asserts an outcome for inputs other than the ones the criterion is about.'
+
+[decision.steps_bind]
+version = 'steps_bind/v1'
+instructions = 'Below are one Gherkin step line as written in a feature file and one step definition expression written to match it. Would this expression match that line, and would it capture the values the line carries? Answer about matching alone, not about what the step body does.'
+when_true = 'Yes - the expression matches the line as written, and every literal value in the line (a number, a quoted string, a named state) is either captured by a parameter or present in the expression verbatim. A Cucumber expression parameter such as {int}, {string} or {word} matches the corresponding literal in the line; a regular expression capture group does the same.'
+when_false = 'No - the expression would not match the line: the words differ beyond the captured parameters, the keyword-stripped text diverges, a literal in the line has no corresponding parameter or literal in the expression, or the expression hard-codes a value the line varies. It is also No when the expression captures a different number of values than the line carries.'
+
+[decision.test_asserts]
+version = 'test_asserts/v1'
+instructions = 'Below are one acceptance criterion and the body of a unit test written for it. Does this test body actually assert the outcome the criterion states - would it fail if the production code returned the wrong answer?'
+when_true = 'Yes - the body calls the production code and asserts against a value the criterion states, so a wrong answer from that code fails the test. The assertion style does not matter, and a body may set up data, call several methods, or assert more than the criterion requires, and still be asserting it.'
+when_false = 'No - the body would pass whatever the production code returned. That covers an assertion against a constant rather than the call (asserting that true is true, that a literal equals itself, that a value equals itself), a body that calls the code and asserts nothing, a body whose only assertion is that no exception was thrown when the criterion states a value, a body left as a placeholder or a deliberate failure, and a body that asserts an outcome the criterion does not state while leaving the stated one unchecked.'
+
+[decision.implementation_complete]
+version = 'implementation_complete/v1'
+instructions = 'Below are one acceptance criterion and the production code written to satisfy it. Grade how completely this code implements the behaviour the criterion describes, for the inputs the criterion is about. Judge the code as written, not the style it is written in. Grade `stub` when the code does not attempt the behaviour: it throws a not-implemented error, returns a fixed value regardless of input, returns null or an empty value unconditionally, or carries a TODO where the work should be. Grade `partial` when the code attempts the behaviour but a case the criterion names is missing or handled wrongly - a branch that is absent, an input the criterion mentions that falls through, or a result computed a different way than stated. Grade `complete` when the code computes the stated outcome for the inputs the criterion is about, including any case the criterion explicitly names.'
+
+[decision.refactor_preserves]
+version = 'refactor_preserves/v1'
+instructions = 'Below are one function before a refactoring and the same function after it. A refactoring is supposed to change how code reads without changing what it does. For the inputs this function accepts, would the two versions return the same results and have the same effects?'
+when_true = 'Yes - the two compute the same thing. Renaming, reordering independent statements, extracting a helper, replacing a loop with an equivalent expression, early returns in place of nesting, and added comments all leave behaviour alone. Added logging or tracing is not a behaviour change.'
+when_false = 'No - some input would be treated differently. A condition inverted or its boundary moved, a branch added or dropped, a different default or fallback, an error now raised or now swallowed, an ordering the caller can observe, or a clause that silently covers fewer cases than before. It is also No when the after version is incomplete - a body that no longer does the work, or one that now throws where it used to compute.'

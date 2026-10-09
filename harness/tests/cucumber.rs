@@ -65,7 +65,9 @@ use spec_harness::bootstrap::refresh_project_memory;
 use spec_harness::branch::{Branched, offer_branch};
 use spec_harness::deliver::{Deliver, DeliverOptions, DeliverReport, Target, parse_target};
 use spec_harness::domain::CACHE_DIR;
-use spec_harness::domain::decision::{DEFAULT_MIN_CONFIDENCE, Judgment, Mode, Policy, Verdict};
+use spec_harness::domain::decision::{
+    DEFAULT_MIN_CONFIDENCE, Judgment, Mode, Policies, Policy, Verdict,
+};
 use spec_harness::domain::feature::{FeatureDoc, FeatureSummary};
 use spec_harness::domain::language::{Language, detect_languages};
 use spec_harness::domain::mcp_registry::{RegistryLoad, ServerSpec, parse_registry};
@@ -4563,7 +4565,7 @@ impl SpecWorld {
         DecisionService::new(
             model,
             OllamaDecision::with_timeout(endpoint, std::time::Duration::from_secs(2)),
-            self.decision_policy(),
+            Policies::uniform(self.decision_policy()),
         )
     }
 
@@ -4660,10 +4662,11 @@ fn push_installed(world: &mut SpecWorld, model: String) {
 
 #[when(regex = r#"^the criterion "(.+)" is judged$"#)]
 fn the_criterion_is_judged(world: &mut SpecWorld, criterion: String) {
-    match world
-        .decision_service()
-        .judge_criterion("--text", &criterion)
-    {
+    match world.decision_service().judge(
+        &spec_harness::domain::decision::CRITERION_MEASURABLE,
+        "--text",
+        spec_harness::domain::decision::measurable_state(&criterion),
+    ) {
         Ok(judgment) => world.judgment = Some(judgment),
         Err(error) => world.judge_error = Some(error),
     }
@@ -4821,7 +4824,7 @@ fn the_question_version_is(world: &mut SpecWorld, expected: String) {
     let question = world.decision_question.expect("the catalog was read");
     assert_eq!(question.version, expected);
     assert_eq!(
-        spec_harness::domain::decision::measurable_version(),
+        spec_harness::domain::decision::CRITERION_MEASURABLE.version(),
         expected,
         "the judgment records the version the catalog holds"
     );
@@ -4843,12 +4846,13 @@ fn the_question_instructions_name_the_clause(world: &mut SpecWorld, word: String
 #[then("the question states both outcomes")]
 fn the_question_states_both_outcomes(world: &mut SpecWorld) {
     let question = world.decision_question.expect("the catalog was read");
-    assert!(question.when_true.contains("literal value"));
-    assert!(question.when_false.contains("vague"));
-    let asked = spec_harness::domain::decision::measurable_question();
+    let (when_true, when_false) = question.outcomes("measurable");
+    assert!(when_true.contains("literal value"));
+    assert!(when_false.contains("vague"));
+    let asked = spec_harness::domain::decision::CRITERION_MEASURABLE.question();
     let json = serde_json::to_value(&asked).expect("the question serializes");
-    assert_eq!(json["criteria"]["true"], question.when_true);
-    assert_eq!(json["criteria"]["false"], question.when_false);
+    assert_eq!(json["criteria"]["true"], when_true);
+    assert_eq!(json["criteria"]["false"], when_false);
 }
 
 #[then("the decision readiness is ready")]

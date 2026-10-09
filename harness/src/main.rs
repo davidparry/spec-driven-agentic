@@ -1946,9 +1946,9 @@ fn run_judge(root: &Path, flag: Option<&str>, command: &JudgeCommand) -> anyhow:
                     "source": source,
                     "endpoint": settings.endpoint,
                     "timeoutSeconds": settings.timeout.as_secs(),
-                    "mode": settings.policy.mode,
-                    "minConfidence": settings.policy.threshold,
-                    "question": spec_harness::domain::decision::measurable_version(),
+                    "mode": settings.policy().mode,
+                    "minConfidence": settings.policy().threshold,
+                    "question": spec_harness::domain::decision::CRITERION_MEASURABLE.version(),
                 }));
             }
             match &resolved {
@@ -1957,8 +1957,8 @@ fn run_judge(root: &Path, flag: Option<&str>, command: &JudgeCommand) -> anyhow:
             }
             println!("endpoint\t{}", settings.endpoint);
             println!("timeout_seconds\t{}", settings.timeout.as_secs());
-            println!("mode\t{}", settings.policy.mode);
-            println!("min_confidence\t{}", settings.policy.threshold);
+            println!("mode\t{}", settings.policy().mode);
+            println!("min_confidence\t{}", settings.policy().threshold);
             Ok(())
         }
         JudgeCommand::Use { model_name } => {
@@ -2034,7 +2034,7 @@ fn run_judge(root: &Path, flag: Option<&str>, command: &JudgeCommand) -> anyhow:
             println!("model\t{}", service.model());
             println!(
                 "question\t{}",
-                spec_harness::domain::decision::measurable_version()
+                spec_harness::domain::decision::CRITERION_MEASURABLE.version()
             );
             println!("mode\t{}", service.policy().mode);
             println!("min_confidence\t{}", service.policy().threshold);

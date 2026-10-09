@@ -545,7 +545,7 @@ mod tests {
     fn allowed_targets_lead_with_the_primary_and_keep_each_file_once() {
         let port = "src/main/java/Port.java".to_string();
         let adapter = "src/main/java/Adapter.java".to_string();
-        assert_eq!(allowed_targets(&port, &[]), [port.clone()]);
+        assert_eq!(allowed_targets(&port, &[]), std::slice::from_ref(&port));
         assert_eq!(
             allowed_targets(&port, &[adapter.clone(), port.clone()]),
             [port.clone(), adapter.clone()]

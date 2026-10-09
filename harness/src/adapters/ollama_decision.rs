@@ -247,16 +247,14 @@ pub(crate) fn check_answers(request: &Request, outcome: &Outcome) -> Result<(), 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::decision::{
-        Answer, MEASURABLE_ANSWER, Question, measurable_question, measurable_state,
-    };
+    use crate::domain::decision::{Answer, CRITERION_MEASURABLE, Question, measurable_state};
     use std::io::{Read as _, Write as _};
     use std::net::TcpListener;
 
     fn request() -> Request {
         Request::single(
-            MEASURABLE_ANSWER,
-            measurable_question(),
+            CRITERION_MEASURABLE.answer_key(),
+            CRITERION_MEASURABLE.question(),
             measurable_state("Given \"1,2\", when add is called, then the result is 3"),
         )
     }
@@ -353,8 +351,8 @@ mod tests {
     #[test]
     fn a_brief_over_the_servers_body_limit_is_refused_locally_with_the_budget() {
         let huge = Request::single(
-            MEASURABLE_ANSWER,
-            measurable_question(),
+            CRITERION_MEASURABLE.answer_key(),
+            CRITERION_MEASURABLE.question(),
             measurable_state(&"x".repeat(MAX_REQUEST_BYTES + 1)),
         );
         let error = OllamaDecision::new("http://127.0.0.1:9".into())

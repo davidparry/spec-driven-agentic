@@ -28,8 +28,8 @@
 use spec_harness::adapters::ollama::OllamaCatalog;
 use spec_harness::adapters::ollama_decision::OllamaDecision;
 use spec_harness::domain::decision::{
-    Answer, DECISION_CAPABILITY, DEFAULT_MIN_CONFIDENCE, MEASURABLE_ANSWER, Mode, Policy, Request,
-    Verdict, measurable_question, measurable_state,
+    Answer, CRITERION_MEASURABLE, DECISION_CAPABILITY, DEFAULT_MIN_CONFIDENCE, GateKind, Mode,
+    Policy, Request, Verdict, measurable_state,
 };
 use spec_harness::ports::{DecisionModel, ModelCatalog};
 
@@ -395,8 +395,8 @@ fn a_local_decision_model_answers_the_measurable_question() {
 
     let criterion = "Given the input \"1,2\", when add is called, then the result is 3";
     let request = Request::single(
-        MEASURABLE_ANSWER,
-        measurable_question(),
+        CRITERION_MEASURABLE.answer_key(),
+        CRITERION_MEASURABLE.question(),
         measurable_state(criterion),
     );
     let started = std::time::Instant::now();
@@ -407,7 +407,7 @@ fn a_local_decision_model_answers_the_measurable_question() {
 
     let answer = outcome
         .answers
-        .get(MEASURABLE_ANSWER)
+        .get(CRITERION_MEASURABLE.answer_key())
         .expect("an answer to the question that was asked");
     println!(
         "answer: {} in {}ms ({} in / {} out tokens)",
@@ -480,8 +480,8 @@ fn the_measurable_question_is_evaluated_against_labeled_criteria() {
     let mut latencies = Vec::new();
     for case in CASES {
         let request = Request::single(
-            MEASURABLE_ANSWER,
-            measurable_question(),
+            CRITERION_MEASURABLE.answer_key(),
+            CRITERION_MEASURABLE.question(),
             measurable_state(case.criterion),
         );
         let started = std::time::Instant::now();
@@ -491,7 +491,7 @@ fn the_measurable_question_is_evaluated_against_labeled_criteria() {
         latencies.push(started.elapsed());
         let answer = outcome
             .answers
-            .get(MEASURABLE_ANSWER)
+            .get(CRITERION_MEASURABLE.answer_key())
             .unwrap_or_else(|| panic!("no answer for {:?}", case.criterion));
         let Answer::Noul { noul } = answer else {
             panic!("expected a noul answer for {:?}", case.criterion);
@@ -511,7 +511,7 @@ fn the_measurable_question_is_evaluated_against_labeled_criteria() {
     println!("\n--- per criterion at the default threshold ---");
     let default = Policy::new(Mode::Advisory, DEFAULT_MIN_CONFIDENCE);
     for (case, probability) in CASES.iter().zip(&probabilities) {
-        let verdict = default.verdict_for(&Answer::Noul { noul: *probability });
+        let verdict = default.verdict_for(&Answer::Noul { noul: *probability }, GateKind::Did);
         let mark = match (case.label, verdict) {
             (Label::Ambiguous, _) | (_, Verdict::Inconclusive) => "  ",
             (Label::Measurable, Verdict::Holds) | (Label::NotMeasurable, Verdict::Fails) => "ok",
@@ -539,7 +539,7 @@ fn the_measurable_question_is_evaluated_against_labeled_criteria() {
         for (case, probability) in CASES.iter().zip(&probabilities) {
             score.tally(
                 case.label,
-                policy.verdict_for(&Answer::Noul { noul: *probability }),
+                policy.verdict_for(&Answer::Noul { noul: *probability }, GateKind::Did),
             );
         }
         println!(
