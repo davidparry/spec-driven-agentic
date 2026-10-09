@@ -154,7 +154,9 @@ is written. Remember it — it is the whole of the next section.
 
 Running out of retries costs you nothing: the last attempt is accepted
 whatever its criteria look like, and whatever it still lacks returns as
-a finding in the wording round. Budget three to four minutes here.
+a finding in the wording round. Budget three to four minutes here; a
+measured run on the pinned model, including one rejection and retry,
+took 1m39s.
 
 **Then it proposes**, having split your sentence into atomic
 requirements, one capability each:
@@ -186,8 +188,26 @@ screen rather than matching it to the list above.
 Type `1`.
 
 One keystroke, and it is a real choice: four proposed requirements are
-discarded unbuilt, and you set the scope rather than the machine. What
-lands in `requirements.json` is `HARNESS-019`:
+discarded unbuilt, and you set the scope rather than the machine.
+
+**It is not the last prompt.** Accepting writes the requirement and
+then walks you straight into a second wizard over what it just wrote:
+
+```text
+Accepted requirements were written to requirements/requirements.json as pending:
+  HARNESS-019 Acceptance criteria of one requirement are each reported proven or unproven
+Walking through HARNESS-019. Each prompt shows the proposal - Enter accepts it, or type your own wording.
+HARNESS-019 title [Acceptance criteria of one requirement are …] (Enter keeps it):
+```
+
+Title, then story, then each criterion, each with the model's proposal
+already in the brackets. Hold Enter and you keep the draft as it
+stands, which is what this walk wants — 9:20 is where the rewording
+happens, deliberately and with both reviews in front of you. Decline
+the wizard and nothing is lost either: the requirement is already in
+`requirements.json` under the model's wording.
+
+What lands there is `HARNESS-019`:
 
 ```text
 {
@@ -553,9 +573,19 @@ The generated definitions are `todo!()` stubs that bind the project's
 own `SpecWorld`. They compile, they fail, and filling them in is the
 next person's job — which is exactly what RED means.
 
+**Read `tests/harness_019_test.rs` before you trust it to build.** The
+step definitions are templated and compile; the unit test is written
+by the model and may not. A measured run produced a file that defined
+its four tests inside a private `mod criteria_coverage` and then added
+four more tests outside it calling in — four `E0425: cannot find
+function` errors, and the whole test target failed to compile. The fix
+was to delete the duplicated outer block. This is the first place in
+the morning where you read generated code rather than trust it, and it
+arrives 45 minutes before the step that warns you about it.
+
 > The model calls are the slow part of the morning. Measured against the
-> pinned local model: `scenario generate` about four minutes, `steps
-> generate` about one, `unittest generate` well under one — and
+> pinned local model: `scenario generate` about seven minutes, `steps
+> generate` under one, `unittest generate` about forty seconds — and
 > `implement`, at 10:15, anywhere from twenty minutes to an hour per
 > attempt. If a step returns in a second it was a cache hit from an
 > earlier run, which is fine, and at 10:15 it is the whole plan: see
@@ -578,6 +608,20 @@ spec state     # the Phase row reads RED
 
 A red bar here is the proof the test can fail. A test written after the
 code never gives you that.
+
+Check *which* red you got. `Last run` says it:
+
+```text
+Phase     RED
+Last run  0 tests, 1 error        # the build is broken — nothing ran
+Last run  1641 tests, 8 failures  # the tests ran and failed — this is the one you want
+```
+
+`0 tests` means a compile error, almost certainly the generated unit
+test from 9:30, and it proves nothing about your tests because none of
+them executed. Fix the build first. The harness calls both of them RED
+because both block a refactor, which is correct of it and is not the
+same claim this step is making.
 
 Now try to tidy up:
 
@@ -604,11 +648,32 @@ in `scripts/verify-workshop-run.sh`. You are exposing it, not inventing
 it.
 
 Read the preflight it prints first. The last line names the file the
-attempt will write, and it should say `src/mcp.rs`. Nothing configured
-that: the harness matched your When/Then steps to the step definitions
-that bind them, followed those one hop into the helpers they call, and
-picked the production file those name through the most distinct symbols.
-The scenarios you wrote at 9:30 are what pointed it there.
+attempt will write:
+
+```text
+  production code (the attempt creates it when missing): src/mcp.rs - present
+```
+
+Nothing configured that: the harness matched your When/Then steps to
+the step definitions that bind them, followed those one hop into the
+helpers they call, and picked the production file those name through
+the most distinct symbols. The scenarios you wrote at 9:30 are what
+pointed it there.
+
+**Which means it can point somewhere else, and say so just as
+confidently.** A measured run landed on `src/ports.rs`, because that
+run's generated steps named the port traits more distinctly than they
+named the router. Nothing is wrong with the inference — it followed
+the only evidence it had, and that evidence was the model's Gherkin,
+not yours. Check this line every time, and when it names the wrong
+file, say so:
+
+```bash
+spec implement HARNESS-019 --into src/mcp.rs
+```
+
+That is cheaper than finding out an hour later, and it is the same
+flag the refusal below asks for.
 
 **If it refuses instead**, saying it cannot tell which production file
 `HARNESS-019` belongs in, the inference worked correctly and found
@@ -628,6 +693,23 @@ unrelated module and the bar still goes green on the tests that did not
 need it.
 
 ### This step is slow, and it may not succeed
+
+**And it is not a step you can walk away from.** `implement` is the
+one command whose profile holds `command_run`, and `tools.confirm`
+defaults to exactly that tool, so every shell command the model wants
+stops and waits for you:
+
+```text
+Run command_run(command=["cargo","--version"])? [y/N]
+Run command_run(command=["cargo","test","criteria_coverage","--","--nocapture"], timeout_secs=300)? [y/N]
+```
+
+A measured run asked seven times before it gave up, for things as
+ordinary as reading a file it had already been handed. Answering `N`
+is safe and often right; the model has `feature_read` for files and
+`run_tests` for the suite, and reaches for a shell when it forgets
+that. What you cannot do is start this and go and get a coffee, which
+is the opposite of what the running time suggests.
 
 `implement` sends the whole neighborhood of the change to the model and
 asks for working code back. Against this crate, three measured
@@ -656,6 +738,13 @@ times is a worse use of the hour than reading good code out loud.
 `timeout_seconds` under `[llm]` and everything it had generated is
 gone. That ceiling is 3600 here for exactly this step; a project with
 more source in the neighborhood may need more again.
+
+**If it ends with `The model's reply held no usable file update`**, it
+spent its rounds looking rather than writing — the measured run above
+burned all of them on `command_run` and never produced a diff. The
+bar is untouched and the attempt is recorded, so the next try is
+briefed with it. Decline the shell commands and it has more rounds
+left for the job you asked for.
 
 **Scope check.** What lands here is one `#[tool(...)]` method on the
 router in `harness/src/mcp.rs`. That is enough to make it
