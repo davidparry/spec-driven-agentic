@@ -11,10 +11,10 @@ This is the attendee copy. The deck is at
 
 ## Prerequisites
 
-- `spec` **built from this repository**, on PATH — `cargo install --path
-  harness`, then `spec --version`. Not the published release: this walk
-  uses `spec judge`, and the decision plane landed after `v0.7.0` was
-  tagged, so no downloadable binary has it yet.
+- `spec` **0.7.10 or newer**, on PATH — the published installer, or
+  `cargo install --path harness` from a clone. Confirm with `spec
+  --version`. This walk is built on `spec judge`, and the decision
+  plane is in no earlier release.
 - Rust toolchain — `cargo --version`
 - Java 21 and Maven, for the smoke test that catches you at the end
 - Ollama 0.35 or newer, with a decision model pulled: `ollama pull
@@ -31,6 +31,30 @@ actually have and override for a run if it differs:
 spec config        # shows the resolved model and where it came from
 spec model list    # what Ollama has pulled locally
 ```
+
+**Read the first line of `spec config` before anything else.** It
+names the file every other line was resolved from, and it has to be
+`./.spec/config.toml`:
+
+```text
+file	./.spec/config.toml
+```
+
+If it says `(none)`, that file is missing from your clone and you are
+running on defaults — which is a different morning from this one, in
+three ways that all bite later. `decision.model` is unset, so 9:20 has
+no judgments to show at all and the section this walk is built around
+does not happen; `llm.timeout_seconds` is 300 rather than 3600, so
+`implement` at 10:15 times out partway through; and
+`llm.cache_ttl_seconds` is 600 rather than a day, so last night's
+rehearsal will not replay this morning. Restore it with `git checkout
+-- harness/.spec/config.toml` and read the line again.
+
+Point a `decision.model` at it by hand and you hit the fourth: with no
+file, `decision.mode` is the shipped `enforce` rather than the
+`advisory` this repository sets, so the judgments at 9:20 gate your
+criteria instead of merely reporting on them. 9:20 explains at length
+why that is the wrong setting here.
 
 Every generating command takes `--model <name>` for one run, so you do
 not have to edit the config to follow along on a different model.
@@ -72,11 +96,16 @@ are one directory too high.
 Confirm the starting state:
 
 ```bash
-spec list       # 17 implemented, 0 pending
-spec validate   # valid: true
-spec status     # nextId: HARNESS-019
+spec list       # 17 requirements, every one implemented
+spec validate   # "The spec is valid."
+spec status     # Next id  HARNESS-019
 cargo test --manifest-path Cargo.toml --test spec_completeness
 ```
+
+Those comments are what a **terminal** shows. Every one of these
+commands prints a laid-out summary when you are reading it and the raw
+JSON when anything else is — a pipe, an agent, `| jq`. Add `--json` to
+see on screen what `spec deliver` sees between stages.
 
 ## 9:00 — one sentence
 
@@ -188,8 +217,8 @@ can be read rather than invented.
 Two different questions, two different tools:
 
 ```bash
-spec validate            # valid: true  — the shape is fine
-spec refine HARNESS-019  # clean: true  — no findings at all
+spec validate            # "The spec is valid."   — the shape is fine
+spec refine HARNESS-019  # "HARNESS-019 is clean." — no findings at all
 ```
 
 A green result, and it is the most interesting moment of the morning.
@@ -544,7 +573,7 @@ exactly how a spec and a suite stop disagreeing.
 
 ```bash
 spec test
-spec state     # phase: RED
+spec state     # the Phase row reads RED
 ```
 
 A red bar here is the proof the test can fail. A test written after the
@@ -664,7 +693,7 @@ that the smoke test cannot silently skip new surface area.
 `@EnabledIfSystemProperty(named = "spec.binary", ...)`; without it the
 test is skipped and the build stays green.
 
-Fixing it means moving the planned count from 21 to 22 everywhere it is
+Fixing it means moving the planned count from 22 to 23 everywhere it is
 written down, and it is written down in four files. All paths are from
 the repository root:
 
@@ -681,7 +710,10 @@ the repository root:
    and `ToolPlan.names()` in `planIsExactlyTwentyOne`, then
    `report.discovered()` and `report.called()` in the two sweep tests.
    Maven will only show you the first one that fails, so change all four
-   before rerunning.
+   before rerunning. (The method name has said `TwentyOne` since the
+   plan was twenty-one tools. Renaming it is optional and the compiler
+   will not care, which is its own small lesson about names that carry
+   a number.)
 
 3. **`smoke-test/requirements/requirements.json`** — `CLI-009` names the
    number in both its title and its first criterion.
@@ -700,7 +732,7 @@ cargo test --manifest-path Cargo.toml --test spec_completeness
 
 `mark-implemented` is gated twice: the bar must be GREEN, and a scenario
 must carry the requirement's tag. The drift gate is scoped to implemented
-requirements, so it now covers 17 instead of 16 — and because
+requirements, so it now covers 18 instead of 17 — and because
 `HARNESS-019` is one of them, its wording is checked on every build from
 here on.
 
@@ -800,11 +832,18 @@ everything except the one decision nothing is checking.
 spec mcp call criteria_coverage --arg id=HARNESS-019
 ```
 
-```text
-verdict     covered
-criteria    4
-uncovered   []
+```json
+{
+  "verdict": "covered",
+  "criteria": 4,
+  "uncovered": []
+}
 ```
+
+`mcp call` prints the tool's reply as it came back over the protocol,
+so this one stays JSON on a terminal — it is a tool's output, not a
+command's. The eight commands that lay themselves out for a reader are
+the ones you have been running all morning; a tool answers a host.
 
 Every acceptance criterion you wrote at 9:10 has an asserting test. The
 tool you built reports on the requirement that asked for it.
@@ -980,8 +1019,8 @@ cargo install --path . --force
 # 4. confirm you are back at the start
 git status --short          # clean
 cd harness
-spec list                   # 17 implemented, 0 pending
-spec status                 # nextId: HARNESS-019
+spec list                   # 17 requirements, every one implemented
+spec status                 # Next id  HARNESS-019
 ```
 
 The check that matters is **0 pending**. If something is pending, the

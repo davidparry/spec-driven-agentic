@@ -861,10 +861,9 @@ Ten minutes, needs Ollama 0.35+ and one more model pulled, and nothing
 else depends on it. This is the one homework item that changes what your
 agent sees from `refine_requirement`.
 
-It also needs a `spec` built from this repository — `cargo install
---path harness`. The decision plane landed after `v0.7.0` was tagged,
-so the binary you installed for the workshop does not have `spec judge`
-yet and will answer with an unrecognised-subcommand error.
+It also needs `spec` 0.7.10 or newer. The decision plane is in no
+earlier release, so a binary from before it does not have `spec judge`
+and will answer with an unrecognised-subcommand error.
 
 In Step 4 the agent called `refine_requirement` and acted on `findings`.
 Those rules are fixed — same wording, same findings — which is why they

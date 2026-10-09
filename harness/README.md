@@ -267,9 +267,8 @@ a decision model answers. Ollama serves them at `/v1/systemone` from
 version 0.35: you send a bounded question and a brief, and get back a
 typed value with a probability rather than prose.
 
-`spec judge` landed after `v0.7.0` was tagged, so it is not in a
-published binary yet — build from this repository (`cargo install
---path harness`) to use anything in this section.
+`spec judge` needs 0.7.10 or newer. No earlier release carries a
+decision plane, so nothing in this section answers on one.
 
 ```bash
 ollama pull nimble
@@ -507,7 +506,7 @@ $ spec
 
   ╭──────────────────────────────────╮
   │                                  ▼
-  │    > spec  v{latest-version}      │
+  │    > spec  v{latest-version}     │
   │    spec → RED → GREEN → REFACTOR │
   ▲                                  │
   ╰──────────────────────────────────╯

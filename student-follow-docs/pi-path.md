@@ -59,9 +59,9 @@ output quality is not. See [Ollama model](../harness/README.md#ollama-model).
 
 Optionally, and separately from the model above, a *decision* model lets
 `refine_requirement` carry a judgment on whether each acceptance
-criterion is measurable. It needs Ollama 0.35+ and a `spec` built from
-this repository (`cargo install --path harness`), because `spec judge`
-landed after `v0.7.0` was tagged. Nothing on this page depends on it:
+criterion is measurable. It needs Ollama 0.35+ and `spec` 0.7.10 or
+newer, because `spec judge` is in no earlier release. Nothing on this
+page depends on it:
 
 ```bash
 ollama pull nimble

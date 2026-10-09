@@ -426,9 +426,8 @@ reachable with `spec reword`, which is what the advice used to name.
 
 A second, separate local model that writes nothing and answers one
 bounded question with a typed value and a probability. Needs Ollama
-0.35+ (`/v1/systemone`), and a `spec` built from this repository
-(`cargo install --path harness`) — the decision plane landed after
-`v0.7.0` was tagged, so no published binary answers `spec judge` yet.
+0.35+ (`/v1/systemone`), and `spec` 0.7.10 or newer — the decision
+plane is in no earlier release, so `spec judge` does not answer on one.
 Off until configured; nothing above depends on it.
 
 ```bash

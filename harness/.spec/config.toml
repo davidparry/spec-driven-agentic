@@ -4,6 +4,14 @@
 # timeout are pinned here rather than inherited. Without this file the
 # demo picks up whatever model happens to be installed, which is how a
 # rehearsal ends up on a different model than the slides advertise.
+#
+# Following along rather than giving the talk? The `[llm] model` below
+# is the presenter's, and you almost certainly have not pulled it.
+# Nothing here needs editing: every generating command takes `--model
+# <name>` for one run, and `spec model list` says what you do have.
+# The `[decision]` block at the bottom is the one to leave alone - it
+# is what 9:20 of the follow-along reads, and `measurable/v2` is
+# calibrated against that model specifically.
 
 [llm]
 model = "qwen3.8-flash-next:125b-mlx"

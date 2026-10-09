@@ -1717,9 +1717,9 @@ git branch -D spec-gates
 About ten minutes, and the only exercise here that needs a second model
 pulled. Skip it freely; nothing else depends on it.
 
-It also needs a `spec` built from this repository — `cargo install
---path harness`. `spec judge` landed after `v0.7.0` was tagged, so the
-published binary you have been using up to here does not answer it.
+It also needs `spec` 0.7.10 or newer. `spec judge` is in no earlier
+release, so a binary from before it answers with an
+unrecognised-subcommand error.
 
 Extra B showed the wording review refusing five things about a story.
 Those rules are fixed, which is why the reply is byte-identical every

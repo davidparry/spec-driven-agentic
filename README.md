@@ -25,8 +25,8 @@ and a probability — can judge whether an acceptance criterion is
 actually measurable ([`spec judge`](https://davidparry.github.io/spec-driven-agentic/manual/commands/judge.html)).
 It is off until you configure it, and a judgment is advice about
 wording: it never changes a test result, a requirement's status, or a
-deterministic finding. It landed after `v0.7.0` was tagged, so it needs
-a build from this repository until the next release.
+deterministic finding. It needs `spec` 0.7.10 or newer; no earlier
+release has a decision plane at all.
 
 > **The workshop** — the 60-minute class, the kata, the slides, the student
 > guide, and the exercises — is in [`talks/WORKSHOP.md`](talks/WORKSHOP.md).
@@ -86,6 +86,17 @@ cargo install --path harness
 From `harness/` itself use `cargo install --path .` — `--path harness` from there looks for `harness/harness` and fails.
 
 Then reload the MCP server in Cursor (toggle it off/on). To try a debug binary without installing: `harness/target/debug/spec mcp serve --root .`.
+
+### Build a release binary without installing it
+
+To exercise the optimised build the installer ships — timings, spinner behaviour, anything a debug build misreports — without replacing the `spec` on your PATH:
+
+```bash
+cargo build --release --manifest-path harness/Cargo.toml
+harness/target/release/spec --version
+```
+
+Run it by path, `harness/target/release/spec`, for as long as you are testing it. `cargo install --path harness` is the same optimised build, so reach for it once you want the binary on PATH rather than beside it.
 
 ### Remove `spec` from this machine
 
