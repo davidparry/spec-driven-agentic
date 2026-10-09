@@ -11,9 +11,14 @@ use crate::application::assets::{
     find_missing_steps, find_requirement, load_spec, production_path, production_type_name,
     steps_path, unit_test_path,
 };
+use crate::application::decision_service::{Brief, TaskJudge, gated};
 use crate::application::scenario_service::ScenarioService;
 use crate::application::spec_service::ServiceError;
 use crate::application::{DEFAULT_LLM_ATTEMPTS, LlmReplyError};
+use crate::domain::decision::{
+    CRITERION_MEASURABLE, Judgment, Policies, SCENARIO_EXERCISES_CRITERION, STEPS_BIND_SCENARIO,
+    TaskGate, scenario_state, steps_state,
+};
 use crate::domain::feature;
 use crate::domain::generation::{
     append_step_definitions, implementation_target_path, looks_like_step_definitions,
@@ -25,8 +30,8 @@ use crate::domain::generation::{
 use crate::domain::language::Language;
 use crate::domain::memory::ProjectStructure;
 use crate::domain::scenario::{
-    ProposedScenario, parse_scenarios_checked, scenario_prompt, scenario_template, tagged,
-    taken_names,
+    ProposedScenario, as_gherkin, parse_scenarios_checked, scenario_prompt, scenario_template,
+    scenarios_criteria, tagged, taken_names,
 };
 use crate::domain::steps::{MissingStep, extract_patterns, source_extension};
 use crate::ports::{
@@ -114,7 +119,7 @@ impl<L: LlmConversation, B: ToolBroker> ResolvedLlm<L, B> {
         &self,
         prompter: &mut dyn Prompter,
         prompt: &crate::domain::prompts::RenderedPrompt,
-        parse: impl Fn(&str) -> Result<T, String>,
+        parse: impl FnMut(&str) -> Result<T, String>,
         on_retry: impl FnMut(u32, u32, &str),
     ) -> Result<T, LlmReplyError> {
         self.agent.ask(prompter, prompt, parse, on_retry)
@@ -147,6 +152,16 @@ where
     language: Language,
     layout: ProjectStructure,
     llm: Option<ResolvedLlm<L, B>>,
+    /// Asked about generated work before it is accepted, when the caller
+    /// has a decision model. `None` means ask nothing - the composition
+    /// root decides that, so no service consults a mode.
+    judge: Option<Box<dyn TaskJudge>>,
+    /// How strictly each gate's answers are read. Inert without a judge.
+    policies: Policies,
+    /// Every judgment this service has made, in order. Interior
+    /// mutability because the generation methods take `&self` and a
+    /// judgment is a record, not a decision - see [`Self::judgments`].
+    judgments: std::cell::RefCell<Vec<Judgment>>,
 }
 
 impl<F, S, C, R, L, B> GenerationService<F, S, C, R, L, B>
@@ -175,7 +190,29 @@ where
             language,
             layout,
             llm,
+            judge: None,
+            policies: Policies::default(),
+            judgments: std::cell::RefCell::new(Vec::new()),
         }
+    }
+
+    /// The decision model this service puts its gates' questions to, and
+    /// the policies their answers are read against.
+    ///
+    /// Attached by the caller rather than read from config, because
+    /// whether to ask at all is the policy's call and
+    /// [`crate::application::decision_service::DecisionService::when_asking`]
+    /// has already made it by the time there is anything to pass here.
+    pub fn with_judge(mut self, judge: Box<dyn TaskJudge>, policies: Policies) -> Self {
+        self.judge = Some(judge);
+        self.policies = policies;
+        self
+    }
+
+    /// Every judgment made so far, for a caller reporting what the
+    /// decision plane said about work it just took.
+    pub fn judgments(&self) -> Vec<Judgment> {
+        self.judgments.borrow().clone()
     }
 
     /// Every feature step with no matching definition (step_definitions_find).
@@ -253,7 +290,9 @@ where
                 let expected = extract_patterns(self.language, fragment);
                 self.polish_fragment(
                     prompter,
-                    "the step definitions",
+                    Pass::gated("the step definitions", &STEPS_BIND_SCENARIO, |code| {
+                        steps_briefs(self.language, &missing, code)
+                    }),
                     fragment,
                     |code| looks_like_step_fragment(self.language, code, &expected),
                     |members| splice_step_definitions(&file.content, self.language, members),
@@ -268,7 +307,14 @@ where
                     Some(file) => append_step_definitions(&file.content, self.language, &missing),
                     None => step_definitions_template(self.language, &missing),
                 };
-                self.polish(prompter, "the step definitions", &template, valid_file)
+                self.polish(
+                    prompter,
+                    Pass::gated("the step definitions", &STEPS_BIND_SCENARIO, |code| {
+                        steps_briefs(self.language, &missing, code)
+                    }),
+                    &template,
+                    valid_file,
+                )
             }
         };
         let verb = if existing.is_some() {
@@ -348,7 +394,11 @@ where
                 let cases = requirement.acceptance_criteria.len();
                 self.polish_fragment(
                     prompter,
-                    "the unit test",
+                    // Deliberately ungated: at generation time the
+                    // placeholders are supposed to be there. The test is
+                    // judged after an implement attempt, where filling
+                    // them in is the job.
+                    Pass::ungated("the unit test"),
                     &fragment,
                     |code| looks_like_unit_test_fragment(self.language, code, &placeholders, cases),
                     |members| splice_unit_tests(&file.content, self.language, members),
@@ -359,7 +409,12 @@ where
             // whole-file polish pass still applies.
             None => {
                 let template = unit_test_template(self.language, requirement);
-                self.polish(prompter, "the unit test", &template, valid_file)
+                self.polish(
+                    prompter,
+                    Pass::ungated("the unit test"),
+                    &template,
+                    valid_file,
+                )
             }
         };
         let summary = format!(
@@ -480,10 +535,24 @@ where
             llm.model()
         ));
         let retries = std::cell::RefCell::new(Vec::<String>::new());
+        // The rule beside this one checks that every criterion got a
+        // scenario; it cannot see whether the scenario it got puts the
+        // criterion to the test, which is how a generated scenario goes
+        // wrong - a Then step that checks the call returned rather than
+        // what it returned.
+        let criteria = scenarios_criteria(requirement);
+        let id = requirement.id.as_str();
         let outcome = llm.ask(
             prompter,
             &prompt,
-            |response| parse_scenarios_checked(response, expected, taken),
+            gated(
+                self.judge.as_deref(),
+                self.policies.policy_for(&SCENARIO_EXERCISES_CRITERION),
+                &SCENARIO_EXERCISES_CRITERION,
+                &mut self.judgments.borrow_mut(),
+                |scenarios: &Vec<ProposedScenario>| scenario_briefs(id, &criteria, scenarios),
+                |response| parse_scenarios_checked(response, expected, taken),
+            ),
             |attempt, of, reason| {
                 retries
                     .borrow_mut()
@@ -517,15 +586,46 @@ where
             .unwrap_or_default()
     }
 
+    /// `validator` with `gate` on top, or `validator` unchanged when the
+    /// pass has no gate or this project asks nothing.
+    ///
+    /// One place to decide that, because `polish` and `polish_fragment`
+    /// are the same pass over two prompts and a rule applied to one of
+    /// them is a rule that will be forgotten on the other.
+    fn gating<'a>(
+        &'a self,
+        gate: Option<CodeGate<'a>>,
+        recorded: &'a mut Vec<Judgment>,
+        validator: impl FnMut(&str) -> Result<String, String> + 'a,
+    ) -> impl FnMut(&str) -> Result<String, String> + 'a {
+        // A pass with no gate still goes through `gated`, with no judge
+        // and so nothing to ask: one code path, and a `None` judge is
+        // already exactly "the validator you handed me".
+        let (asked, briefs) = match gate {
+            Some(gate) => (Some(gate.gate), gate.briefs),
+            None => (None, CodeGate::nothing()),
+        };
+        let gate = asked.unwrap_or(&CRITERION_MEASURABLE);
+        gated(
+            self.judge.as_deref().filter(|_| asked.is_some()),
+            self.policies.policy_for(gate),
+            gate,
+            recorded,
+            move |code: &String| briefs(code),
+            validator,
+        )
+    }
+
     /// The hybrid pass: prefer validated LLM output, fall back to the
     /// template silently on any failure.
     fn polish(
         &self,
         prompter: &mut dyn Prompter,
-        what: &str,
+        pass: Pass<'_>,
         template: &str,
         valid: impl Fn(&str) -> bool,
     ) -> (String, String) {
+        let Pass { what, gate } = pass;
         let Some(llm) = &self.llm else {
             return (template.to_string(), "template".into());
         };
@@ -535,14 +635,14 @@ where
         let outcome = llm.ask(
             prompter,
             &prompt,
-            |response| {
+            self.gating(gate, &mut self.judgments.borrow_mut(), |response| {
                 let code = strip_code_fences(response);
                 if valid(&code) {
                     Ok(code)
                 } else {
                     Err("the reply was not a valid file for this language".into())
                 }
-            },
+            }),
             |attempt, of, reason| {
                 retries
                     .borrow_mut()
@@ -574,12 +674,13 @@ where
     fn polish_fragment(
         &self,
         prompter: &mut dyn Prompter,
-        what: &str,
+        pass: Pass<'_>,
         fragment: &str,
         valid_fragment: impl Fn(&str) -> bool,
         splice: impl Fn(&str) -> String,
         valid_file: impl Fn(&str) -> bool,
     ) -> (String, String) {
+        let Pass { what, gate } = pass;
         let template = splice(fragment);
         let Some(llm) = &self.llm else {
             return (ending_in_newline(template), "template".into());
@@ -590,14 +691,14 @@ where
         let outcome = llm.ask(
             prompter,
             &prompt,
-            |response| {
+            self.gating(gate, &mut self.judgments.borrow_mut(), |response| {
                 let code = strip_code_fences(response);
                 if valid_fragment(&code) {
                     Ok(code)
                 } else {
                     Err("the reply was not the set of members that were asked for".into())
                 }
-            },
+            }),
             |attempt, of, reason| {
                 retries
                     .borrow_mut()
@@ -620,6 +721,125 @@ where
             Err(_) => (ending_in_newline(template), "template".into()),
         }
     }
+}
+
+/// A gate for one polish pass: which question, and what to ask it
+/// about given the code that came back.
+///
+/// Boxed because the two passes' briefs close over different things -
+/// the missing steps for one, nothing at all for the other - and a
+/// generic would put a type parameter on `polish` and `polish_fragment`
+/// for a collaborator most calls do not have.
+pub struct CodeGate<'a> {
+    gate: &'static TaskGate,
+    briefs: Briefs<'a>,
+}
+
+/// What to ask a gate's question about, given the code that came back.
+type Briefs<'a> = Box<dyn Fn(&str) -> Vec<Brief> + 'a>;
+
+/// One polish pass: the words for the line shown while the model
+/// thinks, and the gate its reply is put to, if any.
+///
+/// The two travel together because a pass that names itself to the
+/// developer is the same pass that names itself in a judgment record,
+/// and because `polish_fragment` had run out of room for another
+/// parameter.
+pub struct Pass<'a> {
+    what: &'a str,
+    gate: Option<CodeGate<'a>>,
+}
+
+impl<'a> Pass<'a> {
+    /// A pass with no gate: nothing is asked about its reply.
+    fn ungated(what: &'a str) -> Self {
+        Self { what, gate: None }
+    }
+
+    fn gated(
+        what: &'a str,
+        gate: &'static TaskGate,
+        briefs: impl Fn(&str) -> Vec<Brief> + 'a,
+    ) -> Self {
+        Self {
+            what,
+            gate: Some(CodeGate::new(gate, briefs)),
+        }
+    }
+}
+
+impl<'a> CodeGate<'a> {
+    fn new(gate: &'static TaskGate, briefs: impl Fn(&str) -> Vec<Brief> + 'a) -> Self {
+        Self {
+            gate,
+            briefs: Box::new(briefs),
+        }
+    }
+
+    /// The brief for a pass with no gate, which is never called.
+    fn nothing() -> Briefs<'a> {
+        Box::new(|_| Vec::new())
+    }
+}
+
+/// What [`STEPS_BIND_SCENARIO`] is asked about: one question per
+/// generated definition, against the step line it was written for.
+///
+/// The step runner answers this exactly, but only by running, which is
+/// after the attempt has been spent and the file has been staged.
+///
+/// Paired by position: the template writes one definition per missing
+/// step in order, and the polish pass is asked for the same members
+/// back. A reply with a different number of expressions than there were
+/// missing steps is asked nothing, because pairing a short list by
+/// position would read each expression against somebody else's line.
+fn steps_briefs(language: Language, missing: &[MissingStep], code: &str) -> Vec<Brief> {
+    let expressions = extract_patterns(language, code);
+    if expressions.len() != missing.len() {
+        return Vec::new();
+    }
+    missing
+        .iter()
+        .zip(expressions)
+        .map(|(step, expression)| {
+            let line = format!("{} {}", step.keyword, step.text);
+            Brief::new(
+                format!("{} step {line:?}", step.feature),
+                steps_state(&line, &expression),
+            )
+        })
+        .collect()
+}
+
+/// What [`SCENARIO_EXERCISES_CRITERION`] is asked about: one question
+/// per scenario, against the criterion it was written for.
+///
+/// Paired by position against [`scenarios_criteria`] rather than the
+/// requirement's whole list, because a criterion the template could not
+/// read yields no scenario and no question about one.
+///
+/// A reply carrying a different number of scenarios than there are
+/// criteria is asked nothing: the deterministic check refuses it first,
+/// and pairing a short list by position would read each scenario against
+/// somebody else's criterion.
+fn scenario_briefs(id: &str, criteria: &[&String], scenarios: &[ProposedScenario]) -> Vec<Brief> {
+    if scenarios.len() != criteria.len() {
+        return Vec::new();
+    }
+    criteria
+        .iter()
+        .zip(scenarios)
+        .enumerate()
+        .map(|(index, (criterion, scenario))| {
+            Brief::new(
+                match criteria.len() {
+                    1 => id.to_string(),
+                    _ => format!("{id} acceptance criterion {}", index + 1),
+                },
+                scenario_state(criterion, &as_gherkin(std::slice::from_ref(scenario))),
+            )
+        })
+        .collect()
 }
 
 /// A rejected reply costs another full model call. Saying so is the

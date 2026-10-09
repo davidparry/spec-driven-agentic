@@ -31,6 +31,7 @@ use crate::application::scenario_service::ScenarioService;
 use crate::application::spec_mutation_service::SpecMutationService;
 use crate::application::spec_service::{ProjectLayout, SpecService};
 use crate::application::tdd_service::TddService;
+use crate::domain::decision::Policies;
 use crate::domain::language::Language;
 use crate::ports::{LlmConversation, TestRunner};
 use crate::workspace::{SPEC_PATH, project_layout};
@@ -237,7 +238,7 @@ pub fn generation_service(
     attempts: u32,
 ) -> GenerationService<ProjectFeatures, ProjectTree, FsWorkTree, FsSpecRepository, DynLlm> {
     let layout = project_layout(root);
-    GenerationService::new(
+    let service = GenerationService::new(
         feature_catalog(root),
         source_tree(root, layout.module_root.as_deref()),
         work_tree(root),
@@ -245,7 +246,11 @@ pub fn generation_service(
         language,
         layout,
         resolved_llm(root, llm, attempts),
-    )
+    );
+    match judging(root, None) {
+        Some((judge, policies)) => service.with_judge(judge, policies),
+        None => service,
+    }
 }
 
 pub fn implement_service(
@@ -255,7 +260,7 @@ pub fn implement_service(
     attempts: u32,
 ) -> ImplementService<ProjectFeatures, ProjectTree, FsWorkTree, FsSpecRepository, DynLlm> {
     let layout = project_layout(root);
-    ImplementService::new(
+    let service = ImplementService::new(
         feature_catalog(root),
         source_tree(root, layout.module_root.as_deref()),
         work_tree(root),
@@ -263,7 +268,37 @@ pub fn implement_service(
         language,
         layout,
         resolved_llm(root, llm, attempts),
-    )
+    );
+    match judging(root, None) {
+        Some((judge, policies)) => service.with_judge(judge, policies),
+        None => service,
+    }
+}
+
+/// The decision model a generating service gates its attempts with, and
+/// the policies to read its answers against - or `None` for a project
+/// that has not named a decision model or has turned the plane off.
+///
+/// The one place the "should anything be asked" question is answered, so
+/// no service consults a mode. A service handed `None` cannot ask.
+///
+/// A *named* model, not a discovered one. [`decision_service`] falls
+/// back to discovery because `spec judge` runs when a human types it and
+/// finding them a model is a kindness; a gate inside the workflow is the
+/// opposite case. Discovering here would put a provider call in every
+/// service constructor and turn a gate on for a project that never
+/// opted into one.
+fn judging(
+    root: &Path,
+    flag: Option<&str>,
+) -> Option<(
+    Box<dyn crate::application::decision_service::TaskJudge>,
+    Policies,
+)> {
+    let settings = resolved_decision(root, flag);
+    settings.model.as_ref()?;
+    let judge = decision_service(root, flag)?.when_asking()?;
+    Some((Box::new(judge), settings.policies))
 }
 
 /// `rounds` is the refactor loop's own budget: one model call and one full
@@ -276,7 +311,7 @@ pub fn refactor_service(
     rounds: u32,
 ) -> RefactorService<ProjectTree, FsWorkTree, FsSpecRepository, DynLlm> {
     let layout = project_layout(root);
-    RefactorService::new(
+    let service = RefactorService::new(
         source_tree(root, layout.module_root.as_deref()),
         work_tree(root),
         spec_repository(root),
@@ -284,7 +319,11 @@ pub fn refactor_service(
         layout,
         resolved_llm(root, llm, attempts),
         rounds,
-    )
+    );
+    match judging(root, None) {
+        Some((judge, policies)) => service.with_judge(judge, policies),
+        None => service,
+    }
 }
 
 #[cfg(test)]
@@ -401,5 +440,55 @@ mod tests {
         .unwrap();
         let service = decision_service(dir.path(), None).expect("a service");
         assert_eq!(service.policy().mode, crate::domain::decision::Mode::Off);
+    }
+
+    /// The counterpart to the test above: a gate inside the workflow is
+    /// not an explicit ask, so it needs a model named on purpose.
+    ///
+    /// Left to discovery, a developer with Ollama running would get
+    /// gates on a project that never configured one - and the gates
+    /// would come and go with whatever was running on the machine.
+    /// There is no endpoint here at all, so a discovering `judging`
+    /// would reach for the default one and find whatever is there.
+    #[test]
+    fn a_gate_is_only_attached_to_a_model_that_was_named_on_purpose() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = config_path(dir.path());
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "[decision]\nmode = \"enforce\"\n").unwrap();
+
+        assert!(
+            judging(dir.path(), None).is_none(),
+            "a project that named no decision model got one anyway"
+        );
+        assert!(judging(dir.path(), Some("nimble:test")).is_some());
+    }
+
+    /// A gate the labelled sets have not justified yet stays advisory
+    /// even here, where the whole plane enforces.
+    #[test]
+    fn an_enforcing_plane_still_hands_a_new_gate_its_advisory_ceiling() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = config_path(dir.path());
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            "[decision]\nmodel = \"nimble:test\"\nmode = \"enforce\"\n",
+        )
+        .unwrap();
+
+        let (_, policies) = judging(dir.path(), None).expect("a named model");
+        assert_eq!(
+            policies
+                .policy_for(&crate::domain::decision::IMPLEMENTATION_COMPLETE)
+                .mode,
+            crate::domain::decision::Mode::Advisory
+        );
+        assert_eq!(
+            policies
+                .policy_for(&crate::domain::decision::CRITERION_MEASURABLE)
+                .mode,
+            crate::domain::decision::Mode::Enforce
+        );
     }
 }

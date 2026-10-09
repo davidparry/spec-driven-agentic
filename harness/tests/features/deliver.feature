@@ -247,6 +247,54 @@ Feature: Deliver mode
     And the developer was told a finding containing "Generating an implementation attempt - working ..."
     And the working tree file "src/main/java/Kata.java" contains "public class Kata"
 
+  # The generated unit test ships with a `TODO: assert` placeholder on
+  # purpose - writing the assertion is the point of the exercise. An
+  # attempt that writes production code and leaves the placeholder
+  # standing has written nothing the suite can fail on, and six measured
+  # attempts did exactly that while the failure count climbed.
+  Scenario: An attempt that leaves the generated placeholder standing is refused
+    Given a Java project marker
+    And a working spec with the pending requirements "REQ-001"
+    And a model is resolved
+    And the model will reply:
+      """
+      [{"path": "src/main/java/Kata.java", "content": "public class Kata { int add(String input) { return 0; } }"}]
+      """
+    And the delivery skips the refactor
+    And the delivery budget is 1 attempts
+    And the test runs will report:
+      """
+      1 tests and 1 failures detailed "Req001Test: TODO: assert"
+      1 tests and 1 failures detailed "Req001Test: TODO: assert"
+      """
+    When the delivery runs for "REQ-001"
+    Then the delivery is not completed
+    And the developer was told a finding containing "still carries the generated placeholder"
+
+  # The file a delivery wrote is recorded on the requirement, so the next
+  # attempt writes where the last one did instead of inferring the path
+  # again from step definitions that may not name it.
+  Scenario: A delivery records where it wrote the production code
+    Given a Java project marker
+    And a working spec with the pending requirements "REQ-001"
+    And a model is resolved
+    And the model will reply:
+      """
+      [{"path": "src/main/java/Kata.java", "content": "public class Kata { int add(String input) { return 0; } }"}]
+      """
+    And the model will also fill in the generated unit test
+    And the delivery skips the refactor
+    And the delivery budget is 3 attempts
+    And the test runs will report:
+      """
+      1 tests and 1 failures detailed "Req001Test: TODO: assert"
+      1 tests and 0 failures
+      """
+    When the delivery runs for "REQ-001"
+    Then the delivery completes
+    And the working tree file "requirements/requirements.json" contains "productionFiles"
+    And the working tree file "requirements/requirements.json" contains "src/main/java/Kata.java"
+
   Scenario: A budget that runs out leaves the requirement outstanding with its phase
     Given a Java project marker
     And a working spec with the pending requirements "REQ-001"

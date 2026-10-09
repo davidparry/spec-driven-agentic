@@ -9,9 +9,14 @@ use crate::application::LlmReplyError;
 use crate::application::assets::{
     asset_survey, find_requirement, load_spec, production_path, scenario_evidence, unit_test_path,
 };
+use crate::application::decision_service::{Brief, TaskJudge, gated};
 use crate::application::generation_service::ResolvedLlm;
 use crate::application::spec_service::ServiceError;
 use crate::domain::coverage::covers_all;
+use crate::domain::decision::{
+    IMPLEMENTATION_COMPLETE, Judgment, Policies, UNIT_TEST_ASSERTS, implementation_state,
+    test_asserts_state,
+};
 use crate::domain::generation::{
     FileUpdate, ImplementAsset, advice_prompt, implementation_file_name, implementation_prompt,
     parse_file_updates_checked, strip_code_fences, unasserted_criteria,
@@ -28,7 +33,7 @@ use crate::ports::{
 };
 
 /// Reply of an implementation attempt: the files the model updated.
-#[derive(Debug, Serialize, PartialEq, Eq)]
+#[derive(Debug, Serialize, PartialEq)]
 pub struct ImplementationReport {
     pub targets: Vec<String>,
     /// Which of `targets` were production files rather than tests or
@@ -42,6 +47,12 @@ pub struct ImplementationReport {
     /// attempt is incomplete and the caller narrates it loudly.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub warning: Option<String>,
+    /// Every judgment this attempt earned, in the order they were made.
+    /// Empty when no decision model was attached, which is the shipped
+    /// state. The accepted reply is the one that satisfied them; the
+    /// ones that did not are the complaints it was re-asked with.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub judgments: Vec<Judgment>,
     #[serde(rename = "nextStep")]
     pub next_step: String,
 }
@@ -83,6 +94,12 @@ where
     language: Language,
     layout: ProjectStructure,
     llm: Option<ResolvedLlm<L, B>>,
+    /// Asked about an attempt before it is accepted, when the caller has
+    /// a decision model. `None` means ask nothing - the composition root
+    /// decides that, so no service ever consults a mode.
+    judge: Option<Box<dyn TaskJudge>>,
+    /// How strictly each gate's answers are read. Inert without a judge.
+    policies: Policies,
 }
 
 impl<F, S, C, R, L, B> ImplementService<F, S, C, R, L, B>
@@ -111,7 +128,22 @@ where
             language,
             layout,
             llm,
+            judge: None,
+            policies: Policies::default(),
         }
+    }
+
+    /// The decision model this service puts its gates' questions to, and
+    /// the policies their answers are read against.
+    ///
+    /// Attached by the caller rather than read from config, because
+    /// whether to ask at all is the policy's call and
+    /// [`crate::application::decision_service::DecisionService::when_asking`]
+    /// has already made it by the time there is anything to pass here.
+    pub fn with_judge(mut self, judge: Box<dyn TaskJudge>, policies: Policies) -> Self {
+        self.judge = Some(judge);
+        self.policies = policies;
+        self
     }
 
     /// Whether a model is resolved; callers narrate model calls only
@@ -235,9 +267,22 @@ where
         let unit_test = unit_test_path(&sources, self.language, req_id, &self.layout);
         let criteria = requirement.acceptance_criteria.as_slice();
         tracing::debug!(requirement = %req_id, "calling LLM for an implementation attempt");
-        let updates = match llm.ask(
-            prompter,
-            &prompt,
+        // Two gates on one reply, nested so each keeps its own narrow
+        // question: did the test get a real assertion, and is the
+        // production code more than a stub? The deterministic check
+        // below catches a literal placeholder left standing; neither
+        // gate can be reached until it passes, and neither rule can see
+        // what the gates are for - `assertTrue(true)` and a method that
+        // returns a constant both read as perfectly good code.
+        let judge = self.judge.as_deref();
+        let mut judgments = Vec::new();
+        let mut asserts = Vec::new();
+        let asserts_gate = gated(
+            judge,
+            self.policies.policy_for(&UNIT_TEST_ASSERTS),
+            &UNIT_TEST_ASSERTS,
+            &mut asserts,
+            |updates: &Vec<FileUpdate>| test_briefs(req_id, criteria, updates, &unit_test),
             |reply| {
                 let updates: Vec<FileUpdate> = parse_file_updates_checked(reply)?
                     .into_iter()
@@ -263,8 +308,24 @@ where
                 }
                 Ok(updates)
             },
+        );
+        let mut complete = Vec::new();
+        let attempt = llm.ask(
+            prompter,
+            &prompt,
+            gated(
+                judge,
+                self.policies.policy_for(&IMPLEMENTATION_COMPLETE),
+                &IMPLEMENTATION_COMPLETE,
+                &mut complete,
+                |updates: &Vec<FileUpdate>| production_briefs(req_id, criteria, updates, &allowed),
+                asserts_gate,
+            ),
             |_, _, _| {},
-        ) {
+        );
+        judgments.append(&mut asserts);
+        judgments.append(&mut complete);
+        let updates = match attempt {
             Ok(updates) => updates,
             Err(LlmReplyError::Call(e)) => {
                 return Err(ServiceError(LlmReplyError::call_failed(&e)));
@@ -352,6 +413,7 @@ where
             production: written_production,
             source: "llm".into(),
             warning: (!warnings.is_empty()).then(|| warnings.join(" ")),
+            judgments,
             next_step,
         })
     }
@@ -469,6 +531,84 @@ where
 /// `files` is what the prompt showed the model, which is the working
 /// tree as it stands - so a match means writing this update would
 /// change nothing.
+/// What [`UNIT_TEST_ASSERTS`] is asked about: one question per
+/// criterion, against the test file this attempt wrote.
+///
+/// Nothing to ask when the attempt left the test file alone - the
+/// question is about work this reply did, and a file it did not touch
+/// is the previous attempt's business.
+fn test_briefs(
+    req_id: &str,
+    criteria: &[String],
+    updates: &[FileUpdate],
+    unit_test: &str,
+) -> Vec<Brief> {
+    briefs_for(
+        req_id,
+        criteria,
+        written(updates, unit_test),
+        test_asserts_state,
+    )
+}
+
+/// What [`IMPLEMENTATION_COMPLETE`] is graded on: one question per
+/// criterion, against the production file this attempt wrote.
+///
+/// Only the primary file, not every declared one. The brief is the
+/// criterion plus the one artefact on purpose - `MAX_REQUEST_BYTES` is
+/// 64KB and the shipped decision models load an 8,192-token context, so
+/// a brief that grows to the whole module is a brief that gets
+/// truncated, and a truncated brief is evidence about nothing.
+fn production_briefs(
+    req_id: &str,
+    criteria: &[String],
+    updates: &[FileUpdate],
+    allowed: &[String],
+) -> Vec<Brief> {
+    let Some(primary) = allowed.first() else {
+        return Vec::new();
+    };
+    briefs_for(
+        req_id,
+        criteria,
+        written(updates, primary),
+        implementation_state,
+    )
+}
+
+/// What this reply wrote to `path`, if it wrote it at all.
+fn written<'a>(updates: &'a [FileUpdate], path: &str) -> Option<&'a str> {
+    updates
+        .iter()
+        .find(|update| update.path == path)
+        .map(|update| update.content.as_str())
+}
+
+/// One brief per criterion over the same body, numbered the way
+/// `review_criteria` numbers them so provenance reads the same wherever
+/// a judgment came from.
+fn briefs_for(
+    req_id: &str,
+    criteria: &[String],
+    body: Option<&str>,
+    state: impl Fn(&str, &str) -> serde_json::Value,
+) -> Vec<Brief> {
+    let Some(body) = body else {
+        return Vec::new();
+    };
+    criteria
+        .iter()
+        .enumerate()
+        .map(|(index, criterion)| {
+            let input = match criteria.len() {
+                1 => req_id.to_string(),
+                _ => format!("{req_id} acceptance criterion {}", index + 1),
+            };
+            Brief::new(input, state(criterion, body))
+        })
+        .collect()
+}
+
 fn is_unchanged(files: &[(String, String)], update: &FileUpdate) -> bool {
     files
         .iter()

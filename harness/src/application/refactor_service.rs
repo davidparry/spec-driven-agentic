@@ -12,9 +12,11 @@ use serde::Serialize;
 
 use crate::application::LlmReplyError;
 use crate::application::assets::{find_requirement, load_spec, production_path};
+use crate::application::decision_service::{Brief, TaskJudge, gated};
 use crate::application::generation_service::ResolvedLlm;
 use crate::application::spec_service::ServiceError;
-use crate::domain::generation::implementation_target_path;
+use crate::domain::decision::{Judgment, Policies, REFACTOR_PRESERVES_BEHAVIOUR, refactor_state};
+use crate::domain::generation::{FileUpdate, implementation_target_path};
 use crate::domain::human::{Human, bullets, columns, counted, sections, titled};
 use crate::domain::language::Language;
 use crate::domain::memory::ProjectStructure;
@@ -28,6 +30,26 @@ use crate::ports::{
     LlmConversation, Prompter, RunnerError, SourceFiles, SpecRepository, TestFilter, TestRunner,
     ToolBroker, WorkTree,
 };
+
+/// What [`REFACTOR_PRESERVES_BEHAVIOUR`] is asked about: one question
+/// per file this round rewrote, with the version it replaced.
+///
+/// Only files that actually changed. A model often hands a file back
+/// word for word, and asking whether a file equals itself is a model
+/// call spent on a question with a known answer.
+fn refactor_briefs(before: &[(String, String)], updates: &[FileUpdate]) -> Vec<Brief> {
+    updates
+        .iter()
+        .filter_map(|update| {
+            let prior = before
+                .iter()
+                .find(|(path, _)| *path == update.path)
+                .map(|(_, content)| content.as_str())?;
+            (prior != update.content)
+                .then(|| Brief::new(&update.path, refactor_state(prior, &update.content)))
+        })
+        .collect()
+}
 
 /// What one `spec refactor` run did: how much of its budget it spent,
 /// what it changed, and whether any of it survived.
@@ -106,6 +128,15 @@ where
     layout: ProjectStructure,
     llm: Option<ResolvedLlm<L, B>>,
     attempts: u32,
+    /// Asked whether a round changed behaviour, when the caller has a
+    /// decision model. `None` means ask nothing - the composition root
+    /// decides that, so no service consults a mode.
+    judge: Option<Box<dyn TaskJudge>>,
+    /// How strictly the gate's answers are read. Inert without a judge.
+    policies: Policies,
+    /// Every judgment this run has made, in order. Interior mutability
+    /// because `run` takes `&self` and a judgment is a record.
+    judgments: std::cell::RefCell<Vec<Judgment>>,
 }
 
 impl<S, C, R, L, B> RefactorService<S, C, R, L, B>
@@ -133,7 +164,29 @@ where
             layout,
             llm,
             attempts: attempts.max(1),
+            judge: None,
+            policies: Policies::default(),
+            judgments: std::cell::RefCell::new(Vec::new()),
         }
+    }
+
+    /// The decision model this service puts its gate's question to, and
+    /// the policies the answers are read against.
+    ///
+    /// Attached by the caller rather than read from config, because
+    /// whether to ask at all is the policy's call and
+    /// [`crate::application::decision_service::DecisionService::when_asking`]
+    /// has already made it by the time there is anything to pass here.
+    pub fn with_judge(mut self, judge: Box<dyn TaskJudge>, policies: Policies) -> Self {
+        self.judge = Some(judge);
+        self.policies = policies;
+        self
+    }
+
+    /// Every judgment made so far, for a caller reporting what the
+    /// decision plane said about a refactor it just took.
+    pub fn judgments(&self) -> Vec<Judgment> {
+        self.judgments.borrow().clone()
     }
 
     pub fn has_model(&self) -> bool {
@@ -216,10 +269,22 @@ where
                 self.attempts,
                 llm.model()
             ));
+            // The suite answers this too, and better - but only for
+            // behaviour it covers. A refactor that quietly moves a
+            // boundary nothing asserts goes green, and the run below
+            // would call it a success.
+            let before = scope.writable.as_slice();
             let outcome = llm.ask(
                 prompter,
                 &prompt,
-                |reply| parse_refactor_updates(reply, &writable, &self.layout),
+                gated(
+                    self.judge.as_deref(),
+                    self.policies.policy_for(&REFACTOR_PRESERVES_BEHAVIOUR),
+                    &REFACTOR_PRESERVES_BEHAVIOUR,
+                    &mut self.judgments.borrow_mut(),
+                    |updates: &Vec<FileUpdate>| refactor_briefs(before, updates),
+                    |reply| parse_refactor_updates(reply, &writable, &self.layout),
+                ),
                 |_, _, _| {},
             );
             drop(work);
@@ -388,6 +453,9 @@ where
 
     /// Put every writable file back exactly as it was, and report
     /// whether anything had to move to get there.
+    ///
+    /// Unrelated to the gate above; kept here because it is the other
+    /// half of "a round that did not hold leaves nothing behind".
     fn restore(
         &self,
         snapshot: &[(String, String)],
