@@ -4142,6 +4142,11 @@ fn mcp_call_with_arg(world: &mut SpecWorld, name: String, pair: String) {
     world.call_sessions += 1;
     world.session_opened = true;
     let envelope = ToolCallService::call(&broker, &catalog, &name, &arguments).unwrap();
+    // Recorded for the same reason the no-argument call records it:
+    // `call_json` persists across steps, so a scenario that calls with
+    // an argument and then asserts on the envelope would otherwise read
+    // whichever earlier call left one behind.
+    world.call_json = Some(serde_json::to_value(&envelope).unwrap());
     world.call_content = Some(envelope.content);
     world.call_is_error = envelope.is_error;
 }

@@ -43,6 +43,16 @@ Feature: Stateless MCP tool calls from the shell
     Then the JSON envelope names tool "list_requirements"
     And the JSON envelope isError is false
 
+  # The envelope has to come from the call that was just made. It is
+  # carried between steps, so a call that recorded no envelope would be
+  # asserted against whichever earlier one did - passing while proving
+  # nothing about the tool named here.
+  Scenario: A call carrying an argument records its own envelope
+    When mcp call "list_requirements"
+    And mcp call "get_requirement" with arg "id=REQ-001"
+    Then the JSON envelope names tool "get_requirement"
+    And the JSON envelope isError is false
+
   Scenario: Two successive calls each get a fresh session
     When mcp call "list_requirements"
     And mcp call "get_tdd_state"
