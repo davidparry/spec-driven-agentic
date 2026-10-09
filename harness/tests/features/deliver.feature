@@ -269,6 +269,58 @@ Feature: Deliver mode
     And the working tree file "requirements/requirements.json" contains "pending"
     And the delivery next step contains "spec deliver REQ-001 again"
 
+  # A build error and a failing test are both red bars to the state
+  # machine, and the implement loop can only move one of them. Spending
+  # the budget writing production code against a compiler error is how a
+  # run burns three model calls and finishes further back than it began.
+  Scenario: A bar that is a build error stops the requirement instead of spending attempts
+    Given a Java project marker
+    And a working spec with the pending requirements "REQ-001"
+    And a model is resolved
+    And the model will reply:
+      """
+      [{"path": "src/main/java/Kata.java", "content": "public class Kata {}"}]
+      """
+    And the delivery skips the refactor
+    And the delivery budget is 3 attempts
+    And the test runs will report:
+      """
+      the build failed with "Req001Test.java:12: cannot find symbol"
+      """
+    When the delivery runs for "REQ-001"
+    Then the delivery is not completed
+    And the delivery leaves "REQ-001" outstanding because "before any test ran"
+    And the developer was told a finding containing "generated unit test is the usual cause"
+    And the developer was not told a finding containing "Attempt 1 of 3."
+
+  # The attempt that breaks the build is worse than the one before it:
+  # it briefs the next attempt with a compiler error instead of a failing
+  # test, and leaves the break on disk when the budget runs out.
+  Scenario: An attempt that stops the code compiling is put back
+    Given a Java project marker
+    And a project source file "src/main/java/Kata.java" containing:
+      """
+      public class Kata { int add(String input) { return 0; } }
+      """
+    And a working spec with the pending requirements "REQ-001"
+    And a model is resolved
+    And the model will reply:
+      """
+      [{"path": "src/main/java/Kata.java", "content": "public class Kata { int add( }"}]
+      """
+    And the delivery skips the refactor
+    And the delivery budget is 1 attempt
+    And the test runs will report:
+      """
+      1 tests and 1 failures detailed "Req001Test: TODO: assert"
+      the build failed with "Kata.java:1: ')' expected"
+      """
+    When the delivery runs for "REQ-001"
+    Then the delivery is not completed
+    And the developer was told a finding containing "Attempt 1 left the build not compiling"
+    And the developer was told a finding containing "src/main/java/Kata.java"
+    And the working tree file "src/main/java/Kata.java" contains "return 0;"
+
   Scenario: A runtime that disappears mid-loop stops the requirement
     Given a Java project marker
     And a working spec with the pending requirements "REQ-001"

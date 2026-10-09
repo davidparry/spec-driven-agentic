@@ -245,6 +245,17 @@ pub struct TestRunSummary {
     pub failure_details: Vec<String>,
 }
 
+/// Whether a run's counts say the build failed before the suite could
+/// start. Nothing executed, so they report on the compiler rather than
+/// on the tests — a different fact from RED, where tests ran and failed,
+/// even though both block a refactor.
+///
+/// Free so the reply DTOs carrying the same counts can answer it without
+/// restating the rule.
+pub fn build_broken(tests: u32, errors: u32) -> bool {
+    tests == 0 && errors > 0
+}
+
 impl TestRunSummary {
     pub fn passed(&self) -> bool {
         self.tests > 0 && self.failures == 0 && self.errors == 0
@@ -255,6 +266,11 @@ impl TestRunSummary {
     /// phase to RED for this outcome.
     pub fn no_tests(&self) -> bool {
         self.tests == 0 && self.failures == 0 && self.errors == 0
+    }
+
+    /// See [`build_broken`].
+    pub fn build_broken(&self) -> bool {
+        build_broken(self.tests, self.errors)
     }
 }
 
@@ -275,6 +291,30 @@ mod tests {
     fn a_run_with_no_tests_has_not_passed() {
         assert!(!TestRunSummary::default().passed());
         assert!(TestRunSummary::default().no_tests());
+    }
+
+    /// A build error and a failing test are both red bars, and only one
+    /// of them is evidence about the code under test.
+    #[test]
+    fn a_build_that_never_ran_the_suite_is_told_apart_from_a_failing_one() {
+        let broken = TestRunSummary {
+            tests: 0,
+            errors: 1,
+            ..Default::default()
+        };
+        assert!(broken.build_broken());
+        assert!(!broken.no_tests(), "an error is not a quiet build");
+
+        let red = TestRunSummary {
+            tests: 12,
+            failures: 6,
+            ..Default::default()
+        };
+        assert!(!red.build_broken());
+
+        // A build that compiled and reported nothing is the third case
+        // `no_tests` already names, and is not this one.
+        assert!(!TestRunSummary::default().build_broken());
     }
 
     #[test]

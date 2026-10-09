@@ -58,9 +58,12 @@ use crate::domain::memory::ProjectStructure;
 use crate::domain::model::{Requirement, Spec};
 use crate::domain::requirement_id::{DEFAULT_PREFIX, is_id_shape, split_id};
 use crate::domain::scaffold::slug;
-use crate::domain::steps::criterion_to_steps;
+use crate::domain::steps::{criterion_to_steps, source_extension};
 use crate::domain::tdd::ImplementAttempt;
-use crate::ports::{FeatureCatalog as _, Prompter, SpecRepository as _, TestRunner, WorkTree as _};
+use crate::ports::{
+    FeatureCatalog as _, Prompter, SourceFile, SourceFiles as _, SpecRepository as _, TestRunner,
+    WorkTree as _,
+};
 use crate::wiring::{DynLlm, ProjectFeatures, ProjectTree, RunnerFactory};
 use crate::workspace::project_layout;
 
@@ -699,6 +702,14 @@ impl Deliver {
         if report.phase == "GREEN" {
             return Ok(Bar::Green);
         }
+        // RED and "it did not compile" are both red bars to the state
+        // machine, and only one of them is a test that can be made to
+        // pass. Implementing against a build error spends the budget on
+        // production code while the break is usually in the generated
+        // unit test, which the loop is not aimed at.
+        if report.build_broken() {
+            return Ok(Bar::stopped(broken_build(req_id), Some(report.phase)));
+        }
         if self.llm.is_none() {
             return Ok(Bar::stopped(
                 format!(
@@ -713,8 +724,9 @@ impl Deliver {
         let implement = self.implement_service(language);
         for attempt in 1..=budget {
             prompter.tell(&format!("Attempt {attempt} of {budget}."));
+            let before = self.source_snapshot(language)?;
             self.attempt_implementation(prompter, &implement, tdd, req_id)?;
-            report = match run_and_narrate(tdd, runner, prompter)? {
+            let judged = match run_and_narrate(tdd, runner, prompter)? {
                 Some(report) => report,
                 None => {
                     return Ok(Bar::stopped(
@@ -725,9 +737,22 @@ impl Deliver {
                     ));
                 }
             };
-            if report.phase == "GREEN" {
+            if judged.phase == "GREEN" {
                 return Ok(Bar::Green);
             }
+            // An attempt that stops the suite compiling is worse than the
+            // one before it: the next attempt is briefed with a compiler
+            // error instead of a failing test, and a run that spends its
+            // budget leaves the break on disk. Put the code back and let
+            // the remaining attempts read the bar this one was given.
+            if judged.build_broken() {
+                let restored = self.restore_sources(language, &before)?;
+                if !restored.is_empty() {
+                    prompter.warn(&reverted_attempt(attempt, &restored));
+                    continue;
+                }
+            }
+            report = judged;
         }
         Ok(Bar::stopped(
             format!(
@@ -918,6 +943,43 @@ impl Deliver {
             Err(error) => prompter.warn(&format!("{} Implement by hand instead.", error.0)),
         }
         Ok(())
+    }
+
+    /// Every source file an implement attempt could write, read before
+    /// the attempt so a build it breaks can be put back.
+    fn source_snapshot(&self, language: Language) -> Result<Vec<SourceFile>, String> {
+        let layout = project_layout(&self.root);
+        crate::wiring::source_tree(&self.root, layout.module_root.as_deref())
+            .sources(source_extension(language))
+            .map_err(|e| e.0)
+    }
+
+    /// Put back every snapshotted file the attempt moved, and name them.
+    ///
+    /// A file the attempt *created* is not in the snapshot and stays:
+    /// [`WorkTree`] writes and reads, and deliberately cannot delete.
+    /// The build breaks this guards against came from rewrites of files
+    /// that were already there.
+    fn restore_sources(
+        &self,
+        language: Language,
+        snapshot: &[SourceFile],
+    ) -> Result<Vec<String>, String> {
+        let now = self.source_snapshot(language)?;
+        let tree = self.work_tree();
+        let mut restored = Vec::new();
+        for file in snapshot {
+            let unchanged = now
+                .iter()
+                .any(|current| current.path == file.path && current.content == file.content);
+            if unchanged {
+                continue;
+            }
+            tree.write(&file.path, &file.content, RESTORE_SUMMARY)
+                .map_err(|e| e.0)?;
+            restored.push(file.path.clone());
+        }
+        Ok(restored)
     }
 
     /// Whether the asset survey still reports a gap whose finding
@@ -1197,6 +1259,27 @@ fn undefined_steps_remain(req_id: &str, count: usize) -> String {
 /// picks the conventional one anyway. A warning rather than a quiet
 /// `tell`: the choice is convention, not evidence, and the next reader
 /// of the transcript should know which it was.
+/// The summary written against every file an abandoned attempt moved.
+const RESTORE_SUMMARY: &str = "restore the code the attempt started from";
+
+/// Why the loop will not spend attempts on a tree that does not build.
+fn broken_build(req_id: &str) -> String {
+    format!(
+        "The build failed before any test ran, so there is no red bar to implement {req_id} \
+         against - the generated unit test is the usual cause. Fix the build, then run \
+         spec deliver {req_id} again."
+    )
+}
+
+/// What an attempt that broke the build cost, and what was kept instead.
+fn reverted_attempt(attempt: u32, restored: &[String]) -> String {
+    format!(
+        "Attempt {attempt} left the build not compiling, so {} was restored to what the \
+         attempt read. The bar is where it was before it ran.",
+        restored.join(", ")
+    )
+}
+
 fn unattended_target(req_id: &str, conventional: &str) -> String {
     format!(
         "No step definition {req_id}'s scenarios run through names a production file. \
@@ -1239,6 +1322,28 @@ mod tests {
         assert!(notice.contains("src/main/java/Kata.java"), "{notice}");
         assert!(notice.contains("by convention"), "{notice}");
         assert!(notice.contains("spec implement REQ-001 --into"), "{notice}");
+    }
+
+    /// The stop has to separate the two red bars, because the way out of
+    /// a build error is not another implement attempt.
+    #[test]
+    fn the_broken_build_stop_says_the_suite_never_ran_and_names_the_way_out() {
+        let stop = broken_build("HARNESS-019");
+        assert!(stop.contains("before any test ran"), "{stop}");
+        assert!(stop.contains("generated unit test"), "{stop}");
+        assert!(stop.contains("spec deliver HARNESS-019 again"), "{stop}");
+    }
+
+    /// An attempt that is thrown away has to be in the transcript with
+    /// the files it touched, or the next reader cannot tell a reverted
+    /// run from one that never wrote anything.
+    #[test]
+    fn the_revert_notice_names_the_attempt_and_every_file_put_back() {
+        let notice = reverted_attempt(2, &["src/lib.rs".into(), "tests/req_001_test.rs".into()]);
+        assert!(notice.contains("Attempt 2"), "{notice}");
+        assert!(notice.contains("src/lib.rs"), "{notice}");
+        assert!(notice.contains("tests/req_001_test.rs"), "{notice}");
+        assert!(notice.contains("not compiling"), "{notice}");
     }
 
     #[test]

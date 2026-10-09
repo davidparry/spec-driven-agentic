@@ -23,6 +23,14 @@ pub struct TestReport {
     pub next_step: String,
 }
 
+impl TestReport {
+    /// See [`crate::domain::model::build_broken`]. The reply carries the
+    /// counts the summary did, so it answers the same question.
+    pub fn build_broken(&self) -> bool {
+        crate::domain::model::build_broken(self.tests, self.errors)
+    }
+}
+
 impl Human for TestReport {
     fn human(&self) -> String {
         sections(&[
@@ -178,8 +186,7 @@ fn test_next_step(summary: &crate::domain::model::TestRunSummary, suggestion: &s
                 tests live under kata/)."
             .into();
     }
-    if summary.tests == 0
-        && summary.errors > 0
+    if summary.build_broken()
         && summary
             .failure_details
             .iter()

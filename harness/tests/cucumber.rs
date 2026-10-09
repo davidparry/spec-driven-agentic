@@ -2701,10 +2701,21 @@ fn scripted_runs(step: &Step) -> Vec<Result<TestRunSummary, RunnerError>> {
         regex::Regex::new(r#"^(\d+) tests and (\d+) failures(?: detailed "(.+)")?$"#).unwrap();
     let missing = regex::Regex::new(r#"^runtime "([^"]+)" missing with hint "(.+)"$"#).unwrap();
     let failed = regex::Regex::new(r#"^failed "(.+)"$"#).unwrap();
+    // A run the compiler stopped: the runner answers, so this is not a
+    // RunnerError, but no test executed and the counts report on the
+    // build rather than on the suite.
+    let broken = regex::Regex::new(r#"^the build failed with "(.+)"$"#).unwrap();
     docstring_lines(step)
         .iter()
         .map(|line| {
-            if let Some(captures) = counts.captures(line) {
+            if let Some(captures) = broken.captures(line) {
+                Ok(TestRunSummary {
+                    tests: 0,
+                    errors: 1,
+                    failure_details: vec![captures[1].to_string()],
+                    ..Default::default()
+                })
+            } else if let Some(captures) = counts.captures(line) {
                 Ok(TestRunSummary {
                     tests: captures[1].parse().unwrap(),
                     failures: captures[2].parse().unwrap(),
