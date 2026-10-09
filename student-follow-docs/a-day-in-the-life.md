@@ -773,6 +773,13 @@ spec mcp tools | wc -l                  # one more than this morning
 mvn -f ../smoke-test/pom.xml test -Dspec.binary=$(which spec)
 ```
 
+Do not skip the `cargo install`. The tool you wrote this morning is
+compiled into the server, so the `spec` already on your path serves the
+22 it was built with and will go on saying 22 however green your bar is.
+Until you reinstall, the build that knows about `criteria_coverage` is
+`./target/debug/spec`, and either that path or a fresh install is what
+the Maven run below has to be pointed at.
+
 `LiveSpecServerTest` fails, and the sweep reports `criteria_coverage` as
 **unexpected**. That is `CLI-009` doing its job: it asks for an MCP tool
 the plan does not name to fail the Java build until someone plans it, so
@@ -810,7 +817,24 @@ the repository root:
 4. **`smoke-test/src/test/resources/features/tool_sweep.feature`** — the
    `Feature:` line, and the `@CLI-009` scenario's name and its `Then`.
 
+5. **`smoke-test/src/test/java/com/davidparry/workshop/smoke/LiveSpecServerTest.java`**
+   — `report.discovered()` again, in the one test that talks to your real
+   binary. It is skipped without `-Dspec.binary`, so the four files above
+   can all be green and this still fails the moment you point Maven at
+   `spec`. It is the last one you find and the only one that proves
+   anything.
+
 Rerun. Green.
+
+The Rust side pins the same number twice, and you will meet both before
+Maven: `tests/mcp_conformance.rs` asserts the served count, and
+`tests/published_facts.rs` asserts it and then checks it against every
+number written on a published page — nine lines across `README.md`,
+`harness/README.md`, `manual/src/commands/mcp.md` and
+`.github/workflows/ci.yml`. That gate is the point rather than an
+obstacle: a tool count is a published fact, and the repository refuses
+to let the docs drift away from the binary. Seven places in all, which
+is a fair answer to "what does one more tool cost".
 
 ## 11:05 — close it out
 
