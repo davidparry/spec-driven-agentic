@@ -6,8 +6,9 @@
 use crate::application::spec_service::ServiceError;
 use crate::domain::feature::FeatureDoc;
 use crate::domain::generation::{
-    ImplementAsset, implementation_file_name, implementation_target_path, is_pending_step_body,
-    steps_target_path, unit_test_file_name, unit_test_target_path,
+    ImplementAsset, implementation_file_name, implementation_target_path,
+    is_generated_unit_test_name, is_pending_step_body, steps_target_path, unit_test_file_name,
+    unit_test_target_path,
 };
 use crate::domain::language::Language;
 use crate::domain::layout::{in_production_root, in_test_root};
@@ -320,6 +321,10 @@ fn mentions_requirement(content: &str, req_id: &str) -> bool {
 /// Where to write or look for this requirement's unit test: an existing
 /// test that already names the id, else the project's calculator-style
 /// test class, else the `Req00NTest` path inside the layout's test root.
+///
+/// The middle choice skips a test generated for another requirement.
+/// Appending there would name this requirement's test after that one,
+/// and the survey above looks the id up by file name.
 pub(crate) fn unit_test_path(
     files: &[crate::ports::SourceFile],
     language: Language,
@@ -332,12 +337,10 @@ pub(crate) fn unit_test_path(
         .or_else(|| {
             files.iter().find(|file| {
                 is_unit_test_path(&file.path)
-                    && !file
-                        .path
-                        .rsplit('/')
-                        .next()
-                        .unwrap_or("")
-                        .starts_with("Req")
+                    && !is_generated_unit_test_name(
+                        language,
+                        file.path.rsplit('/').next().unwrap_or(&file.path),
+                    )
             })
         })
         .map(|file| file.path.clone())
@@ -600,6 +603,49 @@ mod tests {
             findings
                 .iter()
                 .any(|f| f.contains("spec unittest generate REQ-003"))
+        );
+    }
+
+    /// A run that delivers a whole backlog generates one unit test per
+    /// requirement, and the second must not be written into the file the
+    /// first was named after: `unit_test_path` would hand back
+    /// `harness_019_test.rs` for HARNESS-020, the generator would append
+    /// there, and the survey - which looks the id up by file name - would
+    /// go on reporting HARNESS-020's test as missing.
+    #[test]
+    fn a_unit_test_generated_for_another_requirement_is_not_the_target() {
+        let sources = FakeSources(vec![SourceFile {
+            path: "tests/harness_019_test.rs".into(),
+            content: "//! Generated from HARNESS-019\n#[test] fn t() {}".into(),
+        }]);
+        assert_eq!(
+            unit_test_path(
+                &sources.0,
+                Language::Rust,
+                "HARNESS-020",
+                &flat_layout(Language::Rust),
+            ),
+            "tests/harness_020_test.rs"
+        );
+    }
+
+    /// The same file is still the right answer for the requirement it was
+    /// generated for, which is what makes a rerun append rather than
+    /// write a second copy.
+    #[test]
+    fn the_requirement_a_generated_test_names_still_resolves_to_it() {
+        let sources = FakeSources(vec![SourceFile {
+            path: "tests/harness_019_test.rs".into(),
+            content: "//! Generated from HARNESS-019\n#[test] fn t() {}".into(),
+        }]);
+        assert_eq!(
+            unit_test_path(
+                &sources.0,
+                Language::Rust,
+                "HARNESS-019",
+                &flat_layout(Language::Rust),
+            ),
+            "tests/harness_019_test.rs"
         );
     }
 

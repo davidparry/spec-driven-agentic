@@ -44,6 +44,31 @@ pub fn unit_test_file_name(language: Language, req_id: &str) -> String {
     }
 }
 
+/// Whether `file_name` is one [`unit_test_file_name`] gave some
+/// requirement's generated unit test, rather than a test the project
+/// wrote for itself.
+///
+/// A requirement id ends in digits, so the name built from it does too
+/// once the ecosystem's test suffix comes off: `HARNESS-019` becomes
+/// `harness_019_test.rs` or `Harness019Test.java`. A project's own test
+/// is named for the thing under test and ends in a letter.
+///
+/// Appending to a generated test is what makes a second requirement's
+/// test land in a file named for the first, where the read-back that
+/// looks for the id cannot find it.
+pub fn is_generated_unit_test_name(language: Language, file_name: &str) -> bool {
+    let stem = match language {
+        Language::Java => file_name.strip_suffix("Test.java"),
+        Language::JavaScript => file_name.strip_suffix(".test.js"),
+        Language::TypeScript => file_name.strip_suffix(".test.ts"),
+        Language::DotNet => file_name.strip_suffix("Test.cs"),
+        Language::Rust => file_name.strip_suffix("_test.rs"),
+    };
+    stem.is_some_and(|stem| {
+        stem.ends_with(|c: char| c.is_ascii_digit()) && stem.contains(|c: char| c.is_alphabetic())
+    })
+}
+
 /// Where a generated unit test for one requirement is written in a
 /// project with no layout of its own yet.
 pub fn unit_test_target_path(language: Language, req_id: &str) -> String {
@@ -1401,6 +1426,55 @@ mod tests {
             unit_test_target_path(Language::Rust, "REQ-001"),
             "tests/req_001_test.rs"
         );
+    }
+
+    /// The name every ecosystem builds from an id has to read back as
+    /// generated, whatever the id's prefix - the guard this replaced only
+    /// recognised ids spelled `REQ`, so `HARNESS-019`'s generated test
+    /// passed for a project's own and got appended to.
+    #[test]
+    fn a_name_built_from_any_requirement_id_reads_back_as_generated() {
+        for language in Language::ALL {
+            for req_id in ["REQ-001", "HARNESS-019", "CLI-009"] {
+                let name = unit_test_file_name(language, req_id);
+                assert!(
+                    is_generated_unit_test_name(language, &name),
+                    "{language:?} {req_id} -> {name}"
+                );
+            }
+        }
+    }
+
+    /// The test a project wrote for itself is named for the thing under
+    /// test, and stays eligible as the append target.
+    #[test]
+    fn a_projects_own_test_does_not_read_back_as_generated() {
+        assert!(!is_generated_unit_test_name(
+            Language::Java,
+            "StringCalculatorTest.java"
+        ));
+        assert!(!is_generated_unit_test_name(
+            Language::Rust,
+            "calculator_test.rs"
+        ));
+        assert!(!is_generated_unit_test_name(
+            Language::TypeScript,
+            "calculator.test.ts"
+        ));
+    }
+
+    /// A name carrying another ecosystem's suffix is not this one's
+    /// generated test, so each language only skips its own.
+    #[test]
+    fn a_suffix_from_another_ecosystem_does_not_match() {
+        assert!(!is_generated_unit_test_name(
+            Language::Rust,
+            "Harness019Test.java"
+        ));
+        assert!(!is_generated_unit_test_name(
+            Language::Java,
+            "harness_019_test.rs"
+        ));
     }
 
     #[test]
