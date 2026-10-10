@@ -716,8 +716,15 @@ removed before anything is deleted.
 
 ## Tests
 
+From `harness/`, build the crate and run the full suite before committing:
+
 ```bash
-cargo test                   # everything: unit + cucumber
+cargo test
+```
+
+That compiles the library and every test target, then runs the unit tests and the Cucumber scenarios. Narrower slices:
+
+```bash
 cargo test --lib             # unit tests only
 cargo test --test cucumber   # spec-driven cucumber scenarios only
 ```
