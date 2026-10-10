@@ -561,10 +561,10 @@ impl Deliver {
         if let Some(stopped) = self.author_steps(prompter, language, req_id)? {
             return Ok(stopped);
         }
-        match self.author_unit_test(prompter, language, req_id)? {
+        let unit_test = match self.author_unit_test(prompter, language, req_id)? {
             AuthoringStep::Stopped(stopped) => return Ok(stopped),
-            AuthoringStep::Done => {}
-        }
+            authored => authored,
+        };
 
         // Execution only when the runtime is present; the authoring
         // above stands on its own either way.
@@ -579,7 +579,7 @@ impl Deliver {
             }
         };
         let tdd = self.tdd_service();
-        let Some(report) = run_and_narrate(&tdd, runner.as_ref(), prompter)? else {
+        let Some(mut report) = run_and_narrate(&tdd, runner.as_ref(), prompter)? else {
             return Ok(Outcome::Stopped {
                 reason: "Authoring is complete but the language runtime is missing, so \
                          the tests never ran."
@@ -587,6 +587,24 @@ impl Deliver {
                 phase: None,
             });
         };
+        // A build the model's unit test broke is the one break the run
+        // can mend itself: the template it polished compiles.
+        if report.build_broken()
+            && let AuthoringStep::Polished { target, before } = &unit_test
+        {
+            self.fall_back_to_template_unit_test(prompter, language, req_id, target, before)?;
+            report = match run_and_narrate(&tdd, runner.as_ref(), prompter)? {
+                Some(report) => report,
+                None => {
+                    return Ok(Outcome::Stopped {
+                        reason: "The language runtime disappeared mid-run, so the bar \
+                                 cannot be read."
+                            .into(),
+                        phase: None,
+                    });
+                }
+            };
+        }
 
         if let Bar::Stopped(stopped) =
             self.drive_to_green(prompter, &tdd, runner.as_ref(), language, req_id, report)?
@@ -722,6 +740,9 @@ impl Deliver {
             prompter.tell(&format!("The unit test for {req_id} is already in place."));
             return Ok(AuthoringStep::Done);
         }
+        // Taken before the model writes, so that if what it wrote does
+        // not build the tree can go back to this and take the template.
+        let before = self.source_snapshot(language)?;
         let generation = self.generation_service(language);
         let work = prompter.working(&format!("Generating the unit test for {req_id} - working"));
         let generated = generation.unittest_generate(prompter, req_id);
@@ -736,12 +757,50 @@ impl Deliver {
             prompter.tell("Generated unit test (the assertions are yours to sharpen):");
             prompter.tell(&content);
         }
-        match verified(self.unit_test_missing(language, req_id)?, || {
+        if let Some(stopped) = verified(self.unit_test_missing(language, req_id)?, || {
             unverified_unit_test(req_id, &report.target)
         }) {
-            Some(stopped) => Ok(AuthoringStep::Stopped(stopped)),
-            None => Ok(AuthoringStep::Done),
+            return Ok(AuthoringStep::Stopped(stopped));
         }
+        Ok(match report.source.as_str() {
+            "llm" => AuthoringStep::Polished {
+                target: report.target,
+                before,
+            },
+            _ => AuthoringStep::Done,
+        })
+    }
+
+    /// The template unit test in place of the one the model polished,
+    /// when that one stopped the build.
+    ///
+    /// The tree goes back to what the unit-test step read, so a class
+    /// the model's members were spliced into is the class it was, and
+    /// the template is written by the same service with no model
+    /// attached - the fallback the run promised on its second line.
+    /// One more test run and no model call; a build still broken after
+    /// it is somebody else's break, and the stop stands.
+    fn fall_back_to_template_unit_test(
+        &self,
+        prompter: &mut dyn Prompter,
+        language: Language,
+        req_id: &str,
+        target: &str,
+        before: &[SourceFile],
+    ) -> Result<(), String> {
+        prompter.warn(&template_unit_test_fallback(req_id, target));
+        self.restore_sources(language, before)?;
+        let template = crate::wiring::generation_service(
+            &self.root,
+            language,
+            None::<ResolvedLlm<DynLlm>>,
+            None,
+        );
+        let report = template
+            .unittest_generate(prompter, req_id)
+            .map_err(|e| e.to_string())?;
+        prompter.tell(&format!("Wrote {} ({}).", report.target, report.source));
+        Ok(())
     }
 
     /// The RED-to-GREEN loop, bounded by `--attempts`. `spec implement`
@@ -1258,7 +1317,15 @@ impl Deliver {
 /// `Option<Outcome>` reads as "maybe nothing happened" at the call site;
 /// this says which of the two it was.
 enum AuthoringStep {
+    /// Nothing to write, or the template was written as it stands.
     Done,
+    /// The model polished the template into `target`. `before` is the
+    /// source tree as the step read it, so the template can replace the
+    /// polish if the polish turns out not to build.
+    Polished {
+        target: String,
+        before: Vec<SourceFile>,
+    },
     Stopped(Outcome),
 }
 
@@ -1359,6 +1426,18 @@ fn undefined_steps_remain(req_id: &str, count: usize) -> String {
 /// of the transcript should know which it was.
 /// The summary written against every file an abandoned attempt moved.
 const RESTORE_SUMMARY: &str = "restore the code the attempt started from";
+
+/// Said when the model's unit test stopped the build and the template
+/// is written in its place. A warning, because the polish the run paid
+/// a model call for is gone and the assertions it printed a moment ago
+/// are not the ones on disk any more.
+fn template_unit_test_fallback(req_id: &str, target: &str) -> String {
+    format!(
+        "The build failed with the unit test the model wrote for {req_id} in it, so {target} \
+         is being rewritten from the template, which compiles. The tests run again before \
+         anything is implemented."
+    )
+}
 
 /// Why the loop will not spend attempts on a tree that does not build.
 fn broken_build(req_id: &str) -> String {

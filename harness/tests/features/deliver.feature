@@ -391,6 +391,75 @@ Feature: Deliver mode
     And the developer was told a finding containing "generated unit test is the usual cause"
     And the developer was not told a finding containing "Attempt 1 of 3."
 
+  # "Templates are the fallback" is the run's second line. The polish
+  # pass checks a unit test's shape and never whether it compiles, so a
+  # model that adds a helper the file cannot build is the one break the
+  # run can mend by itself: the template it polished compiles.
+  Scenario: A unit test the model broke is rewritten from the template before the run stops
+    Given a Java project marker
+    And a working spec with the pending requirements "REQ-001"
+    And a model is resolved
+    And the model will reply:
+      """
+      [{"path": "src/main/java/Kata.java", "content": "public class Kata {}"}]
+      """
+    And the model will polish the unit test into:
+      """
+      import org.junit.jupiter.api.Test;
+
+      class Req001Test {
+          @Test
+          void addsNumbers() { Helper.notDeclaredAnywhere(); }
+      }
+      """
+    And the model will also fill in the generated unit test
+    And the delivery skips the refactor
+    And the delivery budget is 1 attempt
+    And the test runs will report:
+      """
+      the build failed with "Req001Test.java:5: cannot find symbol Helper"
+      1 tests and 1 failures detailed "Req001Test: TODO: assert"
+      1 tests and 0 failures
+      """
+    When the delivery runs for "REQ-001"
+    Then the delivery completes
+    And the delivery delivered "REQ-001"
+    And the developer was told a finding containing "rewritten from the template"
+    And the developer was told a finding containing "Attempt 1 of 1."
+    And the working tree file "src/test/java/Req001Test.java" does not contain "Helper.notDeclaredAnywhere"
+
+  # The same break with the template already in place is somebody
+  # else's: there is nothing to fall back to, so the stop stands.
+  Scenario: A build broken by something other than the model's unit test still stops the requirement
+    Given a Java project marker
+    And a working spec with the pending requirements "REQ-001"
+    And a model is resolved
+    And the model will reply:
+      """
+      [{"path": "src/main/java/Kata.java", "content": "public class Kata {}"}]
+      """
+    And the model will polish the unit test into:
+      """
+      import org.junit.jupiter.api.Test;
+
+      class Req001Test {
+          @Test
+          void addsNumbers() { Helper.notDeclaredAnywhere(); }
+      }
+      """
+    And the delivery skips the refactor
+    And the delivery budget is 1 attempt
+    And the test runs will report:
+      """
+      the build failed with "Req001Test.java:5: cannot find symbol Helper"
+      the build failed with "Kata.java:1: class Kata is public, should be declared in a file named Kata.java"
+      """
+    When the delivery runs for "REQ-001"
+    Then the delivery is not completed
+    And the developer was told a finding containing "rewritten from the template"
+    And the delivery leaves "REQ-001" outstanding because "before any test ran"
+    And the developer was not told a finding containing "Attempt 1 of 1."
+
   # The attempt that breaks the build is worse than the one before it:
   # it briefs the next attempt with a compiler error instead of a failing
   # test, and leaves the break on disk when the budget runs out.

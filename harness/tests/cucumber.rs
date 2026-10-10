@@ -147,6 +147,9 @@ struct SpecWorld {
     generation_error: Option<String>,
     llm_reply: Option<String>,
     llm_fills_placeholders: bool,
+    /// What the model answers the unit-test polish prompt with, when a
+    /// scenario wants that reply to differ from every other one.
+    llm_unit_test_polish: Option<String>,
     llm_failure: Option<String>,
     greenfield_runs: Vec<Result<TestRunSummary, RunnerError>>,
     greenfield_factory_error: Option<String>,
@@ -407,10 +410,11 @@ impl SpecWorld {
     /// placeholders from when it is also meant to fill them in.
     fn scripted_llm(&mut self) -> ScriptedLlm {
         let reply = self.llm_reply.clone().expect("a scripted model reply");
-        match self.llm_fills_placeholders {
+        let llm = match self.llm_fills_placeholders {
             true => ScriptedLlm::filling_placeholders_under(reply, self.project_root()),
             false => ScriptedLlm::new(reply),
-        }
+        };
+        llm.polishing_unit_tests_into(self.llm_unit_test_polish.clone())
     }
 
     fn scenario_doc(&self, name: &str) -> &spec_harness::domain::feature::ScenarioDoc {
@@ -1229,6 +1233,13 @@ fn working_tree_file_contains(world: &mut SpecWorld, path: String, expected: Str
     let content = std::fs::read_to_string(world.project_root().join(&path))
         .unwrap_or_else(|e| panic!("{path}: {e}"));
     assert!(content.contains(&expected), "content: {content}");
+}
+
+#[then(regex = r#"^the working tree file "([^"]+)" does not contain "(.+)"$"#)]
+fn working_tree_file_does_not_contain(world: &mut SpecWorld, path: String, unexpected: String) {
+    let content = std::fs::read_to_string(world.project_root().join(&path))
+        .unwrap_or_else(|e| panic!("{path}: {e}"));
+    assert!(!content.contains(&unexpected), "content: {content}");
 }
 
 // ---- spec mutation steps ----------------------------------------------------
@@ -2211,6 +2222,9 @@ struct ScriptedLlm {
     /// The project root to read placeholders from, when the scenario
     /// asked for a reply that fills them in.
     filling_from: Option<PathBuf>,
+    /// The reply to the unit-test polish prompt alone, when a scenario
+    /// scripts one. Every other prompt still gets `reply`.
+    unit_test_polish: Option<String>,
 }
 
 impl ScriptedLlm {
@@ -2218,6 +2232,7 @@ impl ScriptedLlm {
         Self {
             reply,
             filling_from: None,
+            unit_test_polish: None,
         }
     }
 
@@ -2225,17 +2240,41 @@ impl ScriptedLlm {
         Self {
             reply,
             filling_from: Some(root),
+            unit_test_polish: None,
         }
     }
+
+    fn polishing_unit_tests_into(self, polish: Option<String>) -> Self {
+        Self {
+            unit_test_polish: polish,
+            ..self
+        }
+    }
+}
+
+/// Whether `messages` is the unit-test polish prompt: the polish system
+/// prompt over a file holding the generated placeholder. The step
+/// definitions go through the same system prompt and carry no
+/// placeholder, which is what tells the two apart.
+fn asks_to_polish_a_unit_test(messages: &[ChatMessage]) -> bool {
+    messages
+        .iter()
+        .any(|m| m.content.contains("test scaffolding"))
+        && messages.iter().any(|m| m.content.contains("TODO: assert"))
 }
 
 impl LlmConversation for ScriptedLlm {
     fn chat(
         &self,
         _model: &str,
-        _messages: &[ChatMessage],
+        messages: &[ChatMessage],
         _tools: &[ToolDefinition],
     ) -> Result<ChatTurn, LlmError> {
+        if let Some(polish) = &self.unit_test_polish
+            && asks_to_polish_a_unit_test(messages)
+        {
+            return Ok(text_turn(polish.clone()));
+        }
         Ok(text_turn(match &self.filling_from {
             Some(root) => with_placeholders_filled(&self.reply, root),
             None => self.reply.clone(),
@@ -2439,6 +2478,14 @@ fn the_model_will_reply(world: &mut SpecWorld, step: &Step) {
 #[given("the model will also fill in the generated unit test")]
 fn the_model_will_fill_the_unit_test(world: &mut SpecWorld) {
     world.llm_fills_placeholders = true;
+}
+
+/// The model's answer to the unit-test polish prompt, scripted apart
+/// from its answer to everything else - for a scenario about what the
+/// polished test does to the build.
+#[given("the model will polish the unit test into:")]
+fn the_model_will_polish_the_unit_test_into(world: &mut SpecWorld, step: &Step) {
+    world.llm_unit_test_polish = Some(docstring(step));
 }
 
 #[when("missing steps are reported")]
