@@ -100,6 +100,10 @@ where
     judge: Option<Box<dyn TaskJudge>>,
     /// How strictly each gate's answers are read. Inert without a judge.
     policies: Policies,
+    /// Judgments from attempts that were refused and never became a
+    /// report, kept so a caller can still read what the plane said
+    /// about them. A report carries its own.
+    judgments: std::cell::RefCell<Vec<Judgment>>,
 }
 
 impl<F, S, C, R, L, B> ImplementService<F, S, C, R, L, B>
@@ -130,7 +134,15 @@ where
             llm,
             judge: None,
             policies: Policies::default(),
+            judgments: std::cell::RefCell::new(Vec::new()),
         }
+    }
+
+    /// The judgments of attempts that were refused outright, handed over
+    /// and cleared. An accepted attempt reports its own judgments
+    /// instead, so the two never double up.
+    pub fn take_judgments(&self) -> Vec<Judgment> {
+        std::mem::take(&mut *self.judgments.borrow_mut())
     }
 
     /// The decision model this service puts its gates' questions to, and
@@ -144,6 +156,12 @@ where
         self.judge = Some(judge);
         self.policies = policies;
         self
+    }
+
+    /// Whether a decision model gates this service's attempts. The
+    /// composition root decides that; this only reports it.
+    pub fn judges(&self) -> bool {
+        self.judge.is_some()
     }
 
     /// Whether a model is resolved; callers narrate model calls only
@@ -327,15 +345,19 @@ where
         judgments.append(&mut complete);
         let updates = match attempt {
             Ok(updates) => updates,
-            Err(LlmReplyError::Call(e)) => {
-                return Err(ServiceError(LlmReplyError::call_failed(&e)));
-            }
-            // The reason names the file still holding a stub, which is
-            // the one thing a developer rerunning this by hand needs.
-            Err(LlmReplyError::Invalid { reason }) => {
-                return Err(ServiceError(format!(
-                    "The model's reply was refused: {reason}"
-                )));
+            Err(error) => {
+                // A refused attempt has no report to carry its
+                // judgments, so they are kept for the caller to read.
+                self.judgments.borrow_mut().append(&mut judgments);
+                return Err(ServiceError(match error {
+                    LlmReplyError::Call(e) => LlmReplyError::call_failed(&e),
+                    // The reason names the file still holding a stub,
+                    // which is the one thing a developer rerunning this
+                    // by hand needs.
+                    LlmReplyError::Invalid { reason } => {
+                        format!("The model's reply was refused: {reason}")
+                    }
+                }));
             }
         };
         let summary = format!("implementation attempt for {req_id} (llm)");

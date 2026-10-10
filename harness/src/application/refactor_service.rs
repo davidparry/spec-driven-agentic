@@ -53,7 +53,7 @@ fn refactor_briefs(before: &[(String, String)], updates: &[FileUpdate]) -> Vec<B
 
 /// What one `spec refactor` run did: how much of its budget it spent,
 /// what it changed, and whether any of it survived.
-#[derive(Debug, Serialize, PartialEq, Eq)]
+#[derive(Debug, Serialize, PartialEq)]
 pub struct RefactorReport {
     pub phase: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -73,6 +73,10 @@ pub struct RefactorReport {
     pub warning: Option<String>,
     #[serde(rename = "nextStep")]
     pub next_step: String,
+    /// Every judgment the decision model made about the rounds, in the
+    /// order they were made. Empty when no decision model was attached.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub judgments: Vec<Judgment>,
 }
 
 impl Human for RefactorReport {
@@ -105,6 +109,7 @@ impl Human for RefactorReport {
             columns(&facts),
             titled("Changed", &bullets(&self.targets)),
             self.warning.clone().unwrap_or_default(),
+            crate::domain::decision::second_review(&self.judgments),
         ])
     }
 
@@ -183,10 +188,21 @@ where
         self
     }
 
+    /// Whether a decision model gates this service's attempts. The
+    /// composition root decides that; this only reports it.
+    pub fn judges(&self) -> bool {
+        self.judge.is_some()
+    }
+
     /// Every judgment made so far, for a caller reporting what the
     /// decision plane said about a refactor it just took.
     pub fn judgments(&self) -> Vec<Judgment> {
         self.judgments.borrow().clone()
+    }
+
+    /// The judgments made so far, handed over and cleared.
+    pub fn take_judgments(&self) -> Vec<Judgment> {
+        std::mem::take(&mut *self.judgments.borrow_mut())
     }
 
     pub fn has_model(&self) -> bool {
@@ -335,6 +351,7 @@ where
                     applied: false,
                     reverted,
                     source: "llm".into(),
+                    judgments: self.take_judgments(),
                     warning: Some(if history.is_empty() {
                         "The model found nothing worth refactoring and left the code as it is."
                             .into()
@@ -391,6 +408,7 @@ where
                                 was. Read it with git diff, then run spec test to record the \
                                 run."
                         .into(),
+                    judgments: self.take_judgments(),
                 });
             }
             // A count that moved without a failure is the subtle one: the
@@ -448,6 +466,7 @@ where
             next_step: "Nothing was kept. Refactor by hand and run spec test, or run spec \
                         refactor again with a smaller --note."
                 .into(),
+            judgments: self.take_judgments(),
         }
     }
 
@@ -1083,6 +1102,7 @@ mod tests {
             source: "model".into(),
             warning: None,
             next_step: "Run spec test.".into(),
+            judgments: Vec::new(),
         }
     }
 

@@ -295,6 +295,55 @@ Feature: Deliver mode
     And the working tree file "requirements/requirements.json" contains "productionFiles"
     And the working tree file "requirements/requirements.json" contains "src/main/java/Kata.java"
 
+  # A run nobody watched can still be read for what the decision plane
+  # made of each gated stage. The judgments ride in the report per stage,
+  # and the run says them as it goes, the same way `spec refine` does.
+  Scenario: A delivery reports what the decision model made of each gated stage
+    Given a Java project marker
+    And a working spec with the pending requirements "REQ-001"
+    And a model is resolved
+    And a decision model that answers every question favourably is configured for the project
+    And the model will reply:
+      """
+      [{"path": "src/main/java/Kata.java", "content": "public class Kata { int add(String input) { return 0; } }"}]
+      """
+    And the model will also fill in the generated unit test
+    And the delivery skips the refactor
+    And the delivery budget is 3 attempts
+    And the test runs will report:
+      """
+      1 tests and 1 failures detailed "Req001Test: TODO: assert"
+      1 tests and 0 failures
+      """
+    When the delivery runs for "REQ-001"
+    Then the delivery completes
+    And the delivery report carries a "drive_to_green" judgment from the gate "UNIT_TEST_ASSERTS"
+    And the delivery report carries a "drive_to_green" judgment from the gate "IMPLEMENTATION_COMPLETE"
+    And every delivery judgment reads "HOLDS"
+    And the developer was told a finding containing "A second review (IMPLEMENTATION_COMPLETE, implementation_complete/v1) judged 1 file:"
+
+  # The same run with no decision model named reports exactly what it
+  # reported before there was a plane to consult.
+  Scenario: A delivery without a decision model carries no judgments
+    Given a Java project marker
+    And a working spec with the pending requirements "REQ-001"
+    And a model is resolved
+    And the model will reply:
+      """
+      [{"path": "src/main/java/Kata.java", "content": "public class Kata { int add(String input) { return 0; } }"}]
+      """
+    And the model will also fill in the generated unit test
+    And the delivery skips the refactor
+    And the delivery budget is 3 attempts
+    And the test runs will report:
+      """
+      1 tests and 1 failures detailed "Req001Test: TODO: assert"
+      1 tests and 0 failures
+      """
+    When the delivery runs for "REQ-001"
+    Then the delivery completes
+    And the delivery report carries no judgments
+
   Scenario: A budget that runs out leaves the requirement outstanding with its phase
     Given a Java project marker
     And a working spec with the pending requirements "REQ-001"

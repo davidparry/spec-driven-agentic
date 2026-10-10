@@ -33,7 +33,7 @@ use crate::application::spec_service::{ProjectLayout, SpecService};
 use crate::application::tdd_service::TddService;
 use crate::domain::decision::Policies;
 use crate::domain::language::Language;
-use crate::ports::{LlmConversation, TestRunner};
+use crate::ports::{LlmConversation, TestRunner, ToolBroker};
 use crate::workspace::{SPEC_PATH, project_layout};
 
 /// The project's feature files, read from disk. An alias rather than
@@ -223,7 +223,7 @@ pub fn memory_llm(root: &Path, llm: Option<&(String, DynLlm)>) -> SessionLlm {
 }
 
 /// [`memory_llm`] in the shape the generation services take it.
-fn resolved_llm(
+pub fn resolved_llm(
     root: &Path,
     llm: Option<&(String, DynLlm)>,
     attempts: u32,
@@ -231,12 +231,19 @@ fn resolved_llm(
     memory_llm(root, llm).map(|(model, chat)| ResolvedLlm::with_attempts(model, chat, attempts))
 }
 
-pub fn generation_service(
+/// The generating services below are the one way to build them, for
+/// the CLI and for `spec deliver` alike, and are generic over the model
+/// handle because the two callers hold different ones: the CLI's is
+/// connected to a tool broker, the delivery run's is not. What they
+/// must not differ on is the gate - `decision` is the one-run
+/// `--decision-model`, and [`judging`] decides from it and the config
+/// whether a judge is attached at all.
+pub fn generation_service<L: LlmConversation, B: ToolBroker>(
     root: &Path,
     language: Language,
-    llm: Option<&(String, DynLlm)>,
-    attempts: u32,
-) -> GenerationService<ProjectFeatures, ProjectTree, FsWorkTree, FsSpecRepository, DynLlm> {
+    llm: Option<ResolvedLlm<L, B>>,
+    decision: Option<&str>,
+) -> GenerationService<ProjectFeatures, ProjectTree, FsWorkTree, FsSpecRepository, L, B> {
     let layout = project_layout(root);
     let service = GenerationService::new(
         feature_catalog(root),
@@ -245,20 +252,20 @@ pub fn generation_service(
         spec_repository(root),
         language,
         layout,
-        resolved_llm(root, llm, attempts),
+        llm,
     );
-    match judging(root, None) {
+    match judging(root, decision) {
         Some((judge, policies)) => service.with_judge(judge, policies),
         None => service,
     }
 }
 
-pub fn implement_service(
+pub fn implement_service<L: LlmConversation, B: ToolBroker>(
     root: &Path,
     language: Language,
-    llm: Option<&(String, DynLlm)>,
-    attempts: u32,
-) -> ImplementService<ProjectFeatures, ProjectTree, FsWorkTree, FsSpecRepository, DynLlm> {
+    llm: Option<ResolvedLlm<L, B>>,
+    decision: Option<&str>,
+) -> ImplementService<ProjectFeatures, ProjectTree, FsWorkTree, FsSpecRepository, L, B> {
     let layout = project_layout(root);
     let service = ImplementService::new(
         feature_catalog(root),
@@ -267,9 +274,9 @@ pub fn implement_service(
         spec_repository(root),
         language,
         layout,
-        resolved_llm(root, llm, attempts),
+        llm,
     );
-    match judging(root, None) {
+    match judging(root, decision) {
         Some((judge, policies)) => service.with_judge(judge, policies),
         None => service,
     }
@@ -303,13 +310,13 @@ fn judging(
 
 /// `rounds` is the refactor loop's own budget: one model call and one full
 /// test run each, so the caller bounds it rather than the loop running free.
-pub fn refactor_service(
+pub fn refactor_service<L: LlmConversation, B: ToolBroker>(
     root: &Path,
     language: Language,
-    llm: Option<&(String, DynLlm)>,
-    attempts: u32,
+    llm: Option<ResolvedLlm<L, B>>,
     rounds: u32,
-) -> RefactorService<ProjectTree, FsWorkTree, FsSpecRepository, DynLlm> {
+    decision: Option<&str>,
+) -> RefactorService<ProjectTree, FsWorkTree, FsSpecRepository, L, B> {
     let layout = project_layout(root);
     let service = RefactorService::new(
         source_tree(root, layout.module_root.as_deref()),
@@ -317,10 +324,10 @@ pub fn refactor_service(
         spec_repository(root),
         language,
         layout,
-        resolved_llm(root, llm, attempts),
+        llm,
         rounds,
     );
-    match judging(root, None) {
+    match judging(root, decision) {
         Some((judge, policies)) => service.with_judge(judge, policies),
         None => service,
     }
@@ -490,5 +497,28 @@ mod tests {
                 .mode,
             crate::domain::decision::Mode::Enforce
         );
+    }
+
+    /// Every generating service is built here, by the CLI and by `spec
+    /// deliver` alike, so a judge attached to one is attached to all -
+    /// and a `--decision-model` for one run reaches the gates the same
+    /// way it reaches `spec judge`, rather than only the draft.
+    #[test]
+    fn every_generating_service_takes_the_same_judge_from_the_same_flag() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = config_path(dir.path());
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "[decision]\nmode = \"advisory\"\n").unwrap();
+        let root = dir.path();
+        let none = || None::<ResolvedLlm<EchoLlm>>;
+
+        assert!(!generation_service(root, Language::Rust, none(), None).judges());
+        assert!(!implement_service(root, Language::Rust, none(), None).judges());
+        assert!(!refactor_service(root, Language::Rust, none(), 1, None).judges());
+
+        let flag = Some("nimble:test");
+        assert!(generation_service(root, Language::Rust, none(), flag).judges());
+        assert!(implement_service(root, Language::Rust, none(), flag).judges());
+        assert!(refactor_service(root, Language::Rust, none(), 1, flag).judges());
     }
 }

@@ -49,7 +49,7 @@ pub struct MissingStepsReport {
 }
 
 /// Reply of `spec steps generate` and `spec unittest generate`.
-#[derive(Debug, Serialize, PartialEq, Eq)]
+#[derive(Debug, Serialize, PartialEq)]
 pub struct GenerationReport {
     pub target: String,
     pub written: bool,
@@ -59,10 +59,14 @@ pub struct GenerationReport {
     pub summary: String,
     #[serde(rename = "nextStep")]
     pub next_step: String,
+    /// Every judgment the decision model made about this reply, in the
+    /// order they were made. Empty when no decision model was attached.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub judgments: Vec<Judgment>,
 }
 
 /// Reply of `spec scenario generate`.
-#[derive(Debug, Serialize, PartialEq, Eq)]
+#[derive(Debug, Serialize, PartialEq)]
 pub struct ScenarioGenerationReport {
     pub feature: String,
     /// The scenario names written, in the order the criteria gave them.
@@ -76,6 +80,9 @@ pub struct ScenarioGenerationReport {
     pub source: String,
     #[serde(rename = "nextStep")]
     pub next_step: String,
+    /// Every judgment the decision model made about the scenarios.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub judgments: Vec<Judgment>,
 }
 
 /// The resolved LLM, when one is available: an [`Agent`] already scoped
@@ -209,10 +216,23 @@ where
         self
     }
 
+    /// Whether a decision model gates this service's attempts. The
+    /// composition root decides that; this only reports it.
+    pub fn judges(&self) -> bool {
+        self.judge.is_some()
+    }
+
     /// Every judgment made so far, for a caller reporting what the
     /// decision plane said about work it just took.
     pub fn judgments(&self) -> Vec<Judgment> {
         self.judgments.borrow().clone()
+    }
+
+    /// The judgments made so far, handed over and cleared, so a caller
+    /// that runs several steps on one service can say which step earned
+    /// which - and so a step that failed still gets its judgments read.
+    pub fn take_judgments(&self) -> Vec<Judgment> {
+        std::mem::take(&mut *self.judgments.borrow_mut())
     }
 
     /// Every feature step with no matching definition (step_definitions_find).
@@ -334,6 +354,7 @@ where
             summary,
             next_step: "Read it against the acceptance criteria, then run spec test (expect RED)."
                 .into(),
+            judgments: self.take_judgments(),
         })
     }
 
@@ -429,6 +450,7 @@ where
             summary,
             next_step: "Sharpen the assertions (they are yours), then run spec test (expect RED)."
                 .into(),
+            judgments: self.take_judgments(),
         })
     }
 
@@ -506,6 +528,7 @@ where
             next_step:
                 "Read the steps against the acceptance criteria, then run spec steps missing."
                     .into(),
+            judgments: self.take_judgments(),
         })
     }
 

@@ -800,9 +800,15 @@ fn execute(
             print_json(&service.inspect())
         }
         Command::Feature(command) => run_feature(root, command),
-        Command::Scenario(command) => {
-            run_scenario(root, model, attempts, tools, max_rounds, command)
-        }
+        Command::Scenario(command) => run_scenario(
+            root,
+            model,
+            decision_model,
+            attempts,
+            tools,
+            max_rounds,
+            command,
+        ),
         Command::Init(args) => run_init(root, args),
         Command::Greenfield => run_greenfield(root, model, attempts, no_branch),
         Command::Deliver(args) => {
@@ -864,7 +870,8 @@ fn execute(
                 Ok(phase) => phase,
                 Err(error) => return tdd_error_reply(error, args.json),
             };
-            let service = refactor_service(root, model, attempts, tools, max_rounds)?;
+            let service =
+                refactor_service(root, model, decision_model, attempts, tools, max_rounds)?;
             if !service.has_model() {
                 // No model, no loop: the phase is marked and the cleanup
                 // is the developer's, which is the whole behaviour this
@@ -888,6 +895,7 @@ fn execute(
             let service = generation_service(
                 root,
                 model,
+                decision_model,
                 attempts,
                 tools,
                 max_rounds,
@@ -897,7 +905,9 @@ fn execute(
                 StepsCommand::Missing => print_json(&service.steps_missing()?),
                 StepsCommand::Generate => {
                     let mut prompter = interactive_prompter(Prompts::Incidental);
-                    print_json(&service.steps_generate(prompter.as_mut())?)
+                    let report = service.steps_generate(prompter.as_mut())?;
+                    narrate_review(&report.judgments);
+                    print_json(&report)
                 }
             }
         }
@@ -906,8 +916,15 @@ fn execute(
             const RED: &str = "\x1b[31m";
             const GREEN: &str = "\x1b[32m";
             const RESET: &str = "\x1b[0m";
-            let service =
-                implement_service(root, model, attempts, tools, max_rounds, Caller::Implement)?;
+            let service = implement_service(
+                root,
+                model,
+                decision_model,
+                attempts,
+                tools,
+                max_rounds,
+                Caller::Implement,
+            )?;
             let tdd = tdd_service(root);
             let phase = tdd
                 .state()
@@ -947,6 +964,7 @@ fn execute(
                     let advice_service = implement_service(
                         root,
                         model,
+                        decision_model,
                         attempts,
                         tools,
                         max_rounds,
@@ -989,6 +1007,7 @@ fn execute(
             if let Some(warning) = &report.warning {
                 println!("{RED}{warning}{RESET}");
             }
+            narrate_review(&report.judgments);
             // The outcome stays empty until the next test run attaches
             // what these changes actually caused.
             tdd.record_attempt(ImplementAttempt {
@@ -1009,6 +1028,7 @@ fn execute(
             let service = generation_service(
                 root,
                 model,
+                decision_model,
                 attempts,
                 tools,
                 max_rounds,
@@ -1266,9 +1286,14 @@ fn deterministic_status_gap(next_step: &str) -> bool {
         || next_step.contains("spec implement")
 }
 
+/// The three generating services, built the way `spec deliver` builds
+/// them - through `wiring` - with the CLI's tool-connected model handle.
+/// One constructor each, so the gate a delivery run attaches is the gate
+/// the hand-run command attaches.
 fn generation_service(
     root: &Path,
     model_flag: Option<&str>,
+    decision_model: Option<&str>,
     attempts: u32,
     tools: Option<&str>,
     max_rounds: Option<u32>,
@@ -1284,21 +1309,18 @@ fn generation_service(
     >,
 > {
     let language = primary_language(root)?;
-    let layout = project_layout(root);
-    Ok(GenerationService::new(
-        feature_catalog(root),
-        wiring::source_tree(root, layout.module_root.as_deref()),
-        wiring::work_tree(root),
-        wiring::spec_repository(root),
+    Ok(wiring::generation_service(
+        root,
         language,
-        layout,
         connected_llm(root, model_flag, caller, attempts, tools, max_rounds),
+        decision_model,
     ))
 }
 
 fn implement_service(
     root: &Path,
     model_flag: Option<&str>,
+    decision_model: Option<&str>,
     attempts: u32,
     tools: Option<&str>,
     max_rounds: Option<u32>,
@@ -1314,35 +1336,28 @@ fn implement_service(
     >,
 > {
     let language = primary_language(root)?;
-    let layout = project_layout(root);
-    Ok(ImplementService::new(
-        feature_catalog(root),
-        wiring::source_tree(root, layout.module_root.as_deref()),
-        wiring::work_tree(root),
-        wiring::spec_repository(root),
+    Ok(wiring::implement_service(
+        root,
         language,
-        layout,
         connected_llm(root, model_flag, caller, attempts, tools, max_rounds),
+        decision_model,
     ))
 }
 
 fn refactor_service(
     root: &Path,
     model_flag: Option<&str>,
+    decision_model: Option<&str>,
     attempts: u32,
     tools: Option<&str>,
     max_rounds: Option<u32>,
 ) -> anyhow::Result<RefactorService<ProjectTree, FsWorkTree, FsSpecRepository, ChatLlm, LiveBroker>>
 {
     let language = primary_language(root)?;
-    let layout = project_layout(root);
     let rounds = refactor_attempts(&config_path(root));
-    Ok(RefactorService::new(
-        wiring::source_tree(root, layout.module_root.as_deref()),
-        wiring::work_tree(root),
-        wiring::spec_repository(root),
+    Ok(wiring::refactor_service(
+        root,
         language,
-        layout,
         connected_llm(
             root,
             model_flag,
@@ -1352,6 +1367,7 @@ fn refactor_service(
             max_rounds,
         ),
         rounds,
+        decision_model,
     ))
 }
 
@@ -1551,6 +1567,7 @@ fn tdd_error_message(error: TddError) -> String {
 fn run_scenario(
     root: &Path,
     model: Option<&str>,
+    decision_model: Option<&str>,
     attempts: u32,
     tools: Option<&str>,
     max_rounds: Option<u32>,
@@ -1561,6 +1578,7 @@ fn run_scenario(
         let generation = generation_service(
             root,
             model,
+            decision_model,
             attempts,
             tools,
             max_rounds,
@@ -1575,6 +1593,7 @@ fn run_scenario(
         )?;
         drop(prompter);
         let _ = mutation_service(root, DEFAULT_LLM_ATTEMPTS).set_feature(req_id, &report.feature);
+        narrate_review(&report.judgments);
         return print_json(&report);
     }
     let report = match command {
@@ -2316,6 +2335,21 @@ fn piped_stdin_warning(prompts: Prompts) -> String {
 fn print_json<T: serde::Serialize>(value: &T) -> anyhow::Result<()> {
     println!("{}", speak_cli(&serde_json::to_string_pretty(value)?));
     Ok(())
+}
+
+/// What the decision model made of a reply, laid out for a reader, on
+/// the terminal only. The same rows ride in the JSON reply under
+/// `judgments` for anything else that is listening, and a pipe reading
+/// that JSON must not find a table in front of it.
+fn narrate_review(judgments: &[spec_harness::domain::decision::Judgment]) {
+    use std::io::IsTerminal as _;
+    if judgments.is_empty() || !std::io::stdout().is_terminal() {
+        return;
+    }
+    println!(
+        "{}",
+        spec_harness::domain::decision::second_review(judgments)
+    );
 }
 
 /// A reply, printed for whoever is reading it.

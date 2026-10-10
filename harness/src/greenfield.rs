@@ -569,19 +569,19 @@ impl Greenfield {
         &self,
         language: Language,
     ) -> GenerationService<ProjectFeatures, ProjectTree, FsWorkTree, FsSpecRepository, DynLlm> {
-        crate::wiring::generation_service(
-            &self.root,
-            language,
-            self.llm.as_ref(),
-            self.llm_attempts,
-        )
+        crate::wiring::generation_service(&self.root, language, self.resolved_llm(), None)
     }
 
     fn implement_service(
         &self,
         language: Language,
     ) -> ImplementService<ProjectFeatures, ProjectTree, FsWorkTree, FsSpecRepository, DynLlm> {
-        crate::wiring::implement_service(&self.root, language, self.llm.as_ref(), self.llm_attempts)
+        crate::wiring::implement_service(&self.root, language, self.resolved_llm(), None)
+    }
+
+    /// The session LLM in the shape the generating services take it.
+    fn resolved_llm(&self) -> Option<crate::application::generation_service::ResolvedLlm<DynLlm>> {
+        crate::wiring::resolved_llm(&self.root, self.llm.as_ref(), self.llm_attempts)
     }
 
     /// The session LLM with project memory prepended to every system

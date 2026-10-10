@@ -766,6 +766,9 @@ pub struct TaskGate {
     /// What the question is about, as a finding names it: `criterion`,
     /// `unit test`, `step expression`.
     pub subject: &'static str,
+    /// What one judgment counts as when a review is summed up, singular
+    /// then plural: `judged 3 criteria`, `judged 1 scenario`.
+    pub counted: [&'static str; 2],
     /// What is wrong when the answer goes against the property.
     pub complaint: &'static str,
     /// What to do about it, named when the answer cannot say which way
@@ -862,6 +865,60 @@ impl TaskGate {
     }
 }
 
+/// Every judgment as a block per gate: which gate and question, how
+/// many it judged, then one row each - what was judged, the verdict,
+/// and the answer that decided it.
+///
+/// Every judgment, not only the ones that complained. Showing the
+/// complaints alone leaves out the denominator: three judged and two
+/// reported reads as two problems out of two, and the one that
+/// satisfied the question disappears. Named as a second review so a
+/// reader can hold it beside the deterministic verdict without the two
+/// contradicting each other - they are different questions asked by
+/// different models.
+///
+/// One renderer for every command that judges, so `spec refine`,
+/// `spec implement` and `spec deliver` show a judgment the same way.
+pub fn second_review(judgments: &[Judgment]) -> String {
+    use crate::domain::human::{columns, counted, indent, sections, titled};
+    let mut gates: Vec<&'static str> = Vec::new();
+    for judgment in judgments {
+        if !gates.contains(&judgment.gate) {
+            gates.push(judgment.gate);
+        }
+    }
+    let blocks: Vec<String> = gates
+        .iter()
+        .map(|gate| {
+            let of_gate: Vec<&Judgment> = judgments.iter().filter(|j| j.gate == *gate).collect();
+            let [one, many] = GATES
+                .iter()
+                .find(|known| known.gate == *gate)
+                .map(|known| known.counted)
+                .unwrap_or(["answer", "answers"]);
+            let rows: Vec<Vec<String>> = of_gate
+                .iter()
+                .map(|judgment| {
+                    vec![
+                        judgment.provenance.input.clone(),
+                        judgment.verdict.to_string(),
+                        judgment.answer.summary(),
+                    ]
+                })
+                .collect();
+            titled(
+                &format!(
+                    "A second review ({gate}, {}) judged {}:",
+                    of_gate[0].question,
+                    counted(of_gate.len(), one, many)
+                ),
+                &indent(&columns(&rows)),
+            )
+        })
+        .collect();
+    sections(&blocks)
+}
+
 /// Can this acceptance criterion be checked by a test with a single
 /// unambiguous result?
 ///
@@ -901,6 +958,7 @@ pub const CRITERION_MEASURABLE: TaskGate = TaskGate {
     gate: "CRITERION_MEASURABLE",
     prompt: "measurable",
     subject: "criterion",
+    counted: ["criterion", "criteria"],
     complaint: "the outcome may not be measurable",
     remedy: "reword it so the clause after \"then\" names the literal value a test \
              would assert",
@@ -930,6 +988,7 @@ pub const SCENARIO_EXERCISES_CRITERION: TaskGate = TaskGate {
     gate: "SCENARIO_EXERCISES_CRITERION",
     prompt: "scenario_exercises",
     subject: "scenario for",
+    counted: ["scenario", "scenarios"],
     complaint: "it may not exercise what the criterion states",
     remedy: "make the Then step check the outcome the criterion names, for the \
              inputs the criterion is about",
@@ -952,6 +1011,7 @@ pub const STEPS_BIND_SCENARIO: TaskGate = TaskGate {
     gate: "STEPS_BIND_SCENARIO",
     prompt: "steps_bind",
     subject: "step expression for",
+    counted: ["step", "steps"],
     complaint: "it may not match the step line it was written for",
     remedy: "make the expression match the line as written, with a parameter for \
              each literal the line carries",
@@ -979,6 +1039,7 @@ pub const UNIT_TEST_ASSERTS: TaskGate = TaskGate {
     gate: "UNIT_TEST_ASSERTS",
     prompt: "test_asserts",
     subject: "unit test for",
+    counted: ["unit test", "unit tests"],
     complaint: "it may pass whatever the production code returns",
     remedy: "assert the value the criterion names against the result of calling the \
              production code",
@@ -1009,6 +1070,7 @@ pub const IMPLEMENTATION_COMPLETE: TaskGate = TaskGate {
     gate: "IMPLEMENTATION_COMPLETE",
     prompt: "implementation_complete",
     subject: "implementation of",
+    counted: ["file", "files"],
     complaint: "it may not implement what the criterion describes",
     remedy: "implement the behaviour for every case the criterion names, rather than \
              returning a fixed value or leaving a case out",
@@ -1035,6 +1097,7 @@ pub const REFACTOR_PRESERVES_BEHAVIOUR: TaskGate = TaskGate {
     gate: "REFACTOR_PRESERVES_BEHAVIOUR",
     prompt: "refactor_preserves",
     subject: "refactoring of",
+    counted: ["file", "files"],
     complaint: "it may change what the code does, not just how it reads",
     remedy: "keep every branch, boundary and default as it was, and make the change \
              to the wording of the code alone",
@@ -1171,6 +1234,74 @@ mod tests {
     /// made total - returns `Holds` for a confident grade of *unusable*,
     /// so the very answer the gate exists to catch is the one it waved
     /// through. A grade has to clear the threshold *and* reach the
+    /// Judgments from two gates render as two blocks, each counting its
+    /// own rows in its own noun, and every row is there - the one that
+    /// held as much as the one that did not.
+    #[test]
+    fn a_second_review_is_one_block_per_gate_with_every_row_in_it() {
+        let policy = Policy::new(Mode::Advisory, DEFAULT_MIN_CONFIDENCE);
+        let judge = |gate: &'static TaskGate, input: &str, answer: Answer| {
+            policy.judge(
+                gate,
+                "nimble:test",
+                answer,
+                Provenance {
+                    input: input.to_string(),
+                    state: "sha256:0".into(),
+                    state_bytes: 0,
+                },
+                Usage::default(),
+            )
+        };
+        let judgments = vec![
+            judge(
+                &UNIT_TEST_ASSERTS,
+                "REQ-001 criterion 1",
+                Answer::Noul { noul: 0.91 },
+            ),
+            judge(
+                &UNIT_TEST_ASSERTS,
+                "REQ-001 criterion 2",
+                Answer::Noul { noul: 0.12 },
+            ),
+            judge(
+                &IMPLEMENTATION_COMPLETE,
+                "src/main/java/Kata.java",
+                score(2.0, 0.95),
+            ),
+        ];
+
+        let rendered = second_review(&judgments);
+
+        assert!(
+            rendered.contains(&format!(
+                "A second review (UNIT_TEST_ASSERTS, {}) judged 2 unit tests:",
+                UNIT_TEST_ASSERTS.version()
+            )),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains(&format!(
+                "A second review (IMPLEMENTATION_COMPLETE, {}) judged 1 file:",
+                IMPLEMENTATION_COMPLETE.version()
+            )),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("REQ-001 criterion 1  HOLDS"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("REQ-001 criterion 2  FAILS"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("src/main/java/Kata.java  HOLDS"),
+            "{rendered}"
+        );
+        assert_eq!(second_review(&[]), "");
+    }
+
     /// gate's floor.
     #[test]
     fn a_confident_grade_below_the_floor_fails_rather_than_holding() {

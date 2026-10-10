@@ -5,7 +5,7 @@
 use serde::Serialize;
 
 use crate::application::assets::load_spec;
-use crate::domain::human::{Human, bullets, columns, counted, indent, sections, titled};
+use crate::domain::human::{Human, bullets, columns, counted, sections, titled};
 use crate::domain::model::Requirement;
 use crate::domain::refiner::RequirementRefiner;
 use crate::domain::spec_validator::{SpecValidator, is_structural_issue, structural_repair};
@@ -135,37 +135,10 @@ impl Human for RefinementReport {
 }
 
 impl RefinementReport {
-    /// Every judgment as one row: which criterion, how it was read, and
-    /// the answer that decided it.
-    ///
-    /// Named as a second review so the reader can hold it beside
-    /// `clean` without the two contradicting each other - `clean` is
-    /// the deterministic rules, and these are a different question
-    /// asked by a different model.
+    /// Every judgment as one row, rendered the way every judging command
+    /// renders them - see [`crate::domain::decision::second_review`].
     fn judged(&self) -> String {
-        let Some(first) = self.judgments.first() else {
-            return String::new();
-        };
-        let rows: Vec<Vec<String>> = self
-            .judgments
-            .iter()
-            .map(|judgment| {
-                vec![
-                    judgment.provenance.input.clone(),
-                    judgment.verdict.to_string(),
-                    judgment.answer.summary(),
-                ]
-            })
-            .collect();
-        titled(
-            &format!(
-                "A second review ({}, {}) judged {}:",
-                first.gate,
-                first.question,
-                counted(self.judgments.len(), "criterion", "criteria")
-            ),
-            &indent(&columns(&rows)),
-        )
+        crate::domain::decision::second_review(&self.judgments)
     }
 
     /// Why a verdict that read badly still carried on.

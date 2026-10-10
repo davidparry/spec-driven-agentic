@@ -42,7 +42,7 @@ use crate::adapters::fs_worktree::FsWorkTree;
 use crate::adapters::runners::detect_runner;
 use crate::application::DEFAULT_LLM_ATTEMPTS;
 use crate::application::assets::{asset_survey, load_spec};
-use crate::application::generation_service::GenerationService;
+use crate::application::generation_service::{GenerationService, ResolvedLlm};
 use crate::application::implement_service::{ImplementService, ImplementTarget};
 use crate::application::refactor_service::RefactorService;
 use crate::application::scenario_service::ScenarioService;
@@ -52,6 +52,7 @@ use crate::bootstrap::{
     IMPLEMENT_ATTEMPT_WORK, LOOP_CLOSED, ensure_project, ensure_spec, has_readable_spec,
     project_detected, refresh_project_memory, run_and_narrate,
 };
+use crate::domain::decision::Judgment;
 use crate::domain::language::Language;
 use crate::domain::layout::in_feature_root;
 use crate::domain::memory::ProjectStructure;
@@ -193,7 +194,7 @@ pub struct Outstanding {
 /// `completed` is true only when every planned requirement landed, so a
 /// partial run cannot read as a success; `outstanding` names what is
 /// left and why each one stopped.
-#[derive(Debug, Serialize, PartialEq, Eq)]
+#[derive(Debug, Serialize, PartialEq)]
 pub struct DeliverReport {
     pub planned: Vec<String>,
     pub delivered: Vec<String>,
@@ -202,6 +203,27 @@ pub struct DeliverReport {
     pub completed: bool,
     #[serde(rename = "nextStep")]
     pub next_step: String,
+    /// What the decision model said about each stage that was gated, in
+    /// the order the stages ran. Empty when no decision model was named,
+    /// which is the shipped default; present so a run nobody watched can
+    /// still be read for what the plane made of it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub judgments: Vec<StageJudgments>,
+}
+
+/// The judgments one stage of one requirement earned.
+///
+/// Kept per stage rather than flattened, because the same gate reads
+/// differently at different points: a `REWORK` on attempt one that the
+/// retry addressed is a different fact from a `REWORK` on the attempt
+/// that was finally accepted.
+#[derive(Debug, Serialize, PartialEq)]
+pub struct StageJudgments {
+    pub id: String,
+    /// `author_steps`, `drive_to_green`, `refactor` - the stage names
+    /// the manual uses.
+    pub stage: &'static str,
+    pub judgments: Vec<Judgment>,
 }
 
 /// One requirement's outcome.
@@ -228,6 +250,8 @@ pub struct Deliver {
     /// drafting model exactly the prompts it sent before this existed.
     judge_draft: bool,
     options: DeliverOptions,
+    /// Every gated stage's judgments so far, drained into the report.
+    judgments: std::cell::RefCell<Vec<StageJudgments>>,
 }
 
 impl Deliver {
@@ -251,6 +275,7 @@ impl Deliver {
             decision_model: None,
             judge_draft: false,
             options,
+            judgments: std::cell::RefCell::new(Vec::new()),
         }
     }
 
@@ -327,6 +352,7 @@ impl Deliver {
                             spec deliver \"<what to build>\", or draft it by hand with \
                             spec draft."
                     .into(),
+                judgments: Vec::new(),
             });
         }
         prompter.tell(&format!(
@@ -405,7 +431,30 @@ impl Deliver {
             outstanding,
             completed,
             next_step,
+            judgments: self.judgments.take(),
         }
+    }
+
+    /// Record what the decision model said about one stage, and say it
+    /// while the run is still on the screen. Nothing is recorded for a
+    /// stage that earned no judgment, so a run without a decision model
+    /// reports exactly what it reported before there was one.
+    fn reviewed(
+        &self,
+        prompter: &mut dyn Prompter,
+        id: &str,
+        stage: &'static str,
+        judgments: Vec<Judgment>,
+    ) {
+        if judgments.is_empty() {
+            return;
+        }
+        prompter.tell(&crate::domain::decision::second_review(&judgments));
+        self.judgments.borrow_mut().push(StageJudgments {
+            id: id.to_string(),
+            stage,
+            judgments,
+        });
     }
 
     /// Resolve the target into the ids this run will work, in catalog
@@ -634,7 +683,19 @@ impl Deliver {
             let work = prompter.working("Generating step definitions - working");
             let generated = generation.steps_generate(prompter);
             drop(work);
-            let report = generated.map_err(|e| e.to_string())?;
+            let report = match generated {
+                Ok(report) => report,
+                Err(error) => {
+                    self.reviewed(
+                        prompter,
+                        req_id,
+                        "author_steps",
+                        generation.take_judgments(),
+                    );
+                    return Err(error.to_string());
+                }
+            };
+            self.reviewed(prompter, req_id, "author_steps", report.judgments);
             prompter.tell(&format!("Wrote {} ({}).", report.target, report.source));
         }
         let missing = generation.steps_missing().map_err(|e| e.to_string())?;
@@ -795,6 +856,7 @@ impl Deliver {
         }
         match service.run(prompter, runner, Some(&goal), Some(req_id)) {
             Ok(report) => {
+                self.reviewed(prompter, req_id, "refactor", report.judgments);
                 if let Some(warning) = &report.warning {
                     prompter.warn(warning);
                 }
@@ -829,6 +891,7 @@ impl Deliver {
                 }
             }
             Err(error) => {
+                self.reviewed(prompter, req_id, "refactor", service.take_judgments());
                 prompter.warn(&format!("{} Skipping the refactor.", error.0));
                 // The gate moved the phase to REFACTOR and the loop
                 // never ran, so the green bar has to be re-established
@@ -924,6 +987,7 @@ impl Deliver {
         drop(work);
         match outcome {
             Ok(attempt) => {
+                self.reviewed(prompter, req_id, "drive_to_green", attempt.judgments);
                 for target in &attempt.targets {
                     let full = std::path::absolute(self.root.join(target))
                         .unwrap_or_else(|_| self.root.join(target));
@@ -956,7 +1020,15 @@ impl Deliver {
                 })
                 .map_err(tdd_message)?;
             }
-            Err(error) => prompter.warn(&format!("{} Implement by hand instead.", error.0)),
+            Err(error) => {
+                self.reviewed(
+                    prompter,
+                    req_id,
+                    "drive_to_green",
+                    implement.take_judgments(),
+                );
+                prompter.warn(&format!("{} Implement by hand instead.", error.0));
+            }
         }
         Ok(())
     }
@@ -1134,8 +1206,8 @@ impl Deliver {
         crate::wiring::generation_service(
             &self.root,
             language,
-            self.llm.as_ref(),
-            self.llm_attempts,
+            self.resolved_llm(),
+            self.decision_model.as_deref(),
         )
     }
 
@@ -1143,7 +1215,12 @@ impl Deliver {
         &self,
         language: Language,
     ) -> ImplementService<ProjectFeatures, ProjectTree, FsWorkTree, FsSpecRepository, DynLlm> {
-        crate::wiring::implement_service(&self.root, language, self.llm.as_ref(), self.llm_attempts)
+        crate::wiring::implement_service(
+            &self.root,
+            language,
+            self.resolved_llm(),
+            self.decision_model.as_deref(),
+        )
     }
 
     /// The refactor loop's own rounds are bounded by `--attempts`, the
@@ -1155,10 +1232,15 @@ impl Deliver {
         crate::wiring::refactor_service(
             &self.root,
             language,
-            self.llm.as_ref(),
-            self.llm_attempts,
+            self.resolved_llm(),
             self.options.attempts.max(1),
+            self.decision_model.as_deref(),
         )
+    }
+
+    /// The session LLM in the shape the generating services take it.
+    fn resolved_llm(&self) -> Option<ResolvedLlm<DynLlm>> {
+        crate::wiring::resolved_llm(&self.root, self.llm.as_ref(), self.llm_attempts)
     }
 
     /// The session LLM with project memory prepended to every system

@@ -4530,6 +4530,98 @@ fn serve_decision(status: u16, body: String) -> String {
     format!("http://127.0.0.1:{port}")
 }
 
+/// A decision endpoint that answers every request it is sent, favourably:
+/// a boolean question gets a confident `true`, a graded one gets the top
+/// level with full confidence. Reads the questions out of each request
+/// so the answers match what was asked - the adapter refuses anything
+/// else - and keeps serving, because one delivery asks several times.
+fn serve_agreeable_decision(model: &str) -> String {
+    use std::io::{Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a free port");
+    let port = listener.local_addr().expect("a local address").port();
+    let model = model.to_string();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { break };
+            let mut raw = Vec::new();
+            let mut chunk = [0u8; 4096];
+            // Read headers, then as much body as content-length promises.
+            let body_start = loop {
+                let Ok(n) = stream.read(&mut chunk) else {
+                    break None;
+                };
+                if n == 0 {
+                    break None;
+                }
+                raw.extend_from_slice(&chunk[..n]);
+                if let Some(at) = raw.windows(4).position(|w| w == b"\r\n\r\n") {
+                    break Some(at + 4);
+                }
+            };
+            let Some(body_start) = body_start else {
+                continue;
+            };
+            let head = String::from_utf8_lossy(&raw[..body_start]).to_string();
+            let length: usize = head
+                .lines()
+                .find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    name.eq_ignore_ascii_case("content-length")
+                        .then(|| value.trim().parse().ok())
+                        .flatten()
+                })
+                .unwrap_or(0);
+            while raw.len() < body_start + length {
+                let Ok(n) = stream.read(&mut chunk) else {
+                    break;
+                };
+                if n == 0 {
+                    break;
+                }
+                raw.extend_from_slice(&chunk[..n]);
+            }
+            let request: serde_json::Value =
+                serde_json::from_slice(&raw[body_start..]).unwrap_or_default();
+            let mut answers = serde_json::Map::new();
+            if let Some(questions) = request.get("questions").and_then(|q| q.as_object()) {
+                for (name, question) in questions {
+                    let answer = match question.get("type").and_then(|t| t.as_str()) {
+                        Some("score") => {
+                            let levels = question
+                                .get("criteria")
+                                .and_then(|c| c.as_array())
+                                .map(|c| c.len())
+                                .unwrap_or(1);
+                            serde_json::json!({
+                                "type": "score",
+                                "score": (levels.max(1) - 1) as f64,
+                                "legend": {},
+                                "probabilities": {},
+                                "confidence": 0.97,
+                            })
+                        }
+                        _ => serde_json::json!({ "type": "noul", "noul": 0.96 }),
+                    };
+                    answers.insert(name.clone(), answer);
+                }
+            }
+            let body = serde_json::json!({
+                "model": model,
+                "answers": answers,
+                "usage": { "input_tokens": 151, "output_tokens": 1 },
+            })
+            .to_string();
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\n\
+                 content-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = stream.write_all(response.as_bytes());
+        }
+    });
+    format!("http://127.0.0.1:{port}")
+}
+
 /// A port nothing is listening on, for the unreachable scenarios.
 fn closed_endpoint() -> String {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a free port");
@@ -4581,6 +4673,59 @@ impl SpecWorld {
 #[given(regex = r#"^a decision model "([^"]+)" is configured$"#)]
 fn a_decision_model_is_configured(world: &mut SpecWorld, model: String) {
     world.decision_model = Some(model);
+}
+
+/// The project's own config names the model, so the delivery attaches
+/// its gates the way a real project does - through `wiring`, not through
+/// a hook the test reaches in with.
+#[given("a decision model that answers every question favourably is configured for the project")]
+fn an_agreeable_decision_model_is_configured(world: &mut SpecWorld) {
+    let endpoint = serve_agreeable_decision("nimble:test");
+    let path = config_path(&world.project_root());
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let existing = std::fs::read_to_string(&path).unwrap_or_default();
+    std::fs::write(
+        &path,
+        format!(
+            "{existing}\n[decision]\nmodel = \"nimble:test\"\nendpoint = \"{endpoint}\"\n\
+             mode = \"advisory\"\ntimeout_seconds = 5\n"
+        ),
+    )
+    .unwrap();
+}
+
+#[then(regex = r#"^the delivery report carries a "([^"]+)" judgment from the gate "([^"]+)"$"#)]
+fn the_delivery_report_carries_a_judgment(world: &mut SpecWorld, stage: String, gate: String) {
+    let report = world.deliver_report();
+    let found = report
+        .judgments
+        .iter()
+        .any(|staged| staged.stage == stage && staged.judgments.iter().any(|j| j.gate == gate));
+    assert!(
+        found,
+        "no {gate} judgment at {stage} in {:#?}",
+        report.judgments
+    );
+}
+
+#[then(regex = r#"^every delivery judgment reads "([^"]+)"$"#)]
+fn every_delivery_judgment_reads(world: &mut SpecWorld, verdict: String) {
+    let report = world.deliver_report();
+    let all: Vec<&Judgment> = report
+        .judgments
+        .iter()
+        .flat_map(|staged| staged.judgments.iter())
+        .collect();
+    assert!(!all.is_empty(), "no judgments at all in {report:?}");
+    for judgment in all {
+        assert_eq!(judgment.verdict.to_string(), verdict, "{judgment:?}");
+    }
+}
+
+#[then("the delivery report carries no judgments")]
+fn the_delivery_report_carries_no_judgments(world: &mut SpecWorld) {
+    let report = world.deliver_report();
+    assert!(report.judgments.is_empty(), "{:#?}", report.judgments);
 }
 
 #[given(regex = r#"^the decision mode is "([^"]+)"$"#)]
