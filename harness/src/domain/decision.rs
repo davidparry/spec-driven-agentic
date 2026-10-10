@@ -567,8 +567,11 @@ impl Policy {
             {
                 Verdict::Inconclusive
             }
+            // A score is the probability-weighted average over the
+            // levels, so a model sure of the top level says 1.99 and
+            // never 2.0. The nearest level is what it graded.
             Answer::Score { score, .. } => match kind {
-                GateKind::Graded { floor, .. } if *score < floor as f64 => Verdict::Fails,
+                GateKind::Graded { floor, .. } if score.round() < floor as f64 => Verdict::Fails,
                 // A gate that asked a boolean question and got a grade
                 // has no floor to read it against, so it has no verdict
                 // either. Saying so beats inventing one.
@@ -1321,6 +1324,20 @@ mod tests {
         assert_eq!(
             policy.verdict_for(&score(2.0, 0.95), graded),
             Verdict::Holds
+        );
+        // A score is a probability-weighted average over the levels, so
+        // a model that is 99% sure of the top level answers 1.99, not
+        // 2.0. The floor is read against the nearest level, or the top
+        // grade could never be reached at all.
+        assert_eq!(
+            policy.verdict_for(&score(1.996, 0.95), graded),
+            Verdict::Holds,
+            "nearest level is the top one"
+        );
+        assert_eq!(
+            policy.verdict_for(&score(1.49, 0.95), graded),
+            Verdict::Fails,
+            "nearest level is still below the floor"
         );
         assert_eq!(
             policy.verdict_for(&score(0.0, 0.30), graded),
