@@ -643,15 +643,30 @@ Refused: `Never refactor on a red bar`. That is a state machine in
 ```bash
 spec implement HARNESS-019
 git diff       # read the model's code before you trust the bar
-spec test      # GREEN
+spec test      # RED on the tool count - 10:50 is about that
 ```
+
+`spec test` does not go green here even when the model's code is
+right: the tool you just added moved the served count from 22 to 23,
+and three Rust tests pin 22. That is the failure 10:50 is built around,
+so a RED whose only failures name a tool count is the bar you want. A
+RED that also names your `@HARNESS-019` scenarios is a different thing:
+a measured run's Gherkin reused two existing steps with the wrong
+shape (`the requirement has criterion` with no requirement before it,
+`with arg "REQ-999"` where the step wants `id=REQ-999`), and no amount
+of production code fixes a step that panics in its own fixture. Read
+the failing step, then the step definition it matched, before you let
+the model try again.
 
 What you are building: an MCP tool `criteria_coverage` that takes a
 requirement id and reports, per acceptance criterion, whether a test
 asserts it. The matching logic already exists in
 `harness/src/domain/coverage.rs` — ported from the workshop's own grader
 in `scripts/verify-workshop-run.sh`. You are exposing it, not inventing
-it.
+it. A measured attempt did invent it — 400 lines of matching inside
+`mcp.rs`, doc comments on the neighbouring tools deleted to make room,
+and a bar that would have gone green on it. `git diff` is where that
+gets caught; the bar cannot.
 
 Read the preflight it prints first. The last line names the file the
 attempt will write:
@@ -786,8 +801,10 @@ Until you reinstall, the build that knows about `criteria_coverage` is
 `./target/debug/spec`, and either that path or a fresh install is what
 the Maven run below has to be pointed at.
 
-`LiveSpecServerTest` fails, and the sweep reports `criteria_coverage` as
-**unexpected**. That is `CLI-009` doing its job: it asks for an MCP tool
+`LiveSpecServerTest` fails: `Expected size: 22 but was: 23`, with
+`criteria_coverage` sitting in the list it prints. The `hasSize`
+assertion trips before the one that would call it **unexpected**, but
+the name is on screen either way. That is `CLI-009` doing its job: it asks for an MCP tool
 the plan does not name to fail the Java build until someone plans it, so
 that the smoke test cannot silently skip new surface area.
 
@@ -796,8 +813,8 @@ that the smoke test cannot silently skip new surface area.
 test is skipped and the build stays green.
 
 Fixing it means moving the planned count from 22 to 23 everywhere it is
-written down, and it is written down in four files. All paths are from
-the repository root:
+written down, and it is written down in five files on the Java side.
+All paths are from the repository root:
 
 1. **`smoke-test/src/main/java/com/davidparry/workshop/smoke/ToolPlan.java`**
    — add a row to the `TOOLS` list. It is a read-only tool taking an id,
@@ -832,15 +849,18 @@ the repository root:
 
 Rerun. Green.
 
-The Rust side pins the same number twice, and you will meet both before
-Maven: `tests/mcp_conformance.rs` asserts the served count, and
-`tests/published_facts.rs` asserts it and then checks it against every
-number written on a published page — nine lines across `README.md`,
-`harness/README.md`, `manual/src/commands/mcp.md` and
-`.github/workflows/ci.yml`. That gate is the point rather than an
-obstacle: a tool count is a published fact, and the repository refuses
-to let the docs drift away from the binary. Seven places in all, which
-is a fair answer to "what does one more tool cost".
+The Rust side pins the same number three times, and you will meet all
+of them before Maven: `tests/mcp_conformance.rs` asserts the served
+count, `tests/features/mcp_call.feature` says `22 MCP tools are
+listed` over the wire, and `tests/published_facts.rs` asserts it and
+then checks it against every number written on a published page —
+nine lines across `README.md`, `harness/README.md`,
+`manual/src/commands/mcp.md` and `.github/workflows/ci.yml`, and it
+prints every one of them with its line number when you change the
+assertion first. That gate is the point rather than an obstacle: a tool
+count is a published fact, and the repository refuses to let the docs
+drift away from the binary. Eight files in all, which is a fair answer
+to "what does one more tool cost".
 
 ## 11:05 — close it out
 
