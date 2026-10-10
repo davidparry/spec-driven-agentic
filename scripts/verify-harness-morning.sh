@@ -9,7 +9,8 @@
 # solution: the tagged scenario is whatever the run wrote, the unit test
 # is read for whether it still carries the generated placeholder, the
 # production files are whatever the requirement says they are. The
-# optional deliver report is the `--json` reply `spec deliver` printed;
+# optional deliver report is the JSON `spec deliver` printed (it has no
+# `--json`: the report is always JSON, after the narration);
 # with it the judgments the decision plane recorded are tabled per gate,
 # and without it that row says so rather than passing.
 #
@@ -30,6 +31,11 @@ usage() {
 [ $# -ge 2 ] && [ "$1" = "check" ] || usage
 REQ_ID="$2"
 REPORT="${3:-}"
+# Resolved before the cd below, so a path typed relative to wherever the
+# grader was invoked is still the file it named.
+if [ -n "$REPORT" ] && [ "${REPORT#/}" = "$REPORT" ]; then
+    REPORT="$PWD/$REPORT"
+fi
 
 cd "$HARNESS"
 branch="$(git branch --show-current)"
@@ -172,8 +178,17 @@ if report_path:
         report(False, "the deliver report is readable", str(e))
     if deliver is not None:
         staged = deliver.get("judgments", [])
-        report(True, f"the deliver report carries {sum(len(s['judgments']) for s in staged)} "
-                     f"judgment(s) over {len(staged)} gated stage(s)")
+        counted = sum(len(s["judgments"]) for s in staged)
+        # A configured decision model that was asked nothing is a fact
+        # worth a line: a report with no judgments is byte-identical to
+        # one from a project with no decision model at all.
+        configured = run("spec", "config").stdout
+        decision = [l for l in configured.splitlines() if l.startswith("decision.model\t")]
+        named = bool(decision) and "(unset)" not in decision[0]
+        report(counted > 0 or not named,
+               f"the deliver report carries {counted} judgment(s) over {len(staged)} gated stage(s)",
+               f"a decision model is configured ({decision[0].split(chr(9))[1] if decision else '?'}) "
+               "and no gate recorded a judgment - every gated stage asked nothing, or none was reached")
         by_gate = {}
         for stage in staged:
             for j in stage["judgments"]:
@@ -194,7 +209,7 @@ if report_path:
                f"the deliver report says {rid} was delivered",
                "; ".join(o.get("reason", "") for o in deliver.get("outstanding", [])) or "not in delivered")
 else:
-    print("  SKIP  no deliver report given - pass the --json reply as the third argument to table the judgments")
+    print("  SKIP  no deliver report given - pass the JSON spec deliver printed as the third argument to table the judgments")
 
 # ---- 8. the log ---------------------------------------------------------
 logs = sorted(glob.glob(os.path.join(harness, ".spec/log/spec.log.*")))
