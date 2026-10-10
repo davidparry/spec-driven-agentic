@@ -217,8 +217,11 @@ if logs:
     text = "".join(open(p, errors="replace").read() for p in logs)
     approvals = [l for l in text.splitlines() if "command_run" in l]
     unjudged = [l for l in text.splitlines() if "could not be judged" in l]
+    unasked = [l for l in text.splitlines() if "asked nothing" in l]
     print(f"  INFO  {len(logs)} log file(s): {len(approvals)} command_run line(s), "
-          f"{len(unjudged)} 'could not be judged' warning(s)")
+          f"{len(unjudged)} 'could not be judged' warning(s), {len(unasked)} gate(s) that asked nothing")
+    for line in unasked[:10]:
+        print(f"          {line.strip()[:160]}")
     for line in approvals[:10]:
         print(f"          {line.strip()[:160]}")
     for line in unjudged[:5]:

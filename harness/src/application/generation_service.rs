@@ -819,6 +819,16 @@ impl<'a> CodeGate<'a> {
 fn steps_briefs(language: Language, missing: &[MissingStep], code: &str) -> Vec<Brief> {
     let expressions = extract_patterns(language, code);
     if expressions.len() != missing.len() {
+        // Said with the counts, because the gate's own "asked nothing"
+        // line cannot know them: a model that folds `R-002`, `R-003`
+        // and `R-004` into one `R-{int}` has written fewer expressions
+        // than there were lines, and nothing wrong.
+        tracing::info!(
+            gate = STEPS_BIND_SCENARIO.gate,
+            missing = missing.len(),
+            expressions = expressions.len(),
+            "asked nothing: the reply's expressions do not pair one-to-one with the missing steps"
+        );
         return Vec::new();
     }
     missing

@@ -345,8 +345,21 @@ pub fn gated<'a, T>(
         let Some(judge) = judge else {
             return Ok(parsed);
         };
+        let briefs = briefs(&parsed);
+        if briefs.is_empty() {
+            // A judge attached and nothing to put to it. The caller's
+            // brief declined - a reply it could not pair with what it
+            // was written for, usually - and that is its call; but a
+            // record with no judgments reads the same as a project with
+            // no decision model, so the log carries the difference.
+            tracing::info!(
+                gate = gate.gate,
+                "asked nothing: the reply carried nothing this gate could be put to"
+            );
+            return Ok(parsed);
+        }
         let mut complaints = Vec::new();
-        for brief in briefs(&parsed) {
+        for brief in briefs {
             match judge.judge_task(gate, &brief.input, brief.state) {
                 Ok(judgment) => {
                     let finding = gate.finding(&brief.input, &judgment);
@@ -1094,6 +1107,96 @@ mod tests {
         assert_eq!(check("").unwrap_err(), "empty");
         drop(check);
         assert!(recorded.is_empty());
+    }
+
+    /// Everything a `tracing` subscriber wrote, for a test to read.
+    #[derive(Clone, Default)]
+    struct Captured(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl std::io::Write for Captured {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for Captured {
+        type Writer = Captured;
+
+        fn make_writer(&'a self) -> Self::Writer {
+            self.clone()
+        }
+    }
+
+    fn logged_by(work: impl FnOnce()) -> String {
+        let captured = Captured::default();
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(captured.clone())
+            .with_ansi(false)
+            .with_max_level(tracing::Level::INFO)
+            .finish();
+        tracing::subscriber::with_default(subscriber, work);
+        let bytes = captured.0.lock().unwrap().clone();
+        String::from_utf8(bytes).unwrap()
+    }
+
+    /// A gate with a judge attached and nothing to put to it is a fact
+    /// the record has to carry. The first gauged run of `spec deliver`
+    /// had a decision model configured, a gated step-definitions pass,
+    /// and a reply whose expression count did not match the missing
+    /// steps - so the briefs came back empty, nothing was asked, and the
+    /// report was byte-identical to one from a project with no decision
+    /// model at all. Declining to pair by position is right; doing it in
+    /// silence is not.
+    #[test]
+    fn a_gate_that_asks_nothing_says_so_in_the_log() {
+        let judge = ScriptedJudge::saying(Mode::Advisory, 0.99);
+        let mut recorded = Vec::new();
+        let log = logged_by(|| {
+            let mut check = gated(
+                Some(&judge),
+                Policy::new(Mode::Advisory, 0.70),
+                &CRITERION_MEASURABLE,
+                &mut recorded,
+                |_: &String| Vec::new(),
+                |reply: &str| Ok(reply.to_string()),
+            );
+            assert_eq!(
+                check("then the result is 3").unwrap(),
+                "then the result is 3"
+            );
+        });
+        assert!(recorded.is_empty(), "nothing was asked, nothing recorded");
+        assert!(judge.briefs().is_empty(), "the judge was never called");
+        assert!(
+            log.contains("asked nothing") && log.contains("CRITERION_MEASURABLE"),
+            "the log names the gate that went unasked: {log}"
+        );
+    }
+
+    /// The quiet case stays quiet: a gate that asked and was answered has
+    /// its judgments to show for it, and no "asked nothing" line.
+    #[test]
+    fn a_gate_that_asked_does_not_also_say_it_asked_nothing() {
+        let judge = ScriptedJudge::saying(Mode::Advisory, 0.99);
+        let mut recorded = Vec::new();
+        let log = logged_by(|| {
+            let mut check = gated(
+                Some(&judge),
+                Policy::new(Mode::Advisory, 0.70),
+                &CRITERION_MEASURABLE,
+                &mut recorded,
+                |parsed: &String| vec![Brief::new("REQ-007 criterion 1", measurable_state(parsed))],
+                |reply: &str| Ok(reply.to_string()),
+            );
+            check("then the result is 3").unwrap();
+        });
+        assert_eq!(recorded.len(), 1);
+        assert!(!log.contains("asked nothing"), "{log}");
     }
 
     /// When several criteria disagree about what should happen, the most
