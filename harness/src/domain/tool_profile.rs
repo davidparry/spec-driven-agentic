@@ -305,6 +305,17 @@ mod tests {
         assert_eq!(Caller::parse("nonsense"), None);
     }
 
+    /// The section is what `AgentConfig` loads. A caller pointed at a
+    /// template the catalog does not have panics on the first real run,
+    /// which is too late: the mapping is data this crate owns.
+    #[test]
+    fn every_caller_section_is_a_prompt_the_catalog_can_render() {
+        for caller in Caller::ALL {
+            let section = caller.section();
+            assert!(crate::domain::prompts::SECTIONS.contains(&section));
+        }
+    }
+
     #[test]
     fn every_caller_names_the_cli_command_that_loads_its_tools() {
         let mut seen = std::collections::BTreeSet::new();

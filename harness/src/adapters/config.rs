@@ -1018,6 +1018,69 @@ mod tests {
         );
     }
 
+    /// `spec config` is the only place a gate override is visible, and
+    /// it has to show exactly the half the file named. Inventing the
+    /// other half would look like a threshold the project set.
+    #[test]
+    fn inspect_config_lists_a_gate_override_only_for_the_keys_it_names() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(CONFIG_FILE);
+        fs::write(
+            &path,
+            "[tools]\nconfirm = []\n[tools.disabled]\nstatus = [\"run_tests\"]\n\
+             [decision]\nendpoint = \"http://judge:11434\"\nmin_confidence = 0.95\n\
+             [decision.gates.CRITERION_MEASURABLE]\nmode = \"advisory\"\n\
+             [decision.gates.UNIT_TEST_ASSERTS]\nmin_confidence = 0.9\n",
+        )
+        .unwrap();
+        let report = inspect_config(&path);
+        let file = path.to_str().unwrap();
+
+        let endpoint = report.setting("decision.endpoint").unwrap();
+        assert_eq!(endpoint.value, "http://judge:11434");
+        assert_eq!(
+            endpoint.source,
+            crate::domain::config_report::ConfigSource::File(file.into())
+        );
+        let threshold = report.setting("decision.min_confidence").unwrap();
+        assert_eq!(threshold.value, "0.95");
+        assert!(matches!(
+            threshold.source,
+            crate::domain::config_report::ConfigSource::File(_)
+        ));
+
+        let mode = report
+            .setting("decision.gates.CRITERION_MEASURABLE.mode")
+            .unwrap();
+        assert_eq!(mode.value, "advisory");
+        assert!(
+            report
+                .setting("decision.gates.CRITERION_MEASURABLE.min_confidence")
+                .is_none()
+        );
+        let asserts = report
+            .setting("decision.gates.UNIT_TEST_ASSERTS.min_confidence")
+            .unwrap();
+        assert_eq!(asserts.value, "0.9");
+        assert!(
+            report
+                .setting("decision.gates.UNIT_TEST_ASSERTS.mode")
+                .is_none()
+        );
+
+        assert_eq!(report.setting("tools.confirm").unwrap().value, "(none)");
+        assert_eq!(
+            report.setting("tools.disabled.status").unwrap().value,
+            "run_tests"
+        );
+        assert_eq!(report.setting("decision.mode").unwrap().value, "enforce");
+
+        let json = serde_json::to_string(&report).unwrap();
+        assert!(json.contains(file));
+        assert!(json.contains("\"(default)\""));
+        assert!(json.contains("advisory"));
+    }
+
     // ---- [decision] ----------------------------------------------------
 
     fn decision_store_in(dir: &tempfile::TempDir) -> TomlDecisionStore {

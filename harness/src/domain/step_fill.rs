@@ -510,4 +510,43 @@ fn the_result_is(world: &mut KataWorld, expected: i32) {
         assert!(prompt.system.contains("1 "), "{}", prompt.system);
         assert!(prompt.system.contains("cucumber-rs"), "{}", prompt.system);
     }
+
+    /// A brace in a comment, an escaped string, or an inner block is
+    /// not the end of the definition. Counting any of them would splice
+    /// the replacement over the next function.
+    #[test]
+    fn braces_inside_comments_strings_and_inner_blocks_stay_in_the_body() {
+        let source = r#"#[when(expr = "add is called")]
+fn add(w: &mut W) {
+    let s = "a \" } b";
+    // } still inside
+    if w.ready {
+        w.result = 1;
+    }
+    w.done = true;
+}
+"#;
+        let spans = definition_spans(Language::Rust, source);
+        assert_eq!(spans.len(), 1);
+        let text = spans[0].text(source);
+        assert!(text.contains("w.done = true;"));
+        assert!(text.contains("w.result = 1;"));
+        assert!(text.ends_with("}\n"));
+    }
+
+    /// A body whose braces never close yields no span. Guessing an end
+    /// would eat whatever follows it in the file.
+    #[test]
+    fn a_body_whose_braces_never_close_is_not_a_span() {
+        let source = "#[when(expr = \"add is called\")]\nfn add(_w: &mut W) {\n    let n = 1;\n";
+        assert!(definition_spans(Language::Rust, source).is_empty());
+    }
+
+    /// An unclosed quote runs to the end of the file, so the body has
+    /// no trustworthy close either.
+    #[test]
+    fn an_unclosed_string_is_not_a_span() {
+        let source = "#[when(expr = \"add is called\")]\nfn add(_w: &mut W) { let s = \"oops; }\n";
+        assert!(definition_spans(Language::Rust, source).is_empty());
+    }
 }
