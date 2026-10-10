@@ -14,8 +14,8 @@ use crate::application::generation_service::ResolvedLlm;
 use crate::application::spec_service::ServiceError;
 use crate::domain::coverage::covers_all;
 use crate::domain::decision::{
-    IMPLEMENTATION_COMPLETE, Judgment, Policies, UNIT_TEST_ASSERTS, implementation_state,
-    test_asserts_state,
+    IMPLEMENTATION_COMPLETE, Judgment, Policies, UNIT_TEST_ASSERTS, changed_code,
+    implementation_state, test_asserts_state,
 };
 use crate::domain::generation::{
     FileUpdate, ImplementAsset, advice_prompt, implementation_file_name, implementation_prompt,
@@ -336,7 +336,9 @@ where
                 self.policies.policy_for(&IMPLEMENTATION_COMPLETE),
                 &IMPLEMENTATION_COMPLETE,
                 &mut complete,
-                |updates: &Vec<FileUpdate>| production_briefs(req_id, criteria, updates, &allowed),
+                |updates: &Vec<FileUpdate>| {
+                    production_briefs(req_id, criteria, updates, &allowed, &files)
+                },
                 asserts_gate,
             ),
             |_, _, _| {},
@@ -574,26 +576,38 @@ fn test_briefs(
 }
 
 /// What [`IMPLEMENTATION_COMPLETE`] is graded on: one question per
-/// criterion, against the production file this attempt wrote.
+/// criterion, against what this attempt changed in the production file.
 ///
-/// Only the primary file, not every declared one. The brief is the
-/// criterion plus the one artefact on purpose - `MAX_REQUEST_BYTES` is
-/// 64KB and the shipped decision models load an 8,192-token context, so
-/// a brief that grows to the whole module is a brief that gets
-/// truncated, and a truncated brief is evidence about nothing.
+/// Only the primary file, and only the lines the attempt changed in it,
+/// with a little context. The brief is the criterion plus the one
+/// change on purpose - `MAX_REQUEST_BYTES` is 64KB and the shipped
+/// decision models load an 8,192-token context and refuse what
+/// overflows it. A brief that grows to the whole module is a brief
+/// that is never answered, and because this gate ships advisory the
+/// refusal is a line in the log and a verdict nobody gave. Measured
+/// against this crate's router, the whole file was 19,885 tokens.
+///
+/// A file handed back word for word changed nothing, and the gate is
+/// asked nothing: the question is about work this reply did.
 fn production_briefs(
     req_id: &str,
     criteria: &[String],
     updates: &[FileUpdate],
     allowed: &[String],
+    files: &[(String, String)],
 ) -> Vec<Brief> {
     let Some(primary) = allowed.first() else {
         return Vec::new();
     };
+    let prior = files
+        .iter()
+        .find(|(path, _)| path == primary)
+        .map(|(_, content)| content.as_str());
+    let change = written(updates, primary).map(|after| changed_code(prior, after));
     briefs_for(
         req_id,
         criteria,
-        written(updates, primary),
+        change.as_deref().filter(|change| !change.is_empty()),
         implementation_state,
     )
 }
@@ -926,6 +940,52 @@ mod tests {
 
     /// A path the project has never seen is the attempt creating a
     /// file, and nothing can be lost from a file that is not there.
+    #[test]
+    fn the_completeness_brief_is_the_change_not_the_file() {
+        let prior: String = (0..600)
+            .map(|n| format!("fn existing_{n}() -> u32 {{\n    {n}\n}}\n"))
+            .collect();
+        let added = "fn add(input: &str) -> u32 {\n    3\n}\n";
+        let update = FileUpdate {
+            path: "src/lib.rs".into(),
+            content: format!("{prior}{added}"),
+        };
+        let criteria = vec!["Given \"1,2\", when add is called, then 3".to_string()];
+        let briefs = production_briefs(
+            "REQ-001",
+            &criteria,
+            std::slice::from_ref(&update),
+            &["src/lib.rs".to_string()],
+            &[("src/lib.rs".to_string(), prior.clone())],
+        );
+        assert_eq!(briefs.len(), 1);
+        let code = briefs[0].state["production_code"].as_str().unwrap();
+        assert!(code.contains(added), "{code}");
+        assert!(
+            code.len() < prior.len() / 10,
+            "{} bytes of {}",
+            code.len(),
+            prior.len()
+        );
+    }
+
+    #[test]
+    fn a_file_handed_back_word_for_word_asks_the_completeness_gate_nothing() {
+        let prior = "fn add() -> u32 { 3 }\n".to_string();
+        let update = FileUpdate {
+            path: "src/lib.rs".into(),
+            content: prior.clone(),
+        };
+        let briefs = production_briefs(
+            "REQ-001",
+            &["a criterion".to_string()],
+            std::slice::from_ref(&update),
+            &["src/lib.rs".to_string()],
+            &[("src/lib.rs".to_string(), prior)],
+        );
+        assert_eq!(briefs.len(), 0);
+    }
+
     #[test]
     fn a_brand_new_file_is_not_measured_against_anything() {
         let reply = r#"[{"path": "src/main/java/Kata.java", "content": "placeholder"}]"#;

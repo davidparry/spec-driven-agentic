@@ -1084,10 +1084,86 @@ pub const IMPLEMENTATION_COMPLETE: TaskGate = TaskGate {
     ships_at: Mode::Advisory,
 };
 
-/// The brief for [`IMPLEMENTATION_COMPLETE`]: the criterion and the one
-/// function, never the file.
+/// The brief for [`IMPLEMENTATION_COMPLETE`]: the criterion and the
+/// code this attempt changed, never the file. [`changed_code`] is what
+/// cuts the file down to that.
 pub fn implementation_state(criterion: &str, code: &str) -> serde_json::Value {
     serde_json::json!({ "acceptance_criterion": criterion, "production_code": code })
+}
+
+/// How much code one brief carries.
+///
+/// The shipped decision models load an 8,192-token context and refuse a
+/// prompt that overflows it rather than truncating. Source code runs
+/// three to four bytes a token, so this leaves the criterion and the
+/// question room beside the code. A measured attempt against a
+/// 1,200-line router sent 19,885 tokens and was refused, and because
+/// the gate ships advisory the refusal was a line in the log and a
+/// verdict nobody gave.
+pub const MAX_BRIEF_CODE_BYTES: usize = 24 * 1024;
+
+/// What stands between two changed regions in a brief.
+pub const ELIDED: &str = "    // …\n";
+
+/// How many unchanged lines each side of a change travel with it, so
+/// a judge can see the signature a new body sits under.
+const CONTEXT_LINES: usize = 3;
+
+/// The lines of `after` that `before` did not have, each change with a
+/// little of its surroundings, and nothing else.
+///
+/// A whole file is not an answer to "does this code satisfy the
+/// criterion"; it is a haystack, and past a size it is not even that -
+/// it is a refused request. A brand new file is all change, and so is
+/// carried whole. A file handed back unchanged is no change at all,
+/// and the empty brief is how a gate learns it has nothing to ask.
+///
+/// Lines are compared by content rather than aligned by a diff: a line
+/// present anywhere in `before` is old, however far it moved. That is
+/// deliberately cheap - the test file this is also pointed at runs to
+/// thousands of lines - and the cost is that a moved block reads as
+/// unchanged, which for "is the new code complete" is the right call.
+pub fn changed_code(before: Option<&str>, after: &str) -> String {
+    let Some(before) = before else {
+        return crate::domain::diff::cap(after, MAX_BRIEF_CODE_BYTES).text;
+    };
+    let mut old: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for line in before.lines() {
+        *old.entry(line).or_default() += 1;
+    }
+    let lines: Vec<&str> = after.lines().collect();
+    let changed: Vec<bool> = lines
+        .iter()
+        .map(|line| match old.get_mut(line) {
+            Some(count) if *count > 0 => {
+                *count -= 1;
+                false
+            }
+            _ => true,
+        })
+        .collect();
+    if !changed.iter().any(|c| *c) {
+        return String::new();
+    }
+    let mut kept = vec![false; lines.len()];
+    for (index, _) in changed.iter().enumerate().filter(|(_, c)| **c) {
+        let from = index.saturating_sub(CONTEXT_LINES);
+        let to = (index + CONTEXT_LINES).min(lines.len() - 1);
+        kept[from..=to].iter_mut().for_each(|k| *k = true);
+    }
+    let mut out = String::new();
+    let mut previous_kept = true;
+    for (line, keep) in lines.iter().zip(&kept) {
+        if *keep {
+            if !previous_kept {
+                out.push_str(ELIDED);
+            }
+            out.push_str(line);
+            out.push('\n');
+        }
+        previous_kept = *keep;
+    }
+    crate::domain::diff::cap(&out, MAX_BRIEF_CODE_BYTES).text
 }
 
 /// Did this refactoring leave behaviour alone?
@@ -1913,5 +1989,64 @@ mod tests {
         assert_eq!(SYSTEMONE_PATH, "/v1/systemone");
         assert_eq!(DECISION_CAPABILITY, "decision");
         assert_eq!(COMPLETION_CAPABILITY, "completion");
+    }
+
+    fn long_file(functions: usize) -> String {
+        (0..functions)
+            .map(|n| format!("fn existing_{n}() -> u32 {{\n    {n}\n}}\n"))
+            .collect()
+    }
+
+    #[test]
+    fn a_new_file_is_the_change_in_its_entirety() {
+        let after = "fn add(a: u32, b: u32) -> u32 {\n    a + b\n}\n";
+        assert_eq!(changed_code(None, after), after);
+    }
+
+    #[test]
+    fn a_function_added_to_a_long_file_is_briefed_without_the_rest_of_the_file() {
+        let before = long_file(400);
+        let added = "fn criteria_coverage(id: &str) -> Coverage {\n    coverage_of(id)\n}\n";
+        let after = format!(
+            "{}{added}{}",
+            &before[..before.len() / 2],
+            &before[before.len() / 2..]
+        );
+        let brief = changed_code(Some(&before), &after);
+        assert!(brief.contains(added), "{brief}");
+        assert!(
+            brief.len() < added.len() + 200,
+            "the brief carries the file, not the change: {} bytes",
+            brief.len()
+        );
+    }
+
+    #[test]
+    fn a_file_handed_back_unchanged_has_no_change_to_brief() {
+        let file = long_file(3);
+        assert_eq!(changed_code(Some(&file), &file), "");
+    }
+
+    #[test]
+    fn two_separate_changes_are_both_briefed_with_a_marker_between() {
+        let before = long_file(50);
+        let mut lines: Vec<&str> = before.lines().collect();
+        lines.insert(4, "    // first");
+        lines.insert(120, "    // second");
+        let after = lines.join("\n");
+        let brief = changed_code(Some(&before), &after);
+        assert!(
+            brief.contains("// first") && brief.contains("// second"),
+            "{brief}"
+        );
+        assert!(brief.contains(ELIDED), "{brief}");
+    }
+
+    #[test]
+    fn a_change_larger_than_the_context_is_cut_on_a_line_boundary() {
+        let after = long_file(3000);
+        let brief = changed_code(None, &after);
+        assert!(brief.len() <= MAX_BRIEF_CODE_BYTES, "{} bytes", brief.len());
+        assert!(brief.ends_with('\n'), "cut mid-line");
     }
 }
