@@ -554,9 +554,15 @@ answers, so the next command reads it straight away:
 spec feature create --path tests/features/tool_coverage.feature --name "Criteria coverage"
 spec scenario generate HARNESS-019 --feature tests/features/tool_coverage.feature
 spec unittest generate HARNESS-019
-git diff
+git status            # two new files - git diff cannot show those yet
+git diff              # requirements.json, from 9:20
 spec steps missing
 ```
+
+Both files the two `generate` commands wrote are new, so `git diff`
+is silent about them until they are staged: read them with `git
+status` and open them, or `git add -N tests/` first and `git diff`
+shows them from then on.
 
 How many steps come back missing depends on how the model worded the
 scenarios. It may reuse step definitions the suite already has and
@@ -923,17 +929,32 @@ Go back to 9:10 and imagine you had not been there.
 The model's own wording was `valid`. It was `clean`. Delivered
 autonomously it would have earned a tagged scenario, a red bar, a green
 bar, and the `implemented` flag — every gate satisfied, honestly. The
-decision model would not have been asked at all: `deliver` never
-consults it, in any mode. The
 Java smoke test at 10:50 would have stayed green too, because no new
 MCP tool would exist to be unplanned.
+
+The decision model would have been asked, and would have said yes.
+`deliver` puts the same questions to it that your commands did this
+morning — is each scenario exercising its criterion, does each step
+expression bind its line, does each test body assert, is the production
+code more than a stub — and a measured run of exactly this sentence
+shows what it answered. The model wrote
+`criterion_proof_report(requirement_id, criteria, proven: &[bool])`:
+a function that takes the proven-or-unproven answer *in* as a slice of
+booleans and reports it back out, with eight tests that feed
+`[true, false]` and assert `[Proven, Unproven]`. `UNIT_TEST_ASSERTS`
+read all of them as asserting, at 0.997 and above — and they do.
+`IMPLEMENTATION_COMPLETE` graded the first criterion complete at 1.96
+of 2 and hesitated on the other three, `INCONCLUSIVE` at 1.87 to 1.91,
+which is a gate noticing something it has no words for. Nothing it was
+asked was "is this the thing the sentence meant".
 
 And what you would have on disk is `requirement_coverage()`: a
 function, in a module, that no agent can call and no host can see.
 
 Every gate passed. Every gate was about **correctness**. Not one of
 them asked whether this was the right thing to build, because that
-question has no state machine behind it.
+question has no state machine behind it — and no second model behind it
+either.
 
 That is the whole argument of the morning in one line: the gates are not
 there to slow you down. They are what makes it safe to leave — from

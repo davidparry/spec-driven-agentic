@@ -422,6 +422,44 @@ A misspelled mode is no mode, so it takes the default — which means a
 typo keeps gating rather than silently stopping. That is the direction
 a typo in a gate should fail in.
 
+### `[decision.gates.<GATE>]`
+
+`mode` and `min_confidence` apply to the whole plane. One gate can be
+read differently:
+
+```toml
+[decision]
+mode = "enforce"
+
+[decision.gates.UNIT_TEST_ASSERTS]
+mode = "advisory"
+
+[decision.gates.CRITERION_MEASURABLE]
+min_confidence = 0.9
+```
+
+Each half of an override falls back to the plane's setting rather than
+to a built-in, so a gate that names only a mode keeps the threshold set
+once above it. The gate names are the ones printed in every judgment
+and `second review` block:
+
+| Gate | Asked by | Ships at |
+| --- | --- | --- |
+| `CRITERION_MEASURABLE` | `spec refine`, `refine_requirement`, `--judge-draft` | `enforce` |
+| `SCENARIO_EXERCISES_CRITERION` | `spec scenario generate` | `advisory` |
+| `STEPS_BIND_SCENARIO` | `spec steps generate`, `deliver` | `advisory` |
+| `UNIT_TEST_ASSERTS` | `spec implement`, `deliver` | `advisory` |
+| `IMPLEMENTATION_COMPLETE` | `spec implement`, `deliver` | `advisory` |
+| `REFACTOR_PRESERVES_BEHAVIOUR` | `spec refactor`, `deliver` | `advisory` |
+
+**Ships at** is a ceiling, not a default. A gate with no entry of its
+own is read at the weaker of the plane's mode and that ceiling, so
+`mode = "enforce"` turns up the one calibrated question and leaves the
+other five advisory. An explicit `[decision.gates.<GATE>]` entry is
+taken at its word, which is how a project that has measured a gate on
+its own work turns it up. The labelled sets behind each ceiling run
+with `cargo test --test decision_live -- --ignored --nocapture`.
+
 ### `decision.min_confidence`
 
 A dead band, not a quality bar. For the boolean question the harness

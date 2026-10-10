@@ -110,12 +110,48 @@ A step that loops on its own is called once and its loop is trusted:
 drafting's validate-and-reword rounds, `spec implement`'s attempts,
 and `spec refactor`'s rounds are not wrapped in a second loop here.
 
+## What the decision model is asked along the way
+
+With a [decision model](judge.md) configured, every generating stage
+puts the writing model's reply to the same bounded question the
+hand-run command would. The gate and the stage that asks it:
+
+| Stage | Gate | The question |
+| --- | --- | --- |
+| `author_steps` | `STEPS_BIND_SCENARIO` | would this step expression match that step line? |
+| `drive_to_green` | `UNIT_TEST_ASSERTS` | does this test body assert the criterion, or pass regardless? |
+| `drive_to_green` | `IMPLEMENTATION_COMPLETE` | how completely does this code implement its criterion - stub, partial, complete? |
+| `refactor` | `REFACTOR_PRESERVES_BEHAVIOUR` | did this refactoring leave behaviour alone? |
+
+`author_scenarios` is deterministic and asks nothing;
+`SCENARIO_EXERCISES_CRITERION` is the hand-run `spec scenario
+generate`'s gate. All four ship at `advisory`, where a verdict is
+recorded and changes nothing, and that ceiling holds whatever `[decision]
+mode` says until a project raises a gate by name:
+
+```toml
+[decision.gates.UNIT_TEST_ASSERTS]
+mode = "enforce"
+```
+
+Under `enforce` a `FAILS` becomes a `REWORK`: the writing model is
+re-asked with the finding as the complaint, riding the same retry a
+malformed reply gets, and nothing else changes. A judgment can never
+approve anything - a reply that holds every gate still has to compile
+and go green. Each judgment is printed as a `second review` block as the
+stage finishes and rides in the final JSON under `judgments`, one entry
+per requirement per stage, so a run nobody watched can be read back.
+With no decision model configured none of this happens and the report
+carries no `judgments` key. A gate that has a judge and nothing to put
+to it - a reply whose expressions do not pair with the missing steps -
+says so in `.spec/log` and records nothing.
+
 ## `--judge-draft`: the decision model during drafting
 
 Delivering a description rather than an id means the spec is written by
 a model with nobody reading it. `--judge-draft` puts the
-[decision model](judge.md) in that loop — the only place in the harness
-its answer is used as **feedback rather than a gate**.
+decision model in that loop too — the one place in the harness its
+answer is used as **feedback rather than a gate**.
 
 With the flag, a proposal that clears the deterministic edge-case rule
 has each of its criteria put to the question `measurable/v2`. Anything
