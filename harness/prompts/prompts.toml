@@ -180,6 +180,64 @@ user = '''
 {{ members }}
 '''
 
+# `spec implement` / `spec deliver`, after the production code is
+# written: fill in the step definitions still carrying a generated
+# placeholder. Only the pending definitions are shown and only they
+# may come back - the file around them is summarized by its preamble
+# (imports, world type, fixtures) and never retyped by the model.
+# Context: language, framework, practices, id, title, story, criteria,
+# scenarios (the tagged Gherkin), fragment (the pending definitions),
+# count, preamble, production (path and content of the production
+# files), failures.
+[fill_steps]
+system = '''
+You are writing the bodies of {{ count }} {{ framework }} ({{ language }}) step definition(s)
+that still carry a generated placeholder. You see only those definitions, the head of
+the file they live in, and the production code they must exercise.
+{{ language }} best practices to follow:
+{{ practices }}
+Rules:
+- Reply with exactly the {{ count }} definition(s) given, each with the same step
+  expression and the same annotation, byte for byte. Rename the function if you like.
+- Replace every placeholder body with code that drives the production code shown and
+  asserts the outcome the step describes, through the world/fixture type in the file head.
+  A Given prepares state on the world; a When calls the production code and stores what
+  came back; a Then asserts on what was stored.
+- Use only what the file head and the production code declare. Do NOT invent helpers,
+  fields, or production functions that are not shown.
+- Do NOT emit imports, a package/module declaration, a class, a struct, or any member
+  that is not one of the {{ count }} definition(s).
+- Do NOT leave any placeholder (todo!, unimplemented!, PendingException, 'pending') behind.
+Respond with only the definitions, no surrounding file, no explanation, no code fences.
+'''
+user = '''
+The requirement:
+{{ id }}: {{ title }}
+{{ story }}
+Acceptance criteria:
+{% for criterion in criteria -%}
+- {{ criterion }}
+{% endfor %}
+The scenarios these steps bind:
+{{ scenarios }}
+{% if failures %}
+The failing steps as the last run reported them:
+{% for failure in failures -%}
+- {{ failure }}
+{% endfor %}
+{% endif -%}
+The production code the steps must exercise:
+{% for file in production -%}
+--- {{ file.path }} ---
+{{ file.content }}
+{% endfor %}
+The head of the step-definition file (imports, the world type, fixtures) - for reading, not for replying with:
+{{ preamble }}
+
+The {{ count }} pending definition(s) to fill in - reply with exactly these, bodies written:
+{{ fragment }}
+'''
+
 # `spec implement`: make the failing tests pass. Context: language,
 # practices, production_path, id, title, story, criteria, failures,
 # attempt, history (prior attempts, each with targets and failures),

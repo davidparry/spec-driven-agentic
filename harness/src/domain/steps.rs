@@ -63,7 +63,7 @@ pub fn source_extension(language: Language) -> &'static str {
 /// to catch them without parsing the language.
 const BODY_WINDOW: usize = 800;
 
-fn definition_regex(language: Language) -> &'static Regex {
+pub(crate) fn definition_regex(language: Language) -> &'static Regex {
     match language {
         Language::Java => &JAVA_DEF,
         Language::JavaScript | Language::TypeScript => &JS_DEF,
@@ -120,7 +120,7 @@ pub fn extract_definitions(language: Language, source: &str) -> Vec<(String, &st
 /// Only the three escapes this crate emits are collapsed. An unknown
 /// escape keeps its backslash: the `\d` of a hand-written `#[then(regex
 /// = r"^the result is (\d+)$")]` is a regex atom, not an escaped `d`.
-fn unescape_literal(text: &str) -> String {
+pub(crate) fn unescape_literal(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut characters = text.chars();
     while let Some(character) = characters.next() {

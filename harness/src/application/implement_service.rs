@@ -26,11 +26,21 @@ use crate::domain::layout::{allowed_targets, in_production_root};
 use crate::domain::memory::ProjectStructure;
 use crate::domain::model::Spec;
 use crate::domain::reply_guard::{Damage, damage};
-use crate::domain::steps::source_extension;
+use crate::domain::step_fill;
+use crate::domain::steps::{extract_patterns, source_extension};
 use crate::domain::tdd::{ImplementAttempt, StateEntry};
 use crate::ports::{
     FeatureCatalog, LlmConversation, Prompter, SourceFiles, SpecRepository, ToolBroker, WorkTree,
 };
+
+/// Reply of the step-filling pass: which step file had its pending
+/// bodies written, and how many.
+#[derive(Debug, Serialize, PartialEq)]
+pub struct StepFillReport {
+    pub target: String,
+    pub filled: usize,
+    pub source: String,
+}
 
 /// Reply of an implementation attempt: the files the model updated.
 #[derive(Debug, Serialize, PartialEq)]
@@ -208,6 +218,178 @@ where
                 ),
             },
         })
+    }
+
+    /// Write the bodies of the step definitions this requirement's
+    /// scenarios run through that are still generated placeholders.
+    ///
+    /// The second half of making the bar green, after [`Self::generate`]
+    /// has written the production code. It is a separate pass with a
+    /// separate brief because the step-definition file is the one file
+    /// the implementation prompt can never get back whole: it is shared
+    /// by every requirement, it is the largest file in a project that
+    /// has been at this for a while, and three measured runs on this
+    /// crate spent every attempt rewriting the production file while
+    /// the bar stayed RED on three `todo!()` bodies in it. Only the
+    /// pending definitions go to the model, with the production code
+    /// they should call and the head of their file; only they come
+    /// back, and they are spliced in where they were.
+    ///
+    /// `Ok(None)` when nothing bound to the requirement is pending. A
+    /// reply that keeps a placeholder, drops a pattern, or brings a
+    /// scope of its own is refused and nothing is written - the stub on
+    /// disk is a better state than a half-filled file.
+    pub fn fill_pending_steps(
+        &self,
+        prompter: &mut dyn Prompter,
+        req_id: &str,
+        failures: &[String],
+    ) -> Result<Option<StepFillReport>, ServiceError> {
+        let Some(llm) = &self.llm else {
+            return Ok(None);
+        };
+        let spec = load_spec(&self.spec)?;
+        let requirement = find_requirement(&spec, req_id)?;
+        let (scenarios, step_lines) = self.tagged_scenarios(&format!("@{req_id}"))?;
+        if step_lines.is_empty() {
+            return Ok(None);
+        }
+        let sources = self.sources.sources(source_extension(self.language))?;
+        // The file with the most of this requirement's pending steps.
+        // One file is what a project has; picking the fullest keeps a
+        // stray stub elsewhere from splitting the pass in two.
+        let Some((file, pending)) = sources
+            .iter()
+            .map(|file| {
+                (
+                    file,
+                    step_fill::pending_step_definitions(self.language, &file.content, &step_lines),
+                )
+            })
+            .filter(|(_, pending)| !pending.is_empty())
+            .max_by_key(|(_, pending)| pending.len())
+        else {
+            return Ok(None);
+        };
+        let fragment = pending
+            .iter()
+            .map(|span| span.text(&file.content).trim_end())
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        let expected: Vec<String> = pending.iter().map(|span| span.pattern.clone()).collect();
+        // The production files the requirement records - a delivery
+        // writes them after its first attempt - or, before anything is
+        // recorded, the file the evidence resolves to today.
+        let mut wanted = requirement.production_files.clone();
+        if wanted.is_empty()
+            && let Ok(
+                ImplementTarget::Resolved(path)
+                | ImplementTarget::Unresolved { conventional: path },
+            ) = self.target(req_id)
+        {
+            wanted.push(path);
+        }
+        let production: Vec<(String, String)> = sources
+            .iter()
+            .filter(|source| wanted.contains(&source.path))
+            .map(|source| (source.path.clone(), source.content.clone()))
+            .collect();
+        let prompt = step_fill::fill_steps_prompt(
+            self.language,
+            requirement,
+            &step_fill::FillBrief {
+                scenarios: &scenarios,
+                fragment: &fragment,
+                count: pending.len(),
+                preamble: step_fill::step_file_preamble(self.language, &file.content),
+                production: &production,
+                failures,
+            },
+        );
+        let work = prompter.working(&format!(
+            "Asking {} to write {} pending step bodies in {} - working",
+            llm.model(),
+            pending.len(),
+            file.path
+        ));
+        let declared = extract_patterns(self.language, &file.content);
+        let outcome = llm.ask(
+            prompter,
+            &prompt,
+            |reply| {
+                let code = strip_code_fences(reply);
+                if !step_fill::looks_like_filled_steps(self.language, &code, &expected) {
+                    return Err(format!(
+                        "the reply was not the {} definition(s) asked for, each with its \
+                         expression kept and its placeholder replaced",
+                        expected.len()
+                    ));
+                }
+                let assembled = step_fill::replace_step_definitions(
+                    self.language,
+                    &file.content,
+                    &pending,
+                    &code,
+                );
+                let kept = extract_patterns(self.language, &assembled);
+                if kept != declared {
+                    return Err("splicing the reply in would change which steps the file \
+                                declares"
+                        .into());
+                }
+                Ok(assembled)
+            },
+            |_, _, _| {},
+        );
+        drop(work);
+        let assembled = outcome.map_err(|error| {
+            ServiceError(match error {
+                LlmReplyError::Call(e) => LlmReplyError::call_failed(&e),
+                LlmReplyError::Invalid { reason } => format!(
+                    "The step bodies for {req_id} were not written - {reason}. The stubs in {} \
+                     are unchanged; write them by hand or run spec implement {req_id} again.",
+                    file.path
+                ),
+            })
+        })?;
+        let summary = format!(
+            "fill {} pending step definition(s) for {req_id}",
+            pending.len()
+        );
+        self.store.write(&file.path, &assembled, &summary)?;
+        tracing::info!(
+            requirement = %req_id,
+            target = %file.path,
+            filled = pending.len(),
+            "pending step bodies written"
+        );
+        Ok(Some(StepFillReport {
+            target: file.path.clone(),
+            filled: pending.len(),
+            source: "llm".into(),
+        }))
+    }
+
+    /// The requirement's scenarios as Gherkin text, with their step
+    /// texts (keywords dropped) for matching against definitions.
+    fn tagged_scenarios(&self, tag: &str) -> Result<(String, Vec<String>), ServiceError> {
+        let mut text = String::new();
+        let mut steps = Vec::new();
+        for summary in self.features.list()? {
+            let doc = self.features.read(&summary.path)?;
+            for scenario in &doc.scenarios {
+                if !scenario.tags.iter().chain(&doc.tags).any(|t| t == tag) {
+                    continue;
+                }
+                text.push_str(&format!("  {tag}\n  Scenario: {}\n", scenario.name));
+                for step in &scenario.steps {
+                    text.push_str(&format!("    {step}\n"));
+                }
+                text.push('\n');
+                steps.extend(scenario.steps.iter().cloned());
+            }
+        }
+        Ok((text, step_fill::step_texts(&steps)))
     }
 
     /// Ask the model to make the failing tests pass: production code plus
@@ -984,6 +1166,113 @@ mod tests {
             &[("src/lib.rs".to_string(), prior)],
         );
         assert_eq!(briefs.len(), 0);
+    }
+
+    /// REQ-001's steps with the When and Then still pending, beside a
+    /// hand-written Given and another requirement's stub.
+    fn pending_steps() -> SourceFile {
+        SourceFile {
+            path: "src/test/java/steps/Steps.java".into(),
+            content: "package steps;\n\nimport io.cucumber.java.PendingException;\nimport io.cucumber.java.en.*;\n\npublic class Steps {\n    private int result;\n\n    @Given(\"a calculator\")\n    public void a() { result = -1; }\n\n    @When(\"add is called with {string}\")\n    public void b(String s) {\n        throw new PendingException();\n    }\n\n    @Then(\"the result is {int}\")\n    public void c(int n) {\n        throw new PendingException();\n    }\n\n    @Then(\"something REQ-002 asks\")\n    public void d() {\n        throw new PendingException();\n    }\n}\n".into(),
+        }
+    }
+
+    fn production() -> SourceFile {
+        SourceFile {
+            path: "src/main/java/Kata.java".into(),
+            content: "public class Kata { int add(String in) { return 3; } }".into(),
+        }
+    }
+
+    const FILLED_STEPS: &str = "    @When(\"add is called with {string}\")\n    public void b(String s) {\n        result = new Kata().add(s);\n    }\n\n    @Then(\"the result is {int}\")\n    public void c(int n) {\n        org.junit.jupiter.api.Assertions.assertEquals(n, result);\n    }\n";
+
+    #[test]
+    fn the_pending_step_bodies_bound_to_the_requirement_are_filled_in_place() {
+        let service = service(
+            vec![pending_steps(), production()],
+            Some(FakeLlm::replying(FILLED_STEPS)),
+        );
+        let report = service
+            .fill_pending_steps(
+                &mut NullPrompter,
+                "REQ-001",
+                &["the result is 3: FAILED".into()],
+            )
+            .unwrap()
+            .expect("two pending steps to fill");
+        assert_eq!(report.target, "src/test/java/steps/Steps.java");
+        assert_eq!(report.filled, 2);
+        let written = service
+            .store
+            .read("src/test/java/steps/Steps.java")
+            .unwrap()
+            .expect("the step file was written");
+        assert!(written.contains("result = new Kata().add(s);"), "{written}");
+        assert!(written.contains("assertEquals(n, result);"), "{written}");
+        assert!(
+            written.contains("public void a() { result = -1; }"),
+            "{written}"
+        );
+        assert!(written.contains("something REQ-002 asks"), "{written}");
+        assert_eq!(
+            written.matches("PendingException();").count(),
+            1,
+            "{written}"
+        );
+        let prompt = service.llm.as_ref().unwrap().chat().prompts.borrow()[0].clone();
+        assert!(
+            prompt.contains("int add(String in)"),
+            "the production code is in the brief"
+        );
+        assert!(
+            prompt.contains("private int result;"),
+            "the file head is in the brief"
+        );
+        assert!(
+            !prompt.contains("something REQ-002 asks"),
+            "another requirement's stub is not"
+        );
+    }
+
+    #[test]
+    fn a_reply_that_leaves_a_step_pending_fills_nothing() {
+        let still_pending = "    @When(\"add is called with {string}\")\n    public void b(String s) {\n        result = new Kata().add(s);\n    }\n\n    @Then(\"the result is {int}\")\n    public void c(int n) {\n        throw new PendingException();\n    }\n";
+        let service = service(
+            vec![pending_steps(), production()],
+            Some(FakeLlm::replying(still_pending)),
+        );
+        let outcome = service.fill_pending_steps(&mut NullPrompter, "REQ-001", &[]);
+        assert!(outcome.is_err(), "{outcome:?}");
+        assert!(
+            service
+                .store
+                .read("src/test/java/steps/Steps.java")
+                .unwrap()
+                .is_none(),
+            "nothing is written for a refused reply"
+        );
+    }
+
+    #[test]
+    fn nothing_pending_means_nothing_to_fill() {
+        let service = service(
+            vec![covered_steps_source(), production()],
+            Some(FakeLlm::replying(FILLED_STEPS)),
+        );
+        let outcome = service
+            .fill_pending_steps(&mut NullPrompter, "REQ-001", &[])
+            .unwrap();
+        assert!(outcome.is_none());
+        assert!(
+            service
+                .llm
+                .as_ref()
+                .unwrap()
+                .chat()
+                .prompts
+                .borrow()
+                .is_empty()
+        );
     }
 
     #[test]

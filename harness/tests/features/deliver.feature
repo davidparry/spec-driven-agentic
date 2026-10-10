@@ -295,6 +295,90 @@ Feature: Deliver mode
     And the working tree file "requirements/requirements.json" contains "productionFiles"
     And the working tree file "requirements/requirements.json" contains "src/main/java/Kata.java"
 
+  # The step-definition file is the one file an implementation attempt
+  # never gets back whole - it is shared by every requirement and is the
+  # largest file in a project that has been at this for a while. Its
+  # pending bodies are filled as a fragment of their own, after the
+  # production code they should call has been written.
+  Scenario: A delivery fills the pending step bodies after writing the production code
+    Given a Java project marker
+    And a working spec with the pending requirements "REQ-001"
+    And a model is resolved
+    And the model will reply:
+      """
+      [{"path": "src/main/java/Kata.java", "content": "public class Kata { int add(String input) { return 0; } }"}]
+      """
+    And the model will also fill in the generated unit test
+    And the model will fill the step bodies with:
+      """
+          @Given("a")
+          public void givenA() {
+              kata = new Kata();
+          }
+
+          @When("b")
+          public void whenB() {
+              result = kata.add("1,2");
+          }
+
+          @Then("{int}")
+          public void thenTheResultIs(int expected) {
+              org.junit.jupiter.api.Assertions.assertEquals(expected, result);
+          }
+      """
+    And the delivery skips the refactor
+    And the delivery budget is 3 attempts
+    And the test runs will report:
+      """
+      1 tests and 1 failures detailed "Req001Test: TODO: assert"
+      1 tests and 0 failures
+      """
+    When the delivery runs for "REQ-001"
+    Then the delivery completes
+    And the developer was told a finding containing "Filled 3 pending step bodies in src/test/java/GeneratedSteps.java (llm)."
+    And the working tree file "src/test/java/GeneratedSteps.java" contains "result = kata.add("
+    And the working tree file "src/test/java/GeneratedSteps.java" does not contain "PendingException();"
+
+  # A reply the fill pass cannot use leaves the stubs as they were and
+  # says so; the attempt is not lost over it.
+  Scenario: A step-filling reply that keeps a placeholder is refused and the stubs stand
+    Given a Java project marker
+    And a working spec with the pending requirements "REQ-001"
+    And a model is resolved
+    And the model will reply:
+      """
+      [{"path": "src/main/java/Kata.java", "content": "public class Kata { int add(String input) { return 0; } }"}]
+      """
+    And the model will also fill in the generated unit test
+    And the model will fill the step bodies with:
+      """
+          @Given("a")
+          public void givenA() {
+              throw new PendingException();
+          }
+
+          @When("b")
+          public void whenB() {
+              result = new Kata().add("1,2");
+          }
+
+          @Then("{int}")
+          public void thenTheResultIs(int expected) {
+              org.junit.jupiter.api.Assertions.assertEquals(expected, result);
+          }
+      """
+    And the delivery skips the refactor
+    And the delivery budget is 1 attempts
+    And the test runs will report:
+      """
+      1 tests and 1 failures detailed "Req001Test: TODO: assert"
+      1 tests and 1 failures detailed "Given a: FAILED"
+      """
+    When the delivery runs for "REQ-001"
+    Then the delivery is not completed
+    And the developer was told a finding containing "The step bodies for REQ-001 were not written"
+    And the working tree file "src/test/java/GeneratedSteps.java" does not contain "result = new Kata().add("
+
   # A run nobody watched can still be read for what the decision plane
   # made of each gated stage. The judgments ride in the report per stage,
   # and the run says them as it goes, the same way `spec refine` does.

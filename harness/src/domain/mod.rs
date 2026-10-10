@@ -66,6 +66,7 @@ pub mod requirement_id;
 pub mod scaffold;
 pub mod scenario;
 pub mod spec_validator;
+pub mod step_fill;
 pub mod steps;
 pub mod tdd;
 pub mod tool_profile;

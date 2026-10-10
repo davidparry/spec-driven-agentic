@@ -82,7 +82,8 @@ the work back rather than walking you through wording it — that is what
 1. scenario            Gherkin scenario tagged @REQ-...
 2. steps               step definitions for every undefined step
 3. test → RED          the scenario fails honestly
-4. implement           the model attempts, up to --attempts times
+4. implement           the model attempts, up to --attempts times:
+                       production code, then the pending step bodies
 5. test → GREEN
 6. refactor            optional; only on GREEN, and only with a model
 7. mark implemented    status flipped, validated, committed, read back
@@ -109,6 +110,18 @@ Running the tests - working ...
 A step that loops on its own is called once and its loop is trusted:
 drafting's validate-and-reword rounds, `spec implement`'s attempts,
 and `spec refactor`'s rounds are not wrapped in a second loop here.
+
+Each implementation attempt is two model calls, the same two
+[`spec implement`](implement.md#the-step-bodies-are-a-second-pass)
+makes: the production code and the unit test as whole files, then the
+step definitions this requirement's scenarios still run through as
+placeholders, as a fragment of their own. The second is what turns a
+RED bar that reads only `Given …: FAILED` green: the step-definition
+file is shared by every requirement and is never asked for whole, so
+without it an attempt could write perfect production code and leave
+the bar exactly where it was - measured three runs in a row on this
+repository. A fill reply the pass cannot use is said and the stubs
+stand; the attempt is not lost over it.
 
 ## What the decision model is asked along the way
 

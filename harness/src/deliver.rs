@@ -846,6 +846,7 @@ impl Deliver {
             prompter.tell(&format!("Attempt {attempt} of {budget}."));
             let before = self.source_snapshot(language)?;
             self.attempt_implementation(prompter, &implement, tdd, req_id)?;
+            self.fill_steps(prompter, &implement, tdd, req_id);
             let judged = match run_and_narrate(tdd, runner, prompter)? {
                 Some(report) => report,
                 None => {
@@ -1000,6 +1001,42 @@ impl Deliver {
             .iter()
             .any(|r| r.id == req_id && r.status == "implemented");
         Ok(verified(!implemented, || unverified_mark(req_id)).unwrap_or(Outcome::Implemented))
+    }
+
+    /// The second half of an attempt: the step bodies this requirement's
+    /// scenarios still run through as placeholders, written against the
+    /// production code the first half just put down.
+    ///
+    /// Narrated, never fatal. A refused reply leaves the stubs as they
+    /// were and the bar reads them as it did; the next attempt, or a
+    /// human, can still fill them in. Three measured runs on this crate
+    /// ended RED on exactly these bodies with the production code
+    /// written and every attempt spent, which is what this pass is for.
+    fn fill_steps(
+        &self,
+        prompter: &mut dyn Prompter,
+        implement: &ImplementService<
+            crate::wiring::ProjectFeatures,
+            crate::wiring::ProjectTree,
+            FsWorkTree,
+            FsSpecRepository,
+            DynLlm,
+        >,
+        tdd: &TddService<FsStateStore>,
+        req_id: &str,
+    ) {
+        let failures = tdd
+            .implementation_brief(req_id)
+            .map(|brief| brief.failures)
+            .unwrap_or_default();
+        match implement.fill_pending_steps(prompter, req_id, &failures) {
+            Ok(Some(report)) => prompter.tell(&format!(
+                "Filled {} pending step bodies in {} ({}).",
+                report.filled, report.target, report.source
+            )),
+            Ok(None) => {}
+            Err(error) => prompter.warn(&error.0),
+        }
     }
 
     /// Ask the model to make the failing tests pass and commit whatever

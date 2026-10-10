@@ -1008,6 +1008,17 @@ fn execute(
                 println!("{RED}{warning}{RESET}");
             }
             narrate_review(&report.judgments);
+            // The step bodies the scenarios still run through as
+            // placeholders, written against the code just put down -
+            // the same second pass a delivery makes.
+            match service.fill_pending_steps(prompter.as_mut(), req_id, &brief.failures) {
+                Ok(Some(filled)) => println!(
+                    "  wrote: {} ({} pending step bodies, {})",
+                    filled.target, filled.filled, filled.source
+                ),
+                Ok(None) => {}
+                Err(e) => println!("{RED}{}{RESET}", e.0),
+            }
             // The outcome stays empty until the next test run attaches
             // what these changes actually caused.
             tdd.record_attempt(ImplementAttempt {

@@ -150,6 +150,8 @@ struct SpecWorld {
     /// What the model answers the unit-test polish prompt with, when a
     /// scenario wants that reply to differ from every other one.
     llm_unit_test_polish: Option<String>,
+    /// The model's answer to the step-filling prompt alone.
+    llm_step_fill: Option<String>,
     llm_failure: Option<String>,
     greenfield_runs: Vec<Result<TestRunSummary, RunnerError>>,
     greenfield_factory_error: Option<String>,
@@ -415,6 +417,7 @@ impl SpecWorld {
             false => ScriptedLlm::new(reply),
         };
         llm.polishing_unit_tests_into(self.llm_unit_test_polish.clone())
+            .filling_steps_with(self.llm_step_fill.clone())
     }
 
     fn scenario_doc(&self, name: &str) -> &spec_harness::domain::feature::ScenarioDoc {
@@ -2225,6 +2228,9 @@ struct ScriptedLlm {
     /// The reply to the unit-test polish prompt alone, when a scenario
     /// scripts one. Every other prompt still gets `reply`.
     unit_test_polish: Option<String>,
+    /// The reply to the step-filling prompt alone, when a scenario
+    /// scripts one.
+    step_fill: Option<String>,
 }
 
 impl ScriptedLlm {
@@ -2233,6 +2239,7 @@ impl ScriptedLlm {
             reply,
             filling_from: None,
             unit_test_polish: None,
+            step_fill: None,
         }
     }
 
@@ -2241,12 +2248,20 @@ impl ScriptedLlm {
             reply,
             filling_from: Some(root),
             unit_test_polish: None,
+            step_fill: None,
         }
     }
 
     fn polishing_unit_tests_into(self, polish: Option<String>) -> Self {
         Self {
             unit_test_polish: polish,
+            ..self
+        }
+    }
+
+    fn filling_steps_with(self, fill: Option<String>) -> Self {
+        Self {
+            step_fill: fill,
             ..self
         }
     }
@@ -2263,6 +2278,14 @@ fn asks_to_polish_a_unit_test(messages: &[ChatMessage]) -> bool {
         && messages.iter().any(|m| m.content.contains("TODO: assert"))
 }
 
+/// The step-filling prompt names itself by what it shows: the pending
+/// definitions to fill in, with the production code beside them.
+fn asks_to_fill_step_bodies(messages: &[ChatMessage]) -> bool {
+    messages
+        .iter()
+        .any(|m| m.content.contains("pending definition(s) to fill in"))
+}
+
 impl LlmConversation for ScriptedLlm {
     fn chat(
         &self,
@@ -2274,6 +2297,11 @@ impl LlmConversation for ScriptedLlm {
             && asks_to_polish_a_unit_test(messages)
         {
             return Ok(text_turn(polish.clone()));
+        }
+        if let Some(fill) = &self.step_fill
+            && asks_to_fill_step_bodies(messages)
+        {
+            return Ok(text_turn(fill.clone()));
         }
         Ok(text_turn(match &self.filling_from {
             Some(root) => with_placeholders_filled(&self.reply, root),
@@ -2486,6 +2514,13 @@ fn the_model_will_fill_the_unit_test(world: &mut SpecWorld) {
 #[given("the model will polish the unit test into:")]
 fn the_model_will_polish_the_unit_test_into(world: &mut SpecWorld, step: &Step) {
     world.llm_unit_test_polish = Some(docstring(step));
+}
+
+/// The model's answer to the step-filling prompt, scripted apart from
+/// its answer to everything else.
+#[given("the model will fill the step bodies with:")]
+fn the_model_will_fill_the_step_bodies_with(world: &mut SpecWorld, step: &Step) {
+    world.llm_step_fill = Some(docstring(step));
 }
 
 #[when("missing steps are reported")]

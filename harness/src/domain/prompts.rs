@@ -12,12 +12,13 @@ use serde::Serialize;
 const PROMPTS_TOML: &str = include_str!("../../prompts/prompts.toml");
 
 /// The sections the catalog must hold, one per LLM call.
-pub const SECTIONS: [&str; 12] = [
+pub const SECTIONS: [&str; 13] = [
     "proposal",
     "rewording",
     "scenario",
     "polish",
     "polish_fragment",
+    "fill_steps",
     "implementation",
     "refactor",
     "advice",

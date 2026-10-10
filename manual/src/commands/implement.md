@@ -153,6 +153,27 @@ decides whether an attempt is any good, and it never gets to run when
 the reply deletes the code the tests were going to call. The refusal
 is per file, so the rest of an otherwise fine attempt is still written.
 
+### The step bodies are a second pass
+
+One file is never asked for whole: the step-definition file. It is
+shared by every requirement and is the largest file in a project that
+has been at this for a while, and a model asked to return it complete
+returns the production file instead - measured three runs in a row on
+this repository's own 5,600-line `tests/cucumber.rs`, with the bar RED
+on three `todo!()` bodies at the end of every one.
+
+So after the reply above is written, the step definitions this
+requirement's scenarios run through that still carry a generated
+placeholder (`todo!`, `PendingException`, `'pending'`) go to the model
+on their own: just those definitions, the head of their file (imports,
+the world type, fixtures) for reading, and the production code they
+should call. Exactly those definitions come back and are spliced in
+where they were; nothing else in the file is retyped. The reply is
+refused, and the stubs left as they were, if it keeps a placeholder,
+drops a step expression, or brings a class or struct of its own.
+Printed as `wrote: <file> (N pending step bodies, llm)`; `spec
+deliver` does the same inside every attempt.
+
 ## Where the work lands
 
 The production file is resolved in this order, and the first answer
