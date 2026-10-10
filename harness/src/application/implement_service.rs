@@ -496,15 +496,6 @@ where
         // declared file that does not exist yet is the one an attempt is
         // there to create, so it has to survive the reply filter below.
         let allowed = allowed_targets(&production, &requirement.production_files);
-        let prompt = implementation_prompt(
-            self.language,
-            requirement,
-            failures,
-            history,
-            states,
-            &files,
-            &allowed,
-        );
         // The assertions this attempt is expected to write. The prompt
         // has always asked for them; nothing checked, and six measured
         // attempts left every placeholder standing while the failure
@@ -515,6 +506,16 @@ where
         // requirement's stub would be a complaint no reply to this
         // prompt could answer.
         let unit_test = unit_test_path(&sources, self.language, req_id, &self.layout);
+        let prompt = implementation_prompt(
+            self.language,
+            requirement,
+            failures,
+            history,
+            states,
+            &files,
+            &allowed,
+            &unit_test,
+        );
         let criteria = requirement.acceptance_criteria.as_slice();
         tracing::debug!(requirement = %req_id, "calling LLM for an implementation attempt");
         // Two gates on one reply, nested so each keeps its own narrow

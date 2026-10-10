@@ -471,11 +471,15 @@ struct AttemptContext {
 const PROMPT_HISTORY_ATTEMPTS: usize = 3;
 
 /// How much source text one implementation prompt may carry, in bytes.
-/// A kata fits whole; a project of any size does not, and a model handed
-/// more than its context window answers with an error instead of a
-/// patch. Roughly 30k tokens, which leaves room for the requirement,
-/// the failures, the attempt history, and the reply.
-const PROMPT_SOURCE_BUDGET: usize = 120_000;
+/// A kata fits whole; a project of any size does not, and every byte
+/// past the change itself is prefill a local model pays for twice -
+/// once waiting, once generating. Roughly 10k tokens, which leaves
+/// room for the requirement, the failures, the attempt history, and
+/// the reply. The files the attempt must write (its targets, the files
+/// the failures name, and the unit test carrying the assertions) are
+/// seeds and are always shown whole; everything past the budget is
+/// named in the map instead.
+const PROMPT_SOURCE_BUDGET: usize = 40_000;
 const PROMPT_FAILURE_BRIEF_CHARS: usize = 300;
 
 /// Project files the failures point at, in the order they appear in
@@ -585,6 +589,7 @@ pub fn implementation_prompt(
     states: &[StateEntry],
     files: &[(String, String)],
     targets: &[String],
+    unit_test: &str,
 ) -> RenderedPrompt {
     // Every rule in the template reads correctly about one file, so the
     // first target stays the one they all name and the rest arrive as a
@@ -620,9 +625,16 @@ pub fn implementation_prompt(
     // The attempt has to write the production file and whatever the
     // failures point at; everything else is only worth sending insofar
     // as it explains those. Walking out from them keeps the prompt
-    // about this change instead of about the whole project.
+    // about this change instead of about the whole project. The unit
+    // test is seeded too: the assertions live there, and under a tight
+    // budget the walk could otherwise map it away just when the attempt
+    // has to replace its placeholders. A seed the project does not
+    // have is ignored by the walk, so a missing test costs nothing.
     let mut seeds: Vec<&str> = targets.iter().map(String::as_str).collect();
     seeds.extend(implicated.iter().copied());
+    if !unit_test.is_empty() {
+        seeds.push(unit_test);
+    }
     let selected = neighborhood::select(language, files, &seeds, PROMPT_SOURCE_BUDGET);
     let files_context: Vec<FileContext> = selected
         .included
@@ -2686,6 +2698,7 @@ mod tests {
                 "class Req001Test {}".into(),
             )],
             &["src/main/java/Kata.java".to_string()],
+            "src/test/java/Req001Test.java",
         );
         assert!(prompt.user.contains("REQ-001: Empty string returns zero"));
         assert!(prompt.user.contains("Req001Test.case: TODO: assert"));
@@ -2736,6 +2749,7 @@ mod tests {
                 "src/main/java/Port.java".to_string(),
                 "src/main/java/Adapter.java".to_string(),
             ],
+            "",
         );
         assert!(
             prompt
@@ -2777,6 +2791,7 @@ mod tests {
                 ),
             ],
             &["src/main/java/Kata.java".to_string()],
+            "src/test/java/Req001Test.java",
         );
         assert!(
             prompt
@@ -2812,6 +2827,7 @@ mod tests {
                 "class Req001Test {}".into(),
             )],
             &["src/main/java/Kata.java".to_string()],
+            "src/test/java/Req001Test.java",
         );
         assert!(
             !prompt
@@ -2852,6 +2868,7 @@ io.cucumber.junit.platform.engine.UndefinedStepException: The step 'the result i
                 ),
             ],
             &["src/main/java/StringCalculator.java".to_string()],
+            "src/test/java/Req001Test.java",
         );
         assert!(
             prompt
@@ -2887,6 +2904,7 @@ io.cucumber.junit.platform.engine.UndefinedStepException: The step 'the result i
                 "public class GeneratedSteps {}".into(),
             )],
             &["src/main/java/Kata.java".to_string()],
+            "src/test/java/Req001Test.java",
         );
         assert!(
             prompt
@@ -2921,6 +2939,7 @@ io.cucumber.junit.platform.engine.UndefinedStepException: The step 'the result i
             &[],
             &files,
             &["src/lib.rs".to_string()],
+            "tests/req_001_test.rs",
         );
         assert!(
             prompt.user.contains("--- src/lib.rs ---"),
@@ -2942,6 +2961,53 @@ io.cucumber.junit.platform.engine.UndefinedStepException: The step 'the result i
             prompt.user.len() < PROMPT_SOURCE_BUDGET * 2,
             "prompt was {} bytes",
             prompt.user.len()
+        );
+    }
+
+    #[test]
+    fn the_unit_test_is_shown_whole_even_when_bulk_crowds_the_budget() {
+        // The budget no longer fits a project, so the walk maps
+        // everything past it - except the seeds. The assertions live in
+        // the unit test, and an attempt that cannot see its placeholders
+        // cannot replace them.
+        let bulk = "// filler\n".repeat(4_000); // ~40 KB each
+        let files = vec![
+            (
+                "src/noise_a.rs".into(),
+                format!("pub struct NoiseA;\n{bulk}"),
+            ),
+            (
+                "src/noise_b.rs".into(),
+                format!("pub struct NoiseB;\n{bulk}"),
+            ),
+            ("src/report.rs".into(), "pub fn report() {}".into()),
+            (
+                "tests/harness_019_test.rs".into(),
+                "#[test] fn t() { unimplemented!(\"TODO: assert - covers 3\") }".to_string(),
+            ),
+        ];
+        let prompt = implementation_prompt(
+            Language::Rust,
+            &requirement(),
+            &["the new tests failed".into()],
+            &[],
+            &[],
+            &files,
+            &["src/report.rs".to_string()],
+            "tests/harness_019_test.rs",
+        );
+        assert!(
+            prompt.user.contains("--- tests/harness_019_test.rs ---")
+                && prompt.user.contains("TODO: assert - covers 3"),
+            "the unit test is shown whole, not mapped"
+        );
+        assert!(
+            prompt.user.contains("--- src/report.rs ---"),
+            "the production target is shown too"
+        );
+        assert!(
+            !prompt.user.contains("--- src/noise_a.rs ---"),
+            "bulk past the budget is still only mapped"
         );
     }
 
@@ -2972,6 +3038,7 @@ io.cucumber.junit.platform.engine.UndefinedStepException: The step 'the result i
             &[],
             &[],
             &["src/main/java/Kata.java".to_string()],
+            "src/test/java/Req001Test.java",
         );
         assert!(
             prompt
@@ -3035,6 +3102,7 @@ io.cucumber.junit.platform.engine.UndefinedStepException: The step 'the result i
             &[],
             &[],
             &["src/main/java/Kata.java".to_string()],
+            "src/test/java/Req001Test.java",
         );
         assert!(
             prompt
@@ -3081,6 +3149,7 @@ io.cucumber.junit.platform.engine.UndefinedStepException: The step 'the result i
             &states,
             &[],
             &["src/main/java/Kata.java".to_string()],
+            "src/test/java/Req001Test.java",
         );
         assert!(
             prompt
