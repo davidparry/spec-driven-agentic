@@ -227,6 +227,20 @@
         "Given a git repository on \"main\" and no one left to answer, when the branch gate runs, then 0 branches are created"
       ],
       "featureFile": "tests/features/branch_gate.feature"
+    },
+    {
+      "id": "HARNESS-019",
+      "title": "Report acceptance criterion status for a requirement",
+      "status": "pending",
+      "story": "As a developer, I want each acceptance criterion of a requirement reported as proven or unproven so that I know exactly which criteria have been satisfied and which remain unverified.",
+      "acceptanceCriteria": [
+        "Given a requirement with criteria C1, C2, and C3 where C1 and C3 have passing tests, when the status report is generated for that requirement, then C1 is reported as \"proven\", C2 is reported as \"unproven\", and C3 is reported as \"proven\"",
+        "Given a requirement with criteria C1 and C2 where both have passing tests, when the status report is generated for that requirement, then C1 is reported as \"proven\" and C2 is reported as \"proven\"",
+        "Given a requirement with criteria C1 and C2 where neither has a passing test, when the status report is generated for that requirement, then C1 is reported as \"unproven\" and C2 is reported as \"unproven\"",
+        "Given a requirement with zero acceptance criteria, when the status report is generated for that requirement, then the report contains an empty list of criterion statuses",
+        "Given a requirement identifier that does not exist in the catalog, when the status report is generated for that requirement, then an error is raised stating the requirement was not found"
+      ],
+      "featureFile": "tests/features/report-acceptance-criterion-status-for-a-requirement.feature"
     }
   ]
 }

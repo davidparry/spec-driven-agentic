@@ -593,21 +593,23 @@ Feature: Deliver mode
     Then the delivery is not completed
     And the delivery leaves "REQ-001" outstanding because "runtime disappeared mid-loop"
 
-  Scenario: A model outage spends the attempt and hands the work back
+  # The model never answered - a timeout on a prompt this size,
+  # usually. The loop stops with the requirement still pending instead
+  # of spending the remaining attempts waiting out the same timeout.
+  Scenario: A model outage stops the loop and hands the work back
     Given a Java project marker
     And a working spec with the pending requirements "REQ-001"
     And the model is resolved but every call fails with "the endpoint refused the connection"
     And the delivery skips the refactor
-    And the delivery budget is 1 attempt
+    And the delivery budget is 3 attempts
     And the test runs will report:
       """
-      1 tests and 1 failures detailed "Req001Test: TODO: assert"
       1 tests and 1 failures detailed "Req001Test: TODO: assert"
       """
     When the delivery runs for "REQ-001"
     Then the delivery is not completed
     And the developer was told a finding containing "Implement by hand instead."
-    And the delivery leaves "REQ-001" outstanding because "still RED after 1 attempt(s)"
+    And the delivery leaves "REQ-001" outstanding because "never answered"
 
   Scenario: A build that cannot run at all is an error, not an outcome
     Given a Java project marker

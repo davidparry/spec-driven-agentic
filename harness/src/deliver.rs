@@ -851,7 +851,17 @@ impl Deliver {
         for attempt in 1..=budget {
             prompter.tell(&format!("Attempt {attempt} of {budget}."));
             let before = self.source_snapshot(language)?;
-            self.attempt_implementation(prompter, &implement, tdd, req_id)?;
+            if self.attempt_implementation(prompter, &implement, tdd, req_id)? {
+                return Ok(Bar::stopped(
+                    format!(
+                        "The model never answered the implementation prompt, so {req_id} \
+                         was not attempted. Implement by hand, then run spec deliver \
+                         {req_id} again - or raise timeout_seconds under [llm] if the \
+                         model was still generating when the wait ran out."
+                    ),
+                    Some(report.phase.clone()),
+                ));
+            }
             self.fill_steps(prompter, &implement, tdd, req_id);
             let judged = match run_and_narrate(tdd, runner, prompter)? {
                 Some(report) => report,
@@ -1046,8 +1056,13 @@ impl Deliver {
     }
 
     /// Ask the model to make the failing tests pass and commit whatever
-    /// it wrote. A model failure is narrated, not fatal - the next
-    /// round, or a human, can still implement.
+    /// it wrote. A refused reply is narrated, not fatal - the next
+    /// round, or a human, can still implement. But when the model never
+    /// answered at all the loop stops: nothing was staged, and the same
+    /// prompt would only wait out another timeout.
+    ///
+    /// `Ok(true)` is that stop; `Ok(false)` ran the attempt to whatever
+    /// verdict the reply earned.
     fn attempt_implementation(
         &self,
         prompter: &mut dyn Prompter,
@@ -1060,7 +1075,7 @@ impl Deliver {
         >,
         tdd: &TddService<FsStateStore>,
         req_id: &str,
-    ) -> Result<(), String> {
+    ) -> Result<bool, String> {
         let brief = tdd.implementation_brief(req_id).map_err(tdd_message)?;
         // Nobody is at the keyboard to answer --into. Evidence still
         // decides wherever it can; only when it names nothing does an
@@ -1074,7 +1089,7 @@ impl Deliver {
             }
             Err(error) => {
                 prompter.warn(&format!("{} Implement by hand instead.", error.0));
-                return Ok(());
+                return Ok(false);
             }
         };
         let destinations = implement.attempt_destinations(req_id).unwrap_or_default();
@@ -1130,10 +1145,19 @@ impl Deliver {
                     "drive_to_green",
                     implement.take_judgments(),
                 );
+                // The model never answered - a timeout on a prompt this
+                // size, usually. The next round would ask the same prompt
+                // and wait out another one, so the loop stops here with
+                // the requirement still pending instead of spending the
+                // remaining attempts proving that.
+                if implement.take_unanswered().is_some() {
+                    prompter.warn(&format!("{} Implement by hand instead.", error.0));
+                    return Ok(true);
+                }
                 prompter.warn(&format!("{} Implement by hand instead.", error.0));
             }
         }
-        Ok(())
+        Ok(false)
     }
 
     /// Every source file an implement attempt could write, read before
@@ -2297,24 +2321,28 @@ mod tests {
         assert!(stopped_because(&outcome).contains("runtime disappeared mid-loop"));
     }
 
-    /// A model failure is narrated and the attempt is spent, not turned
-    /// into an error: a human can still implement by hand.
+    /// The model never answered - a timeout on a prompt this size,
+    /// usually. The failure is narrated and the loop stops with the
+    /// requirement still pending: nothing was staged, and the same
+    /// prompt would only wait out another timeout.
     #[test]
-    fn a_model_that_fails_is_narrated_and_the_budget_is_spent() {
+    fn a_model_that_never_answers_stops_the_loop_instead_of_spending_the_budget() {
         let dir = kata(one_criterion());
         let mut prompter = Script::default();
         let outcome = deliver_one(
             dir.path(),
             &mut prompter,
-            vec![red(), red()],
+            vec![red()],
             model(Err("the endpoint refused the connection")),
             DeliverOptions {
-                attempts: 1,
+                attempts: 3,
                 ..no_refactor()
             },
         );
         assert!(prompter.said("Implement by hand instead."));
-        assert!(stopped_because(&outcome).contains("still RED after 1 attempt(s)"));
+        let reason = stopped_because(&outcome);
+        assert!(reason.contains("never answered"), "{reason}");
+        assert!(reason.contains("spec deliver REQ-001 again"), "{reason}");
     }
 
     /// A build that fails outright is not a red bar and not a missing

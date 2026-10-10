@@ -5640,7 +5640,9 @@ fn an_error_is_raised_with_message(_world: &mut SpecWorld, arg0: String) {
 
 #[given(expr = "a requirement with acceptance criteria {string} and {string}")]
 fn a_requirement_with_acceptance_criteria_and(_world: &mut SpecWorld, arg0: String, arg1: String) {
-    todo!("implement step: a requirement with acceptance criteria \"the sum is 3\" and \"the difference is 1\"");
+    todo!(
+        "implement step: a requirement with acceptance criteria \"the sum is 3\" and \"the difference is 1\""
+    );
 }
 
 #[when(expr = "the report is generated")]
@@ -5656,15 +5658,21 @@ fn the_output_lists_with_verdict_and_with_verdict(
     arg2: String,
     arg3: String,
 ) {
-    todo!("implement step: the output lists \"the sum is 3\" with verdict \"proven\" and \"the difference is 1\" with verdict \"unproven\"");
+    todo!(
+        "implement step: the output lists \"the sum is 3\" with verdict \"proven\" and \"the difference is 1\" with verdict \"unproven\""
+    );
 }
 
-#[given(expr = "a requirement whose only acceptance criterion is {string} and that criterion has a passing test")]
+#[given(
+    expr = "a requirement whose only acceptance criterion is {string} and that criterion has a passing test"
+)]
 fn a_requirement_whose_only_acceptance_criterion_is_and_that_criterion_has_a_passing_test(
     _world: &mut SpecWorld,
     arg0: String,
 ) {
-    todo!("implement step: a requirement whose only acceptance criterion is \"the sum is 3\" and that criterion has a passing test");
+    todo!(
+        "implement step: a requirement whose only acceptance criterion is \"the sum is 3\" and that criterion has a passing test"
+    );
 }
 
 #[then(expr = "the output shows exactly one entry with verdict {string}")]
@@ -5672,12 +5680,16 @@ fn the_output_shows_exactly_one_entry_with_verdict(_world: &mut SpecWorld, arg0:
     todo!("implement step: the output shows exactly one entry with verdict \"proven\"");
 }
 
-#[given(expr = "a requirement whose only acceptance criterion is {string} and that criterion has a failing test")]
+#[given(
+    expr = "a requirement whose only acceptance criterion is {string} and that criterion has a failing test"
+)]
 fn a_requirement_whose_only_acceptance_criterion_is_and_that_criterion_has_a_failing_test(
     _world: &mut SpecWorld,
     arg0: String,
 ) {
-    todo!("implement step: a requirement whose only acceptance criterion is \"the sum is 3\" and that criterion has a failing test");
+    todo!(
+        "implement step: a requirement whose only acceptance criterion is \"the sum is 3\" and that criterion has a failing test"
+    );
 }
 
 #[given(expr = "a requirement with zero acceptance criteria")]
@@ -5712,7 +5724,9 @@ fn a_requirement_with_acceptance_criteria_and_and(
     arg1: String,
     arg2: String,
 ) {
-    todo!("implement step: a requirement with acceptance criteria \"the sum is 3\" and \"the difference is 1\" and \"the product is 6\"");
+    todo!(
+        "implement step: a requirement with acceptance criteria \"the sum is 3\" and \"the difference is 1\" and \"the product is 6\""
+    );
 }
 
 #[when(expr = "the report is generated and only {string} passes")]
@@ -5720,7 +5734,9 @@ fn the_report_is_generated_and_only_passes(_world: &mut SpecWorld, arg0: String)
     todo!("implement step: the report is generated and only \"the difference is 1\" passes");
 }
 
-#[then(expr = "the output lists {string} with verdict {string}, {string} with verdict {string}, and {string} with verdict {string}")]
+#[then(
+    expr = "the output lists {string} with verdict {string}, {string} with verdict {string}, and {string} with verdict {string}"
+)]
 fn the_output_lists_with_verdict_with_verdict_and_with_verdict(
     _world: &mut SpecWorld,
     arg0: String,
@@ -5730,5 +5746,57 @@ fn the_output_lists_with_verdict_with_verdict_and_with_verdict(
     arg4: String,
     arg5: String,
 ) {
-    todo!("implement step: the output lists \"the sum is 3\" with verdict \"unproven\", \"the difference is 1\" with verdict \"proven\", and \"the product is 6\" with verdict \"unproven\"");
+    todo!(
+        "implement step: the output lists \"the sum is 3\" with verdict \"unproven\", \"the difference is 1\" with verdict \"proven\", and \"the product is 6\" with verdict \"unproven\""
+    );
+}
+
+#[given(expr = "a requirement with criteria C1, C2, and C3 where C1 and C3 have passing tests")]
+fn a_requirement_with_criteria_c1_c2_and_c3_where_c1_and_c3_have_passing_tests(_world: &mut SpecWorld) {
+    todo!("implement step: a requirement with criteria C1, C2, and C3 where C1 and C3 have passing tests");
+}
+
+#[when(expr = "the status report is generated for that requirement")]
+fn the_status_report_is_generated_for_that_requirement(_world: &mut SpecWorld) {
+    todo!("implement step: the status report is generated for that requirement");
+}
+
+#[then(expr = "C1 is reported as {string}, C2 is reported as {string}, and C3 is reported as {string}")]
+fn c1_is_reported_as_c2_is_reported_as_and_c3_is_reported_as(
+    _world: &mut SpecWorld,
+    arg0: String,
+    arg1: String,
+    arg2: String,
+) {
+    todo!("implement step: C1 is reported as \"proven\", C2 is reported as \"unproven\", and C3 is reported as \"proven\"");
+}
+
+#[given(expr = "a requirement with criteria C1 and C2 where both have passing tests")]
+fn a_requirement_with_criteria_c1_and_c2_where_both_have_passing_tests(_world: &mut SpecWorld) {
+    todo!("implement step: a requirement with criteria C1 and C2 where both have passing tests");
+}
+
+#[then(expr = "C1 is reported as {string} and C2 is reported as {string}")]
+fn c1_is_reported_as_and_c2_is_reported_as(_world: &mut SpecWorld, arg0: String, arg1: String) {
+    todo!("implement step: C1 is reported as \"proven\" and C2 is reported as \"proven\"");
+}
+
+#[given(expr = "a requirement with criteria C1 and C2 where neither has a passing test")]
+fn a_requirement_with_criteria_c1_and_c2_where_neither_has_a_passing_test(_world: &mut SpecWorld) {
+    todo!("implement step: a requirement with criteria C1 and C2 where neither has a passing test");
+}
+
+#[then(expr = "the report contains an empty list of criterion statuses")]
+fn the_report_contains_an_empty_list_of_criterion_statuses(_world: &mut SpecWorld) {
+    todo!("implement step: the report contains an empty list of criterion statuses");
+}
+
+#[given(expr = "a requirement identifier that does not exist in the catalog")]
+fn a_requirement_identifier_that_does_not_exist_in_the_catalog(_world: &mut SpecWorld) {
+    todo!("implement step: a requirement identifier that does not exist in the catalog");
+}
+
+#[then(expr = "an error is raised stating the requirement was not found")]
+fn an_error_is_raised_stating_the_requirement_was_not_found(_world: &mut SpecWorld) {
+    todo!("implement step: an error is raised stating the requirement was not found");
 }

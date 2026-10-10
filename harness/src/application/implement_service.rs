@@ -117,6 +117,12 @@ where
     /// report, kept so a caller can still read what the plane said
     /// about them. A report carries its own.
     judgments: std::cell::RefCell<Vec<Judgment>>,
+    /// The transport failure from an attempt the model never answered -
+    /// a timeout on a prompt this size, usually. Nothing was staged and
+    /// nothing was refused, so asking the same prompt again only spends
+    /// another timeout. Kept so a caller can stop its loop instead of
+    /// burning the remaining attempts proving that.
+    unanswered: std::cell::RefCell<Option<String>>,
 }
 
 /// One definition from a fill reply, when it keeps `pattern` and the
@@ -171,6 +177,7 @@ where
             judge: None,
             policies: Policies::default(),
             judgments: std::cell::RefCell::new(Vec::new()),
+            unanswered: std::cell::RefCell::new(None),
         }
     }
 
@@ -179,6 +186,13 @@ where
     /// instead, so the two never double up.
     pub fn take_judgments(&self) -> Vec<Judgment> {
         std::mem::take(&mut *self.judgments.borrow_mut())
+    }
+
+    /// The transport failure of an attempt the model never answered,
+    /// handed over and cleared. `None` when the last attempt either
+    /// produced a reply or never ran.
+    pub fn take_unanswered(&self) -> Option<String> {
+        self.unanswered.borrow_mut().take()
     }
 
     /// The decision model this service puts its gates' questions to, and
@@ -569,15 +583,20 @@ where
                 // A refused attempt has no report to carry its
                 // judgments, so they are kept for the caller to read.
                 self.judgments.borrow_mut().append(&mut judgments);
-                return Err(ServiceError(match error {
-                    LlmReplyError::Call(e) => LlmReplyError::call_failed(&e),
+                let reason = match error {
+                    LlmReplyError::Call(e) => {
+                        let reason = LlmReplyError::call_failed(&e);
+                        self.unanswered.borrow_mut().replace(reason.clone());
+                        reason
+                    }
                     // The reason names the file still holding a stub,
                     // which is the one thing a developer rerunning this
                     // by hand needs.
                     LlmReplyError::Invalid { reason } => {
                         format!("The model's reply was refused: {reason}")
                     }
-                }));
+                };
+                return Err(ServiceError(reason));
             }
         };
         let summary = format!("implementation attempt for {req_id} (llm)");
@@ -1810,6 +1829,33 @@ mod tests {
             .generate(&mut NullPrompter, "REQ-001", &[], &[], &[], None)
             .unwrap_err();
         assert_eq!(error.0, "the model call failed - model crashed");
+    }
+
+    /// A transport failure is flagged for the caller, a refused reply is
+    /// not: the loop stops on the first and retries the second.
+    #[test]
+    fn an_unanswered_attempt_is_flagged_while_a_refused_reply_is_not() {
+        let unanswered = service(vec![], Some(FakeLlm::failing()));
+        unanswered
+            .generate(&mut NullPrompter, "REQ-001", &[], &[], &[], None)
+            .unwrap_err();
+        let flagged = unanswered
+            .take_unanswered()
+            .expect("a transport failure is flagged");
+        assert!(flagged.contains("the model call failed"), "{flagged}");
+        assert!(
+            unanswered.take_unanswered().is_none(),
+            "taking the flag clears it"
+        );
+
+        let refused = service(vec![], Some(FakeLlm::replying("Sure, here you go!")));
+        refused
+            .generate(&mut NullPrompter, "REQ-001", &[], &[], &[], None)
+            .unwrap_err();
+        assert!(
+            refused.take_unanswered().is_none(),
+            "a refused reply is not an unanswered attempt"
+        );
     }
 
     #[test]

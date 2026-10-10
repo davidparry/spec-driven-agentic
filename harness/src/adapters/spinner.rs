@@ -13,10 +13,10 @@
 //! wait scribbling "working ..." over it.
 
 use std::io::{IsTerminal, Write};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, MutexGuard, PoisonError, Weak};
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::adapters::console_prompt::{GREEN, RESET, YELLOW};
 use crate::ports::{PromptError, Prompter, Working};
@@ -49,7 +49,12 @@ fn frame(step: usize) -> &'static str {
 struct Animation {
     /// Painted for the terminal; `columns` is what it occupies on it.
     message: String,
-    columns: usize,
+    columns: AtomicUsize,
+    /// When the wait started, as epoch seconds. A generation that runs
+    /// minutes past a local model's prefill looks identical to a hung
+    /// one when the line never changes, so frames past the first minute
+    /// say how long the wait has been.
+    started_secs: AtomicU64,
     stop: AtomicBool,
     /// Nonzero while something else owns the terminal.
     hushed: AtomicUsize,
@@ -60,12 +65,20 @@ struct Animation {
     out: Mutex<Box<dyn Write + Send>>,
 }
 
+fn unix_now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs())
+        .unwrap_or(0)
+}
+
 impl Animation {
     fn new(message: &str, out: Box<dyn Write + Send>) -> Self {
         Self {
             message: paint(message),
             // One space, then the dots padded to three columns.
-            columns: message.chars().count() + 4,
+            columns: AtomicUsize::new(message.chars().count() + 4),
+            started_secs: AtomicU64::new(unix_now()),
             stop: AtomicBool::new(false),
             hushed: AtomicUsize::new(0),
             drawn: AtomicBool::new(false),
@@ -84,8 +97,25 @@ impl Animation {
         if self.hushed.load(Ordering::Acquire) > 0 {
             return;
         }
+        // Past the first minute the frame names the wait, so a long
+        // generation reads as slow rather than stuck. Shorter waits draw
+        // exactly the line they always did.
+        let minutes = unix_now().saturating_sub(self.started_secs.load(Ordering::Relaxed)) / 60;
+        let note = match minutes {
+            0 => String::new(),
+            minutes => format!(" ({minutes}m elapsed)"),
+        };
+        self.columns.store(
+            self.message.chars().count() + note.chars().count() + 4,
+            Ordering::Release,
+        );
         // Left-padding to three columns erases the previous, longer frame.
-        let _ = write!(out, "\r{} {YELLOW}{:<3}{RESET}", self.message, frame(step));
+        let _ = write!(
+            out,
+            "\r{}{note} {YELLOW}{:<3}{RESET}",
+            self.message,
+            frame(step)
+        );
         let _ = out.flush();
         self.drawn.store(true, Ordering::Release);
     }
@@ -105,7 +135,8 @@ impl Animation {
         self.hushed.fetch_add(1, Ordering::AcqRel);
         let mut out = self.writer();
         if self.drawn.swap(false, Ordering::AcqRel) {
-            let _ = write!(out, "\r{:columns$}\r", "", columns = self.columns);
+            let columns = self.columns.load(Ordering::Acquire);
+            let _ = write!(out, "\r{:columns$}\r", "");
             let _ = out.flush();
         }
     }
@@ -333,6 +364,33 @@ mod tests {
         assert!(text.starts_with(&first), "first frame: {text:?}");
         assert!(text.contains(&second), "second frame: {text:?}");
         assert!(text.ends_with(&settled), "settled line: {text:?}");
+    }
+
+    #[test]
+    fn a_wait_past_a_minute_names_the_elapsed_time() {
+        let sink = Sink::default();
+        let animation = Animation::new("Working", Box::new(sink.clone()));
+        animation
+            .started_secs
+            .store(unix_now().saturating_sub(125), Ordering::Relaxed);
+        animation.draw(2);
+        assert!(
+            sink.text().contains("Working (2m elapsed)"),
+            "the frame names the wait: {:?}",
+            sink.text()
+        );
+    }
+
+    #[test]
+    fn a_fresh_wait_draws_the_line_it_always_did() {
+        let sink = Sink::default();
+        let animation = Animation::new("Working", Box::new(sink.clone()));
+        animation.draw(0);
+        assert!(
+            !sink.text().contains("elapsed"),
+            "no elapsed note inside the first minute: {:?}",
+            sink.text()
+        );
     }
 
     #[test]
