@@ -687,6 +687,18 @@ pub fn polish_prompt(language: Language, scaffold: &str) -> RenderedPrompt {
     )
 }
 
+/// One expression for one step line, asked when the template expression
+/// does not bind that line. Rendered from `[step_expression]`.
+pub fn step_expression_prompt(line: &str, expression: &str) -> RenderedPrompt {
+    render(
+        "step_expression",
+        minijinja::context! {
+            line => line,
+            expression => expression,
+        },
+    )
+}
+
 /// The fragment-scoped polish instructions used when the target file
 /// already exists: the model is shown only the newly generated members,
 /// never the file they will be spliced into. Rendered from the
@@ -1247,7 +1259,34 @@ fn ensure_java_import(source: &str, import: &str) -> String {
 }
 
 fn count_placeholders(expression: &str) -> usize {
-    expression.matches('{').count()
+    let mut count = 0;
+    let mut rest = expression;
+    while let Some(open) = unescaped_index(rest, '{') {
+        count += 1;
+        rest = &rest[open + '{'.len_utf8()..];
+    }
+    count
+}
+
+/// Index of `needle` in `text`, ignoring a character escaped with `\`.
+/// `{string}` counts; `\{` does not, because that brace is literal text
+/// from the step line.
+fn unescaped_index(text: &str, needle: char) -> Option<usize> {
+    let mut escaped = false;
+    for (index, character) in text.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if character == '\\' {
+            escaped = true;
+            continue;
+        }
+        if character == needle {
+            return Some(index);
+        }
+    }
+    None
 }
 
 /// Build a parameter list from the expression's placeholders, one entry
@@ -1255,13 +1294,13 @@ fn count_placeholders(expression: &str) -> usize {
 fn parameter_list(expression: &str, format_param: impl Fn(usize, &str) -> String) -> String {
     let mut params = Vec::new();
     let mut rest = expression;
-    while let Some(open) = rest.find('{') {
+    while let Some(open) = unescaped_index(rest, '{') {
         let tail = &rest[open..];
-        let close = tail
-            .find('}')
-            .expect("expressions come from step_to_expression");
+        let Some(close) = unescaped_index(tail, '}') else {
+            break;
+        };
         params.push(format_param(params.len(), &tail[..=close]));
-        rest = &tail[close + 1..];
+        rest = &tail[close + '}'.len_utf8()..];
     }
     params.join(", ")
 }
@@ -1322,7 +1361,7 @@ fn words(text: &str) -> Vec<String> {
         .collect()
 }
 
-fn snake_case(text: &str) -> String {
+pub(crate) fn snake_case(text: &str) -> String {
     let name = words(text).join("_");
     if name.is_empty() {
         "step".to_string()
@@ -2555,12 +2594,18 @@ mod tests {
 
         // An expression only keeps a backslash when it falls outside the
         // quoted span step_to_expression collapses to {string}.
+        // A backslash in the step is a literal backslash, so the
+        // expression escapes it (`\\`) and the source literal escapes
+        // that again.
         for (language, expected) in [
-            (Language::Java, r#"@Then("the delimiter is \\n")"#),
-            (Language::DotNet, r#"[Then("the delimiter is \\n")]"#),
-            (Language::Rust, r#"#[then(expr = "the delimiter is \\n")]"#),
-            (Language::JavaScript, r"Then('the delimiter is \\n'"),
-            (Language::TypeScript, r"Then('the delimiter is \\n'"),
+            (Language::Java, r#"@Then("the delimiter is \\\\n")"#),
+            (Language::DotNet, r#"[Then("the delimiter is \\\\n")]"#),
+            (
+                Language::Rust,
+                r#"#[then(expr = "the delimiter is \\\\n")]"#,
+            ),
+            (Language::JavaScript, r"Then('the delimiter is \\\\n'"),
+            (Language::TypeScript, r"Then('the delimiter is \\\\n'"),
         ] {
             let code =
                 step_definitions_template(language, &[missing("Then", r"the delimiter is \n")]);
@@ -2581,7 +2626,7 @@ mod tests {
         let generated = step_definitions_template(Language::Java, std::slice::from_ref(&step));
         assert_eq!(
             extract_patterns(Language::Java, &generated),
-            vec![r"the delimiter is \n".to_string()]
+            vec![r"the delimiter is \\n".to_string()]
         );
         assert!(
             step_definitions_fragment(&generated, Language::Java, &[step]).is_none(),

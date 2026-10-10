@@ -166,28 +166,88 @@ pub fn pattern_matches(pattern: &str, text: &str) -> bool {
 }
 
 /// Translate a Cucumber expression into an anchored regex.
+///
+/// `\(` and `\)` are literal parentheses. An unescaped `(...)` is
+/// optional text, the way cucumber-expressions reads it, so a pattern
+/// that copied parentheses through unescaped does not match a step
+/// line that contains those characters.
 fn cucumber_expression_to_regex(expression: &str) -> String {
     let mut out = String::from("^");
-    let mut rest = expression;
-    while let Some(open) = rest.find('{') {
-        let (literal, tail) = rest.split_at(open);
-        out.push_str(&regex::escape(literal));
-        let Some(close) = tail.find('}') else {
-            out.push_str(&regex::escape(tail));
-            rest = "";
-            break;
-        };
-        out.push_str(match &tail[..=close] {
-            "{int}" => r"-?\d+",
-            "{float}" => r"-?\d+(?:\.\d+)?",
-            "{word}" => r"\S+",
-            "{string}" => r#""[^"]*"|'[^']*'"#,
-            _ => ".*",
-        });
-        rest = &tail[close + 1..];
-    }
-    out.push_str(&regex::escape(rest));
+    out.push_str(&translate_cucumber(expression));
     out.push('$');
+    out
+}
+
+/// The body of [`cucumber_expression_to_regex`], so an optional group
+/// can translate its own interior with the same rules.
+fn translate_cucumber(expression: &str) -> String {
+    let mut out = String::new();
+    let mut chars = expression.chars().peekable();
+    while let Some(character) = chars.next() {
+        if character == '\\' {
+            match chars.next() {
+                Some(escaped) => out.push_str(&regex::escape(&escaped.to_string())),
+                None => out.push_str(r"\\"),
+            }
+            continue;
+        }
+        if character == '(' {
+            let mut inner = String::new();
+            let mut closed = false;
+            let mut escaped = false;
+            for next in chars.by_ref() {
+                if escaped {
+                    inner.push('\\');
+                    inner.push(next);
+                    escaped = false;
+                    continue;
+                }
+                if next == '\\' {
+                    escaped = true;
+                    continue;
+                }
+                if next == ')' {
+                    closed = true;
+                    break;
+                }
+                inner.push(next);
+            }
+            if !closed {
+                out.push_str(&regex::escape("("));
+                out.push_str(&regex::escape(&inner));
+                continue;
+            }
+            out.push_str("(?:");
+            out.push_str(&translate_cucumber(&inner));
+            out.push_str(")?");
+            continue;
+        }
+        if character == '{' {
+            let mut inner = String::new();
+            let mut closed = false;
+            for next in chars.by_ref() {
+                if next == '}' {
+                    closed = true;
+                    break;
+                }
+                inner.push(next);
+            }
+            if !closed {
+                out.push_str(&regex::escape("{"));
+                out.push_str(&regex::escape(&inner));
+                continue;
+            }
+            out.push_str(match inner.as_str() {
+                "int" => r"-?\d+",
+                "float" => r"-?\d+(?:\.\d+)?",
+                "word" => r"\S+",
+                "string" => r#""[^"]*"|'[^']*'"#,
+                _ => ".*",
+            });
+            continue;
+        }
+        out.push_str(&regex::escape(&character.to_string()));
+    }
     out
 }
 
@@ -257,13 +317,61 @@ pub fn criterion_to_steps(criterion: &str) -> Option<Vec<String>> {
     ])
 }
 
+/// Characters cucumber-expressions treats as syntax. A step line that
+/// contains one of them means the character itself, so the expression
+/// escapes it. `{string}` and `{int}` are written after this pass and
+/// stay unescaped: they are the parameters, not text from the line.
+const CUCUMBER_RESERVED: &[char] = &['(', ')', '{', '}', '/', '\\'];
+
 /// Turn a concrete step text into a Cucumber expression: numbers become
-/// `{int}`, quoted strings become `{string}`.
+/// `{int}`, quoted strings become `{string}`, and reserved characters
+/// in the remaining text are escaped so they match literally.
 pub fn step_to_expression(text: &str) -> String {
-    static QUOTED: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#""[^"]*""#).expect("valid"));
-    static NUMBER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b\d+\b").expect("valid"));
-    let with_strings = QUOTED.replace_all(text, "{string}");
-    NUMBER.replace_all(&with_strings, "{int}").into_owned()
+    let mut out = String::new();
+    let chars: Vec<char> = text.chars().collect();
+    let mut index = 0;
+    while index < chars.len() {
+        if chars[index] == '"' {
+            let mut end = index + 1;
+            while end < chars.len() && chars[end] != '"' {
+                end += 1;
+            }
+            if end < chars.len() {
+                out.push_str("{string}");
+                index = end + 1;
+                continue;
+            }
+        }
+        if chars[index].is_ascii_digit() && word_boundary_before(&chars, index) {
+            let mut end = index;
+            while end < chars.len() && chars[end].is_ascii_digit() {
+                end += 1;
+            }
+            if word_boundary_after(&chars, end) {
+                out.push_str("{int}");
+                index = end;
+                continue;
+            }
+        }
+        if CUCUMBER_RESERVED.contains(&chars[index]) {
+            out.push('\\');
+        }
+        out.push(chars[index]);
+        index += 1;
+    }
+    out
+}
+
+fn is_word_char(character: char) -> bool {
+    character.is_ascii_alphanumeric() || character == '_'
+}
+
+fn word_boundary_before(chars: &[char], index: usize) -> bool {
+    index == 0 || !is_word_char(chars[index - 1])
+}
+
+fn word_boundary_after(chars: &[char], index: usize) -> bool {
+    index == chars.len() || !is_word_char(chars[index])
 }
 
 #[cfg(test)]
@@ -563,6 +671,48 @@ mod tests {
             "a trailing period on the Gherkin line must stay on the expression or Cucumber treats the step as undefined"
         );
         assert_eq!(step_to_expression("a calculator"), "a calculator");
+    }
+
+    /// cucumber-rs reads `(an empty list)` as optional text. The
+    /// expression has to escape the parentheses or the step is undefined
+    /// at runtime while this matcher, treating them as literal, reports
+    /// it defined.
+    #[test]
+    fn parentheses_in_a_step_are_escaped_and_only_the_escaped_form_matches() {
+        let text = "a requirement with zero acceptance criteria (an empty list)";
+        let expression = step_to_expression(text);
+        assert_eq!(
+            expression,
+            r"a requirement with zero acceptance criteria \(an empty list\)"
+        );
+        assert!(
+            pattern_matches(&expression, text),
+            "the escaped expression has to match the step line"
+        );
+        assert!(
+            !pattern_matches(
+                "a requirement with zero acceptance criteria (an empty list)",
+                text
+            ),
+            "an unescaped optional group is not a definition of the parenthesized line"
+        );
+    }
+
+    #[test]
+    fn a_slash_and_a_backslash_in_a_step_are_escaped() {
+        assert_eq!(
+            step_to_expression(r"the delimiter is \n"),
+            r"the delimiter is \\n"
+        );
+        assert_eq!(step_to_expression("read/write"), r"read\/write");
+        assert!(pattern_matches(
+            &step_to_expression(r"the delimiter is \n"),
+            r"the delimiter is \n"
+        ));
+        assert!(pattern_matches(
+            &step_to_expression("read/write"),
+            "read/write"
+        ));
     }
 
     #[test]

@@ -11,21 +11,22 @@ use crate::application::assets::{
     find_missing_steps, find_requirement, load_spec, production_path, production_type_name,
     steps_path, unit_test_path,
 };
-use crate::application::decision_service::{Brief, TaskJudge, gated};
+use crate::application::decision_service::{Brief, TaskJudge};
+use crate::application::incremental::{Exam, expression_exam, settle};
 use crate::application::scenario_service::ScenarioService;
 use crate::application::spec_service::ServiceError;
 use crate::application::{DEFAULT_LLM_ATTEMPTS, LlmReplyError};
 use crate::domain::decision::{
-    CRITERION_MEASURABLE, Judgment, Policies, SCENARIO_EXERCISES_CRITERION, STEPS_BIND_SCENARIO,
-    TaskGate, scenario_state, steps_state,
+    Judgment, Policies, SCENARIO_EXERCISES_CRITERION, STEPS_BIND_SCENARIO, scenario_state,
 };
 use crate::domain::feature;
 use crate::domain::generation::{
-    append_step_definitions, implementation_target_path, looks_like_step_definitions,
-    looks_like_step_fragment, looks_like_unit_test, looks_like_unit_test_for,
-    looks_like_unit_test_fragment, polish_fragment_prompt, polish_prompt, splice_step_definitions,
-    splice_unit_tests, step_definitions_fragment, step_definitions_template, strip_code_fences,
-    todo_placeholders, unit_test_fragment, unit_test_target_path, unit_test_template,
+    append_step_definitions, escape_literal, implementation_target_path,
+    looks_like_step_definitions, looks_like_step_fragment, looks_like_unit_test,
+    looks_like_unit_test_for, looks_like_unit_test_fragment, polish_fragment_prompt, polish_prompt,
+    splice_step_definitions, splice_unit_tests, step_definitions_fragment,
+    step_definitions_template, step_expression_prompt, strip_code_fences, todo_placeholders,
+    unit_test_fragment, unit_test_target_path, unit_test_template,
 };
 use crate::domain::language::Language;
 use crate::domain::memory::ProjectStructure;
@@ -33,7 +34,7 @@ use crate::domain::scenario::{
     ProposedScenario, as_gherkin, parse_scenarios_checked, scenario_prompt, scenario_template,
     scenarios_criteria, tagged, taken_names,
 };
-use crate::domain::steps::{MissingStep, extract_patterns, source_extension};
+use crate::domain::steps::{MissingStep, extract_patterns, source_extension, step_to_expression};
 use crate::ports::{
     FeatureCatalog, LlmConversation, Prompter, SourceFiles, SpecRepository, ToolBroker, WorkTree,
 };
@@ -304,15 +305,18 @@ where
                 }
         };
         let fragment = existing
-            .and_then(|file| step_definitions_fragment(&file.content, self.language, &missing));
+            .and_then(|file| step_definitions_fragment(&file.content, self.language, &missing))
+            .map(|fragment| self.bind_expressions(prompter, &fragment, &missing));
         let (content, source) = match (existing, &fragment) {
             (Some(file), Some(fragment)) => {
                 let expected = extract_patterns(self.language, fragment);
+                // Names and formatting only. Binding was settled per step
+                // in `bind_expressions`; this pass is forbidden from
+                // changing an expression, and a mismatch here is the
+                // fragment validator, not another question.
                 self.polish_fragment(
                     prompter,
-                    Pass::gated("the step definitions", &STEPS_BIND_SCENARIO, |code| {
-                        steps_briefs(self.language, &missing, code)
-                    }),
+                    "the step definitions",
                     fragment,
                     |code| looks_like_step_fragment(self.language, code, &expected),
                     |members| splice_step_definitions(&file.content, self.language, members),
@@ -327,14 +331,8 @@ where
                     Some(file) => append_step_definitions(&file.content, self.language, &missing),
                     None => step_definitions_template(self.language, &missing),
                 };
-                self.polish(
-                    prompter,
-                    Pass::gated("the step definitions", &STEPS_BIND_SCENARIO, |code| {
-                        steps_briefs(self.language, &missing, code)
-                    }),
-                    &template,
-                    valid_file,
-                )
+                let template = self.bind_expressions(prompter, &template, &missing);
+                self.polish(prompter, "the step definitions", &template, valid_file)
             }
         };
         let verb = if existing.is_some() {
@@ -419,7 +417,7 @@ where
                     // placeholders are supposed to be there. The test is
                     // judged after an implement attempt, where filling
                     // them in is the job.
-                    Pass::ungated("the unit test"),
+                    "the unit test",
                     &fragment,
                     |code| looks_like_unit_test_fragment(self.language, code, &placeholders, cases),
                     |members| splice_unit_tests(&file.content, self.language, members),
@@ -430,12 +428,7 @@ where
             // whole-file polish pass still applies.
             None => {
                 let template = unit_test_template(self.language, requirement);
-                self.polish(
-                    prompter,
-                    Pass::ungated("the unit test"),
-                    &template,
-                    valid_file,
-                )
+                self.polish(prompter, "the unit test", &template, valid_file)
             }
         };
         let summary = format!(
@@ -458,10 +451,10 @@ where
     /// feature file.
     ///
     /// The deterministic template reads each criterion literally and is
-    /// always available; a model, when one is resolved, is asked to say
-    /// the same thing in the vocabulary the feature file already uses.
-    /// Its reply is used only when it still covers every criterion, so
-    /// the coverage the workshop grades cannot be lost to a chatty model.
+    /// always available. A model, when one is resolved, is asked for one
+    /// scenario per criterion, in the vocabulary the feature file already
+    /// uses. A criterion it cannot cover keeps that criterion's template
+    /// scenario, and the scenarios already accepted stay written.
     pub fn scenario_generate<SC, SF>(
         &self,
         prompter: &mut dyn Prompter,
@@ -532,8 +525,108 @@ where
         })
     }
 
+    /// Each missing step's template expression is the first candidate.
+    /// One that already matches the line is kept and the model is not
+    /// asked. One that does not is repaired on its own; a repair that
+    /// never binds falls back to the template expression, and the other
+    /// steps are left as they were.
+    fn bind_expressions(
+        &self,
+        prompter: &mut dyn Prompter,
+        fragment: &str,
+        missing: &[MissingStep],
+    ) -> String {
+        let quote = match self.language {
+            Language::JavaScript | Language::TypeScript => '\'',
+            _ => '"',
+        };
+        let mut fragment = fragment.to_string();
+        for step in missing {
+            let expression = step_to_expression(&step.text);
+            let line = format!("{} {}", step.keyword, step.text);
+            if matches!(
+                expression_exam(&step.text, &expression, &line),
+                Exam::Accept
+            ) {
+                continue;
+            }
+            let repaired = self.pursue_expression(prompter, &step.text, &line, &expression);
+            let from = escape_literal(&expression, quote);
+            let to = escape_literal(&repaired, quote);
+            if from != to {
+                fragment = fragment.replacen(&from, &to, 1);
+            }
+        }
+        fragment
+    }
+
+    /// One expression, retried until it binds or the attempt budget is
+    /// spent. The template expression comes back when it never does.
+    fn pursue_expression(
+        &self,
+        prompter: &mut dyn Prompter,
+        step_text: &str,
+        line: &str,
+        template: &str,
+    ) -> String {
+        let Some(llm) = &self.llm else {
+            return template.to_string();
+        };
+        let prompt = step_expression_prompt(line, template);
+        let retries = std::cell::RefCell::new(Vec::<String>::new());
+        let outcome = llm.ask(
+            prompter,
+            &prompt,
+            |response| {
+                let expression = response
+                    .trim()
+                    .lines()
+                    .next()
+                    .unwrap_or("")
+                    .trim()
+                    .trim_matches('`')
+                    .to_string();
+                let expression = expression
+                    .strip_prefix("Given ")
+                    .or_else(|| expression.strip_prefix("When "))
+                    .or_else(|| expression.strip_prefix("Then "))
+                    .unwrap_or(&expression)
+                    .to_string();
+                match expression_exam(step_text, &expression, line) {
+                    Exam::Accept => Ok(expression),
+                    Exam::Retry(reason) => Err(reason),
+                    exam @ Exam::Ask(_) => {
+                        settle(
+                            exam,
+                            &mut self.judgments.borrow_mut(),
+                            self.judge.as_deref(),
+                            self.policies.policy_for(&STEPS_BIND_SCENARIO),
+                            &STEPS_BIND_SCENARIO,
+                        )?;
+                        Ok(expression)
+                    }
+                }
+            },
+            |attempt, of, reason| {
+                retries
+                    .borrow_mut()
+                    .push(retry_note(attempt, of, reason, "the step expression"));
+            },
+        );
+        for message in retries.into_inner() {
+            prompter.warn(&message);
+        }
+        outcome.unwrap_or_else(|_| template.to_string())
+    }
+
     /// The model's scenarios when they cover every criterion, the literal
     /// template otherwise. Never fails: the template is always usable.
+    ///
+    /// One criterion per ask. A criterion the model cannot cover keeps
+    /// its template scenario, and the criteria already accepted stay
+    /// written. Each accepted scenario is appended to the feature text
+    /// the next criterion sees, which is the vocabulary that prompt
+    /// reuses.
     fn author_scenarios(
         &self,
         prompter: &mut dyn Prompter,
@@ -546,50 +639,106 @@ where
         let Some(llm) = &self.llm else {
             return (template.to_vec(), "template".into());
         };
-        // Only whole, parsed criteria get a scenario, so a model asked for
-        // one per criterion must be asked for the number the template
-        // found - not the number the requirement declares.
-        let expected = template.len();
         let known_steps = self.defined_step_patterns();
-        let rendered = doc.as_ref().map(feature::render).unwrap_or_default();
-        let prompt = scenario_prompt(requirement, feature_path, &rendered, &known_steps, template);
+        let mut feature_text = doc.as_ref().map(feature::render).unwrap_or_default();
+        let mut taken = taken.to_vec();
+        let criteria = scenarios_criteria(requirement);
         let work = prompter.working(&format!(
             "Asking {} to write the scenarios - working",
             llm.model()
         ));
+        let mut accepted = Vec::with_capacity(template.len());
+        let mut from_model = false;
+        for (index, fallback) in template.iter().enumerate() {
+            let criterion = criteria.get(index).map(|text| text.as_str()).unwrap_or("");
+            let mut one = requirement.clone();
+            if !criterion.is_empty() {
+                one.acceptance_criteria = vec![criterion.to_string()];
+            }
+            match self.author_one_scenario(
+                prompter,
+                llm,
+                &one,
+                feature_path,
+                &feature_text,
+                &known_steps,
+                std::slice::from_ref(fallback),
+                &taken,
+                criterion,
+            ) {
+                Some(scenario) => {
+                    from_model = true;
+                    feature_text.push_str(&as_gherkin(std::slice::from_ref(&scenario)));
+                    taken.push(scenario.name.clone());
+                    accepted.push(scenario);
+                }
+                None => {
+                    feature_text.push_str(&as_gherkin(std::slice::from_ref(fallback)));
+                    taken.push(fallback.name.clone());
+                    accepted.push(fallback.clone());
+                }
+            }
+        }
+        drop(work);
+        let source = if from_model { "llm" } else { "template" };
+        (accepted, source.into())
+    }
+
+    /// One scenario for one criterion. `None` is the template: the model
+    /// never produced a scenario the examiner would keep.
+    fn author_one_scenario(
+        &self,
+        prompter: &mut dyn Prompter,
+        llm: &ResolvedLlm<L, B>,
+        requirement: &crate::domain::model::Requirement,
+        feature_path: &str,
+        feature_text: &str,
+        known_steps: &[String],
+        template: &[ProposedScenario],
+        taken: &[String],
+        criterion: &str,
+    ) -> Option<ProposedScenario> {
+        let prompt = scenario_prompt(
+            requirement,
+            feature_path,
+            feature_text,
+            known_steps,
+            template,
+        );
         let retries = std::cell::RefCell::new(Vec::<String>::new());
-        // The rule beside this one checks that every criterion got a
-        // scenario; it cannot see whether the scenario it got puts the
-        // criterion to the test, which is how a generated scenario goes
-        // wrong - a Then step that checks the call returned rather than
-        // what it returned.
-        let criteria = scenarios_criteria(requirement);
         let id = requirement.id.as_str();
         let outcome = llm.ask(
             prompter,
             &prompt,
-            gated(
-                self.judge.as_deref(),
-                self.policies.policy_for(&SCENARIO_EXERCISES_CRITERION),
-                &SCENARIO_EXERCISES_CRITERION,
-                &mut self.judgments.borrow_mut(),
-                |scenarios: &Vec<ProposedScenario>| scenario_briefs(id, &criteria, scenarios),
-                |response| parse_scenarios_checked(response, expected, taken),
-            ),
+            |response| {
+                let scenarios = parse_scenarios_checked(response, 1, taken)?;
+                let owned = criterion.to_string();
+                let scenario = scenarios
+                    .into_iter()
+                    .next()
+                    .ok_or_else(|| "the reply held no scenario".to_string())?;
+                let briefs = scenario_briefs(id, &[&owned], std::slice::from_ref(&scenario));
+                if let Some(brief) = briefs.into_iter().next() {
+                    settle(
+                        Exam::Ask(brief),
+                        &mut self.judgments.borrow_mut(),
+                        self.judge.as_deref(),
+                        self.policies.policy_for(&SCENARIO_EXERCISES_CRITERION),
+                        &SCENARIO_EXERCISES_CRITERION,
+                    )?;
+                }
+                Ok(scenario)
+            },
             |attempt, of, reason| {
                 retries
                     .borrow_mut()
-                    .push(retry_note(attempt, of, reason, "the scenarios"));
+                    .push(retry_note(attempt, of, reason, "the scenario"));
             },
         );
-        drop(work);
         for message in retries.into_inner() {
             prompter.warn(&message);
         }
-        match outcome {
-            Ok(scenarios) => (scenarios, "llm".into()),
-            Err(_) => (template.to_vec(), "template".into()),
-        }
+        outcome.ok()
     }
 
     /// Every step expression the project already has a definition for.
@@ -609,46 +758,17 @@ where
             .unwrap_or_default()
     }
 
-    /// `validator` with `gate` on top, or `validator` unchanged when the
-    /// pass has no gate or this project asks nothing.
-    ///
-    /// One place to decide that, because `polish` and `polish_fragment`
-    /// are the same pass over two prompts and a rule applied to one of
-    /// them is a rule that will be forgotten on the other.
-    fn gating<'a>(
-        &'a self,
-        gate: Option<CodeGate<'a>>,
-        recorded: &'a mut Vec<Judgment>,
-        validator: impl FnMut(&str) -> Result<String, String> + 'a,
-    ) -> impl FnMut(&str) -> Result<String, String> + 'a {
-        // A pass with no gate still goes through `gated`, with no judge
-        // and so nothing to ask: one code path, and a `None` judge is
-        // already exactly "the validator you handed me".
-        let (asked, briefs) = match gate {
-            Some(gate) => (Some(gate.gate), gate.briefs),
-            None => (None, CodeGate::nothing()),
-        };
-        let gate = asked.unwrap_or(&CRITERION_MEASURABLE);
-        gated(
-            self.judge.as_deref().filter(|_| asked.is_some()),
-            self.policies.policy_for(gate),
-            gate,
-            recorded,
-            move |code: &String| briefs(code),
-            validator,
-        )
-    }
-
     /// The hybrid pass: prefer validated LLM output, fall back to the
-    /// template silently on any failure.
+    /// template silently on any failure. Binding and coverage are
+    /// settled before this pass, one unit at a time; this one is names
+    /// and formatting.
     fn polish(
         &self,
         prompter: &mut dyn Prompter,
-        pass: Pass<'_>,
+        what: &str,
         template: &str,
         valid: impl Fn(&str) -> bool,
     ) -> (String, String) {
-        let Pass { what, gate } = pass;
         let Some(llm) = &self.llm else {
             return (template.to_string(), "template".into());
         };
@@ -658,14 +778,14 @@ where
         let outcome = llm.ask(
             prompter,
             &prompt,
-            self.gating(gate, &mut self.judgments.borrow_mut(), |response| {
+            |response| {
                 let code = strip_code_fences(response);
                 if valid(&code) {
                     Ok(code)
                 } else {
                     Err("the reply was not a valid file for this language".into())
                 }
-            }),
+            },
             |attempt, of, reason| {
                 retries
                     .borrow_mut()
@@ -697,13 +817,12 @@ where
     fn polish_fragment(
         &self,
         prompter: &mut dyn Prompter,
-        pass: Pass<'_>,
+        what: &str,
         fragment: &str,
         valid_fragment: impl Fn(&str) -> bool,
         splice: impl Fn(&str) -> String,
         valid_file: impl Fn(&str) -> bool,
     ) -> (String, String) {
-        let Pass { what, gate } = pass;
         let template = splice(fragment);
         let Some(llm) = &self.llm else {
             return (ending_in_newline(template), "template".into());
@@ -714,14 +833,14 @@ where
         let outcome = llm.ask(
             prompter,
             &prompt,
-            self.gating(gate, &mut self.judgments.borrow_mut(), |response| {
+            |response| {
                 let code = strip_code_fences(response);
                 if valid_fragment(&code) {
                     Ok(code)
                 } else {
                     Err("the reply was not the set of members that were asked for".into())
                 }
-            }),
+            },
             |attempt, of, reason| {
                 retries
                     .borrow_mut()
@@ -744,104 +863,6 @@ where
             Err(_) => (ending_in_newline(template), "template".into()),
         }
     }
-}
-
-/// A gate for one polish pass: which question, and what to ask it
-/// about given the code that came back.
-///
-/// Boxed because the two passes' briefs close over different things -
-/// the missing steps for one, nothing at all for the other - and a
-/// generic would put a type parameter on `polish` and `polish_fragment`
-/// for a collaborator most calls do not have.
-pub struct CodeGate<'a> {
-    gate: &'static TaskGate,
-    briefs: Briefs<'a>,
-}
-
-/// What to ask a gate's question about, given the code that came back.
-type Briefs<'a> = Box<dyn Fn(&str) -> Vec<Brief> + 'a>;
-
-/// One polish pass: the words for the line shown while the model
-/// thinks, and the gate its reply is put to, if any.
-///
-/// The two travel together because a pass that names itself to the
-/// developer is the same pass that names itself in a judgment record,
-/// and because `polish_fragment` had run out of room for another
-/// parameter.
-pub struct Pass<'a> {
-    what: &'a str,
-    gate: Option<CodeGate<'a>>,
-}
-
-impl<'a> Pass<'a> {
-    /// A pass with no gate: nothing is asked about its reply.
-    fn ungated(what: &'a str) -> Self {
-        Self { what, gate: None }
-    }
-
-    fn gated(
-        what: &'a str,
-        gate: &'static TaskGate,
-        briefs: impl Fn(&str) -> Vec<Brief> + 'a,
-    ) -> Self {
-        Self {
-            what,
-            gate: Some(CodeGate::new(gate, briefs)),
-        }
-    }
-}
-
-impl<'a> CodeGate<'a> {
-    fn new(gate: &'static TaskGate, briefs: impl Fn(&str) -> Vec<Brief> + 'a) -> Self {
-        Self {
-            gate,
-            briefs: Box::new(briefs),
-        }
-    }
-
-    /// The brief for a pass with no gate, which is never called.
-    fn nothing() -> Briefs<'a> {
-        Box::new(|_| Vec::new())
-    }
-}
-
-/// What [`STEPS_BIND_SCENARIO`] is asked about: one question per
-/// generated definition, against the step line it was written for.
-///
-/// The step runner answers this exactly, but only by running, which is
-/// after the attempt has been spent and the file has been staged.
-///
-/// Paired by position: the template writes one definition per missing
-/// step in order, and the polish pass is asked for the same members
-/// back. A reply with a different number of expressions than there were
-/// missing steps is asked nothing, because pairing a short list by
-/// position would read each expression against somebody else's line.
-fn steps_briefs(language: Language, missing: &[MissingStep], code: &str) -> Vec<Brief> {
-    let expressions = extract_patterns(language, code);
-    if expressions.len() != missing.len() {
-        // Said with the counts, because the gate's own "asked nothing"
-        // line cannot know them: a model that folds `R-002`, `R-003`
-        // and `R-004` into one `R-{int}` has written fewer expressions
-        // than there were lines, and nothing wrong.
-        tracing::info!(
-            gate = STEPS_BIND_SCENARIO.gate,
-            missing = missing.len(),
-            expressions = expressions.len(),
-            "asked nothing: the reply's expressions do not pair one-to-one with the missing steps"
-        );
-        return Vec::new();
-    }
-    missing
-        .iter()
-        .zip(expressions)
-        .map(|(step, expression)| {
-            let line = format!("{} {}", step.keyword, step.text);
-            Brief::new(
-                format!("{} step {line:?}", step.feature),
-                steps_state(&line, &expression),
-            )
-        })
-        .collect()
 }
 
 /// What [`SCENARIO_EXERCISES_CRITERION`] is asked about: one question
@@ -1047,6 +1068,12 @@ mod tests {
             prompts[0].contains("Java best practices to follow:")
                 && prompts[0].contains("Package names are lowercase"),
             "prompt pins the language's best practices"
+        );
+        assert!(
+            prompts
+                .iter()
+                .all(|prompt| !prompt.contains("You write one Cucumber expression")),
+            "a template expression that already binds is not sent back for repair: {prompts:?}"
         );
     }
 
@@ -1596,6 +1623,50 @@ mod tests {
             .unwrap();
         assert_eq!(report.source, "template");
         assert_eq!(report.scenarios, vec!["Adds two numbers case 1"]);
+    }
+
+    /// Two criteria, one reply reused for both asks. The first scenario
+    /// is kept. The second ask sees that name as taken, so that unit
+    /// falls back to its template and the first one stays.
+    #[test]
+    fn one_rejected_scenario_keeps_the_scenario_already_accepted() {
+        let reply = r#"{"name": "Two numbers are summed",
+                        "steps": ["Given a calculator", "When add is called with \"1,2\"", "Then the result is 3"]}"#;
+        let mut spec = calculator_spec();
+        spec.requirements[0]
+            .acceptance_criteria
+            .push("Given \"4,5\", when add is called, then the result is 9".into());
+        let service = GenerationService::new(
+            calculator_catalog(),
+            FakeSources(vec![]),
+            InMemoryWorkTree::default(),
+            InMemorySpecRepository(Ok(spec)),
+            Language::Java,
+            flat_layout(Language::Java),
+            Some(FakeLlm::replying(reply)),
+        );
+        let (scenarios, _store) = scenarios();
+        let report = service
+            .scenario_generate(&mut Watching::default(), &scenarios, "REQ-001", None)
+            .unwrap();
+        assert_eq!(report.source, "llm");
+        assert_eq!(
+            report.scenarios,
+            vec![
+                "Two numbers are summed".to_string(),
+                "Adds two numbers case 2".to_string(),
+            ]
+        );
+        let prompts = service.llm.as_ref().unwrap().chat().prompts.borrow();
+        assert!(
+            prompts.len() > 1,
+            "each criterion is its own ask: {prompts:?}"
+        );
+        assert!(
+            prompts[1].contains("Two numbers are summed"),
+            "the next criterion sees the scenario already accepted: {}",
+            prompts[1]
+        );
     }
 
     #[test]

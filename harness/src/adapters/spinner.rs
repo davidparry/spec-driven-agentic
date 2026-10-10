@@ -25,8 +25,14 @@ use crate::ports::{PromptError, Prompter, Working};
 /// starts writing code - renders dark green on a terminal.
 const ATTEMPT_NOTE: &str = "Generating an implementation attempt";
 
+/// The tail every long step ends with. Yellow, same as the dots that
+/// follow it, so "working" reads as part of the indicator rather than
+/// as the sentence.
+const WORKING: &str = " - working";
+
 fn paint(message: &str) -> String {
-    message.replace(ATTEMPT_NOTE, &format!("{GREEN}{ATTEMPT_NOTE}{RESET}"))
+    let message = message.replace(ATTEMPT_NOTE, &format!("{GREEN}{ATTEMPT_NOTE}{RESET}"));
+    message.replace(WORKING, &format!("{YELLOW}{WORKING}{RESET}"))
 }
 
 /// The dot frame for an animation step: one, two, three, over again.
@@ -285,11 +291,11 @@ mod tests {
     fn the_attempt_announcement_is_painted_dark_green() {
         assert_eq!(
             paint("Generating an implementation attempt - working"),
-            format!("{GREEN}Generating an implementation attempt{RESET} - working")
+            format!("{GREEN}Generating an implementation attempt{RESET}{YELLOW} - working{RESET}")
         );
         assert_eq!(
             paint("Running the tests - working"),
-            "Running the tests - working"
+            format!("Running the tests{YELLOW} - working{RESET}")
         );
     }
 

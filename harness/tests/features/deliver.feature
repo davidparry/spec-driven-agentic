@@ -244,7 +244,7 @@ Feature: Deliver mode
     When the delivery runs for "REQ-001"
     Then the delivery completes
     And the developer was told a finding containing "Attempt 1 of 3."
-    And the developer was told a finding containing "Generating an implementation attempt - working ..."
+    And the developer was told a finding containing "src/main/java/Kata.java - working"
     And the working tree file "src/main/java/Kata.java" contains "public class Kata"
 
   # The generated unit test ships with a `TODO: assert` placeholder on
@@ -339,9 +339,10 @@ Feature: Deliver mode
     And the working tree file "src/test/java/GeneratedSteps.java" contains "result = kata.add("
     And the working tree file "src/test/java/GeneratedSteps.java" does not contain "PendingException();"
 
-  # A reply the fill pass cannot use leaves the stubs as they were and
-  # says so; the attempt is not lost over it.
-  Scenario: A step-filling reply that keeps a placeholder is refused and the stubs stand
+  # A reply that leaves one definition pending keeps that stub and
+  # writes the definitions that came back finished. The attempt is not
+  # lost over the one that stayed a placeholder.
+  Scenario: A step-filling reply that keeps a placeholder keeps that step and fills the rest
     Given a Java project marker
     And a working spec with the pending requirements "REQ-001"
     And a model is resolved
@@ -376,8 +377,9 @@ Feature: Deliver mode
       """
     When the delivery runs for "REQ-001"
     Then the delivery is not completed
-    And the developer was told a finding containing "The step bodies for REQ-001 were not written"
-    And the working tree file "src/test/java/GeneratedSteps.java" does not contain "result = new Kata().add("
+    And the developer was told a finding containing "Filled 2 pending step bodies in src/test/java/GeneratedSteps.java (llm)."
+    And the working tree file "src/test/java/GeneratedSteps.java" contains "result = new Kata().add("
+    And the working tree file "src/test/java/GeneratedSteps.java" contains "PendingException();"
 
   # A run nobody watched can still be read for what the decision plane
   # made of each gated stage. The judgments ride in the report per stage,
@@ -787,6 +789,7 @@ Feature: Deliver mode
     Then the delivery completes
     And the delivery delivered "REQ-001"
     And the working tree file "src/test/resources/features/empty-string-returns-zero.feature" contains "@REQ-001"
+    And the working tree file "requirements/requirements.json" contains "src/test/resources/features/empty-string-returns-zero.feature"
     And the working tree file "features/empty-string-returns-zero.feature" does not exist
     And the developer was not told a finding containing "can be read back"
 

@@ -380,7 +380,7 @@ Feature: Greenfield mode
     When the greenfield loop runs
     Then the greenfield run completes with phase "GREEN"
     And the developer was asked "Press Enter to let the model attempt the implementation and rerun the tests, enter a number to attempt up to that many times without asking again, or type stop to pause here:"
-    And the developer was told a finding containing "Generating an implementation attempt - working ..."
+    And the developer was told a finding containing "src/main/java/Kata.java - working"
     # The narration prints the complete (absolute) path; the assertion
     # keeps only the stable, root-agnostic tail.
     And the developer was told a finding containing "src/main/java/Kata.java (llm)."

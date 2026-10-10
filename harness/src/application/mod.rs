@@ -9,6 +9,7 @@ pub mod decision_service;
 pub mod diff_service;
 pub mod generation_service;
 pub mod implement_service;
+pub(crate) mod incremental;
 pub mod init_service;
 pub mod inspect_service;
 pub mod memory_service;

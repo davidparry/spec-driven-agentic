@@ -102,7 +102,7 @@ ask = ["project_root", "list_requirements", "get_requirement", "validate_spec", 
 # The default gates because the question reaches wording no regex does;
 # a judgment that cannot refuse leaves that gap unenforced. Set this to
 # "advisory" while you measure the question against your own criteria.
-# mode = "enforce"
+mode = "enforce"
 # Answers less concentrated than this are reported "unsure" rather than
 # used. Ollama's confidence is distribution concentration, not
 # calibrated correctness, so treat it as a dead band and nothing more.

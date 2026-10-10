@@ -7,10 +7,13 @@ use serde::Serialize;
 
 use crate::application::LlmReplyError;
 use crate::application::assets::{
-    asset_survey, find_requirement, load_spec, production_path, scenario_evidence, unit_test_path,
+    asset_survey, find_requirement, load_spec, production_path, scenario_evidence,
+    unattended_production_file, unit_test_path,
 };
 use crate::application::decision_service::{Brief, TaskJudge, gated};
 use crate::application::generation_service::ResolvedLlm;
+use crate::application::incremental::Exam;
+use crate::application::incremental::placeholder_exam;
 use crate::application::spec_service::ServiceError;
 use crate::domain::coverage::covers_all;
 use crate::domain::decision::{
@@ -18,11 +21,11 @@ use crate::domain::decision::{
     implementation_state, test_asserts_state,
 };
 use crate::domain::generation::{
-    FileUpdate, ImplementAsset, advice_prompt, implementation_file_name, implementation_prompt,
+    FileUpdate, ImplementAsset, advice_prompt, implementation_prompt, is_pending_step_body,
     parse_file_updates_checked, strip_code_fences, unasserted_criteria,
 };
 use crate::domain::language::Language;
-use crate::domain::layout::{allowed_targets, in_production_root};
+use crate::domain::layout::allowed_targets;
 use crate::domain::memory::ProjectStructure;
 use crate::domain::model::Spec;
 use crate::domain::reply_guard::{Damage, damage};
@@ -116,6 +119,29 @@ where
     judgments: std::cell::RefCell<Vec<Judgment>>,
 }
 
+/// One definition from a fill reply, when it keeps `pattern` and the
+/// placeholder is gone. A reply that also carries the neighbours is
+/// fine: only the definition for this pattern is taken.
+fn accept_filled_definition(
+    language: Language,
+    reply: &str,
+    pattern: &str,
+) -> Result<String, String> {
+    let code = strip_code_fences(reply);
+    let Some(found) = step_fill::definition_spans(language, &code)
+        .into_iter()
+        .find(|span| span.pattern == pattern)
+    else {
+        return Err(format!("the reply did not keep the expression {pattern:?}"));
+    };
+    let body = found.text(&code).to_string();
+    match placeholder_exam(pattern, is_pending_step_body(language, &body)) {
+        Exam::Accept => Ok(body),
+        Exam::Retry(reason) => Err(reason),
+        Exam::Ask(_) => Ok(body),
+    }
+}
+
 impl<F, S, C, R, L, B> ImplementService<F, S, C, R, L, B>
 where
     F: FeatureCatalog,
@@ -192,7 +218,8 @@ where
     /// not this service's.
     pub fn target(&self, req_id: &str) -> Result<ImplementTarget, ServiceError> {
         let spec = load_spec(&self.spec)?;
-        let declared = find_requirement(&spec, req_id)?.production_files.as_slice();
+        let requirement = find_requirement(&spec, req_id)?;
+        let declared = requirement.production_files.as_slice();
         let sources = self.sources.sources(source_extension(self.language))?;
         let evidence = scenario_evidence(
             &self.features,
@@ -212,12 +239,29 @@ where
         Ok(match resolved {
             Some(path) => ImplementTarget::Resolved(path),
             None => ImplementTarget::Unresolved {
-                conventional: in_production_root(
+                conventional: unattended_production_file(
                     &self.layout,
-                    &implementation_file_name(self.language, &spec.project),
+                    self.language,
+                    &spec.project,
+                    &requirement.title,
                 ),
             },
         })
+    }
+
+    /// The production files this attempt will write, as project-relative
+    /// paths, named before the model is asked. The primary target, then
+    /// any other file the requirement already declares. Empty is not an
+    /// answer `target` gives: a conventional file stands in when nothing
+    /// else does.
+    pub fn attempt_destinations(&self, req_id: &str) -> Result<Vec<String>, ServiceError> {
+        let spec = load_spec(&self.spec)?;
+        let requirement = find_requirement(&spec, req_id)?;
+        let primary = match self.target(req_id)? {
+            ImplementTarget::Resolved(path) => path,
+            ImplementTarget::Unresolved { conventional } => conventional,
+        };
+        Ok(allowed_targets(&primary, &requirement.production_files))
     }
 
     /// Write the bodies of the step definitions this requirement's
@@ -235,10 +279,11 @@ where
     /// they should call and the head of their file; only they come
     /// back, and they are spliced in where they were.
     ///
-    /// `Ok(None)` when nothing bound to the requirement is pending. A
-    /// reply that keeps a placeholder, drops a pattern, or brings a
-    /// scope of its own is refused and nothing is written - the stub on
-    /// disk is a better state than a half-filled file.
+    /// `Ok(None)` when nothing bound to the requirement is pending, or
+    /// when every pending body stayed a placeholder. Each definition is
+    /// asked on its own. A reply that keeps that one's placeholder is
+    /// sent back for that definition only; when the attempt budget is
+    /// spent the stub stays and the definitions already filled are kept.
     pub fn fill_pending_steps(
         &self,
         prompter: &mut dyn Prompter,
@@ -271,12 +316,6 @@ where
         else {
             return Ok(None);
         };
-        let fragment = pending
-            .iter()
-            .map(|span| span.text(&file.content).trim_end())
-            .collect::<Vec<_>>()
-            .join("\n\n");
-        let expected: Vec<String> = pending.iter().map(|span| span.pattern.clone()).collect();
         // The production files the requirement records - a delivery
         // writes them after its first attempt - or, before anything is
         // recorded, the file the evidence resolves to today.
@@ -294,78 +333,75 @@ where
             .filter(|source| wanted.contains(&source.path))
             .map(|source| (source.path.clone(), source.content.clone()))
             .collect();
-        let prompt = step_fill::fill_steps_prompt(
-            self.language,
-            requirement,
-            &step_fill::FillBrief {
-                scenarios: &scenarios,
-                fragment: &fragment,
-                count: pending.len(),
-                preamble: step_fill::step_file_preamble(self.language, &file.content),
-                production: &production,
-                failures,
-            },
-        );
+        let preamble = step_fill::step_file_preamble(self.language, &file.content);
+        let declared = extract_patterns(self.language, &file.content);
         let work = prompter.working(&format!(
             "Asking {} to write {} pending step bodies in {} - working",
             llm.model(),
             pending.len(),
             file.path
         ));
-        let declared = extract_patterns(self.language, &file.content);
-        let outcome = llm.ask(
-            prompter,
-            &prompt,
-            |reply| {
-                let code = strip_code_fences(reply);
-                if !step_fill::looks_like_filled_steps(self.language, &code, &expected) {
-                    return Err(format!(
-                        "the reply was not the {} definition(s) asked for, each with its \
-                         expression kept and its placeholder replaced",
-                        expected.len()
-                    ));
+        // Last definition first, so a splice does not move the offsets
+        // of the definitions still waiting.
+        let mut ordered = pending.clone();
+        ordered.sort_by_key(|span| std::cmp::Reverse(span.start));
+        let mut content = file.content.clone();
+        let mut filled = 0usize;
+        for span in &ordered {
+            let fragment = span.text(&content).trim_end().to_string();
+            let pattern = span.pattern.clone();
+            let prompt = step_fill::fill_steps_prompt(
+                self.language,
+                requirement,
+                &step_fill::FillBrief {
+                    scenarios: &scenarios,
+                    fragment: &fragment,
+                    count: 1,
+                    preamble,
+                    production: &production,
+                    failures,
+                },
+            );
+            let language = self.language;
+            let outcome = llm.ask(
+                prompter,
+                &prompt,
+                |reply| accept_filled_definition(language, reply, &pattern),
+                |_, _, _| {},
+            );
+            match outcome {
+                Ok(body) => {
+                    content.replace_range(span.start..span.end, &body);
+                    filled += 1;
                 }
-                let assembled = step_fill::replace_step_definitions(
-                    self.language,
-                    &file.content,
-                    &pending,
-                    &code,
-                );
-                let kept = extract_patterns(self.language, &assembled);
-                if kept != declared {
-                    return Err("splicing the reply in would change which steps the file \
-                                declares"
-                        .into());
+                Err(LlmReplyError::Call(error)) => {
+                    drop(work);
+                    return Err(ServiceError(LlmReplyError::call_failed(&error)));
                 }
-                Ok(assembled)
-            },
-            |_, _, _| {},
-        );
+                Err(LlmReplyError::Invalid { .. }) => {}
+            }
+        }
         drop(work);
-        let assembled = outcome.map_err(|error| {
-            ServiceError(match error {
-                LlmReplyError::Call(e) => LlmReplyError::call_failed(&e),
-                LlmReplyError::Invalid { reason } => format!(
-                    "The step bodies for {req_id} were not written - {reason}. The stubs in {} \
-                     are unchanged; write them by hand or run spec implement {req_id} again.",
-                    file.path
-                ),
-            })
-        })?;
-        let summary = format!(
-            "fill {} pending step definition(s) for {req_id}",
-            pending.len()
-        );
-        self.store.write(&file.path, &assembled, &summary)?;
+        if filled == 0 {
+            return Ok(None);
+        }
+        let kept = extract_patterns(self.language, &content);
+        if kept != declared {
+            return Err(ServiceError(
+                "splicing the filled steps in would change which steps the file declares".into(),
+            ));
+        }
+        let summary = format!("fill {filled} pending step definition(s) for {req_id}");
+        self.store.write(&file.path, &content, &summary)?;
         tracing::info!(
             requirement = %req_id,
             target = %file.path,
-            filled = pending.len(),
+            filled,
             "pending step bodies written"
         );
         Ok(Some(StepFillReport {
             target: file.path.clone(),
-            filled: pending.len(),
+            filled,
             source: "llm".into(),
         }))
     }
@@ -955,6 +991,38 @@ mod tests {
         );
     }
 
+    /// Rust's conventional file is `lib.rs` for every crate, and this
+    /// project already has modules. A new requirement with nothing
+    /// pointing at one of them gets a file of its own.
+    #[test]
+    fn a_rust_project_with_nothing_to_point_at_gets_a_file_named_for_the_requirement() {
+        let sources = vec![
+            SourceFile {
+                path: "src/lib.rs".into(),
+                content: "pub mod a;".into(),
+            },
+            SourceFile {
+                path: "src/a.rs".into(),
+                content: "pub fn a() {}".into(),
+            },
+        ];
+        let service = ImplementService::new(
+            calculator_catalog(),
+            FakeSources(sources),
+            InMemoryWorkTree::default(),
+            InMemorySpecRepository(Ok(calculator_spec())),
+            Language::Rust,
+            flat_layout(Language::Rust),
+            None::<ResolvedLlm<FakeLlm>>,
+        );
+        assert_eq!(
+            service.target("REQ-001").unwrap(),
+            ImplementTarget::Unresolved {
+                conventional: "src/adds_two_numbers.rs".into(),
+            }
+        );
+    }
+
     /// Evidence still decides. The fallback is only reached when
     /// nothing points anywhere, so a project with a single production
     /// file resolves without it.
@@ -1235,21 +1303,26 @@ mod tests {
     }
 
     #[test]
-    fn a_reply_that_leaves_a_step_pending_fills_nothing() {
+    fn a_reply_that_leaves_a_step_pending_keeps_that_step_and_fills_the_rest() {
         let still_pending = "    @When(\"add is called with {string}\")\n    public void b(String s) {\n        result = new Kata().add(s);\n    }\n\n    @Then(\"the result is {int}\")\n    public void c(int n) {\n        throw new PendingException();\n    }\n";
         let service = service(
             vec![pending_steps(), production()],
             Some(FakeLlm::replying(still_pending)),
         );
-        let outcome = service.fill_pending_steps(&mut NullPrompter, "REQ-001", &[]);
-        assert!(outcome.is_err(), "{outcome:?}");
+        let report = service
+            .fill_pending_steps(&mut NullPrompter, "REQ-001", &[])
+            .unwrap()
+            .expect("the When is filled even though the Then stays pending");
+        assert_eq!(report.filled, 1);
+        let written = service
+            .store
+            .read("src/test/java/steps/Steps.java")
+            .unwrap()
+            .expect("the step that bound is written");
+        assert!(written.contains("result = new Kata().add(s);"), "{written}");
         assert!(
-            service
-                .store
-                .read("src/test/java/steps/Steps.java")
-                .unwrap()
-                .is_none(),
-            "nothing is written for a refused reply"
+            written.contains("throw new PendingException();"),
+            "{written}"
         );
     }
 

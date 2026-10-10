@@ -7,8 +7,8 @@ use crate::application::spec_service::ServiceError;
 use crate::domain::feature::FeatureDoc;
 use crate::domain::generation::{
     ImplementAsset, implementation_file_name, implementation_target_path,
-    is_generated_unit_test_name, is_pending_step_body, steps_target_path, unit_test_file_name,
-    unit_test_target_path,
+    is_generated_unit_test_name, is_pending_step_body, snake_case, steps_target_path,
+    unit_test_file_name, unit_test_target_path,
 };
 use crate::domain::language::Language;
 use crate::domain::layout::{in_production_root, in_test_root};
@@ -439,6 +439,25 @@ pub(crate) fn production_path(
 fn convention_names_this_project(language: Language, project: &str) -> bool {
     let renamed = format!("{project} renamed");
     implementation_file_name(language, project) != implementation_file_name(language, &renamed)
+}
+
+/// Where an unattended attempt writes when no step names a production
+/// file. A conventional name that follows the project (`Kata.java`) is
+/// that file. One that does not — Rust's `lib.rs`, whatever the crate
+/// is called — would put a new behavior in the module list, so the
+/// attempt gets a new file named for the requirement instead.
+pub(crate) fn unattended_production_file(
+    layout: &ProjectStructure,
+    language: Language,
+    project: &str,
+    title: &str,
+) -> String {
+    let name = if convention_names_this_project(language, project) {
+        implementation_file_name(language, project)
+    } else {
+        format!("{}.{}", snake_case(title), source_extension(language))
+    };
+    in_production_root(layout, &name)
 }
 
 /// The file the scenarios' own code points at, when it points clearly.

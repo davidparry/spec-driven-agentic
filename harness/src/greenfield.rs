@@ -23,8 +23,7 @@ use crate::application::scenario_service::ScenarioService;
 use crate::application::spec_mutation_service::SpecMutationService;
 use crate::application::tdd_service::{TddError, TddService};
 use crate::bootstrap::{
-    IMPLEMENT_ATTEMPT_WORK, LOOP_CLOSED, ensure_project, ensure_spec, refresh_project_memory,
-    run_and_narrate,
+    LOOP_CLOSED, attempt_work, ensure_project, ensure_spec, refresh_project_memory, run_and_narrate,
 };
 use crate::domain::language::Language;
 use crate::domain::layout::in_feature_root;
@@ -509,7 +508,8 @@ impl Greenfield {
         req_id: &str,
     ) -> Result<(), String> {
         let brief = tdd.implementation_brief(req_id).map_err(tdd_message)?;
-        let work = prompter.working(IMPLEMENT_ATTEMPT_WORK);
+        let destinations = implement.attempt_destinations(req_id).unwrap_or_default();
+        let work = prompter.working(&attempt_work(&self.root, &destinations));
         // A greenfield project has no production file yet, so the
         // target resolves by convention and never needs --into.
         let outcome = implement.generate(

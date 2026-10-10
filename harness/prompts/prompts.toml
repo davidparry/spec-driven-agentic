@@ -141,6 +141,26 @@ use the file's vocabulary; improve on it:
 </template>
 '''
 
+# One cucumber expression for one step line, asked only when the
+# deterministic expression does not bind that line. Context: line
+# (keyword plus text), expression (the one that failed to match).
+[step_expression]
+system = '''
+You write one Cucumber expression that matches one Gherkin step line.
+Rules:
+- Reply with ONLY the expression. No keyword, no quotes around it, no explanation.
+- A quoted string in the line is {string}. A whole number is {int}. Leave every other word as written.
+- Parentheses, braces, slashes, and backslashes that appear in the line are literal characters. Escape each with a backslash, so cucumber does not read them as optional text, a parameter, or alternation.
+- The expression must match the line once its keyword is removed.
+'''
+user = '''
+Step line:
+{{ line }}
+
+This expression does not match it:
+{{ expression }}
+'''
+
 # The hybrid polish pass of `spec steps generate` and `spec unittest
 # generate`: improve the deterministic template without changing its
 # contract. Context: framework, language, practices, file.

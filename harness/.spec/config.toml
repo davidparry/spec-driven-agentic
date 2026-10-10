@@ -45,4 +45,4 @@ cache_ttl_seconds = 86400
 # tests/decision_live.rs.
 [decision]
 model = "nimble:latest"
-mode = "advisory"
+mode = "enforce"

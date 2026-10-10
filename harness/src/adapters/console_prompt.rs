@@ -4,7 +4,8 @@
 
 use std::io::{BufRead, Write};
 
-use crate::ports::{PromptError, Prompter};
+use crate::adapters::spinner::Spinner;
+use crate::ports::{PromptError, Prompter, Working};
 
 pub struct ConsolePrompter<R: BufRead, W: Write> {
     input: R,
@@ -146,6 +147,15 @@ impl<R: BufRead, W: Write> Prompter for ConsolePrompter<R, W> {
         let _ = writeln!(self.output, "{RED}{message}{RESET}");
     }
 
+    /// The same animated indicator the readline prompter starts. `spec
+    /// deliver` narrates through this prompter, and the default
+    /// `working` only prints the line once, so "Running the tests -
+    /// working ..." sat still and uncolored while every other wait
+    /// blinked.
+    fn working(&mut self, message: &str) -> Box<dyn Working> {
+        Box::new(Spinner::start(message))
+    }
+
     fn ask(&mut self, question: &str) -> Result<String, PromptError> {
         let _ = write!(self.output, "{} ", highlight_suggestion(question));
         let _ = self.output.flush();
@@ -171,6 +181,16 @@ mod tests {
         let mut p = prompter("  a fine title  \n");
         assert_eq!(p.ask("Title?").unwrap(), "a fine title");
         assert_eq!(String::from_utf8(p.output).unwrap(), "Title? ");
+    }
+
+    #[test]
+    fn working_starts_the_spinner_instead_of_telling_the_line() {
+        let mut p = prompter("");
+        drop(p.working("Running the tests - working"));
+        assert!(
+            p.output.is_empty(),
+            "a told line would be plain and still; the spinner writes the indicator"
+        );
     }
 
     #[test]

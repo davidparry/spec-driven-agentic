@@ -44,6 +44,26 @@ pub const LOOP_CLOSED: &str = "is implemented. Loop closed.";
 /// so a reader watching either command sees the same words.
 pub const IMPLEMENT_ATTEMPT_WORK: &str = "Generating an implementation attempt - working";
 
+/// The same label, naming the files the attempt will write once they
+/// are known. Paths are absolute: the reader may be anywhere on the
+/// machine. An empty list keeps the label with no file on it.
+pub fn attempt_work(root: &Path, files: &[String]) -> String {
+    if files.is_empty() {
+        return IMPLEMENT_ATTEMPT_WORK.to_string();
+    }
+    let paths = files
+        .iter()
+        .map(|file| {
+            std::path::absolute(root.join(file))
+                .unwrap_or_else(|_| root.join(file))
+                .display()
+                .to_string()
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("Generating an implementation attempt - {paths} - working")
+}
+
 /// Run the tests and narrate the outcome. `Ok(None)` means the
 /// runtime is missing: execution stops but authoring stands.
 pub fn run_and_narrate(
@@ -56,10 +76,7 @@ pub fn run_and_narrate(
     drop(work);
     match outcome {
         Ok(report) => {
-            prompter.tell(&format!(
-                "{}: {} tests, {} failures, {} errors.",
-                report.phase, report.tests, report.failures, report.errors
-            ));
+            prompter.tell(&bar_line(&report));
             for detail in &report.failure_details {
                 prompter.tell(&format!("  - {detail}"));
             }
@@ -71,6 +88,22 @@ pub fn run_and_narrate(
         }
         Err(TddError::Other(message)) => Err(message),
     }
+}
+
+/// The one-line bar. A skipped scenario is an unbound step, and leaving
+/// it off this line is how one reads as `0 errors` while a scenario
+/// never ran. Zero skipped stays off the line: the counts that did not
+/// change are not the story.
+pub(crate) fn bar_line(report: &TestReport) -> String {
+    let mut line = format!(
+        "{}: {} tests, {} failures, {} errors",
+        report.phase, report.tests, report.failures, report.errors
+    );
+    if report.skipped > 0 {
+        line.push_str(&format!(", {} skipped", report.skipped));
+    }
+    line.push('.');
+    line
 }
 
 /// Whether the root already holds marker files for a supported language,
@@ -209,6 +242,66 @@ fn project_name(root: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_skipped_scenario_is_on_the_bar_and_a_clean_run_leaves_it_off() {
+        let red = TestReport {
+            phase: "RED".into(),
+            tests: 1750,
+            failures: 11,
+            errors: 0,
+            skipped: 1,
+            failure_details: vec![],
+            next_step: String::new(),
+        };
+        assert_eq!(
+            bar_line(&red),
+            "RED: 1750 tests, 11 failures, 0 errors, 1 skipped."
+        );
+        let green = TestReport {
+            phase: "GREEN".into(),
+            tests: 8,
+            failures: 0,
+            errors: 0,
+            skipped: 0,
+            failure_details: vec![],
+            next_step: String::new(),
+        };
+        assert_eq!(bar_line(&green), "GREEN: 8 tests, 0 failures, 0 errors.");
+    }
+
+    #[test]
+    fn an_attempt_names_the_files_it_will_write_by_their_complete_paths() {
+        let root = std::env::temp_dir().join("kata");
+        assert_eq!(attempt_work(&root, &[]), IMPLEMENT_ATTEMPT_WORK);
+        let one = attempt_work(&root, &["src/main/java/Kata.java".into()]);
+        let full = std::path::absolute(root.join("src/main/java/Kata.java")).unwrap();
+        assert_eq!(
+            one,
+            format!(
+                "Generating an implementation attempt - {} - working",
+                full.display()
+            )
+        );
+        let two = attempt_work(
+            &root,
+            &[
+                "src/main/java/Kata.java".into(),
+                "src/main/java/Port.java".into(),
+            ],
+        );
+        assert!(two.contains(&full.display().to_string()), "{two}");
+        assert!(
+            two.contains(
+                &std::path::absolute(root.join("src/main/java/Port.java"))
+                    .unwrap()
+                    .display()
+                    .to_string()
+            ),
+            "{two}"
+        );
+        assert!(two.ends_with(" - working"), "{two}");
+    }
 
     #[test]
     fn a_project_is_detected_from_its_marker_files() {

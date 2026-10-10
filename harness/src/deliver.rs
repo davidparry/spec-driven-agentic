@@ -49,8 +49,8 @@ use crate::application::scenario_service::ScenarioService;
 use crate::application::spec_mutation_service::SpecMutationService;
 use crate::application::tdd_service::{TddError, TddService, TestReport};
 use crate::bootstrap::{
-    IMPLEMENT_ATTEMPT_WORK, LOOP_CLOSED, ensure_project, ensure_spec, has_readable_spec,
-    project_detected, refresh_project_memory, run_and_narrate,
+    LOOP_CLOSED, attempt_work, ensure_project, ensure_spec, has_readable_spec, project_detected,
+    refresh_project_memory, run_and_narrate,
 };
 use crate::domain::decision::Judgment;
 use crate::domain::language::Language;
@@ -674,6 +674,12 @@ impl Deliver {
                 phase: None,
             }));
         }
+        if let Err(error) = self.mutation_service().set_feature(req_id, &feature_path) {
+            prompter.warn(&format!(
+                "{req_id} still does not record its feature file - {}",
+                error.0
+            ));
+        }
         prompter.tell(&format!("Scenarios written to {feature_path}."));
         Ok(verified(self.scenario_missing(language, req_id)?, || {
             unverified_scenario(req_id, &feature_path)
@@ -1071,7 +1077,8 @@ impl Deliver {
                 return Ok(());
             }
         };
-        let work = prompter.working(IMPLEMENT_ATTEMPT_WORK);
+        let destinations = implement.attempt_destinations(req_id).unwrap_or_default();
+        let work = prompter.working(&attempt_work(&self.root, &destinations));
         let outcome = implement.generate(
             prompter,
             req_id,
