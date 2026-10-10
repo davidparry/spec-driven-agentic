@@ -2215,8 +2215,11 @@ fn run_deliver(
     // before the auto-answering one takes over. Scaffolding questions
     // come after, and `Deliver::run` refuses a project it would have to
     // scaffold - so the same refusal is made first, rather than asking
-    // about a branch for a run that cannot start.
-    if spec_harness::bootstrap::project_detected(root) {
+    // about a branch for a run that cannot start. `--no-branch` is read
+    // here too, before a prompter exists: the prompter for a pipe warns
+    // that prompts come from the pipe, and a run that asks nothing has
+    // no business saying so.
+    if !no_branch && spec_harness::bootstrap::project_detected(root) {
         let mut asking = interactive_prompter(Prompts::Incidental);
         spec_harness::branch::offer_branch(
             asking.as_mut(),

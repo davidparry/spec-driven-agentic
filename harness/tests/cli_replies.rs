@@ -207,6 +207,29 @@ fn a_command_that_writes_is_not_warned_that_it_writes_nothing() {
     assert!(!warning.contains("writes nothing"), "{warning}");
 }
 
+/// `spec deliver --no-branch` asks nothing: the flag skips the one
+/// human question and the auto-answering prompter takes the rest. On a
+/// pipe - the CI shape the flag exists for - it was still told to run
+/// in a terminal to answer the prompts, because the prompter for the
+/// branch question was built before the flag was read.
+#[test]
+fn an_unattended_delivery_is_not_told_to_answer_prompts_it_will_never_be_asked() {
+    let dir = project(VALID);
+    fs::write(
+        dir.path().join("Cargo.toml"),
+        "[package]\nname = \"demo\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+    )
+    .unwrap();
+    fs::create_dir_all(dir.path().join("src")).unwrap();
+    fs::write(dir.path().join("src/lib.rs"), "").unwrap();
+    let output = spec_run(dir.path(), &["deliver", "REQ-001", "--no-branch"]);
+    let warning = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        !warning.contains("stdin is not a terminal"),
+        "stderr: {warning}"
+    );
+}
+
 /// The wizard warning is still earned where it is true: `spec reword`
 /// asks "Write this?" last, and a spent pipe answers no - which is
 /// exactly what happens here, so the reply confirms the warning.
