@@ -273,6 +273,7 @@ Rules:
 - Write the production code at {{ production_path }} implementing exactly the behavior the acceptance criteria describe - nothing more.
 - When a failure says a Cucumber/Gherkin step is undefined, the step-definition expression does not match the scenario line (including trailing punctuation such as a period). You MUST update that step-definition file in this same reply so the expression matches the line exactly; rewriting {{ production_path }} cannot bind an undefined step.
 - The reply MUST include {{ production_path }} with the complete production code. If the failures name a step-definition or test file, include that file too - an attempt that rewrites only {{ production_path }} cannot fix a glue mismatch.
+- A file shown below with no body does not exist yet. Include it in the reply with its complete contents; that is how it is created.
 - Replace TODO/pending placeholders in the test and step-definition files with real bodies that call the production code. Keep every scenario, step expression, and test case - never delete or weaken one.
 - Reply with ONLY a JSON array - no prose, no markdown, no code fences, no <think> tags. Each element: {"path": "<one of the listed paths>", "content": "<the complete file>"}.
 - Only these paths may appear: {{ production_path }} and the project files below.

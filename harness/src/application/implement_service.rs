@@ -528,6 +528,10 @@ where
         let judge = self.judge.as_deref();
         let mut judgments = Vec::new();
         let mut asserts = Vec::new();
+        // The last reply that actually contained production code. A later
+        // refusal - placeholders still standing, or the array cut off
+        // after this file - must not throw that code away.
+        let kept_production = std::cell::RefCell::new(Vec::new());
         let asserts_gate = gated(
             judge,
             self.policies.policy_for(&UNIT_TEST_ASSERTS),
@@ -544,6 +548,15 @@ where
                     .collect();
                 if updates.is_empty() {
                     return Err("the reply held no usable file update for this project".into());
+                }
+                let production_updates: Vec<FileUpdate> = updates
+                    .iter()
+                    .filter(|update| allowed.contains(&update.path))
+                    .filter(|update| !is_unchanged(&files, update))
+                    .cloned()
+                    .collect();
+                if !production_updates.is_empty() {
+                    *kept_production.borrow_mut() = production_updates;
                 }
                 let unasserted = unasserted_criteria(&files, &updates, &unit_test, criteria);
                 if !unasserted.is_empty() {
@@ -589,12 +602,10 @@ where
         }
         judgments.append(&mut asserts);
         judgments.append(&mut complete);
-        let updates = match attempt {
-            Ok(updates) => updates,
+        let salvaged = kept_production.into_inner();
+        let (updates, refusal) = match attempt {
+            Ok(updates) => (updates, None),
             Err(error) => {
-                // A refused attempt has no report to carry its
-                // judgments, so they are kept for the caller to read.
-                self.judgments.borrow_mut().append(&mut judgments);
                 let reason = match error {
                     LlmReplyError::Call(e) => {
                         let reason = LlmReplyError::call_failed(&e);
@@ -608,7 +619,18 @@ where
                         format!("The model's reply was refused: {reason}")
                     }
                 };
-                return Err(ServiceError(reason));
+                // The production file was in the reply. Refusing the
+                // rest - a placeholder the model left, a later file the
+                // reply never finished - used to discard that file too,
+                // so the attempt ended with the path named and nothing
+                // on disk.
+                if salvaged.is_empty() {
+                    // A refused attempt has no report to carry its
+                    // judgments, so they are kept for the caller to read.
+                    self.judgments.borrow_mut().append(&mut judgments);
+                    return Err(ServiceError(reason));
+                }
+                (salvaged, Some(reason))
             }
         };
         let summary = format!("implementation attempt for {req_id} (llm)");
@@ -647,6 +669,9 @@ where
             .iter()
             .map(|(path, damage)| damage.describe(path))
             .collect();
+        if let Some(reason) = refusal {
+            warnings.insert(0, reason);
+        }
         // A reply without the production code is an incomplete attempt:
         // the tests will stay RED. Stage what arrived, but say so. A
         // refusal has already said it, and said more.
@@ -900,17 +925,20 @@ fn is_unchanged(files: &[(String, String)], update: &FileUpdate) -> bool {
         .any(|(path, content)| *path == update.path && *content == update.content)
 }
 
-/// What writing this update would destroy, if the file already exists.
+/// What writing this update would destroy.
 ///
 /// A path the project has never seen is the attempt creating something,
-/// and there is nothing there to lose.
+/// and there is nothing there to lose except a body cut off mid-way:
+/// unclosed braces are not a file yet.
 fn replacing(
     files: &[(String, String)],
     update: &FileUpdate,
     language: Language,
 ) -> Option<Damage> {
-    let (_, before) = files.iter().find(|(path, _)| *path == update.path)?;
-    damage(language, before, &update.content)
+    match files.iter().find(|(path, _)| *path == update.path) {
+        Some((_, before)) => damage(language, before, &update.content),
+        None => damage(language, "", &update.content).filter(|found| found == &Damage::Truncated),
+    }
 }
 
 /// [`covers_all`] heuristic, which is why this warns rather than
@@ -1702,15 +1730,16 @@ mod tests {
 
     /// Observed across six measured attempts: the model writes the
     /// production code and hands the generated `fail("TODO: assert")`
-    /// back untouched, so the bar stays red for a reason the attempt
-    /// never addressed. The prompt has always asked for the assertion -
-    /// this is the first thing that checks it arrived.
+    /// back untouched. The complaint still goes back, so the model is
+    /// asked again. When every reply leaves the placeholder, the
+    /// production file that did arrive is written anyway - refusing the
+    /// test stub used to throw the implementation away with it.
     #[test]
-    fn a_reply_that_leaves_the_placeholders_standing_is_refused_and_asked_again() {
+    fn a_reply_that_leaves_the_placeholders_standing_still_writes_the_production_file() {
         let reply = r#"[{"path": "src/main/java/Kata.java",
             "content": "public class Kata { int add(String in) { return 0; } }"}]"#;
         let service = service(vec![generated_test()], Some(FakeLlm::replying(reply)));
-        let error = service
+        let report = service
             .generate(
                 &mut NullPrompter,
                 "REQ-001",
@@ -1719,22 +1748,44 @@ mod tests {
                 &[],
                 None,
             )
-            .unwrap_err();
+            .unwrap();
+        assert_eq!(report.production, ["src/main/java/Kata.java"]);
+        let warning = report.warning.expect("the placeholder is still a finding");
         assert!(
-            error.0.contains("src/test/java/Req001Test.java"),
-            "the refusal names the file still holding the stub: {}",
-            error.0
+            warning.contains("src/test/java/Req001Test.java"),
+            "the refusal names the file still holding the stub: {warning}"
         );
         assert!(
-            error.0.contains("still carries the generated placeholder")
-                && error.0.contains("when add is called"),
-            "the refusal names the criterion left unasserted: {}",
-            error.0
+            warning.contains("still carries the generated placeholder")
+                && warning.contains("when add is called"),
+            "the refusal names the criterion left unasserted: {warning}"
         );
         assert!(
             service.llm.as_ref().unwrap().chat().prompts.borrow().len() > 1,
             "a refused reply is asked again rather than handed back"
         );
+    }
+
+    /// The production file arrived whole and the reply was then cut off
+    /// inside a later file. That first file is the implementation.
+    #[test]
+    fn a_reply_cut_off_after_the_production_file_still_writes_it() {
+        let reply = concat!(
+            r#"[{"path": "src/main/java/Kata.java", "content": "public class Kata { int add(String in) { return 0; } }"}, "#,
+            r#"{"path": "src/test/java/Req001Test.java", "content": "class Req001Test { "#
+        );
+        let service = service(vec![generated_test()], Some(FakeLlm::replying(reply)));
+        let report = service
+            .generate(
+                &mut NullPrompter,
+                "REQ-001",
+                &["boom".into()],
+                &[],
+                &[],
+                None,
+            )
+            .unwrap();
+        assert_eq!(report.production, ["src/main/java/Kata.java"], "{report:?}");
     }
 
     /// A declared file that does not exist yet is exactly the file an

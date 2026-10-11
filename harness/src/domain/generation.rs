@@ -630,12 +630,23 @@ pub fn implementation_prompt(
     // budget the walk could otherwise map it away just when the attempt
     // has to replace its placeholders. A seed the project does not
     // have is ignored by the walk, so a missing test costs nothing.
+    //
+    // A target that is not on disk yet is still a file the attempt has
+    // to write. The walk can only show a file it was given, so the
+    // missing one is handed over empty - the prompt's own rule reads an
+    // empty body as "this file does not exist yet; create it."
+    let mut shown: Vec<(String, String)> = files.to_vec();
+    for target in targets {
+        if !shown.iter().any(|(path, _)| path == target) {
+            shown.push((target.clone(), String::new()));
+        }
+    }
     let mut seeds: Vec<&str> = targets.iter().map(String::as_str).collect();
     seeds.extend(implicated.iter().copied());
     if !unit_test.is_empty() {
         seeds.push(unit_test);
     }
-    let selected = neighborhood::select(language, files, &seeds, PROMPT_SOURCE_BUDGET);
+    let selected = neighborhood::select(language, &shown, &seeds, PROMPT_SOURCE_BUDGET);
     let files_context: Vec<FileContext> = selected
         .included
         .iter()
@@ -736,7 +747,7 @@ pub fn parse_file_updates(reply: &str) -> Vec<FileUpdate> {
     // array - accept both shapes rather than discarding a usable attempt.
     let updates = serde_json::from_str::<Vec<FileUpdate>>(&body)
         .or_else(|_| serde_json::from_str::<FileUpdate>(&body).map(|update| vec![update]))
-        .unwrap_or_default();
+        .unwrap_or_else(|_| complete_file_updates(&body));
     let updates: Vec<FileUpdate> = updates
         .into_iter()
         .filter(|update| !update.path.trim().is_empty() && !update.content.trim().is_empty())
@@ -757,6 +768,71 @@ pub fn parse_file_updates_checked(reply: &str) -> Result<Vec<FileUpdate>, String
     } else {
         Ok(updates)
     }
+}
+
+/// The complete `{path, content}` objects in a JSON array the model did
+/// not finish. A reply cut off while writing a later file used to parse
+/// as nothing, so the production file that arrived whole was thrown away
+/// with the fragment after it.
+fn complete_file_updates(body: &str) -> Vec<FileUpdate> {
+    let Some(start) = body.find('[') else {
+        return Vec::new();
+    };
+    let mut rest = body[start + 1..].trim_start();
+    let mut updates = Vec::new();
+    while rest.starts_with('{') {
+        let Some(end) = json_object_end(rest) else {
+            break;
+        };
+        let (object, after) = rest.split_at(end);
+        let Ok(update) = serde_json::from_str::<FileUpdate>(object) else {
+            break;
+        };
+        if !update.path.trim().is_empty() && !update.content.trim().is_empty() {
+            updates.push(update);
+        }
+        rest = after.trim_start();
+        let Some(stripped) = rest.strip_prefix(',') else {
+            break;
+        };
+        rest = stripped.trim_start();
+    }
+    updates
+}
+
+/// The byte after the JSON object `input` starts with, when that object
+/// is closed. A string's braces are not structure, and an object the
+/// reply never finished has no end.
+fn json_object_end(input: &str) -> Option<usize> {
+    let mut depth = 0i32;
+    let mut in_string = false;
+    let mut escape = false;
+    for (index, ch) in input.char_indices() {
+        if in_string {
+            if escape {
+                escape = false;
+            } else {
+                match ch {
+                    '\\' => escape = true,
+                    '"' => in_string = false,
+                    _ => {}
+                }
+            }
+            continue;
+        }
+        match ch {
+            '"' => in_string = true,
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(index + ch.len_utf8());
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 /// The first JSON value in `body` opening with `open`. Models often
@@ -3288,6 +3364,45 @@ io.cucumber.junit.platform.engine.UndefinedStepException: The step 'the result i
         assert!(parse_file_updates("Sure! Here is the code:").is_empty());
         assert!(parse_file_updates(r#"[{"path": "", "content": "x"}]"#).is_empty());
         assert!(parse_file_updates(r#"[{"path": "src/lib.rs", "content": "  "}]"#).is_empty());
+    }
+
+    #[test]
+    fn a_reply_cut_off_after_a_complete_file_keeps_that_file() {
+        let reply = concat!(
+            r#"[{"path": "src/report.rs", "content": "pub fn report() { println!(\"hi\"); }"}, "#,
+            r#"{"path": "tests/cucumber.rs", "content": "fn todo("#
+        );
+        let updates = parse_file_updates(reply);
+        assert_eq!(updates.len(), 1, "{updates:?}");
+        assert_eq!(updates[0].path, "src/report.rs");
+        assert!(updates[0].content.contains("println!(\"hi\")"));
+    }
+
+    #[test]
+    fn a_production_file_that_does_not_exist_yet_is_shown_empty() {
+        let prompt = implementation_prompt(
+            Language::Rust,
+            &requirement(),
+            &["the new tests failed".into()],
+            &[],
+            &[],
+            &[(
+                "tests/harness_019_test.rs".into(),
+                "#[test] fn t() { unimplemented!() }".into(),
+            )],
+            &["src/report_acceptance_criterion_status_for_a_requirement.rs".into()],
+            "tests/harness_019_test.rs",
+        );
+        assert!(
+            prompt
+                .user
+                .contains("--- src/report_acceptance_criterion_status_for_a_requirement.rs ---\n"),
+            "the file the attempt will create has to be in the prompt"
+        );
+        assert!(
+            prompt.system.contains("does not exist yet"),
+            "the prompt tells the model an empty file is one to create"
+        );
     }
 
     #[test]

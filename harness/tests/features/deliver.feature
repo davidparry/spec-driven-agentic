@@ -250,9 +250,10 @@ Feature: Deliver mode
   # The generated unit test ships with a `TODO: assert` placeholder on
   # purpose - writing the assertion is the point of the exercise. An
   # attempt that writes production code and leaves the placeholder
-  # standing has written nothing the suite can fail on, and six measured
-  # attempts did exactly that while the failure count climbed.
-  Scenario: An attempt that leaves the generated placeholder standing is refused
+  # standing is asked again, and the complaint is told. The production
+  # file that did arrive is kept: refusing the stub used to throw the
+  # implementation away with it, so the named source file was never written.
+  Scenario: An attempt that leaves the generated placeholder standing keeps the production file
     Given a Java project marker
     And a working spec with the pending requirements "REQ-001"
     And a model is resolved
@@ -270,6 +271,7 @@ Feature: Deliver mode
     When the delivery runs for "REQ-001"
     Then the delivery is not completed
     And the developer was told a finding containing "still carries the generated placeholder"
+    And the working tree file "src/main/java/Kata.java" contains "public class Kata"
 
   # The file a delivery wrote is recorded on the requirement, so the next
   # attempt writes where the last one did instead of inferring the path
