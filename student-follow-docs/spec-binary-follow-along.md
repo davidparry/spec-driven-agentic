@@ -1526,7 +1526,13 @@ Choose [r]eword again, [m]anual rewording without the model, [a]ccept as-is and 
 
 `a` stages the requirement with the open findings recorded in the reply,
 and the `nextStep` reminds you that `spec reword REQ-007` can revisit
-them. This escape hatch exists for **wording** findings only. A
+them. Enter means `r` the first time. If you take that and the next pass
+earns exactly the same findings again, the prompt comes back reading
+`Enter for a`: another identical pass is not what anyone is asking for,
+and this is also how `spec deliver`, which answers every prompt with
+Enter, gets out of the loop with a staged requirement instead of twelve
+passes and nothing written. This escape hatch exists for **wording**
+findings only. A
 structurally invalid requirement — Extra A's case — keeps the loop honest
 however long it takes, because a spec that fails `spec validate` is not
 usable at all.

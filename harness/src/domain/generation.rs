@@ -473,13 +473,16 @@ const PROMPT_HISTORY_ATTEMPTS: usize = 3;
 /// How much source text one implementation prompt may carry, in bytes.
 /// A kata fits whole; a project of any size does not, and every byte
 /// past the change itself is prefill a local model pays for twice -
-/// once waiting, once generating. Roughly 10k tokens, which leaves
+/// once waiting, once generating. Roughly 6k tokens, which leaves
 /// room for the requirement, the failures, the attempt history, and
 /// the reply. The files the attempt must write (its targets, the files
 /// the failures name, and the unit test carrying the assertions) are
 /// seeds and are always shown whole; everything past the budget is
-/// named in the map instead.
-const PROMPT_SOURCE_BUDGET: usize = 40_000;
+/// named in the map instead. Sized against a measured run: a 128 GiB
+/// machine serving a 105 GB model prefilled 13.5k tokens in 2m40s and
+/// the attempt passed four minutes before the reply was in; the
+/// neighbours this trims are what that prompt could afford to lose.
+const PROMPT_SOURCE_BUDGET: usize = 24_000;
 const PROMPT_FAILURE_BRIEF_CHARS: usize = 300;
 
 /// Project files the failures point at, in the order they appear in
@@ -530,6 +533,94 @@ fn is_step_definition_path(path: &str) -> bool {
         || name.contains("steps.")
         || lower.contains("/step_definitions/")
         || lower.contains("/steps/")
+}
+
+/// Lines of context shown on each side of a line the failures name,
+/// when a file is too large to show whole.
+const EXCERPT_CONTEXT_LINES: usize = 40;
+
+/// The line numbers the failures give for `path`, from `name:LINE`
+/// mentions (a compiler's `--> tests/cucumber.rs:5610:1`, a panic's
+/// `tests/cucumber.rs:5610:5`, a Java frame's `(Steps.java:42)`).
+pub(crate) fn failure_lines(path: &str, failures: &[String]) -> Vec<usize> {
+    let Some(name) = std::path::Path::new(path)
+        .file_name()
+        .and_then(|name| name.to_str())
+    else {
+        return Vec::new();
+    };
+    let text = failures.join("\n");
+    let mut lines: Vec<usize> = text
+        .match_indices(name)
+        .filter_map(|(at, _)| {
+            let after = &text[at + name.len()..];
+            let digits: String = after
+                .strip_prefix(':')?
+                .chars()
+                .take_while(char::is_ascii_digit)
+                .collect();
+            digits.parse().ok()
+        })
+        .collect();
+    lines.sort_unstable();
+    lines.dedup();
+    lines
+}
+
+/// A file the failures name that the prompt cannot carry whole: the
+/// lines they point at with context on either side, and a line saying
+/// what was left out.
+///
+/// Shown whole, a 5,600-line step-definition file put 216 KB into one
+/// prompt - 58k tokens, eleven minutes of prefill on the local model
+/// before the first token came back - for a file the reply can never
+/// return whole either (the reply guard refuses a replacement that
+/// drops a name, and 58k tokens of output is longer than the wait).
+/// The file's pending bodies are the step-fill pass's business; the
+/// attempt needs to see the failing lines, not the file.
+///
+/// Without a line number the head of the file is shown, which is
+/// where the imports, the world type, and the fixtures are.
+pub(crate) fn excerpt_for_prompt(path: &str, content: &str, failures: &[String]) -> String {
+    let lines: Vec<&str> = content.lines().collect();
+    let total = lines.len();
+    let mut named = failure_lines(path, failures);
+    named.retain(|line| (1..=total).contains(line));
+    let mut ranges: Vec<(usize, usize)> = Vec::new();
+    if named.is_empty() {
+        ranges.push((1, EXCERPT_CONTEXT_LINES.min(total)));
+    }
+    for line in named {
+        let start = line.saturating_sub(EXCERPT_CONTEXT_LINES).max(1);
+        let end = (line + EXCERPT_CONTEXT_LINES).min(total);
+        match ranges.last_mut() {
+            Some((_, last_end)) if start <= *last_end + 1 => *last_end = (*last_end).max(end),
+            _ => ranges.push((start, end)),
+        }
+    }
+    let mut out = format!(
+        "// EXCERPT of {path}: {total} lines, {} bytes - too large for this prompt. Shown: the \
+         lines the failures name, with context. Do NOT reply with this file; what is wrong in \
+         it is fixed by its own pass.\n",
+        content.len()
+    );
+    let mut cursor = 1;
+    for (start, end) in ranges {
+        if start > cursor {
+            out.push_str(&format!(
+                "// ... lines {cursor}-{} omitted ...\n",
+                start - 1
+            ));
+        }
+        for (offset, line) in lines[start - 1..end].iter().enumerate() {
+            out.push_str(&format!("{:>5}| {line}\n", start + offset));
+        }
+        cursor = end + 1;
+    }
+    if cursor <= total {
+        out.push_str(&format!("// ... lines {cursor}-{total} omitted ...\n"));
+    }
+    out
 }
 
 /// A prior failure, briefed for the prompt: its first line, capped.
@@ -636,7 +727,20 @@ pub fn implementation_prompt(
     // to write. The walk can only show a file it was given, so the
     // missing one is handed over empty - the prompt's own rule reads an
     // empty body as "this file does not exist yet; create it."
-    let mut shown: Vec<(String, String)> = files.to_vec();
+    let mut shown: Vec<(String, String)> = files
+        .iter()
+        .map(|(path, content)| {
+            let whole = targets.contains(path)
+                || path == unit_test
+                || !implicated.contains(&path.as_str())
+                || content.len() <= PROMPT_SOURCE_BUDGET;
+            if whole {
+                (path.clone(), content.clone())
+            } else {
+                (path.clone(), excerpt_for_prompt(path, content, failures))
+            }
+        })
+        .collect();
     for target in targets {
         if !shown.iter().any(|(path, _)| path == target) {
             shown.push((target.clone(), String::new()));
@@ -3039,6 +3143,105 @@ io.cucumber.junit.platform.engine.UndefinedStepException: The step 'the result i
             "prompt was {} bytes",
             prompt.user.len()
         );
+    }
+
+    #[test]
+    fn a_step_file_the_failures_name_that_overruns_the_budget_is_shown_as_an_excerpt() {
+        // Measured: a 5,600-line step file named by one compiler error
+        // was seeded whole - 216 KB, 58k tokens, eleven minutes of
+        // prefill. The attempt needs the failing lines, not the file.
+        let mut steps = String::from(
+            "use cucumber::World;\n#[derive(Debug, Default, World)]\nstruct SpecWorld;\n",
+        );
+        for n in 0..5_000 {
+            steps.push_str(&format!("fn step_{n}() {{ let _ = {n}; }}\n"));
+        }
+        assert!(steps.len() > PROMPT_SOURCE_BUDGET);
+        let files = vec![
+            ("src/report.rs".into(), "pub fn report() {}".to_string()),
+            ("tests/cucumber.rs".into(), steps),
+            ("tests/req_001_test.rs".into(), "#[test] fn t() {}".into()),
+        ];
+        let failure = "thread 'main' panicked at tests/cucumber.rs:4203:5:\nnot yet implemented";
+        let prompt = implementation_prompt(
+            Language::Rust,
+            &requirement(),
+            &[failure.into()],
+            &[],
+            &[],
+            &files,
+            &["src/report.rs".to_string()],
+            "tests/req_001_test.rs",
+        );
+        assert!(
+            prompt.user.contains("--- tests/cucumber.rs ---"),
+            "the named file is still shown"
+        );
+        assert!(
+            prompt
+                .user
+                .contains("// EXCERPT of tests/cucumber.rs: 5003 lines"),
+            "as an excerpt: {}",
+            &prompt.user[..2_000]
+        );
+        assert!(
+            prompt.user.contains(" 4203| fn step_4199()"),
+            "the named line"
+        );
+        assert!(
+            prompt.user.contains(" 4163| fn step_4159()"),
+            "and context before it"
+        );
+        assert!(prompt.user.contains(" 4243| fn step_4239()"), "and after");
+        assert!(!prompt.user.contains("fn step_100()"), "but not the rest");
+        assert!(prompt.user.contains("// ... lines 1-4162 omitted ..."));
+        assert!(prompt.user.contains("// ... lines 4244-5003 omitted ..."));
+        assert!(
+            prompt.user.len() < PROMPT_SOURCE_BUDGET * 2,
+            "prompt was {} bytes",
+            prompt.user.len()
+        );
+    }
+
+    #[test]
+    fn failure_lines_reads_compiler_panic_and_java_frames_and_the_excerpt_merges_neighbours() {
+        let failures = vec![
+            "  --> tests/cucumber.rs:5610:1".to_string(),
+            "panicked at tests/cucumber.rs:5612:9".to_string(),
+            "at steps.Steps.given(Steps.java:42)".to_string(),
+            "tests/cucumber.rs:5610 again, and tests/cucumber.rs:abc".to_string(),
+        ];
+        assert_eq!(
+            failure_lines("tests/cucumber.rs", &failures),
+            vec![5610, 5612]
+        );
+        assert_eq!(
+            failure_lines("src/test/java/steps/Steps.java", &failures),
+            vec![42]
+        );
+        assert!(failure_lines("src/lib.rs", &failures).is_empty());
+
+        let content: String = (1..=100).map(|n| format!("line {n}\n")).collect();
+        let excerpt = excerpt_for_prompt(
+            "tests/cucumber.rs",
+            &content,
+            &[
+                "tests/cucumber.rs:10:1".into(),
+                "tests/cucumber.rs:30:1".into(),
+            ],
+        );
+        assert!(excerpt.contains("    1| line 1\n"), "{excerpt}");
+        assert!(excerpt.contains("   70| line 70\n"), "{excerpt}");
+        assert!(!excerpt.contains("line 71\n"), "{excerpt}");
+        assert_eq!(
+            excerpt.matches("omitted").count(),
+            1,
+            "one tail, no gap: {excerpt}"
+        );
+
+        let head = excerpt_for_prompt("tests/cucumber.rs", &content, &["no line named".into()]);
+        assert!(head.contains("    1| line 1\n") && head.contains("   40| line 40\n"));
+        assert!(head.contains("// ... lines 41-100 omitted ..."), "{head}");
     }
 
     #[test]

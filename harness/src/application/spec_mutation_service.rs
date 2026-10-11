@@ -87,11 +87,11 @@ pub struct DraftReport {
 ///
 /// The other two bounds can both be reset: `max_reword_passes` only
 /// applies once the structural findings are clear, and the stall prompt's
-/// Enter default is "reword again", which zeroes the counter. So without a
-/// ceiling nothing a caller can answer guarantees the loop ends, and a
-/// caller that always answers the same way - a run with nobody at the
-/// keyboard, a pipe of stale answers - would never leave it. Generous
-/// enough that a developer working through real findings will not meet it.
+/// Enter default is "reword again" (until the second identical stall,
+/// when it becomes "accept"), which zeroes the counter. So without a
+/// ceiling an explicit `r` every time would never leave the loop.
+/// Generous enough that a developer working through real findings will
+/// not meet it.
 const MAX_DRAFT_PASSES: u32 = 12;
 
 /// The wizard's questions, named so the end-to-end driver in
@@ -1095,9 +1095,9 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: WorkTree, S: StateS
     /// The wizard loop shared by manual and assisted drafting. `prior`
     /// pre-fills every prompt (a model proposal or the previous pass's
     /// answers); validate + refine findings drive rewording until clean.
-    /// A pass that changes nothing, or `max_reword_passes` passes without
-    /// a clean read, hands the decision back to the developer rather than
-    /// looping forever.
+    /// A pass that earns the same findings, or `max_reword_passes` passes
+    /// without a clean read, hands the decision back to the developer
+    /// rather than looping forever.
     fn draft_loop(
         &self,
         prompter: &mut dyn Prompter,
@@ -1118,6 +1118,9 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: WorkTree, S: StateS
         // is going nowhere.
         let mut passes = 0;
         let mut previous: Option<Vec<String>> = None;
+        // Stall prompts answered "reword again" in a row with nothing
+        // new found since. Twice is where Enter stops meaning it.
+        let mut stalls_in_a_row = 0u32;
         // Every pass this draft has taken, which no answer resets - see
         // [`MAX_DRAFT_PASSES`].
         let mut total_passes = 0;
@@ -1180,11 +1183,21 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: WorkTree, S: StateS
                 }
                 let stalled = previous.as_ref() == Some(&listed);
                 previous = Some(listed.clone());
+                if !stalled {
+                    stalls_in_a_row = 0;
+                }
                 // Only wording findings are the developer's to wave through -
                 // a structurally invalid requirement would not validate, so
                 // those keep the loop honest however long it takes.
                 if findings.structural.is_empty() && (stalled || passes >= self.max_reword_passes) {
-                    match self.stalled_choice(prompter, passes, stalled, findings.advisory.len())? {
+                    let choice = self.stalled_choice(
+                        prompter,
+                        passes,
+                        stalled,
+                        findings.advisory.len(),
+                        stalls_in_a_row >= 1,
+                    )?;
+                    match choice {
                         StalledChoice::Accept => {
                             break Gathered::Wording(candidate, title, findings.advisory);
                         }
@@ -1194,6 +1207,7 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: WorkTree, S: StateS
                         }
                         StalledChoice::Reword => passes = 0,
                     }
+                    stalls_in_a_row += 1;
                 }
                 // With a model, the findings become its brief: the next pass's
                 // prompts carry its reworded proposal instead of the raw prior.
@@ -1274,12 +1288,20 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: WorkTree, S: StateS
     /// The way out when rewording stops making progress. Wording
     /// findings are advice, not structure, so whether they stand is the
     /// developer's decision - the wizard asks instead of looping.
+    ///
+    /// Enter means "reword again" the first time. When that was the
+    /// answer last time too and the same findings are back, Enter means
+    /// "accept as-is": another identical pass is not what anyone is
+    /// asking for, and a caller whose every answer is Enter - `spec
+    /// deliver` with nobody at the keyboard - otherwise reworded twelve
+    /// times, several model calls each, and then wrote nothing at all.
     fn stalled_choice(
         &self,
         prompter: &mut dyn Prompter,
         passes: u32,
         stalled: bool,
         open: usize,
+        enter_accepts: bool,
     ) -> Result<StalledChoice, ServiceError> {
         let reason = if stalled {
             format!("{passes} pass(es) produced the same {open} finding(s)")
@@ -1287,14 +1309,23 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: WorkTree, S: StateS
             format!("{passes} pass(es) left {open} finding(s) open")
         };
         prompter.tell(&format!("The wording review is not converging - {reason}."));
+        let default = if enter_accepts { "a" } else { "r" };
         loop {
             let answer = self.ask(
                 prompter,
-                "Choose [r]eword again, [m]anual rewording without the model, \
-                 [a]ccept as-is and stage [r/m/a, Enter for r]:",
+                &format!(
+                    "Choose [r]eword again, [m]anual rewording without the model, \
+                     [a]ccept as-is and stage [r/m/a, Enter for {default}]:"
+                ),
             )?;
-            match answer.to_lowercase().as_str() {
-                "" | "r" => return Ok(StalledChoice::Reword),
+            let answer = answer.to_lowercase();
+            let answer = if answer.is_empty() {
+                default
+            } else {
+                answer.as_str()
+            };
+            match answer {
+                "r" => return Ok(StalledChoice::Reword),
                 "m" => return Ok(StalledChoice::Manual),
                 "a" => return Ok(StalledChoice::Accept),
                 _ => prompter.warn("Answer r, m, or a."),
@@ -2548,6 +2579,85 @@ mod tests {
                 .iter()
                 .any(|l| l.starts_with("Reword the requirement to address each finding.")),
             "the manual instructions still print on fallback"
+        );
+    }
+
+    /// Observed under `spec deliver`, where every answer is Enter: a
+    /// two-When criterion the model could not reword was reviewed
+    /// twelve times - two findings, three model calls each, per pass -
+    /// and then nothing was written. Enter at the first stall asks for
+    /// another go; at the second, with nothing new found, Enter accepts.
+    #[test]
+    fn at_the_second_identical_stall_enter_accepts_the_wording_as_is() {
+        let service = service(Ok(spec()), green());
+        let llm = FakeLlm(Ok("Sure! Here is a better wording:".into()));
+        let two_whens = "Given a requirement with criterion \"Given x, when f is called, then 2\" \
+                         that passed, when the status is requested, then the result is \"proven\"";
+        let mut prompter = ScriptedPrompter::answering(&[
+            "",
+            "Proof status",
+            CLEAN_STORY,
+            two_whens,
+            EDGE_CRITERION,
+            "",
+            // Pass 2 keeps every field; the first stall prompt takes
+            // Enter: reword again.
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            // Pass 3, the same again; the second stall prompt takes
+            // Enter: accept as-is.
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            // "1 wording finding(s) stay open. Write anyway?"
+            "y",
+        ]);
+        let report = service
+            .draft_assisted(&mut prompter, "test-model", &llm)
+            .unwrap();
+        assert!(
+            report.written,
+            "report: {report:?}\n{:#?}",
+            prompter.transcript
+        );
+        assert_eq!(report.findings.len(), 1, "{:?}", report.findings);
+        assert!(
+            report.findings[0].contains("covers more than one action"),
+            "{:?}",
+            report.findings
+        );
+        let stall_prompts: Vec<&String> = prompter
+            .transcript
+            .iter()
+            .filter(|l| l.starts_with("Choose [r]eword again"))
+            .collect();
+        assert_eq!(stall_prompts.len(), 2, "{:#?}", prompter.transcript);
+        assert!(
+            stall_prompts[0].ends_with("Enter for r]:"),
+            "{}",
+            stall_prompts[0]
+        );
+        assert!(
+            stall_prompts[1].ends_with("Enter for a]:"),
+            "{}",
+            stall_prompts[1]
+        );
+        assert_eq!(
+            prompter
+                .transcript
+                .iter()
+                .filter(|l| l.contains("REQ-008 title"))
+                .count(),
+            3,
+            "three passes, no more: {:#?}",
+            prompter.transcript
         );
     }
 

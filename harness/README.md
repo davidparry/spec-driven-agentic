@@ -431,9 +431,14 @@ wins.
 
 Model calls are cached in two complementary layers:
 
-- **Model residency**: every request carries `keep_alive: "30m"`, so
-  Ollama keeps the model loaded between calls and the next request
-  skips the multi-second startup cost.
+- **Model residency**: every generation request carries `keep_alive:
+  "30m"`, so Ollama keeps the model loaded between calls and the next
+  request skips the multi-second startup cost. Decision requests carry
+  `keep_alive: "0"` instead: the decision model is unloaded as soon as
+  it has answered, because left resident beside a generation model
+  sized to the machine it pushes that model into swap and the next
+  generation prompt pays for it in prefill (measured at a third of the
+  speed, and worse mid-delivery). Each judgment reloads in seconds.
 - **Response cache**: completed answers are stored on disk under
   `.spec/cache/` (gitignored; safe to delete at any
   time). An identical request — same endpoint, model, system prompt,

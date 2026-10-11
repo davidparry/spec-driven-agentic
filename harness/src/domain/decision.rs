@@ -29,11 +29,26 @@ pub const DECISION_CAPABILITY: &str = "decision";
 /// reports. Generative work needs this one.
 pub const COMPLETION_CAPABILITY: &str = "completion";
 
-/// How long Ollama keeps a decision model resident. Decisions are single
-/// forward passes, so the load cost dominates a one-off call; a short
-/// residency makes a second judgment in the same session effectively
-/// free without pinning 9GB for the rest of the day.
-pub const KEEP_ALIVE: &str = "5m";
+/// How long Ollama keeps a decision model resident: not at all. It is
+/// unloaded the moment it has answered.
+///
+/// The decision model is never asked alone. It is asked between two
+/// turns of the generation model, and on the machine a harness is
+/// typically run on, the generation model is sized to the machine:
+/// 111 GB of a 128 GiB laptop here. A 9 GB decision model kept
+/// resident beside it pushes part of the generation model out to
+/// swap, and the next generation prompt pages it back in one layer at
+/// a time. Measured: the same 9.7k-token prefill ran at 83-112
+/// tokens/s with the generation model alone, 32 tokens/s with the
+/// decision model resident for its old five-minute `keep_alive`, and
+/// 89 tokens/s again after a decision call that carried `0`; inside
+/// a delivery the step-fill prompt that followed the judgments fell
+/// to 9 tokens/s and passed four minutes with the prefill not done.
+///
+/// What this costs: a reload per judgment, 1.3 s from the page cache
+/// and 5.5 s cold, against 41 ms resident. A delivery asks a handful
+/// of questions in a row, so that is seconds spent to keep minutes.
+pub const KEEP_ALIVE: &str = "0";
 
 /// Hard ceiling on a request body without images, enforced by the server
 /// with a 413. Checked before sending so an oversize brief is a local

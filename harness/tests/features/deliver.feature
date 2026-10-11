@@ -577,6 +577,39 @@ Feature: Deliver mode
     And the developer was told a finding containing "src/main/java/Kata.java"
     And the working tree file "src/main/java/Kata.java" contains "return 0;"
 
+  # The attempt after a reverted one is briefed from the last recorded
+  # run. Left as the broken build, that is a compiler error for code no
+  # longer on disk, naming files the next prompt then carries whole -
+  # measured as a 216 KB step file and eleven minutes of prefill. So the
+  # bar is read again once the files are back, and the next attempt
+  # starts from what the tree actually says.
+  Scenario: The attempt after a reverted one reads the bar again first
+    Given a Java project marker
+    And a project source file "src/main/java/Kata.java" containing:
+      """
+      public class Kata { int add(String input) { return 0; } }
+      """
+    And a working spec with the pending requirements "REQ-001"
+    And a model is resolved
+    And the model will reply:
+      """
+      [{"path": "src/main/java/Kata.java", "content": "public class Kata { int add(String i) { return 1; } }"}]
+      """
+    And the model will also fill in the generated unit test
+    And the delivery skips the refactor
+    And the delivery budget is 2 attempts
+    And the test runs will report:
+      """
+      1 tests and 1 failures detailed "Req001Test: TODO: assert"
+      the build failed with "Kata.java:1: ')' expected"
+      1 tests and 1 failures detailed "Req001Test: TODO: assert"
+      1 tests and 0 failures
+      """
+    When the delivery runs for "REQ-001"
+    Then the delivery completes
+    And the developer was told a finding containing "Attempt 1 left the build not compiling"
+    And the developer was told a finding containing "Attempt 2 of 2."
+
   Scenario: A runtime that disappears mid-loop stops the requirement
     Given a Java project marker
     And a working spec with the pending requirements "REQ-001"

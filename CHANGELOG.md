@@ -28,6 +28,81 @@
   change first, until 4 KB are spent; the rest of the project is a list
   of paths. Same prompt measured again: 13.1k tokens instead of 17.3k.
 
+- **The model is no longer asked to think out loud into a field nobody
+  reads.** Ollama's `/api/chat` lets a thinking model reason into
+  `message.thinking` before it answers in `message.content`; the
+  harness reads only `content`. So on a thinking model every reasoning
+  token was generated, waited for, and discarded - measured on the
+  development model as four times the tokens and four times the wall
+  clock for the same one-function answer, and a step-body fill that
+  came back with 230 characters after five minutes and forty seconds.
+  Every chat request now carries `think: false`, which Ollama accepts
+  for models that cannot think and only refuses the other way round.
+
+- **Pending step bodies are asked for in one question, not one per
+  step.** The fill pass sent the same brief - scenarios, file head,
+  production code, about 6.5k tokens - once per pending definition,
+  under a single progress line: nine definitions, nine prompts, a
+  quarter of an hour with nothing said. All the pending definitions
+  now go in one prompt; a reply with none of them is sent back once
+  (the retry rides the server's prefix cache: 27 s against 110 s for
+  a fresh question); whatever is still left out or left pending is
+  asked for one at a time, each under its own line that names the
+  step, so a wait is never anonymous.
+
+- **The decision model is unloaded as soon as it has answered.** It
+  used to stay resident for five minutes so a second judgment would be
+  free. It is never asked alone, though: it is asked between two turns
+  of the generation model, and on a machine where that model is sized
+  to the machine (111 GB of 128 GiB here) a 9 GB decision model kept
+  beside it pushes part of the generation model into swap. Measured:
+  the same 9.7k-token prefill ran at 83-112 tokens/s alone, 32 with
+  the decision model resident, 89 again once a decision call carried
+  `keep_alive: "0"`; mid-delivery, the step-fill prompt that followed
+  the judgments fell to 9 tokens/s and passed four minutes still
+  prefilling. Every decision request now carries `keep_alive: "0"`.
+  The cost is a reload per judgment - 1.3 s warm, 5.5 s cold, against
+  41 ms resident - and a delivery asks a handful in a row.
+
+- **The wording review's stall prompt stops defaulting to "reword
+  again" the second time round.** When the rewording passes earn the
+  same findings twice, the wizard asks whether to reword again, reword
+  by hand, or accept as-is, and Enter meant reword again. `spec
+  deliver` answers every prompt with Enter, so a criterion the model
+  could not reword (observed: two Whens in one criterion, the model's
+  rewording unusable every time) was reviewed twelve passes - two
+  findings, three model calls each, per pass - and then nothing was
+  written and the delivery had nothing to deliver. Enter still means
+  reword again at the first stall; at the next one with nothing new
+  found it means accept, so the requirement is staged with its wording
+  findings open and `spec reword` can revisit them.
+
+- **The attempt after a reverted one reads the bar again first.** An
+  attempt that broke the build is put back, but the next attempt was
+  briefed from the last recorded run - the broken build: compiler
+  errors for code no longer on disk, naming files that then went into
+  the prompt whole. Measured: one error at `tests/cucumber.rs:5610`
+  (a tool-call tag the model leaked into a step body) seeded the
+  5,600-line step file, 216 KB, 58k tokens, eleven minutes of prefill.
+  With an attempt still to come, the tests now run once more after the
+  restore, so the record matches the tree the attempt is shown.
+
+- **A file the failures name that the prompt cannot carry is shown as
+  an excerpt.** Seeds were always shown whole, whatever their size.
+  A step-definition file over the source budget now arrives as the
+  lines the failures point at with forty lines of context either
+  side, the rest elided by line range, and a header saying not to
+  reply with it - the reply guard would refuse a replacement that
+  dropped a name, and the reply could never be the whole file anyway.
+  Targets and the unit test are still shown whole.
+
+- **The implementation prompt carries less of the neighbourhood.** The
+  source budget drops from 40 KB to 24 KB. The seeds - the files the
+  attempt must write, the files the failures name, the unit test -
+  are still shown whole; what goes is further-off neighbours that the
+  measured run (13.5k tokens, 2m40s of prefill before the first token,
+  the attempt stopped at 4m31s) could not afford.
+
 - **Eight commands now read like a reply instead of a document when a
   person is the one reading.** `spec list`, `spec show`, `spec
   validate`, `spec refine`, `spec status`, `spec state`, `spec test`,

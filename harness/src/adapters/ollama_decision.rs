@@ -17,10 +17,11 @@ use crate::domain::decision::{KEEP_ALIVE, MAX_REQUEST_BYTES, Outcome, Request, S
 use crate::ports::{DecisionError, DecisionModel};
 
 /// Decisions are a single forward pass with no reasoning step, so they
-/// return in well under a second once the model is resident. The budget
-/// is for the first call, which may have to load 9GB of weights from
-/// disk, and is still far below the generative timeout — a decision that
-/// takes minutes is a broken setup, not a long answer.
+/// return in well under a second once the model is loaded. The budget
+/// is for the load, which every call pays (the model is released as
+/// soon as it answers - see [`KEEP_ALIVE`]) and which takes seconds
+/// from disk; it is still far below the generative timeout — a decision
+/// that takes minutes is a broken setup, not a long answer.
 pub const DEFAULT_DECISION_TIMEOUT_SECONDS: u64 = 60;
 pub const DEFAULT_DECISION_TIMEOUT: Duration =
     Duration::from_secs(DEFAULT_DECISION_TIMEOUT_SECONDS);
@@ -35,8 +36,8 @@ struct Body<'a> {
     keep_alive: &'static str,
 }
 
-/// `Clone` shares the connection pool rather than copying it, which is
-/// what keeps `keep_alive` meaningful across successive judgments.
+/// `Clone` shares the connection pool rather than copying it, so a
+/// copy per caller costs nothing.
 #[derive(Clone)]
 pub struct OllamaDecision {
     endpoint: String,
@@ -302,7 +303,10 @@ mod tests {
         assert!(sent.contains("\"model\":\"nimble:latest\""));
         assert!(sent.contains("\"type\":\"noul\""));
         assert!(sent.contains("\"acceptance_criterion\""));
-        assert!(sent.contains("\"keep_alive\":\"5m\""));
+        assert!(
+            sent.contains("\"keep_alive\":\"0\""),
+            "the decision model is released as soon as it has answered: {sent}"
+        );
     }
 
     #[test]

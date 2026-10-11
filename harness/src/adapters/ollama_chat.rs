@@ -83,6 +83,15 @@ pub fn chat_body(
         "messages": messages.iter().map(chat_message).collect::<Vec<_>>(),
         "stream": false,
         "keep_alive": KEEP_ALIVE,
+        // A thinking model reasons out loud into a `thinking` field
+        // before it answers, and this adapter reads only `content`. So
+        // every reasoning token was generated, waited for, and thrown
+        // away. Measured on the development model: the same one-function
+        // prompt took 245 tokens and 5.3s thinking, 59 tokens and 1.3s
+        // without, with the same function back; a step-body fill
+        // returned 230 characters after 5m42s. Ollama accepts `false`
+        // for models that cannot think and refuses only `true`.
+        "think": false,
     });
     if !tools.is_empty() {
         body.as_object_mut().expect("object").insert(
@@ -231,6 +240,10 @@ mod tests {
         assert_eq!(body["stream"], false);
         assert_eq!(body["keep_alive"], KEEP_ALIVE);
         assert!(body.get("temperature").is_none());
+        assert_eq!(
+            body["think"], false,
+            "reasoning this adapter never reads is not asked for"
+        );
         assert_eq!(body["messages"][2]["role"], "tool");
         assert_eq!(body["messages"][2]["tool_name"], "get_tdd_state");
         assert_eq!(body["tools"][0]["function"]["name"], "get_tdd_state");

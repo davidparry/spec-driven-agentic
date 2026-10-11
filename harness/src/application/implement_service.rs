@@ -128,6 +128,39 @@ where
 /// One definition from a fill reply, when it keeps `pattern` and the
 /// placeholder is gone. A reply that also carries the neighbours is
 /// fine: only the definition for this pattern is taken.
+/// Every definition a batched fill reply filled in, by pattern. A
+/// definition the reply dropped, or handed back still pending, is
+/// simply absent and the caller asks for it on its own; a partial
+/// reply is accepted for what it has. A reply with none of them is
+/// refused, because the retry that follows re-sends the conversation
+/// with the refusal appended and the model's server has the prompt's
+/// prefix cached - measured at 27s against the 110s of a fresh
+/// question - while the per-step pass pays a fresh prompt per step.
+/// Observed from a model told not to think: "Let me look at the world
+/// type and any relevant status report fields." and nothing else.
+fn accept_filled_definitions(
+    language: Language,
+    reply: &str,
+    patterns: &[String],
+) -> Result<std::collections::HashMap<String, String>, String> {
+    let code = strip_code_fences(reply);
+    let filled: std::collections::HashMap<String, String> =
+        step_fill::definition_spans(language, &code)
+            .into_iter()
+            .filter(|span| patterns.contains(&span.pattern))
+            .filter(|span| !is_pending_step_body(language, span.text(&code)))
+            .map(|span| (span.pattern.clone(), span.text(&code).to_string()))
+            .collect();
+    if filled.is_empty() {
+        return Err(format!(
+            "the reply held none of the {} definition(s) asked for with its placeholder \
+             replaced; reply with the definitions themselves, bodies written, and no prose",
+            patterns.len()
+        ));
+    }
+    Ok(filled)
+}
+
 fn accept_filled_definition(
     language: Language,
     reply: &str,
@@ -294,10 +327,11 @@ where
     /// back, and they are spliced in where they were.
     ///
     /// `Ok(None)` when nothing bound to the requirement is pending, or
-    /// when every pending body stayed a placeholder. Each definition is
-    /// asked on its own. A reply that keeps that one's placeholder is
-    /// sent back for that definition only; when the attempt budget is
-    /// spent the stub stays and the definitions already filled are kept.
+    /// when every pending body stayed a placeholder. All the pending
+    /// definitions go in one question first; whatever that reply left
+    /// out or left pending is then asked for one definition at a time,
+    /// and when that attempt budget is spent the stub stays while the
+    /// definitions already filled are kept.
     pub fn fill_pending_steps(
         &self,
         prompter: &mut dyn Prompter,
@@ -349,53 +383,105 @@ where
             .collect();
         let preamble = step_fill::step_file_preamble(self.language, &file.content);
         let declared = extract_patterns(self.language, &file.content);
-        let work = prompter.working(&format!(
-            "Asking {} to write {} pending step bodies in {} - working",
-            llm.model(),
-            pending.len(),
-            file.path
-        ));
+        let language = self.language;
         // Last definition first, so a splice does not move the offsets
         // of the definitions still waiting.
         let mut ordered = pending.clone();
         ordered.sort_by_key(|span| std::cmp::Reverse(span.start));
         let mut content = file.content.clone();
         let mut filled = 0usize;
-        for span in &ordered {
-            let fragment = span.text(&content).trim_end().to_string();
-            let pattern = span.pattern.clone();
-            let prompt = step_fill::fill_steps_prompt(
-                self.language,
-                requirement,
-                &step_fill::FillBrief {
-                    scenarios: &scenarios,
-                    fragment: &fragment,
-                    count: 1,
-                    preamble,
-                    production: &production,
-                    failures,
-                },
-            );
-            let language = self.language;
-            let outcome = llm.ask(
-                prompter,
-                &prompt,
-                |reply| accept_filled_definition(language, reply, &pattern),
-                |_, _, _| {},
-            );
-            match outcome {
-                Ok(body) => {
-                    content.replace_range(span.start..span.end, &body);
-                    filled += 1;
+
+        // One question for the whole batch. The brief - scenarios, file
+        // head, production code - is the same for every definition and
+        // is most of the prompt; asked once per definition it was paid
+        // for once per definition (nine ~6.5k-token prompts under one
+        // progress line, a quarter hour with nothing said).
+        let batch = prompter.working(&format!(
+            "Asking {} to write {} pending step bodies in {} - working",
+            llm.model(),
+            pending.len(),
+            file.path
+        ));
+        let mut fragment = String::new();
+        for span in pending.iter() {
+            fragment.push_str(span.text(&content).trim_end());
+            fragment.push_str("\n\n");
+        }
+        let patterns: Vec<String> = pending.iter().map(|span| span.pattern.clone()).collect();
+        let prompt = step_fill::fill_steps_prompt(
+            language,
+            requirement,
+            &step_fill::FillBrief {
+                scenarios: &scenarios,
+                fragment: fragment.trim_end(),
+                count: pending.len(),
+                preamble,
+                production: &production,
+                failures,
+            },
+        );
+        let mut bodies = match llm.ask(
+            prompter,
+            &prompt,
+            |reply| accept_filled_definitions(language, reply, &patterns),
+            |_, _, _| {},
+        ) {
+            Ok(bodies) => bodies,
+            Err(LlmReplyError::Call(error)) => {
+                drop(batch);
+                return Err(ServiceError(LlmReplyError::call_failed(&error)));
+            }
+            Err(LlmReplyError::Invalid { .. }) => Default::default(),
+        };
+        drop(batch);
+
+        // What the batch left pending is asked for one definition at a
+        // time, each under its own line so a long wait has a name.
+        for (index, span) in ordered.iter().enumerate() {
+            if !bodies.contains_key(&span.pattern) {
+                let fragment = span.text(&content).trim_end().to_string();
+                let prompt = step_fill::fill_steps_prompt(
+                    language,
+                    requirement,
+                    &step_fill::FillBrief {
+                        scenarios: &scenarios,
+                        fragment: &fragment,
+                        count: 1,
+                        preamble,
+                        production: &production,
+                        failures,
+                    },
+                );
+                let pattern = span.pattern.clone();
+                let work = prompter.working(&format!(
+                    "Asking {} again for step {} of {}, {:?} - working",
+                    llm.model(),
+                    ordered.len() - index,
+                    ordered.len(),
+                    pattern
+                ));
+                let outcome = llm.ask(
+                    prompter,
+                    &prompt,
+                    |reply| accept_filled_definition(language, reply, &pattern),
+                    |_, _, _| {},
+                );
+                drop(work);
+                match outcome {
+                    Ok(body) => {
+                        bodies.insert(span.pattern.clone(), body);
+                    }
+                    Err(LlmReplyError::Call(error)) => {
+                        return Err(ServiceError(LlmReplyError::call_failed(&error)));
+                    }
+                    Err(LlmReplyError::Invalid { .. }) => continue,
                 }
-                Err(LlmReplyError::Call(error)) => {
-                    drop(work);
-                    return Err(ServiceError(LlmReplyError::call_failed(&error)));
-                }
-                Err(LlmReplyError::Invalid { .. }) => {}
+            }
+            if let Some(body) = bodies.get(&span.pattern) {
+                content.replace_range(span.start..span.end, body);
+                filled += 1;
             }
         }
-        drop(work);
         if filled == 0 {
             return Ok(None);
         }
@@ -1346,7 +1432,23 @@ mod tests {
             1,
             "{written}"
         );
-        let prompt = service.llm.as_ref().unwrap().chat().prompts.borrow()[0].clone();
+        let prompts = service
+            .llm
+            .as_ref()
+            .unwrap()
+            .chat()
+            .prompts
+            .borrow()
+            .clone();
+        assert_eq!(
+            prompts.len(),
+            1,
+            "both definitions were asked for in one question: {prompts:#?}"
+        );
+        let prompt = prompts[0].clone();
+        assert!(prompt.contains("bodies of 2 "), "{prompt}");
+        assert!(prompt.contains("add is called with {string}"), "{prompt}");
+        assert!(prompt.contains("the result is {int}"), "{prompt}");
         assert!(
             prompt.contains("int add(String in)"),
             "the production code is in the brief"
@@ -1383,6 +1485,48 @@ mod tests {
             written.contains("throw new PendingException();"),
             "{written}"
         );
+        let prompts = service
+            .llm
+            .as_ref()
+            .unwrap()
+            .chat()
+            .prompts
+            .borrow()
+            .clone();
+        assert!(
+            prompts.len() >= 2,
+            "the Then was asked for again: {prompts:#?}"
+        );
+        let again = &prompts[1];
+        assert!(again.contains("bodies of 1 "), "{again}");
+        assert!(again.contains("the result is {int}"), "{again}");
+        assert!(
+            !again.contains("public void b(String s)"),
+            "the When that was filled is not asked for again: {again}"
+        );
+    }
+
+    #[test]
+    fn a_batched_fill_reply_is_taken_for_what_it_filled_and_refused_when_that_is_nothing() {
+        let patterns = vec![
+            "add is called with {string}".to_string(),
+            "the result is {int}".to_string(),
+        ];
+        let whole = accept_filled_definitions(Language::Java, FILLED_STEPS, &patterns).unwrap();
+        assert_eq!(whole.len(), 2, "{whole:?}");
+        assert!(whole["the result is {int}"].contains("assertEquals(n, result);"));
+
+        let partial = "    @When(\"add is called with {string}\")\n    public void b(String s) {\n        result = new Kata().add(s);\n    }\n\n    @Then(\"the result is {int}\")\n    public void c(int n) {\n        throw new PendingException();\n    }\n\n    @Then(\"something REQ-002 asks\")\n    public void d() { result = 0; }\n";
+        let taken = accept_filled_definitions(Language::Java, partial, &patterns).unwrap();
+        assert_eq!(
+            taken.keys().collect::<Vec<_>>(),
+            vec!["add is called with {string}"],
+            "the still-pending one and the stranger are left out"
+        );
+
+        let prose = "Let me look at the world type and any relevant status report fields.";
+        let refused = accept_filled_definitions(Language::Java, prose, &patterns).unwrap_err();
+        assert!(refused.contains("none of the 2 definition(s)"), "{refused}");
     }
 
     #[test]

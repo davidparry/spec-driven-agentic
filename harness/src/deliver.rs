@@ -911,6 +911,28 @@ impl Deliver {
                 let restored = self.restore_sources(language, &before)?;
                 if !restored.is_empty() {
                     prompter.warn(&reverted_attempt(attempt, &restored));
+                    if attempt == budget {
+                        continue;
+                    }
+                    // The next attempt is briefed from the last recorded
+                    // run, and that is now the broken build: compiler
+                    // errors for code that is no longer on disk, naming
+                    // files that go into the prompt whole. Measured: a
+                    // broken step file named this way put 216 KB into
+                    // the next prompt, 58k tokens, eleven minutes of
+                    // prefill. Read the bar again so the record matches
+                    // the tree the attempt will be shown.
+                    match run_and_narrate(tdd, runner, prompter)? {
+                        Some(again) => report = again,
+                        None => {
+                            return Ok(Bar::stopped(
+                                "The language runtime disappeared mid-loop, so the bar \
+                                 cannot be read."
+                                    .into(),
+                                None,
+                            ));
+                        }
+                    }
                     continue;
                 }
             }
@@ -2135,16 +2157,19 @@ mod tests {
         Arc::new(move |_: &Path| Ok(Box::new(Queue(Arc::clone(&queue))) as Box<dyn TestRunner>))
     }
 
-    /// A model that always replies with the same text, or always fails.
-    struct Fixed(Result<String, String>);
+    /// A model that always replies with the same text, or always fails,
+    /// and keeps every user prompt it was sent.
+    struct Fixed(Result<String, String>, std::sync::Mutex<Vec<String>>);
 
     impl crate::ports::LlmConversation for Fixed {
         fn chat(
             &self,
             _model: &str,
-            _messages: &[crate::domain::tools::ChatMessage],
+            messages: &[crate::domain::tools::ChatMessage],
             _tools: &[crate::domain::tools::ToolDefinition],
         ) -> Result<crate::domain::tools::ChatTurn, crate::ports::LlmError> {
+            let (_, user) = crate::domain::tools::system_and_user(messages);
+            self.1.lock().unwrap().push(user);
             match &self.0 {
                 Ok(reply) => Ok(crate::domain::tools::text_turn(reply.clone())),
                 Err(message) => Err(crate::ports::LlmError(message.clone())),
@@ -2153,11 +2178,30 @@ mod tests {
     }
 
     fn model(reply: Result<&str, &str>) -> Option<(String, DynLlm)> {
-        let fixed = Fixed(match reply {
-            Ok(text) => Ok(text.to_string()),
-            Err(message) => Err(message.to_string()),
-        });
-        Some(("scripted-model".into(), Arc::new(fixed) as DynLlm))
+        Some(("scripted-model".into(), recording_model(reply).1))
+    }
+
+    /// The same model, with a handle to read the prompts it was sent.
+    fn recording_model(reply: Result<&str, &str>) -> (Arc<Fixed>, DynLlm) {
+        let fixed = Arc::new(Fixed(
+            match reply {
+                Ok(text) => Ok(text.to_string()),
+                Err(message) => Err(message.to_string()),
+            },
+            std::sync::Mutex::new(Vec::new()),
+        ));
+        (Arc::clone(&fixed), fixed as DynLlm)
+    }
+
+    fn broken_build_run() -> TestOutcome {
+        Ok(crate::domain::model::TestRunSummary {
+            tests: 0,
+            errors: 1,
+            failure_details: vec![
+                "Build failed before tests could run:\nKata.java:1: error: ';' expected".into(),
+            ],
+            ..Default::default()
+        })
     }
 
     /// A Java project with one pending requirement, which is the state
@@ -2577,6 +2621,54 @@ mod tests {
         );
         assert!(matches!(outcome, Outcome::Implemented), "{outcome:?}");
         assert!(prompter.said("the code was restored"));
+    }
+
+    /// An attempt that broke the build is put back, and the attempt
+    /// after it is briefed with the bar on disk - not the compiler error
+    /// from code that is no longer there. Measured live: the stale
+    /// error named the 216 KB step file, which went into the next
+    /// prompt whole.
+    #[test]
+    fn after_a_reverted_attempt_the_next_one_is_briefed_from_the_bar_on_disk() {
+        let dir = kata(one_criterion());
+        std::fs::create_dir_all(dir.path().join("src/main/java")).unwrap();
+        std::fs::write(
+            dir.path().join("src/main/java/Kata.java"),
+            "public class Kata { int add(String input) { return 0; } }\n",
+        )
+        .unwrap();
+        let mut prompter = Script::default();
+        let (recorder, llm) = recording_model(Ok(
+            r#"[{"path":"src/main/java/Kata.java","content":"public class Kata { int add(String i) { return 1; } }\n"}]"#,
+        ));
+        let outcome = deliver_one(
+            dir.path(),
+            &mut prompter,
+            // The gate run; attempt 1 breaks the build; the bar read
+            // again once the file is back; attempt 2 goes green.
+            vec![red(), broken_build_run(), red(), green()],
+            Some(("scripted-model".into(), llm)),
+            DeliverOptions {
+                attempts: 2,
+                ..no_refactor()
+            },
+        );
+        assert!(matches!(outcome, Outcome::Implemented), "{outcome:?}");
+        assert!(prompter.said("Attempt 1 left the build not compiling"));
+        let prompts = recorder.1.lock().unwrap();
+        let second = prompts
+            .iter()
+            .filter(|prompt| prompt.contains("The failing tests"))
+            .nth(1)
+            .expect("a second implementation prompt");
+        assert!(
+            second.contains("Req001Test: TODO: assert"),
+            "briefed with the bar on disk: {second}"
+        );
+        assert!(
+            !second.contains("';' expected"),
+            "not with the error the restore undid: {second}"
+        );
     }
 
     /// A bar the refactor left red is the one refactor outcome that does

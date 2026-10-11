@@ -54,8 +54,7 @@ impl<D: DecisionModel> TaskJudge for DecisionService<D> {
 ///
 /// `Clone` so an async caller can hand a copy to a blocking thread.
 /// Cloning an [`crate::adapters::ollama_decision::OllamaDecision`]
-/// shares one connection pool, so this is cheap and keeps keep-alive
-/// working across judgments.
+/// shares one connection pool, so this is cheap.
 #[derive(Clone)]
 pub struct DecisionService<D: DecisionModel> {
     model: String,
