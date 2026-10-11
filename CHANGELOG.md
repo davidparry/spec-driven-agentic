@@ -2,6 +2,116 @@
 
 ## Unreleased
 
+- **A new Rust module an attempt writes is declared in the crate
+  root.** The implementation prompt asks for the production file and
+  the model writes it; the `mod` line that makes it part of the crate
+  is in a file it was not asked about. Three measured attempts wrote a
+  correct `src/<module>.rs`, none touched `lib.rs`, and every bar read
+  E0433 (`could not find ... in the crate root`). After the reply is
+  written, every new top-level `.rs` file under the production root is
+  declared with `pub mod x;` after the last declaration in `src/lib.rs`
+  (or `src/main.rs`), the crate root joins the attempt's targets, and
+  the transcript says so. A reply that declared it itself is left as
+  written; other languages have no such line.
+
+- **A step-body fill may add the world fields its bodies need.** The
+  fill prompt forbade inventing fields, so a body that needed state the
+  world did not have could only reference it - `world.proven_report`
+  against a world with no such field, three attempts, E0609 each time.
+  The reply may now lead with the world type by its exact name holding
+  ONLY the new fields (Rust `struct`, Java/C# step class); they go into
+  the struct body (a unit struct gets braces) and the definitions go
+  where they were. A block holding anything but fields, or a second
+  struct, is refused with the reason. A Rust reply whose bodies use
+  fields nobody declared - observed right after a reply that declared
+  them properly - is sent back naming the fields. The notice reads
+  "Filled 8 pending step bodies and added 3 world field(s) in ...".
+
+- **A reverted attempt puts back only the files the attempt wrote.**
+  The restore after a build-breaking attempt compared every source file
+  to a pre-attempt snapshot and put back every one that differed - the
+  tree is not the attempt's alone, and a developer's edit made in an
+  open editor while the model was thinking was put back with it
+  (observed live, on this harness). The attempt now reports what it
+  wrote - the implementation's targets, the step file the fill pass
+  wrote - and only those are restored. A file that changed but was not
+  written by the attempt is named ("`src/x.rs` changed during the
+  attempt but not by it, so it was left as it is.") and left; a file
+  the attempt created stays and the notice says so.
+
+- **Tool rules travel only with tools.** Every system prompt carried
+  the `[tool_rules]` block - "call a tool to look up a file path rather
+  than guessing" - including the implementation prompt, which offers
+  no tools. A model that read them answered "Let me start by looking at
+  the project structure." and stopped; three implementation attempts
+  in a row were refused as not a JSON array, each paid for in full.
+  The rules are appended by the agent only when the call has tools.
+
+- **`spec deliver` on a Rust project briefs the crate's import name and
+  names integration-test failures by their file.** The model guessed
+  the crate twice (`use spec_workshop::`, `use harness::`) for a
+  package named `spec-harness`; `.spec/memory.json` now records
+  `crateName` from `Cargo.toml` and the project brief states it. A
+  model-named unit test (`test_criterion_verification_status`) in
+  `tests/harness_020_test.rs` said nothing of its requirement, so the
+  foreign-failure gate stopped the delivery before an attempt was
+  made; the cargo runner now reports it as
+  `harness_020_test::test_criterion_verification_status`. For that to
+  hold, the runner captures cargo's stdout and stderr as one stream:
+  cargo announces each target on stderr and libtest prints the test
+  lines on stdout, and read separately every `Running` line came after
+  every failure, so no failure could be matched to its file. And a
+  polished step stub whose `todo!()` message carried the cucumber
+  expression (`{int}`) was a format string naming no variable - the
+  braces in pending messages are doubled before the file is written.
+
+- **A refactor round shows the model only the tests that reach the file
+  under refactor.** The scope put every test file in the project in the
+  prompt read-only; on this harness that was 400k characters, and the
+  first round of `spec deliver`'s refactor phase had no answer after
+  eight minutes with the model still reading. A test file now travels
+  only when it is named after the file under refactor or mentions its
+  symbol, and one longer than 200 lines travels as the lines around
+  each mention with `// ...` for the rest. A project whose focus has no
+  symbol keeps the old behaviour. The "tests did not move" check is
+  made against every test file whole, kept apart from the excerpt the
+  prompt carried; and a round that check ends now puts the rewrite
+  back from the disk - it compared against what the round had read,
+  so "restored" was said while the rewrite stayed, and the next bar
+  was its build error.
+
+- **On a Rust project, `spec deliver`'s test files reach the library by
+  its crate name, and a crate root that loses its modules is refused.**
+  An integration test under `tests/` is its own crate, so `crate::`
+  there is the test file: a step-body fill declared a world field of
+  type `crate::report::Criterion` and the bar read E0433 for a module
+  that existed. In every test file an attempt writes or fills, a
+  `crate::<module>` path into one of the library's declared modules is
+  written as `<crate name>::<module>`; the test crate's own `crate::`
+  paths are kept. In the same runs the model handed `src/lib.rs` back
+  holding only its own `pub mod` line, and `workspace`, `domain`, and
+  `adapters` left the crate with every other module - the reply guard
+  left `mod` lines out of what a file declares, and now counts them
+  for a Rust root, so that reply is refused and the harness's own
+  declaration stands. And a reply that opened a JSON file update and
+  stopped inside it - three in a row, 23 to 288 tokens - was refused as
+  "not a JSON array"; it is now reported as the model ending its
+  answer early, with the character count.
+
+- **The step polish takes the code out of a talking reply and refuses
+  one that talks around it.** A Rust step expression with two
+  `{string}` placeholders was templated as `arg0: String, , arg1:
+  String`; the polish prompt counted that fragment's eight `#[then]`
+  definitions with Java's `@Then` and called them "1 member"; the model
+  spent four paragraphs reasoning about both and put the corrected
+  members in a fence below, and the whole reply - prose first - was
+  written into `tests/cucumber.rs`, which then did not parse, so the
+  build broke before a red bar existed. Two placeholders now share one
+  comma; members are counted by the language's own markers; a reply
+  that opens with prose yields only its first fenced block; and a
+  fragment with anything but comments outside its definitions is
+  refused, leaving the template in place.
+
 - **`spec deliver` stops on a red bar that is not the requirement's
   instead of spending its attempts on it.** The loop read the bar once
   after authoring and went straight to implementing. When the suite

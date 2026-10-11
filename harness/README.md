@@ -204,7 +204,14 @@ architecture and full test coverage throughout:
   described, a description with no model, a single word reaching for an id
   - is refused up front with the command that settles it. `--attempts`
   sets the RED-to-GREEN budget per requirement, `--fail-fast` stops at the
-  first shortfall instead of carrying on.
+  first shortfall instead of carrying on. Inside an attempt, a new
+  top-level Rust source file the model writes is declared in the crate
+  root (`pub mod x;` in `src/lib.rs`, or `src/main.rs`), a step-body
+  fill may lead with the world type holding only the new fields its
+  bodies need (bodies that use undeclared fields are sent back naming
+  them), and an attempt that leaves the build not compiling has only
+  the files *it wrote* put back - a file that changed under an open
+  editor during the attempt is named and left as it is.
 - `spec model list | current | use` — Ollama model discovery and
   selection: `--model` flag > `.spec/config.toml` configuration > discovery.
   With no configured model, discovery uses the first installed model as
