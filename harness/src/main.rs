@@ -2660,7 +2660,7 @@ fn one_shot_overrides(
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .collect();
-        overrides.replace.insert(caller.key().into(), names);
+        overrides.pinned.insert(caller.key().into(), names);
     }
     overrides
 }
@@ -2801,6 +2801,7 @@ fn run_tools(root: &Path, command: &ToolsCommand) -> anyhow::Result<()> {
                             serde_json::json!({
                                 "caller": v.caller,
                                 "tools": v.tools,
+                                "from_config": v.from_config,
                                 "unknown": v.unknown,
                             })
                         })
@@ -2809,12 +2810,20 @@ fn run_tools(root: &Path, command: &ToolsCommand) -> anyhow::Result<()> {
             }
             for view in views {
                 warn_unknown(&view.unknown);
-                println!(
-                    "{}\t{}\t{}",
-                    view.caller,
-                    view.tools.len(),
-                    view.tools.join(", ")
-                );
+                // A tool the config added on top of the defaults is
+                // marked so the shipped set stays recognisable.
+                let names: Vec<String> = view
+                    .tools
+                    .iter()
+                    .map(|name| {
+                        if view.from_config.contains(name) {
+                            format!("{name} (config)")
+                        } else {
+                            name.clone()
+                        }
+                    })
+                    .collect();
+                println!("{}\t{}\t{}", view.caller, names.len(), names.join(", "));
             }
             Ok(())
         }

@@ -27,6 +27,52 @@ timeout_seconds = 3600
 # the talk, which is no use the night before.
 cache_ttl_seconds = 86400
 
+# Tools offered to the model on each LLM-backed command. These are the
+# built-in defaults, written out so what each command may call is on
+# the page rather than in the binary. A listed command's array is read
+# in addition to its defaults: repeating a default changes nothing,
+# naming one more tool adds it, and leaving a default out does not
+# remove it (use [tools.disabled] for that). `--tools a,b` on the
+# command line is the one way to set the whole list for a run.
+# `spec tools profiles` prints the resolved set and marks what the
+# config added; `spec tools list --for <command>` does it for one.
+# Name a tool as:
+#   validate_spec                 — built-in (exact catalog name)
+#   builtin:validate_spec         — the same built-in, pinned when an
+#                                   mcp.json tool shares the short name
+#   playwright:browser_navigate   — mcp.json server "playwright"
+#   playwright__browser_navigate  — same MCP tool (catalog name)
+#
+# `spec deliver` and `spec greenfield` are not listed: neither offers
+# the model any tools.
+[tools]
+
+[tools.profiles]
+# spec draft
+spec-draft = ["list_requirements", "get_requirement", "validate_spec", "refine_requirement"]
+# spec reword
+spec-reword = ["get_requirement", "validate_spec", "refine_requirement"]
+# spec scenario generate
+scenario-generate = ["get_requirement", "feature_read", "step_definitions_find"]
+# spec steps generate
+steps-generate = ["project_inspect", "feature_list", "feature_read", "step_definitions_find"]
+# spec unittest generate
+unittest-generate = ["project_inspect", "get_requirement", "feature_read", "step_definitions_find"]
+# spec implement (preflight advice)
+implement-advice = ["get_tdd_state", "validate_spec", "feature_list"]
+# spec implement
+implement = ["get_requirement", "feature_read", "step_definitions_find", "get_tdd_state", "run_tests", "command_run"]
+# spec refactor - read-and-inspect only. The loop runs the suite itself,
+# once per round, and judges the result; a model that could run the tests
+# could also report on a run the loop never saw.
+refactor = ["get_requirement", "feature_read", "step_definitions_find", "project_inspect", "get_tdd_state"]
+# spec status
+status = ["project_root", "list_requirements", "get_requirement", "get_tdd_state", "validate_spec"]
+# spec ask
+ask = ["project_root", "list_requirements", "get_requirement", "validate_spec", "refine_requirement", "get_tdd_state", "project_inspect", "feature_list", "feature_read", "step_definitions_find"]
+# spec diff
+diff = ["git_diff", "project_root", "list_requirements", "get_requirement", "feature_read"]
+
 # The second model: [llm] above writes, this one answers the bounded
 # question the deterministic rules cannot. Pinned for the same reason,
 # and for one more - `measurable/v2` is calibrated against this model,

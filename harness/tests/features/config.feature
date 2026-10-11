@@ -20,7 +20,7 @@ Feature: Project configuration dump
       [tools]
       max_rounds = 4
       [tools.profiles]
-      status = ["get_tdd_state"]
+      status = ["get_tdd_state", "git_diff"]
       [tools.enabled]
       implement = ["feature_list"]
       """
@@ -30,7 +30,7 @@ Feature: Project configuration dump
     And the config value "llm.endpoint" is "http://localhost:11434" from default
     And the config value "llm.timeout_seconds" is "900" from the config file
     And the config value "tools.max_rounds" is "4" from the config file
-    And the config value "tools.profiles.status" is "get_tdd_state" from the config file
+    And the config value "tools.profiles.status" is "project_root, list_requirements, get_requirement, get_tdd_state, validate_spec, git_diff" from the config file
     And the config value "tools.profiles.implement" is from default
     And the config value "tools.enabled.implement" is "feature_list" from the config file
 

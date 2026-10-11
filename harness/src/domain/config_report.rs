@@ -7,7 +7,7 @@ use std::fmt;
 use serde::Serialize;
 
 use crate::domain::decision::DEFAULT_MIN_CONFIDENCE;
-use crate::domain::tool_profile::{Caller, default_profile};
+use crate::domain::tool_profile::{Caller, ProfileOverrides, profile_names};
 
 /// The decision mode a project gets without asking for one. Enforcing,
 /// because the question reaches wording no deterministic rule does, and
@@ -203,7 +203,8 @@ pub(crate) struct PresentValues {
 }
 
 /// Merge file-present keys with code defaults. A listed
-/// `[tools.profiles]` command replaces that caller's default set.
+/// `[tools.profiles]` command is reported as the set the command will
+/// be offered: its defaults with the file's additions, no repeats.
 pub(crate) fn build_report(file: ConfigFileStatus, present: PresentValues) -> ConfigReport {
     let mut settings = Vec::new();
     // Kept for the decision endpoint, which inherits it below.
@@ -306,16 +307,18 @@ pub(crate) fn build_report(file: ConfigFileStatus, present: PresentValues) -> Co
     }
     for caller in Caller::ALL {
         let key = format!("tools.profiles.{}", caller.key());
-        match present.profiles.get(caller.key()) {
-            Some(names) => push(&mut settings, &file, &key, join_names(names), true),
-            None => push(
-                &mut settings,
-                &file,
-                &key,
-                join_names(default_profile(caller)),
-                false,
-            ),
-        }
+        let mut overrides = ProfileOverrides::default();
+        let from_file = match present.profiles.get(caller.key()) {
+            Some(names) => {
+                overrides
+                    .profiles
+                    .insert(caller.key().to_string(), names.clone());
+                true
+            }
+            None => false,
+        };
+        let names = profile_names(caller, &overrides);
+        push(&mut settings, &file, &key, join_names(&names), from_file);
     }
     for (caller, names) in &present.enabled {
         push(
@@ -445,9 +448,10 @@ mod tests {
             max_rounds: Some(4),
             ..PresentValues::default()
         };
-        present
-            .profiles
-            .insert("status".into(), vec!["get_tdd_state".into()]);
+        present.profiles.insert(
+            "status".into(),
+            vec!["get_tdd_state".into(), "git_diff".into()],
+        );
         present.enabled.insert(
             "implement".into(),
             vec!["playwright:browser_navigate".into()],
@@ -464,8 +468,13 @@ mod tests {
         assert_eq!(timeout.source, ConfigSource::File(path.into()));
         let rounds = report.setting("tools.max_rounds").unwrap();
         assert_eq!(rounds.value, "4");
+        // The file's list is reported merged with the defaults: the
+        // repeated default appears once, the addition is appended.
         let status = report.setting("tools.profiles.status").unwrap();
-        assert_eq!(status.value, "get_tdd_state");
+        assert_eq!(
+            status.value,
+            "project_root, list_requirements, get_requirement, get_tdd_state, validate_spec, git_diff"
+        );
         assert_eq!(status.source, ConfigSource::File(path.into()));
         let implement = report.setting("tools.profiles.implement").unwrap();
         assert_eq!(implement.source, ConfigSource::Default);

@@ -182,6 +182,7 @@ struct SpecWorld {
     model_system_prompt: Option<String>,
     offered_tools: Vec<String>,
     profile_rows: HashMap<String, Vec<String>>,
+    profile_from_config: HashMap<String, Vec<String>>,
     tool_unknown: Vec<String>,
     tool_problems: Vec<String>,
     tool_error: Option<String>,
@@ -3775,7 +3776,7 @@ fn tools_for_listed_with_flag(world: &mut SpecWorld, caller: String, flag: Strin
     let caller = Caller::parse(&caller).expect("caller");
     let mut overrides = ProfileOverrides::default();
     overrides
-        .replace
+        .pinned
         .insert(caller.key().into(), split_names(&flag));
     let resolved = resolve(caller, &overrides, &builtin_defs());
     world.offered_tools = names_csv(&resolved.tools);
@@ -3803,6 +3804,10 @@ fn the_tool_profiles_are_listed(world: &mut SpecWorld) {
     let service = world.profile_service(false, false);
     let (views, problems) = service.profiles(true);
     world.tool_problems = problems;
+    world.profile_from_config = views
+        .iter()
+        .map(|v| (v.caller.clone(), v.from_config.clone()))
+        .collect();
     world.profile_rows = views.into_iter().map(|v| (v.caller, v.tools)).collect();
 }
 
@@ -4036,6 +4041,18 @@ fn the_tool_error_contains(world: &mut SpecWorld, fragment: String) {
 fn profile_for_offers(world: &mut SpecWorld, caller: String, expected: String) {
     let tools = world.profile_rows.get(&caller).expect("profile");
     assert_same_set(tools, &expected);
+}
+
+#[then(regex = r#"^the profile for "([^"]+)" marks "([^"]+)" as from config$"#)]
+fn profile_for_marks_from_config(world: &mut SpecWorld, caller: String, tool: String) {
+    let from_config = world.profile_from_config.get(&caller).expect("profile");
+    assert!(from_config.contains(&tool), "{from_config:?}");
+}
+
+#[then(regex = r#"^the profile for "([^"]+)" marks nothing else as from config$"#)]
+fn profile_for_marks_nothing_else(world: &mut SpecWorld, caller: String) {
+    let from_config = world.profile_from_config.get(&caller).expect("profile");
+    assert_eq!(from_config.len(), 1, "{from_config:?}");
 }
 
 #[then("discovery did not connect")]

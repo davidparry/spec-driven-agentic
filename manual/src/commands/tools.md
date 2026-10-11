@@ -55,21 +55,36 @@ not in the catalog is a warning, not a hard failure.
 
 Built-in defaults live in code and are also written into
 `[tools.profiles]` by `spec init` so you can see what each command
-offers the model. If that table names a caller with a list, that list
-**replaces** the default for that command. Omitted callers keep the
-code defaults. `[tools.enabled]` adds names;
-`[tools.disabled]` removes them. `spec tools enable` / `disable` write
-those last two tables.
+offers the model. A command reads its list from the file first and
+then its defaults: the two are **merged**, so a tool named in both is
+offered once, a tool named only in the file is added, and a default
+left out of the file is still offered. The written table is a copy of
+the defaults to read and extend, not a replacement for them - a list
+that named one tool used to take the other four away. Omitted callers
+keep the code defaults. `[tools.enabled]` adds names;
+`[tools.disabled]` removes them, and is the one way to take a default
+away for every run. `spec tools enable` / `disable` write those last
+two tables. `--tools a,b` on a command sets the whole list for that
+one run, defaults and config set aside.
 
 After you add a server to `mcp.json`, run `spec tools refresh` and put
-the tool on the command that should use it:
+the tool on the command that should use it, either in its profile or
+under `[tools.enabled]`; the two read the same:
 
 ```toml
 [tools.profiles]
-implement = ["get_requirement", "feature_read", "playwright:browser_navigate"]
+implement = ["get_requirement", "feature_read", "step_definitions_find", "get_tdd_state", "run_tests", "command_run", "playwright:browser_navigate"]
 
 [tools.enabled]
 status = ["playwright:browser_navigate"]
+```
+
+`spec tools profiles` prints each command's resolved set and marks a
+tool the config added with `(config)`, so the shipped set stays
+recognisable:
+
+```text
+status	6	project_root, list_requirements, get_requirement, get_tdd_state, validate_spec, playwright__browser_navigate (config)
 ```
 
 ### Name collisions

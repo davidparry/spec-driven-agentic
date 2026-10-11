@@ -27,23 +27,43 @@ Feature: Per-command tool profiles
     When every default profile is inspected
     Then command_run appears only for implement
 
-  Scenario: A profiles table replaces a caller's set
+  Scenario: A profiles list is read in addition to the defaults
+    Given the config file contains:
+      """
+      [tools.profiles]
+      status = ["project_root", "list_requirements", "get_requirement", "get_tdd_state", "validate_spec", "feature_list"]
+      """
+    When the tools for "status" are listed offline
+    Then the offered tools are "project_root, list_requirements, get_requirement, get_tdd_state, validate_spec, feature_list"
+
+  Scenario: A profiles list that repeats the defaults offers each tool once
+    Given the config file contains:
+      """
+      [tools.profiles]
+      status = ["get_tdd_state", "builtin:validate_spec"]
+      """
+    When the tools for "status" are listed offline
+    Then the offered tools are "project_root, list_requirements, get_requirement, get_tdd_state, validate_spec"
+
+  Scenario: A profiles list shorter than the defaults drops none of them
     Given the config file contains:
       """
       [tools.profiles]
       status = ["get_tdd_state"]
       """
     When the tools for "status" are listed offline
-    Then the offered tools are "get_tdd_state"
+    Then the offered tools are "project_root, list_requirements, get_requirement, get_tdd_state, validate_spec"
 
-  Scenario: A profiles list of builtin-qualified names replaces the default
+  Scenario: tools profiles marks what the config added
     Given the config file contains:
       """
       [tools.profiles]
-      status = ["builtin:get_tdd_state"]
+      status = ["get_tdd_state", "feature_list"]
       """
-    When the tools for "status" are listed offline
-    Then the offered tools are "get_tdd_state"
+    When the tool profiles are listed
+    Then the profile for "status" offers "project_root, list_requirements, get_requirement, get_tdd_state, validate_spec, feature_list"
+    And the profile for "status" marks "feature_list" as from config
+    And the profile for "status" marks nothing else as from config
 
   Scenario: An enabled table adds to a caller's set
     Given the config file contains:

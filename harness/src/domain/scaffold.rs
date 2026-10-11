@@ -93,8 +93,12 @@ endpoint = \"{endpoint}\"
 # mcp_config = \"mcp.json\"
 
 # Tools offered to the model on each LLM-backed command. These are the
-# built-in defaults, written so you can see and edit them. A listed
-# command's array replaces that command's set. Name a tool as:
+# built-in defaults, written so you can see and add to them. A listed
+# command's array is read in addition to its defaults: repeating a
+# default changes nothing, naming one more tool adds it, and leaving a
+# default out does not remove it (use [tools.disabled] for that).
+# `--tools a,b` on the command line is the one way to set the whole
+# list for a run. Name a tool as:
 #   validate_spec                 — built-in (exact catalog name)
 #   {builtin}:validate_spec       — the same built-in, pinned when an
 #                                   mcp.json tool shares the short name

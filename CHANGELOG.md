@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- **A command's `[tools.profiles]` list is read in addition to its
+  defaults, not instead of them.** `spec init` writes every command's
+  default tools into `.spec/config.toml` so what each one may call is
+  on the page, and a reader who adds one tool to that list expects one
+  more tool. Until now a listed command's array replaced its set, so
+  `status = ["get_tdd_state"]` quietly took the other four away and a
+  config that fell behind the catalog (the repository's own named two
+  tools that no longer exist and omitted `spec diff` entirely) silently
+  shrank the profiles it listed. Resolution now starts from the
+  compiled-in defaults and appends each configured name not already
+  there, by the tool it resolves to - `builtin:validate_spec` and
+  `validate_spec` are one tool and are offered once. `[tools.disabled]`
+  is the one way to take a default away for every run; `--tools a,b`
+  still sets the whole list for one. `spec config` reports the merged
+  set attributed to the file, and `spec tools profiles` marks each tool
+  the config added with `(config)` so the shipped set stays
+  recognisable. Both of this repository's config files now carry every
+  command and its full default list, `spec diff` included.
 - **A new Rust module an attempt writes is declared in the crate
   root.** The implementation prompt asks for the production file and
   the model writes it; the `mod` line that makes it part of the crate

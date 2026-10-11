@@ -184,8 +184,10 @@ architecture and full test coverage throughout:
 - `spec mcp tools | call` — list or invoke one tool over a throwaway
   session (loopback or `--stdio`).
 - `spec tools list | profiles | show | enable | disable | refresh | servers`
-  — per-command profiles and the `mcp.json` registry. External tools attach
-  with `--for`, never globally.
+  — per-command profiles and the `mcp.json` registry. A command's
+  `[tools.profiles]` list in `.spec/config.toml` is merged with its
+  built-in defaults (each tool once; `profiles` marks what the config
+  added). External tools attach with `--for`, never globally.
 - `spec ask` — free-form question with the read-only profile.
 - `spec init` and `spec greenfield` — per-language scaffolds and the whole
   orchestrated loop from an empty directory with exactly two human

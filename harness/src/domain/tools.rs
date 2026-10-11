@@ -147,6 +147,18 @@ fn qualified_parts(name: &str) -> Option<(&str, &str)> {
     }
 }
 
+/// The catalog spelling a config name stands for, without consulting a
+/// catalog: `builtin:x` is `x`, `server:tool` is `server__tool`, and
+/// anything else is itself. Two names with one canonical form are one
+/// tool, which is how a profile list is merged before lookup.
+pub fn canonical_name(name: &str) -> String {
+    match qualified_parts(name) {
+        Some((origin, tool)) if origin == BUILTIN_ORIGIN => tool.to_string(),
+        Some((server, tool)) => namespaced(server, tool),
+        None => name.to_string(),
+    }
+}
+
 pub fn find<'a>(catalog: &'a [ToolDefinition], name: &str) -> Result<&'a ToolDefinition, String> {
     if let Some((origin, tool)) = qualified_parts(name) {
         return pick(
@@ -405,6 +417,22 @@ mod tests {
             find(&catalog, "self__validate_spec").unwrap().name,
             "self__validate_spec"
         );
+    }
+
+    #[test]
+    fn canonical_name_folds_every_spelling_of_one_tool_together() {
+        assert_eq!(canonical_name("validate_spec"), "validate_spec");
+        assert_eq!(canonical_name("builtin:validate_spec"), "validate_spec");
+        assert_eq!(
+            canonical_name("playwright:browser_navigate"),
+            "playwright__browser_navigate"
+        );
+        assert_eq!(
+            canonical_name("playwright__browser_navigate"),
+            "playwright__browser_navigate"
+        );
+        // A malformed qualifier is left as written for `find` to refuse.
+        assert_eq!(canonical_name(":x"), ":x");
     }
 
     #[test]

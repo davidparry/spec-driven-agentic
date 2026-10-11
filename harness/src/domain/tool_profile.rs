@@ -1,9 +1,11 @@
 //! Per-command tool profiles: which built-in tools a model call may use.
-//! Pure. Resolution is replace-or-default, plus attachments, minus removals.
+//! Pure. Resolution is the defaults merged with the config's list for the
+//! command, plus attachments, minus removals - or, for one run, whatever
+//! `--tools` pinned instead.
 
 use std::collections::BTreeMap;
 
-use crate::domain::tools::{ToolDefinition, find};
+use crate::domain::tools::{ToolDefinition, canonical_name, find};
 
 /// Every model call the harness makes, as a profile key. The kebab-case
 /// name is what `.spec/config.toml` and `--for` use.
@@ -183,8 +185,17 @@ const ALSO_MUTATING: [&str; 1] = ["unit_test_create"];
 
 #[derive(Debug, Clone, Default)]
 pub struct ProfileOverrides {
-    pub replace: BTreeMap<String, Vec<String>>,
+    /// `[tools.profiles]`: merged with the caller's defaults. A config
+    /// that spells out a command's tools is a copy of the defaults to
+    /// read and extend, so repeating a default adds nothing and leaving
+    /// one out drops nothing.
+    pub profiles: BTreeMap<String, Vec<String>>,
+    /// `--tools a,b` for one run: the whole list, defaults and config
+    /// set aside. Attachments and removals still apply.
+    pub pinned: BTreeMap<String, Vec<String>>,
+    /// `[tools.enabled]`.
     pub attached: BTreeMap<String, Vec<String>>,
+    /// `[tools.disabled]`. Beats an attachment of the same name.
     pub removed: BTreeMap<String, Vec<String>>,
 }
 
@@ -193,22 +204,53 @@ pub struct Resolved {
     pub unknown: Vec<String>,
 }
 
-/// resolved = (replace[caller] or default_profile(caller)) + attached[caller] - removed[caller]
+/// The names a caller's profile holds before the catalog is consulted:
+/// `pinned[caller]` when set, else `default_profile(caller)` with every
+/// `profiles[caller]` name not already there appended in config order.
+pub fn profile_names(caller: Caller, overrides: &ProfileOverrides) -> Vec<String> {
+    let key = caller.key();
+    if let Some(pinned) = overrides.pinned.get(key) {
+        return pinned.clone();
+    }
+    let mut names: Vec<String> = default_profile(caller)
+        .iter()
+        .map(|name| (*name).to_string())
+        .collect();
+    if let Some(configured) = overrides.profiles.get(key) {
+        for name in configured {
+            if !names_one_tool(&names, name) {
+                names.push(name.clone());
+            }
+        }
+    }
+    names
+}
+
+/// Whether `name` is already in the list under any spelling of the
+/// same tool (`validate_spec` / `builtin:validate_spec`,
+/// `playwright:browser_navigate` / `playwright__browser_navigate`).
+fn names_one_tool(names: &[String], name: &str) -> bool {
+    let wanted = canonical_name(name);
+    names
+        .iter()
+        .any(|existing| canonical_name(existing) == wanted)
+}
+
+/// resolved = profile_names(caller) + attached[caller] - removed[caller]
+///
+/// Names are deduplicated again after the catalog lookup, by the tool
+/// they resolved to: `validate_spec` and `builtin:validate_spec` are
+/// one tool and are offered once.
 pub fn resolve(
     caller: Caller,
     overrides: &ProfileOverrides,
     catalog: &[ToolDefinition],
 ) -> Resolved {
     let key = caller.key();
-    let mut names: Vec<String> = overrides.replace.get(key).cloned().unwrap_or_else(|| {
-        default_profile(caller)
-            .iter()
-            .map(|name| (*name).to_string())
-            .collect()
-    });
+    let mut names = profile_names(caller, overrides);
     if let Some(attached) = overrides.attached.get(key) {
         for name in attached {
-            if !names.iter().any(|existing| existing == name) {
+            if !names_one_tool(&names, name) {
                 names.push(name.clone());
             }
         }
@@ -347,14 +389,19 @@ mod tests {
         }
     }
 
+    /// `--tools` pins the list for one run: defaults and config set
+    /// aside, attachments and removals still applied.
     #[test]
-    fn resolve_replace_attach_remove_and_unknown() {
+    fn resolve_pinned_attach_remove_and_unknown() {
         let catalog = catalog(&all_builtin_names());
         let mut overrides = ProfileOverrides::default();
-        overrides.replace.insert(
+        overrides.pinned.insert(
             "status".into(),
             vec!["get_tdd_state".into(), "validate_spec".into()],
         );
+        overrides
+            .profiles
+            .insert("status".into(), vec!["feature_list".into()]);
         overrides
             .attached
             .insert("status".into(), vec!["playwright__browser_navigate".into()]);
@@ -365,6 +412,44 @@ mod tests {
         let names: Vec<_> = resolved.tools.iter().map(|t| t.name.as_str()).collect();
         assert_eq!(names, vec!["get_tdd_state"]);
         assert_eq!(resolved.unknown, vec!["playwright__browser_navigate"]);
+    }
+
+    /// A `[tools.profiles]` list is read on top of the defaults, not
+    /// instead of them: the config is where a command's tools are
+    /// spelled out to be seen and added to, and a list that named one
+    /// tool used to take the other four away.
+    #[test]
+    fn a_profiles_list_adds_to_the_defaults_without_repeating_them() {
+        let catalog = catalog(&all_builtin_names());
+        let mut overrides = ProfileOverrides::default();
+        let mut listed: Vec<String> = default_profile(Caller::Status)
+            .iter()
+            .map(|n| n.to_string())
+            .collect();
+        listed.push("git_diff".into());
+        listed.push("builtin:get_tdd_state".into());
+        overrides.profiles.insert("status".into(), listed);
+        // Before any catalog is consulted the qualified spelling of a
+        // default is already recognised as that default, so what
+        // `spec config` reports is the set the model is offered.
+        let mut before_catalog: Vec<&str> = default_profile(Caller::Status).to_vec();
+        before_catalog.push("git_diff");
+        assert_eq!(profile_names(Caller::Status, &overrides), before_catalog);
+        let resolved = resolve(Caller::Status, &overrides, &catalog);
+        let names: Vec<_> = resolved.tools.iter().map(|t| t.name.as_str()).collect();
+        let mut expected: Vec<&str> = default_profile(Caller::Status).to_vec();
+        expected.push("git_diff");
+        expected.sort_by_key(|n| catalog.iter().position(|c| c.name == *n));
+        assert_eq!(names, expected);
+        assert!(resolved.unknown.is_empty());
+
+        // A list shorter than the defaults drops none of them.
+        let mut short = ProfileOverrides::default();
+        short
+            .profiles
+            .insert("status".into(), vec!["get_tdd_state".into()]);
+        let resolved = resolve(Caller::Status, &short, &catalog);
+        assert_eq!(resolved.tools.len(), default_profile(Caller::Status).len());
     }
 
     #[test]
@@ -391,7 +476,7 @@ mod tests {
             origin: ToolOrigin::Server("self".into()),
         });
         let mut overrides = ProfileOverrides::default();
-        overrides.replace.insert(
+        overrides.profiles.insert(
             "status".into(),
             vec![
                 "builtin:validate_spec".into(),
@@ -401,10 +486,17 @@ mod tests {
         );
         let resolved = resolve(Caller::Status, &overrides, &catalog);
         let names: Vec<_> = resolved.tools.iter().map(|t| t.name.as_str()).collect();
+        // The qualified built-in is the same tool as the default's bare
+        // name and is offered once; the MCP namesake is a second tool.
         assert_eq!(
             names,
             vec!["validate_spec", "get_tdd_state", "self__validate_spec"]
         );
-        assert!(resolved.unknown.is_empty());
+        // The three status defaults this small catalog lacks are the
+        // only unknowns - the qualified names all resolved.
+        assert_eq!(
+            resolved.unknown,
+            vec!["project_root", "list_requirements", "get_requirement"]
+        );
     }
 }

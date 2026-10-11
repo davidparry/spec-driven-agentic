@@ -14,7 +14,12 @@ pub struct ToolList {
 
 pub struct ProfileView {
     pub caller: String,
+    /// Every tool the command is offered, catalog order.
     pub tools: Vec<String>,
+    /// The subset of `tools` the config added on top of the compiled-in
+    /// defaults (`[tools.profiles]` or `[tools.enabled]`), so a reader
+    /// can tell the shipped set from what the project put there.
+    pub from_config: Vec<String>,
     pub unknown: Vec<String>,
 }
 
@@ -100,9 +105,17 @@ where
             .into_iter()
             .map(|caller| {
                 let resolved = resolve(caller, &overrides, &list.tools);
+                let shipped = resolve(caller, &ProfileOverrides::default(), &list.tools);
+                let from_config = resolved
+                    .tools
+                    .iter()
+                    .filter(|t| !shipped.tools.iter().any(|s| s.name == t.name))
+                    .map(|t| t.name.clone())
+                    .collect();
                 ProfileView {
                     caller: caller.key().to_string(),
                     tools: resolved.tools.iter().map(|t| t.name.clone()).collect(),
+                    from_config,
                     unknown: resolved.unknown,
                 }
             })
@@ -222,9 +235,12 @@ mod tests {
         }
     }
 
+    /// The status defaults plus one tool outside them, so a test can
+    /// add something a config list would.
     fn builtin() -> Vec<ToolDefinition> {
         default_profile(Caller::Status)
             .iter()
+            .chain(std::iter::once(&"git_diff"))
             .map(|name| ToolDefinition {
                 name: (*name).into(),
                 description: format!("{name}."),
@@ -382,15 +398,45 @@ mod tests {
         );
     }
 
+    /// A `[tools.profiles]` entry adds to the defaults, and the profile
+    /// view says which tools it added so the shipped set stays visible.
     #[test]
-    fn replace_override_is_visible() {
+    fn a_configured_profile_merges_with_the_defaults_and_is_marked() {
         let service = service(true);
-        service
-            .store
-            .0
-            .borrow_mut()
-            .replace
-            .insert("status".into(), vec!["get_tdd_state".into()]);
+        service.store.0.borrow_mut().profiles.insert(
+            "status".into(),
+            vec!["get_tdd_state".into(), "git_diff".into()],
+        );
+        let (resolved, _) = service.list_for(Caller::Status, false, true);
+        let names: Vec<_> = resolved.tools.iter().map(|t| t.name.as_str()).collect();
+        assert_eq!(names.len(), default_profile(Caller::Status).len() + 1);
+        assert!(names.contains(&"git_diff"));
+        for default in default_profile(Caller::Status) {
+            assert!(
+                names.contains(default),
+                "{default} dropped by a config list"
+            );
+        }
+        let (views, _) = service.profiles(true);
+        let status = views.iter().find(|v| v.caller == "status").unwrap();
+        assert_eq!(status.from_config, vec!["git_diff".to_string()]);
+        let ask = views.iter().find(|v| v.caller == "ask").unwrap();
+        assert!(ask.from_config.is_empty());
+    }
+
+    /// `--tools` pins the list for one run in place of defaults and config.
+    #[test]
+    fn a_pinned_list_is_the_whole_profile() {
+        let service = service(true);
+        {
+            let mut store = service.store.0.borrow_mut();
+            store
+                .profiles
+                .insert("status".into(), vec!["git_diff".into()]);
+            store
+                .pinned
+                .insert("status".into(), vec!["get_tdd_state".into()]);
+        }
         let (resolved, _) = service.list_for(Caller::Status, false, true);
         let names: Vec<_> = resolved.tools.iter().map(|t| t.name.as_str()).collect();
         assert_eq!(names, vec!["get_tdd_state"]);

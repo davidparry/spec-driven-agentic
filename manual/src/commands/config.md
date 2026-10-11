@@ -85,11 +85,13 @@ name Ollama supplied:
 llm.model	qwen3:8b	(discovered)
 ```
 
-A `[tools.profiles]` list for a caller **replaces** that command's
-built-in tools and is attributed to the file. `spec init` writes every
-caller's default list so those rows show as from the file. Callers not
-listed keep the code default. `[tools.enabled]` / `[tools.disabled]`
-rows appear only when those tables are set.
+A `[tools.profiles]` list for a caller is **merged** with that
+command's built-in tools - defaults first, then whatever the file adds,
+each tool once - and the row shows the merged set attributed to the
+file. `spec init` writes every caller's default list so those rows show
+as from the file with the same tools the code would have offered.
+Callers not listed keep the code default. `[tools.enabled]` /
+`[tools.disabled]` rows appear only when those tables are set.
 
 Optional keys with nothing to show print `(unset)` with source
 `(default)`: `tools.mcp_config`, and `llm.model` when Ollama is down

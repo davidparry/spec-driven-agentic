@@ -402,7 +402,8 @@ impl ToolStore for TomlToolStore {
     fn overrides(&self) -> ProfileOverrides {
         let present = present_values(&self.config_file);
         ProfileOverrides {
-            replace: present.profiles,
+            profiles: present.profiles,
+            pinned: BTreeMap::new(),
             attached: present.enabled,
             removed: present.disabled,
         }
@@ -930,7 +931,7 @@ mod tests {
     }
 
     #[test]
-    fn a_profiles_list_replaces_defaults_including_qualified_names() {
+    fn a_profiles_list_is_read_including_qualified_names() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(CONFIG_FILE);
         fs::write(
@@ -940,7 +941,7 @@ mod tests {
         .unwrap();
         let overrides = TomlToolStore::new(path).overrides();
         assert_eq!(
-            overrides.replace.get("status").unwrap(),
+            overrides.profiles.get("status").unwrap(),
             &vec![
                 "builtin:get_tdd_state".to_string(),
                 "self:validate_spec".to_string()
@@ -971,10 +972,17 @@ mod tests {
         );
         assert_eq!(report.setting("llm.timeout_seconds").unwrap().value, "900");
         assert_eq!(report.setting("tools.max_rounds").unwrap().value, "4");
+        // A listed command reads as the merged set it will be offered,
+        // attributed to the file.
+        let status = report.setting("tools.profiles.status").unwrap();
         assert_eq!(
-            report.setting("tools.profiles.status").unwrap().value,
-            "get_tdd_state"
+            status.value,
+            "project_root, list_requirements, get_requirement, get_tdd_state, validate_spec"
         );
+        assert!(matches!(
+            status.source,
+            crate::domain::config_report::ConfigSource::File(_)
+        ));
         assert_eq!(
             report.setting("tools.profiles.implement").unwrap().source,
             crate::domain::config_report::ConfigSource::Default
