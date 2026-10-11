@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+- **A model that sends the same refused reply back is not asked a
+  third time, and every re-ask is said as it happens.** A `spec
+  deliver` on this crate sat at `Generating an implementation attempt -
+  working (14m elapsed)` with nothing else on the screen. The log told
+  the rest: the model had been asked to rewrite `src/mcp.rs`, answered
+  with 50,667 characters cut off at its output limit (seven minutes),
+  was told the reply was not a closed file list, and sent back the
+  identical 50,667 characters (six more minutes) - and with `[llm]
+  retry = 15` and a one-hour per-call timeout, the loop would have
+  gone on doing that for the rest of the afternoon. Nothing said so,
+  because the "asking again (2 of 15)" notes for an implementation
+  attempt were collected and printed only after the last attempt. Two
+  changes. The agent loop now hands the retry callback the prompter,
+  so every caller warns the moment a reply is refused rather than
+  after the budget is spent; the deferred-note pattern is gone from
+  the implementation, step, scenario, unit-test, split, rewording, and
+  layout asks alike. And a refused reply byte-identical to the one
+  refused just before it ends the ask there, with a reason that names
+  the refusal, the size, and that asking again would not change it -
+  the correction is plainly not reaching the model, and each further
+  attempt is a full call to learn the same thing. The requirement
+  split keeps its own rule in step: a happy-path-only draft handed
+  back unchanged is accepted for the author to finish, as the final
+  attempt always accepted it, rather than lost to manual drafting.
 - **Every run belongs to a GUID session that can be resumed by id**
   (HARNESS-019). `.spec/state.json` and `.spec/memory.json` used to
   hold one phase log and one memory for the whole project, so a

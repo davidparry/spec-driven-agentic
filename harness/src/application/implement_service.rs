@@ -586,7 +586,7 @@ where
             prompter,
             &prompt,
             |reply| accept_filled_definitions(language, reply, &patterns, &shape),
-            |_, _, _| {},
+            |_, _, _, _| {},
         );
         drop(batch);
         let FilledSteps {
@@ -636,7 +636,7 @@ where
                     prompter,
                     &prompt,
                     |reply| accept_filled_definition(language, reply, &pattern, &shape),
-                    |_, _, _| {},
+                    |_, _, _, _| {},
                 );
                 drop(work);
                 match outcome {
@@ -880,9 +880,8 @@ where
         );
         let mut complete = Vec::new();
         // A refused reply costs another full model call - minutes on a
-        // local model. Each re-ask leaves its reason behind, so a wait
-        // that spans several reads as retries rather than one hung call.
-        let retries = std::cell::RefCell::new(Vec::<String>::new());
+        // local model. Each re-ask says so as it happens, so a wait that
+        // spans several reads as retries rather than one hung call.
         let attempt = llm.ask(
             prompter,
             &prompt,
@@ -896,15 +895,10 @@ where
                 },
                 asserts_gate,
             ),
-            |attempt, of, reason| {
-                retries
-                    .borrow_mut()
-                    .push(retry_note(attempt, of, reason, "the implementation"));
+            |prompter, attempt, of, reason| {
+                prompter.warn(&retry_note(attempt, of, reason, "the implementation"));
             },
         );
-        for note in retries.into_inner() {
-            prompter.warn(&note);
-        }
         judgments.append(&mut asserts);
         judgments.append(&mut complete);
         let salvaged = kept_production.into_inner();
@@ -1248,7 +1242,7 @@ where
                     Ok(body)
                 }
             },
-            |_, _, _| {},
+            |_, _, _, _| {},
         ) {
             Ok(reply) => reply,
             Err(LlmReplyError::Call(e)) => {

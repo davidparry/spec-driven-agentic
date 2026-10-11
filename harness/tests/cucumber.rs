@@ -4344,7 +4344,7 @@ fn run_agent(world: &mut SpecWorld, user: &str, fail: bool, nonsure: bool) {
         user: user.into(),
         tool_rules: String::new(),
     };
-    let result = agent.ask(&mut prompter, &prompt, parse, |_, _, _| {});
+    let result = agent.ask(&mut prompter, &prompt, parse, |_, _, _, _| {});
     world.agent_told = prompter.told;
     // Reconstruct offered from last chat — QueueChat offered is moved.
     // Capture via a second channel: re-run is wrong. Store offered inside QueueChat

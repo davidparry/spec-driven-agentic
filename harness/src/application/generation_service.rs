@@ -128,7 +128,7 @@ impl<L: LlmConversation, B: ToolBroker> ResolvedLlm<L, B> {
         prompter: &mut dyn Prompter,
         prompt: &crate::domain::prompts::RenderedPrompt,
         parse: impl FnMut(&str) -> Result<T, String>,
-        on_retry: impl FnMut(u32, u32, &str),
+        on_retry: impl FnMut(&mut dyn Prompter, u32, u32, &str),
     ) -> Result<T, LlmReplyError> {
         self.agent.ask(prompter, prompt, parse, on_retry)
     }
@@ -574,7 +574,6 @@ where
             return template.to_string();
         };
         let prompt = step_expression_prompt(line, template);
-        let retries = std::cell::RefCell::new(Vec::<String>::new());
         let outcome = llm.ask(
             prompter,
             &prompt,
@@ -608,15 +607,10 @@ where
                     }
                 }
             },
-            |attempt, of, reason| {
-                retries
-                    .borrow_mut()
-                    .push(retry_note(attempt, of, reason, "the step expression"));
+            |prompter, attempt, of, reason| {
+                prompter.warn(&retry_note(attempt, of, reason, "the step expression"));
             },
         );
-        for message in retries.into_inner() {
-            prompter.warn(&message);
-        }
         outcome.unwrap_or_else(|_| template.to_string())
     }
 
@@ -707,7 +701,6 @@ where
             known_steps,
             template,
         );
-        let retries = std::cell::RefCell::new(Vec::<String>::new());
         let id = requirement.id.as_str();
         let outcome = llm.ask(
             prompter,
@@ -731,15 +724,10 @@ where
                 }
                 Ok(scenario)
             },
-            |attempt, of, reason| {
-                retries
-                    .borrow_mut()
-                    .push(retry_note(attempt, of, reason, "the scenario"));
+            |prompter, attempt, of, reason| {
+                prompter.warn(&retry_note(attempt, of, reason, "the scenario"));
             },
         );
-        for message in retries.into_inner() {
-            prompter.warn(&message);
-        }
         outcome.ok()
     }
 
@@ -776,7 +764,6 @@ where
         };
         let prompt = polish_prompt(self.language, template);
         let work = prompter.working(&format!("Asking {} to write {what} - working", llm.model()));
-        let retries = std::cell::RefCell::new(Vec::<String>::new());
         let outcome = llm.ask(
             prompter,
             &prompt,
@@ -788,16 +775,11 @@ where
                     Err("the reply was not a valid file for this language".into())
                 }
             },
-            |attempt, of, reason| {
-                retries
-                    .borrow_mut()
-                    .push(retry_note(attempt, of, reason, what));
+            |prompter, attempt, of, reason| {
+                prompter.warn(&retry_note(attempt, of, reason, what));
             },
         );
         drop(work);
-        for message in retries.into_inner() {
-            prompter.warn(&message);
-        }
         match outcome {
             // `strip_code_fences` leaves whatever the model ended on, and it
             // often ends on the closing brace. These are source files; give
@@ -835,7 +817,6 @@ where
             count_members(self.language, fragment),
         );
         let work = prompter.working(&format!("Asking {} to write {what} - working", llm.model()));
-        let retries = std::cell::RefCell::new(Vec::<String>::new());
         let outcome = llm.ask(
             prompter,
             &prompt,
@@ -847,16 +828,11 @@ where
                     Err("the reply was not the set of members that were asked for".into())
                 }
             },
-            |attempt, of, reason| {
-                retries
-                    .borrow_mut()
-                    .push(retry_note(attempt, of, reason, what));
+            |prompter, attempt, of, reason| {
+                prompter.warn(&retry_note(attempt, of, reason, what));
             },
         );
         drop(work);
-        for message in retries.into_inner() {
-            prompter.warn(&message);
-        }
         match outcome {
             Ok(polished) => {
                 let assembled = splice(&shaped_like(fragment, &polished));

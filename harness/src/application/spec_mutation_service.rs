@@ -50,7 +50,7 @@ fn ask_llm<T>(
     prompter: &mut dyn Prompter,
     prompt: &RenderedPrompt,
     parse: impl FnMut(&str) -> Result<T, String>,
-    on_retry: impl FnMut(u32, u32, &str),
+    on_retry: impl FnMut(&mut dyn Prompter, u32, u32, &str),
 ) -> Result<T, LlmReplyError> {
     Agent::new(
         call.model,
@@ -444,7 +444,6 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: WorkTree, S: StateS
             "Splitting the description into requirements with {model} - working"
         ));
         let prompt = proposal_prompt(&description);
-        let retries = std::cell::RefCell::new(Vec::<String>::new());
         // Every rejection this check has made, so the last attempt it is
         // allowed can stop insisting: one rejection too many and the whole
         // split fails, which costs the author the draft. A happy-path draft
@@ -458,7 +457,14 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: WorkTree, S: StateS
         // leaving the remaining budget to the rule that is always
         // right about what it finds.
         let judged = std::cell::Cell::new(false);
+        // A draft handed back unchanged after the model was told what it
+        // lacked is the last word it has on the matter: the agent loop
+        // stops asking on a verbatim repeat, so refusing it here again
+        // would lose the draft to manual drafting instead of keeping
+        // it for the author to finish, as the final attempt does.
+        let last_refused = std::cell::RefCell::new(None::<String>);
         let check = |reply: &str| {
+            let repeated = last_refused.borrow().as_deref() == Some(reply);
             let outcome = parse_proposals_checked(reply).and_then(|proposals| {
                 // Deterministic first: it costs nothing, and a draft
                 // that is still missing its edge cases is not worth a
@@ -473,12 +479,13 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: WorkTree, S: StateS
                     unmeasurable_criteria(judge, &proposals)
                 });
                 match reason {
-                    Some(reason) if rejections.get() + 1 < attempts => Err(reason),
+                    Some(reason) if rejections.get() + 1 < attempts && !repeated => Err(reason),
                     _ => Ok(proposals),
                 }
             });
             if outcome.is_err() {
                 rejections.set(rejections.get() + 1);
+                *last_refused.borrow_mut() = Some(reply.to_string());
             }
             outcome
         };
@@ -500,16 +507,13 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: WorkTree, S: StateS
             prompter,
             &prompt,
             check,
-            |attempt, of, reason| {
-                retries.borrow_mut().push(format!(
+            |prompter, attempt, of, reason| {
+                prompter.warn(&format!(
                     "The model reply was invalid ({reason}) - asking again ({attempt} of {of})"
                 ));
             },
         );
         drop(work);
-        for message in retries.into_inner() {
-            prompter.warn(&message);
-        }
         let proposals = match outcome {
             Ok(proposals) => proposals,
             Err(LlmReplyError::Call(error)) => {
@@ -1397,7 +1401,6 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: WorkTree, S: StateS
                 }
                 Ok(proposal)
             };
-            let retries = std::cell::RefCell::new(Vec::<String>::new());
             let null = NullBroker;
             let broker: &dyn ToolBroker = self.broker.as_deref().unwrap_or(&null);
             let outcome = ask_llm(
@@ -1416,16 +1419,13 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: WorkTree, S: StateS
                 prompter,
                 &prompt,
                 check,
-                |attempt, of, reason| {
-                    retries.borrow_mut().push(format!(
+                |prompter, attempt, of, reason| {
+                    prompter.warn(&format!(
                         "The model's rewording was invalid ({reason}) - asking again ({attempt} of {of})"
                     ));
                 },
             );
             drop(work);
-            for message in retries.into_inner() {
-                prompter.warn(&message);
-            }
             let proposal = match outcome {
                 Ok(proposal) => proposal,
                 Err(LlmReplyError::Call(error)) => {
@@ -2345,7 +2345,9 @@ mod tests {
     }
 
     /// [`LlmConversation`] recording every call's system and user prompt
-    /// (joined with a newline), replying the same thing.
+    /// (joined with a newline), replying the same text each time with
+    /// the call number after it - the same *kind* of reply, never the
+    /// same bytes, since a verbatim repeat ends the asking early.
     struct RecordingLlm {
         reply: String,
         prompts: std::cell::RefCell<Vec<String>>,
@@ -2359,8 +2361,12 @@ mod tests {
             _tools: &[crate::domain::tools::ToolDefinition],
         ) -> Result<crate::domain::tools::ChatTurn, crate::ports::LlmError> {
             let (system, user) = crate::domain::tools::system_and_user(messages);
+            let call = self.prompts.borrow().len() + 1;
             self.prompts.borrow_mut().push(format!("{system}\n{user}"));
-            Ok(crate::domain::tools::text_turn(self.reply.clone()))
+            Ok(crate::domain::tools::text_turn(format!(
+                "{} ({call})",
+                self.reply
+            )))
         }
     }
 
@@ -3030,8 +3036,18 @@ mod tests {
     #[test]
     fn a_model_that_never_adds_an_edge_case_keeps_its_draft_rather_than_losing_it() {
         let service = service(Ok(spec()), green());
+        // Three drafts, each still without an edge case but none a
+        // verbatim repeat of the one before, so every attempt is spent.
         let llm = ScriptedLlm {
-            replies: vec![HAPPY_ONLY.into()],
+            replies: vec![
+                HAPPY_ONLY.into(),
+                HAPPY_ONLY
+                    .replace("\"1,2\"", "\"2,3\"")
+                    .replace("is 3", "is 5"),
+                HAPPY_ONLY
+                    .replace("\"1,2\"", "\"4,4\"")
+                    .replace("is 3", "is 8"),
+            ],
             calls: std::cell::Cell::new(0),
         };
         // The author supplies the edge case the retries could not win.
@@ -3053,6 +3069,44 @@ mod tests {
                 .iter()
                 .any(|l| l.contains("The description gave no complete requirement")),
             "the draft must survive an unwinnable retry: {:#?}",
+            prompter.transcript
+        );
+    }
+
+    /// The same draft sent back unchanged after being told what it
+    /// lacked is accepted then and there, as the final attempt would
+    /// have accepted it: the agent loop does not ask a third time for
+    /// a reply it has seen twice, and the draft must not be lost to
+    /// that.
+    #[test]
+    fn a_draft_repeated_verbatim_is_kept_without_spending_the_remaining_attempts() {
+        let service = service(Ok(spec()), green());
+        let llm = ScriptedLlm {
+            replies: vec![HAPPY_ONLY.into()],
+            calls: std::cell::Cell::new(0),
+        };
+        let mut prompter =
+            ScriptedPrompter::answering(&["sum numbers", "", "", "", EDGE_CRITERION, "", "y"]);
+        let report = service
+            .draft_assisted(&mut prompter, "test-model", &llm)
+            .unwrap();
+        assert!(report.written, "report: {report:?}");
+        assert_eq!(report.title, "Comma separated numbers are summed");
+        assert_eq!(llm.calls.get(), 2, "the repeat is the model's last word");
+        assert!(
+            prompter
+                .transcript
+                .iter()
+                .any(|l| l.contains("asking again (2 of 3)")),
+            "the first refusal was still said: {:#?}",
+            prompter.transcript
+        );
+        assert!(
+            !prompter
+                .transcript
+                .iter()
+                .any(|l| l.contains("The description gave no complete requirement")),
+            "the draft must survive the repeat: {:#?}",
             prompter.transcript
         );
     }

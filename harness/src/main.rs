@@ -3047,7 +3047,7 @@ fn ask_once(
                     Ok(body.to_string())
                 }
             },
-            |_, _, _| {},
+            |_, _, _, _| {},
         )
         .map_err(|e| match e {
             spec_harness::application::LlmReplyError::Call(error) => anyhow::anyhow!(error.0),
@@ -3120,7 +3120,7 @@ fn run_diff(
                 Ok(body.to_string())
             }
         },
-        |_, _, _| {},
+        |_, _, _, _| {},
     );
     drop(work);
     let summary = summary.map_err(|e| match e {

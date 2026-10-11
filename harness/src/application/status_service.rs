@@ -224,7 +224,7 @@ where
                     Ok(body)
                 }
             },
-            |_, _, _| {},
+            |_, _, _, _| {},
         ) {
             Ok(reply) => reply,
             Err(LlmReplyError::Call(e)) => {

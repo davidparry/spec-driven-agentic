@@ -1,8 +1,6 @@
 //! Project memory: refresh the recorded language, libraries, and layout
 //! from a scan, and wrap an LLM so every system prompt carries the brief.
 
-use std::cell::RefCell;
-
 use crate::application::LlmReplyError;
 use crate::application::agent_service::{Agent, AgentConfig, DEFAULT_MAX_ROUNDS, NullBroker};
 use crate::domain::language::{Language, detect_languages};
@@ -203,7 +201,6 @@ where
         prompter: &mut dyn Prompter,
     ) -> Result<String, String> {
         let prompt = layout_prompt(input, candidates);
-        let notices = RefCell::new(Vec::new());
         let work = prompter.working(&format!("Asking {} which module - working", ask.model));
         let outcome = Agent::new(
             ask.model,
@@ -216,16 +213,13 @@ where
             prompter,
             &prompt,
             |reply| parse_layout_checked(reply, candidates),
-            |attempt, of, reason| {
-                notices.borrow_mut().push(format!(
+            |prompter, attempt, of, reason| {
+                prompter.warn(&format!(
                     "The model reply was invalid ({reason}) - asking again ({attempt} of {of})"
                 ));
             },
         );
         drop(work);
-        for notice in notices.into_inner() {
-            prompter.warn(&notice);
-        }
         outcome.map_err(|error| match error {
             LlmReplyError::Call(error) => LlmReplyError::call_failed(&error),
             LlmReplyError::Invalid { reason } => {

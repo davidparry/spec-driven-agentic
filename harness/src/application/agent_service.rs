@@ -116,18 +116,35 @@ impl<C: LlmConversation, B: ToolBroker> Agent<C, B> {
     /// Every `Fn` is already an `FnMut`, so this costs existing callers
     /// nothing and saves the ones that need state from reaching for a
     /// `RefCell`.
+    ///
+    /// `on_retry` is handed the prompter, because the moment to say "the
+    /// reply was refused - asking again" is *before* the next call, not
+    /// after the last one. A caller that only has the one `&mut
+    /// Prompter` cannot both lend it here and warn from a closure, and
+    /// the workaround - collecting notes to print once `ask` returns -
+    /// kept a developer looking at a bare spinner for every retry of a
+    /// local model: fifteen refused replies at seven minutes each read
+    /// as a hung process, not as fifteen refusals.
+    ///
+    /// A refused reply identical to the one refused just before it ends
+    /// the ask early. The model was told what was wrong and sent the
+    /// same bytes back, so the correction is not reaching it - typically
+    /// a reply cut off at the model's output limit, which no re-ask
+    /// lengthens - and every further attempt would cost a full call to
+    /// learn the same thing.
     pub fn ask<T>(
         &self,
         prompter: &mut dyn Prompter,
         prompt: &RenderedPrompt,
         mut parse: impl FnMut(&str) -> Result<T, String>,
-        mut on_retry: impl FnMut(u32, u32, &str),
+        mut on_retry: impl FnMut(&mut dyn Prompter, u32, u32, &str),
     ) -> Result<T, LlmReplyError> {
         let mut messages = vec![
             ChatMessage::system(prompt.system_for(!self.tools.is_empty())),
             ChatMessage::user(prompt.user.clone()),
         ];
         let mut answers = 0u32;
+        let mut last_refused: Option<String> = None;
         let names: Vec<String> = self.tools.iter().map(|t| t.name.clone()).collect();
         for _round in 1..=self.max_rounds {
             let turn = chat_logged(
@@ -143,12 +160,23 @@ impl<C: LlmConversation, B: ToolBroker> Agent<C, B> {
                     Ok(value) => return Ok(value),
                     Err(reason) => {
                         answers += 1;
+                        if last_refused.as_deref() == Some(turn.content.as_str()) {
+                            tracing::warn!(
+                                attempts = answers,
+                                chars = turn.content.len(),
+                                "LLM returned the same refused reply twice - not asking again"
+                            );
+                            return Err(LlmReplyError::Invalid {
+                                reason: repeated_reply(&reason, turn.content.len(), answers),
+                            });
+                        }
                         if answers >= self.attempts {
                             return Err(LlmReplyError::Invalid {
                                 reason: format!("{reason} (after {answers} attempts)"),
                             });
                         }
-                        on_retry(answers + 1, self.attempts, &reason);
+                        on_retry(prompter, answers + 1, self.attempts, &reason);
+                        last_refused = Some(turn.content.clone());
                         messages.push(ChatMessage::assistant(turn.content.clone(), Vec::new()));
                         messages.push(ChatMessage::user(correction_user(&reason, &turn.content)));
                         continue;
@@ -207,6 +235,17 @@ impl<C: LlmConversation, B: ToolBroker> Agent<C, B> {
             Err(ToolError(message)) => format!("tool error: {message}"),
         }
     }
+}
+
+/// Why an ask stopped on a repeated reply. Carries the refusal, so the
+/// developer still learns what was wrong with the bytes, and the size,
+/// because a reply tens of thousands of characters long that comes
+/// back the same twice is one the model's output limit cut short.
+fn repeated_reply(reason: &str, chars: usize, attempts: u32) -> String {
+    format!(
+        "{reason} - the model sent the same {chars}-character reply back after being told, \
+         so asking again would not change it (stopped after {attempts} attempts)"
+    )
 }
 
 #[cfg(test)]
@@ -364,7 +403,7 @@ mod tests {
             AgentConfig::new("next_step", 1, 1, Vec::new()),
         );
         without
-            .ask(&mut silent(), &prompt, parse_ok, |_, _, _| {})
+            .ask(&mut silent(), &prompt, parse_ok, |_, _, _, _| {})
             .unwrap();
         assert_eq!(without.chat.systems.borrow().as_slice(), ["advise"]);
 
@@ -378,7 +417,7 @@ mod tests {
             1,
             1,
         );
-        with.ask(&mut silent(), &prompt, parse_ok, |_, _, _| {})
+        with.ask(&mut silent(), &prompt, parse_ok, |_, _, _, _| {})
             .unwrap();
         assert_eq!(
             with.chat.systems.borrow().as_slice(),
@@ -407,7 +446,7 @@ mod tests {
         );
         let mut prompter = silent();
         let value = agent
-            .ask(&mut prompter, &prompt(), parse_ok, |_, _, _| {})
+            .ask(&mut prompter, &prompt(), parse_ok, |_, _, _, _| {})
             .unwrap();
         assert_eq!(value, "run spec test");
     }
@@ -435,7 +474,7 @@ mod tests {
         );
         let mut prompter = silent();
         let value = agent
-            .ask(&mut prompter, &prompt(), parse_ok, |_, _, _| {})
+            .ask(&mut prompter, &prompt(), parse_ok, |_, _, _, _| {})
             .unwrap();
         assert_eq!(value, "phase is GREEN");
         assert!(
@@ -495,7 +534,7 @@ mod tests {
         );
         let mut prompter = silent();
         agent
-            .ask(&mut prompter, &prompt(), parse_ok, |_, _, _| {})
+            .ask(&mut prompter, &prompt(), parse_ok, |_, _, _, _| {})
             .unwrap();
         assert_eq!(*calls.borrow(), vec!["get_tdd_state", "command_run"]);
     }
@@ -523,7 +562,7 @@ mod tests {
         );
         let mut prompter = silent();
         let value = agent
-            .ask(&mut prompter, &prompt(), parse_ok, |_, _, _| {})
+            .ask(&mut prompter, &prompt(), parse_ok, |_, _, _, _| {})
             .unwrap();
         assert_eq!(value, "ok after miss");
     }
@@ -563,15 +602,15 @@ mod tests {
         };
         let (agent, mut prompter) = make(Ok(true));
         agent
-            .ask(&mut prompter, &prompt(), parse_ok, |_, _, _| {})
+            .ask(&mut prompter, &prompt(), parse_ok, |_, _, _, _| {})
             .unwrap();
         let (agent, mut prompter) = make(Ok(false));
         agent
-            .ask(&mut prompter, &prompt(), parse_ok, |_, _, _| {})
+            .ask(&mut prompter, &prompt(), parse_ok, |_, _, _, _| {})
             .unwrap();
         let (agent, mut prompter) = make(Err(PromptError("eof".into())));
         agent
-            .ask(&mut prompter, &prompt(), parse_ok, |_, _, _| {})
+            .ask(&mut prompter, &prompt(), parse_ok, |_, _, _, _| {})
             .unwrap();
         let _ = broker;
     }
@@ -597,12 +636,152 @@ mod tests {
         let mut prompter = silent();
         let notices = RefCell::new(Vec::new());
         let value = agent
-            .ask(&mut prompter, &prompt(), parse_ok, |attempt, of, reason| {
-                notices.borrow_mut().push((attempt, of, reason.to_string()));
-            })
+            .ask(
+                &mut prompter,
+                &prompt(),
+                parse_ok,
+                |_, attempt, of, reason| {
+                    notices.borrow_mut().push((attempt, of, reason.to_string()));
+                },
+            )
             .unwrap();
         assert_eq!(value, "now valid");
         assert_eq!(*notices.borrow(), vec![(2, 3, "empty".into())]);
+    }
+
+    /// The retry callback is handed the prompter `ask` was lent, so a
+    /// caller can say "asking again" the moment it is true rather than
+    /// collecting notes to print after the last attempt.
+    #[test]
+    fn a_retry_can_warn_through_the_prompter_before_the_next_call() {
+        let agent = make_agent(
+            vec![
+                Ok(ChatTurn {
+                    content: "   ".into(),
+                    tool_calls: vec![],
+                }),
+                Ok(ChatTurn {
+                    content: "now valid".into(),
+                    tool_calls: vec![],
+                }),
+            ],
+            FakeBroker::default(),
+            vec![],
+            3,
+            12,
+        );
+        let mut prompter = ScriptedPrompter {
+            confirms: RefCell::new(vec![]),
+            told: RefCell::new(vec![]),
+        };
+        agent
+            .ask(
+                &mut prompter,
+                &prompt(),
+                parse_ok,
+                |prompter, attempt, of, reason| {
+                    prompter.tell(&format!(
+                        "refused ({reason}) - asking again ({attempt} of {of})"
+                    ));
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            prompter.told.borrow().as_slice(),
+            ["refused (empty) - asking again (2 of 3)"]
+        );
+    }
+
+    /// The same refused bytes twice means the correction is not landing
+    /// (a reply the output limit cut short comes back cut short again),
+    /// so the ask stops there instead of spending the remaining
+    /// attempts, each a full call, learning the same thing.
+    #[test]
+    fn a_refused_reply_repeated_verbatim_ends_the_ask_early() {
+        let cut_short = "[{\"path\":\"src/mcp.rs\",\"content\":\"".repeat(4);
+        let agent = make_agent(
+            vec![
+                Ok(ChatTurn {
+                    content: cut_short.clone(),
+                    tool_calls: vec![],
+                }),
+                Ok(ChatTurn {
+                    content: cut_short.clone(),
+                    tool_calls: vec![],
+                }),
+                Ok(ChatTurn {
+                    content: "never asked for".into(),
+                    tool_calls: vec![],
+                }),
+            ],
+            FakeBroker::default(),
+            vec![],
+            15,
+            12,
+        );
+        let retries = RefCell::new(0u32);
+        let error = agent
+            .ask(
+                &mut silent(),
+                &prompt(),
+                |text| {
+                    if text.ends_with(']') {
+                        Ok(text.to_string())
+                    } else {
+                        Err("the reply is not a closed JSON array".to_string())
+                    }
+                },
+                |_, _, _, _| *retries.borrow_mut() += 1,
+            )
+            .unwrap_err();
+        let LlmReplyError::Invalid { reason } = error else {
+            panic!("{error:?}");
+        };
+        assert!(
+            reason.starts_with("the reply is not a closed JSON array - "),
+            "{reason}"
+        );
+        assert!(
+            reason.contains(&format!("same {}-character reply", cut_short.len())),
+            "{reason}"
+        );
+        assert!(reason.ends_with("(stopped after 2 attempts)"), "{reason}");
+        assert_eq!(*retries.borrow(), 1, "one re-ask, then the repeat ended it");
+        assert_eq!(
+            agent.chat().turns.borrow().len(),
+            1,
+            "the third scripted reply was never requested"
+        );
+    }
+
+    /// Two different refusals in a row are an ordinary retry: only a
+    /// verbatim repeat is evidence that asking again is pointless.
+    #[test]
+    fn differing_refused_replies_keep_being_retried() {
+        let agent = make_agent(
+            vec![
+                Ok(ChatTurn {
+                    content: " ".into(),
+                    tool_calls: vec![],
+                }),
+                Ok(ChatTurn {
+                    content: "  ".into(),
+                    tool_calls: vec![],
+                }),
+                Ok(ChatTurn {
+                    content: "valid at last".into(),
+                    tool_calls: vec![],
+                }),
+            ],
+            FakeBroker::default(),
+            vec![],
+            5,
+            12,
+        );
+        let value = agent
+            .ask(&mut silent(), &prompt(), parse_ok, |_, _, _, _| {})
+            .unwrap();
+        assert_eq!(value, "valid at last");
     }
 
     /// A validator that has to remember what it already did - judging a
@@ -641,7 +820,7 @@ mod tests {
                         _ => Ok(reply.to_string()),
                     }
                 },
-                |_, _, _| {},
+                |_, _, _, _| {},
             )
             .unwrap();
         assert_eq!(value, "now valid");
@@ -667,7 +846,7 @@ mod tests {
             2,
             12,
         )
-        .ask(&mut prompter, &prompt(), parse_ok, |_, _, _| {})
+        .ask(&mut prompter, &prompt(), parse_ok, |_, _, _, _| {})
         .unwrap_err();
         match error {
             LlmReplyError::Invalid { reason } => {
@@ -691,7 +870,7 @@ mod tests {
         );
         let mut prompter = silent();
         let error = agent
-            .ask(&mut prompter, &prompt(), parse_ok, |_, _, _| {})
+            .ask(&mut prompter, &prompt(), parse_ok, |_, _, _, _| {})
             .unwrap_err();
         match error {
             LlmReplyError::Invalid { reason } => {
@@ -712,7 +891,7 @@ mod tests {
         );
         let mut prompter = silent();
         let error = agent
-            .ask(&mut prompter, &prompt(), parse_ok, |_, _, _| {})
+            .ask(&mut prompter, &prompt(), parse_ok, |_, _, _, _| {})
             .unwrap_err();
         match error {
             LlmReplyError::Call(e) => assert_eq!(e.0, "connection refused"),

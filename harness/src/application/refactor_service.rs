@@ -301,7 +301,7 @@ where
                     |updates: &Vec<FileUpdate>| refactor_briefs(before, updates),
                     |reply| parse_refactor_updates(reply, &writable, &self.layout),
                 ),
-                |_, _, _| {},
+                |_, _, _, _| {},
             );
             drop(work);
             let updates = match outcome {
