@@ -108,7 +108,20 @@ pub fn scope(
     let focus_symbol = symbol_of(focus);
     for (path, content) in files {
         if is_test_path(path, structure) {
-            scope.readonly.push((path.clone(), content.clone()));
+            // The tests that exercise the file under refactor are the
+            // behaviour being preserved; the rest of the suite is not
+            // context, it is weight. Measured live on this harness: every
+            // test file read-only was 400k characters of prompt, and the
+            // first round had no answer after eight minutes.
+            if let Some(symbol) = focus_symbol.as_deref() {
+                if names_test_of(path, symbol) || mentions(content, symbol) {
+                    scope
+                        .readonly
+                        .push((path.clone(), excerpt(content, symbol)));
+                }
+            } else {
+                scope.readonly.push((path.clone(), content.clone()));
+            }
         } else if path == focus || references(content, &focus_symbol) {
             scope.writable.push((path.clone(), content.clone()));
         } else if focus_symbol
@@ -132,6 +145,55 @@ fn symbol_of(path: &str) -> Option<String> {
     let name = path.rsplit('/').next().unwrap_or(path);
     let stem = name.split('.').next().unwrap_or(name);
     (!stem.is_empty()).then(|| stem.to_string())
+}
+
+/// Whether a test file is named after the file under refactor -
+/// `CalcTest.java`, `calc.feature`, `calc_test.rs` for `Calc`.
+fn names_test_of(path: &str, symbol: &str) -> bool {
+    symbol_of(path).is_some_and(|stem| stem.to_lowercase().contains(&symbol.to_lowercase()))
+}
+
+/// Lines of a read-only test file kept either side of each mention of
+/// the symbol under refactor.
+const EXCERPT_CONTEXT_LINES: usize = 20;
+/// A test file up to this many lines travels whole; excerpting it
+/// would save nothing worth the seams.
+const EXCERPT_WHOLE_FILE_LINES: usize = 200;
+
+/// The parts of a test file that bear on `symbol`: the lines around each
+/// mention, with `// ...` where lines were left out. A file that never
+/// mentions it, or is short, is returned whole.
+fn excerpt(content: &str, symbol: &str) -> String {
+    let lines: Vec<&str> = content.lines().collect();
+    if lines.len() <= EXCERPT_WHOLE_FILE_LINES {
+        return content.to_string();
+    }
+    let mut keep = vec![false; lines.len()];
+    let mut any = false;
+    for (index, line) in lines.iter().enumerate() {
+        if mentions(line, symbol) {
+            any = true;
+            let from = index.saturating_sub(EXCERPT_CONTEXT_LINES);
+            let to = (index + EXCERPT_CONTEXT_LINES + 1).min(lines.len());
+            keep[from..to].iter_mut().for_each(|k| *k = true);
+        }
+    }
+    if !any {
+        return content.to_string();
+    }
+    let mut out = String::new();
+    let mut skipping = false;
+    for (index, line) in lines.iter().enumerate() {
+        if keep[index] {
+            out.push_str(line);
+            out.push('\n');
+            skipping = false;
+        } else if !skipping {
+            out.push_str("// ...\n");
+            skipping = true;
+        }
+    }
+    out
 }
 
 fn references(content: &str, symbol: &Option<String>) -> bool {
@@ -459,6 +521,15 @@ mod tests {
                 "class Unrelated {}".into(),
             ),
             (UNIT_TEST.to_string(), "class CalcTest {}".into()),
+            (FEATURE.to_string(), "Feature: Calc\n".into()),
+            (
+                "kata/src/test/java/ParserSteps.java".to_string(),
+                "class ParserSteps { Calc c; }".into(),
+            ),
+            (
+                "kata/src/test/java/UnrelatedTest.java".to_string(),
+                "class UnrelatedTest { Unrelated u; }".into(),
+            ),
         ];
         let manifests = vec![("pom.xml".to_string(), "<project/>".to_string())];
         let scope = scope(&files, &structure(), PRODUCTION, &manifests);
@@ -468,12 +539,42 @@ mod tests {
             "Parser names Calc, so refactoring Calc may have to touch it"
         );
         let readonly: Vec<&String> = scope.readonly.iter().map(|(p, _)| p).collect();
-        assert!(readonly.contains(&&UNIT_TEST.to_string()));
+        assert!(readonly.contains(&&UNIT_TEST.to_string()), "{readonly:?}");
+        assert!(readonly.contains(&&FEATURE.to_string()), "{readonly:?}");
+        assert!(
+            readonly.contains(&&"kata/src/test/java/ParserSteps.java".to_string()),
+            "a step file that calls Calc is the behaviour being preserved: {readonly:?}"
+        );
         assert!(readonly.contains(&&"pom.xml".to_string()));
         assert!(
             !readonly.contains(&&"kata/src/main/java/Unrelated.java".to_string()),
             "an unconnected file is not context: {readonly:?}"
         );
+        assert!(
+            !readonly.contains(&&"kata/src/test/java/UnrelatedTest.java".to_string()),
+            "a test that never reaches Calc is not context either: {readonly:?}"
+        );
+    }
+
+    /// Measured live: a 5,600-line step file read-only, whole, for a
+    /// refactor of one module it mentions in six places.
+    #[test]
+    fn a_long_test_file_travels_as_the_excerpt_around_its_mentions() {
+        let mut lines: Vec<String> = (0..400).map(|i| format!("line {i}")).collect();
+        lines[100] = "    let r = Calc::new();".into();
+        lines[300] = "    assert!(Calc::ok());".into();
+        let content = lines.join("\n") + "\n";
+        let kept = excerpt(&content, "Calc");
+        assert!(kept.contains("line 80\n"), "{kept}");
+        assert!(kept.contains("let r = Calc::new();"), "{kept}");
+        assert!(kept.contains("line 120\n"), "{kept}");
+        assert!(!kept.contains("line 50\n"), "{kept}");
+        assert!(!kept.contains("line 200\n"), "{kept}");
+        assert!(kept.contains("assert!(Calc::ok());"), "{kept}");
+        assert_eq!(kept.matches("// ...\n").count(), 3, "{kept}");
+        // Short files and files that never mention it travel whole.
+        assert_eq!(excerpt("a\nCalc\nb\n", "Calc"), "a\nCalc\nb\n");
+        assert_eq!(excerpt(&content, "Nothing"), content);
     }
 
     #[test]
