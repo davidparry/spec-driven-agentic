@@ -27,6 +27,17 @@ const MIN_SYMBOL_LEN: usize = 3;
 /// what the file is for, short enough that the map stays a map.
 const MAPPED_SYMBOLS: usize = 12;
 
+/// How many bytes of symbols the whole map may carry. Files the walk
+/// reaches first keep theirs; past this, a file is named by path alone.
+///
+/// Measured on this crate: 105 mapped files at twelve symbols each came
+/// to 22 KB - a third of a 66 KB implementation prompt, spent on files
+/// the prompt forbids the reply to touch. On the local model that
+/// prompt took three and a half minutes to read before the first token
+/// came back. The map's job is to say what exists; the nearest files
+/// are the ones worth saying what is in.
+const MAPPED_SYMBOL_BUDGET: usize = 4_000;
+
 /// How many distinct symbols the evidence has to name before a file
 /// counts as the answer.
 ///
@@ -69,6 +80,10 @@ pub fn select<'a>(
     let mut included = Vec::new();
     let mut mapped = Vec::new();
     let mut remaining = budget;
+    // Symbols are handed out in walk order too, so the files nearest
+    // the change are the ones the map describes and the far side of
+    // the project is a list of paths.
+    let mut symbol_budget = MAPPED_SYMBOL_BUDGET;
     for index in walk(files, seeds, &ties) {
         let file = &files[index];
         if seeded.contains(file.0.as_str()) || file.1.len() <= remaining {
@@ -77,6 +92,16 @@ pub fn select<'a>(
         } else {
             let mut symbols = declared[index].clone();
             symbols.truncate(MAPPED_SYMBOLS);
+            let cost: usize = symbols.iter().map(|symbol| symbol.len() + 2).sum();
+            if cost <= symbol_budget {
+                symbol_budget -= cost;
+            } else {
+                // The first file that does not fit ends the describing,
+                // rather than letting a small file further out leapfrog
+                // a nearer one.
+                symbol_budget = 0;
+                symbols.clear();
+            }
             mapped.push(MappedFile {
                 path: &file.0,
                 symbols,
@@ -414,6 +439,60 @@ mod tests {
         assert_eq!(chosen.mapped.len(), 1);
         assert_eq!(chosen.mapped[0].path, "src/huge.rs");
         assert_eq!(chosen.mapped[0].symbols, vec!["Huge"]);
+    }
+
+    /// A big project maps to a long list, and twelve symbols on every
+    /// line of it is what turned the map into a third of the prompt.
+    /// The files nearest the change keep their symbols; the far side of
+    /// the project is named by path alone.
+    #[test]
+    fn far_files_are_named_without_symbols_once_the_map_is_long() {
+        // One seed, one file it reaches, and a crowd nothing reaches.
+        // Each symbol of the crowd is long enough that ten of them
+        // outrun the budget, so the fifty-first line onward is bare.
+        let mut files = vec![
+            file("src/lib.rs", "pub fn report() { Near::new(); }"),
+            file("src/near.rs", "pub struct Near {}\n// filler\n// filler\n"),
+        ];
+        for index in 0..400 {
+            files.push(file(
+                &format!("src/far_{index:03}.rs"),
+                &format!("pub struct FarAwayDeclaration{index:03} {{}}\n"),
+            ));
+        }
+        let chosen = select(Language::Rust, &files, &["src/lib.rs"], 10);
+        assert_eq!(chosen.mapped.len(), 401);
+        let near = chosen
+            .mapped
+            .iter()
+            .find(|file| file.path == "src/near.rs")
+            .expect("the neighbor is mapped");
+        assert_eq!(
+            near.symbols,
+            vec!["Near"],
+            "the nearest file keeps its symbols"
+        );
+        let described = chosen
+            .mapped
+            .iter()
+            .filter(|file| !file.symbols.is_empty())
+            .count();
+        let spent: usize = chosen
+            .mapped
+            .iter()
+            .flat_map(|file| file.symbols.iter())
+            .map(|symbol| symbol.len() + 2)
+            .sum();
+        assert!(described < 401, "the whole crowd cannot be described");
+        assert!(described > 1, "but more than the neighbor is");
+        assert!(spent <= MAPPED_SYMBOL_BUDGET, "spent {spent} bytes");
+        // Every file is still on the map, symbols or not.
+        assert!(
+            chosen
+                .mapped
+                .iter()
+                .all(|file| file.path.starts_with("src/"))
+        );
     }
 
     #[test]

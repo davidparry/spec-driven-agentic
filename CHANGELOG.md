@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+- **`spec deliver` stops on a red bar that is not the requirement's
+  instead of spending its attempts on it.** The loop read the bar once
+  after authoring and went straight to implementing. When the suite
+  was already failing for some other reason - measured here as one
+  drifted test about documented version floors - every attempt was
+  spent proving the model could not fix it: three implementation
+  prompts at eight minutes each on the local model, and the bar
+  exactly where it started. Failures are now attributed first. One
+  that names nothing of the requirement - not its id in any spelling
+  (`REQ-001`, `Req001Test`, `req_001_test.rs`), not its title, not a
+  line of its acceptance criteria, not a file it owns - is foreign,
+  and a bar with a foreign failure on it is reported with the failures
+  named and the way out (`spec test`, then `spec deliver` again), the
+  same way a build that does not compile already was. A failure wrongly
+  read as the requirement's costs what the loop cost before; the
+  matching is lenient in that direction on purpose.
+
+- **The implementation prompt's map of the unsent project is capped.**
+  Files the budget could not carry were each named with twelve declared
+  symbols. On this crate that was 105 files and 22 KB - a third of a
+  66 KB prompt, spent on paths the prompt forbids the reply to touch,
+  and 3.5 minutes of prefill on the local model before the first token
+  came back. The map now hands out symbols in walk order, nearest the
+  change first, until 4 KB are spent; the rest of the project is a list
+  of paths. Same prompt measured again: 13.1k tokens instead of 17.3k.
+
 - **Eight commands now read like a reply instead of a document when a
   person is the one reading.** `spec list`, `spec show`, `spec
   validate`, `spec refine`, `spec status`, `spec state`, `spec test`,

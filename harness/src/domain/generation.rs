@@ -581,6 +581,7 @@ struct StateContext {
 /// every prior attempt with the failures it was addressing, and only
 /// the three latest dated TDD states. Rendered from the
 /// `[implementation]` templates.
+#[allow(clippy::too_many_arguments)]
 pub fn implementation_prompt(
     language: Language,
     requirement: &Requirement,

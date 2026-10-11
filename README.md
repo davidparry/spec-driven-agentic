@@ -25,7 +25,7 @@ and a probability — can judge whether an acceptance criterion is
 actually measurable ([`spec judge`](https://davidparry.github.io/spec-driven-agentic/manual/commands/judge.html)).
 It is off until you configure it, and a judgment is advice about
 wording: it never changes a test result, a requirement's status, or a
-deterministic finding. It needs `spec` 0.7.15 or newer; no earlier
+deterministic finding. It needs `spec` 0.7.17 or newer; no earlier
 release has a decision plane at all.
 
 > **The workshop** — the 60-minute class, the kata, the slides, the student
@@ -51,7 +51,7 @@ Only `config.toml` is meant to be committed. The other children are gitignored. 
 
 ## Install `spec`
 
-Use the published installer from the [spec site](https://davidparry.github.io/spec-driven-agentic/). It places `spec` on your PATH. You want **0.7.15 or newer** — the `.spec/` directory described above replaced the flat `.spec.toml` in 0.6.0.
+Use the published installer from the [spec site](https://davidparry.github.io/spec-driven-agentic/). It places `spec` on your PATH. You want **0.7.17 or newer** — the `.spec/` directory described above replaced the flat `.spec.toml` in 0.6.0.
 
 macOS and Linux:
 

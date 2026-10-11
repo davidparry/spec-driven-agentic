@@ -41,6 +41,7 @@ pub fn spec_rel(name: &str) -> String {
     format!("{SPEC_DIR}/{name}")
 }
 
+pub mod attribution;
 pub mod branch;
 pub mod command_policy;
 pub mod config_report;

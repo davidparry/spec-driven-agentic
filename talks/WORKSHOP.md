@@ -110,7 +110,7 @@ the branches apart.
 
 ## Prerequisites
 
-Install `spec` first — [published installer](../README.md#install-spec), **0.7.15 or newer** (the `.spec/` directory these exercises use replaced the flat `.spec.toml` in 0.6.0).
+Install `spec` first — [published installer](../README.md#install-spec), **0.7.17 or newer** (the `.spec/` directory these exercises use replaced the flat `.spec.toml` in 0.6.0).
 
 - Java 21+
 - Maven 3.9+
@@ -122,7 +122,7 @@ Install `spec` first — [published installer](../README.md#install-spec), **0.7
 
 ```bash
 git clone <this repo> && cd spec-driven-agentic
-spec --version                     # must succeed, and report 0.7.15 or newer
+spec --version                     # must succeed, and report 0.7.17 or newer
 mvn -q -pl smoke-test package     # MCP-server smoke-test jar
 mvn -q -f kata/pom.xml test       # standalone kata: JUnit + Cucumber
 ```
@@ -157,7 +157,7 @@ plus smoke-test `ToolPlan`):
 | `list_requirements` | Every requirement with its id, title, status, and the spec `file` it lives in — find pending work, and know which document holds it once the catalog is split across includes. Re-reads the spec fresh on every call, so requirements an agent just drafted show up immediately. |
 | `get_requirement` | One requirement's user story, acceptance criteria, and `featureLocation` — the raw material for Gherkin scenarios and failing tests, plus a `workflowHint` telling the agent what to do next. |
 | `validate_spec` | Validates the requirements file **on disk**, which is the only copy there is: well-formed unique ids, stories, Given/When/Then acceptance criteria, and tagged scenarios for implemented requirements. During `spec draft` these lookups do not critique the in-flight proposal; `parse_proposals_checked` is that gate. `spec validate` exits non-zero on an invalid spec, so a CI gate can be scripted on it. |
-| `refine_requirement` | Deterministic quality feedback on one requirement's wording: ambiguous words ("should", "handle", "quickly"), stories missing their actor or their why, outcomes with no concrete expected value, criteria covering more than one action, and happy-path-only coverage. Reads the file as it stands, which is what `requirement_reword` just wrote, so the reword/refine loop converges with nothing in between. Configure a **decision model** (`spec judge use`, Ollama 0.35+, and `spec` 0.7.15 or newer — the decision plane is in no earlier release) and the reply additionally carries a typed judgment per criterion — *is this measurable* — under keys that are absent until you opt in. `findings` and `clean` stay deterministic; the judgment sits beside them and gates nothing. |
+| `refine_requirement` | Deterministic quality feedback on one requirement's wording: ambiguous words ("should", "handle", "quickly"), stories missing their actor or their why, outcomes with no concrete expected value, criteria covering more than one action, and happy-path-only coverage. Reads the file as it stands, which is what `requirement_reword` just wrote, so the reword/refine loop converges with nothing in between. Configure a **decision model** (`spec judge use`, Ollama 0.35+, and `spec` 0.7.17 or newer — the decision plane is in no earlier release) and the reply additionally carries a typed judgment per criterion — *is this measurable* — under keys that are absent until you opt in. `findings` and `clean` stay deterministic; the judgment sits beside them and gates nothing. |
 | `run_tests` | Runs the project tests (Maven on this kata), aggregating Cucumber (BDD) and JUnit (TDD) into one bar color: failures → **RED**, all passing → **GREEN**. It sees the **working tree**, which is where every authoring tool wrote. |
 | `get_tdd_state` | Current Red/Green/Refactor phase, last run summary, and a suggested next step. The reply leads with `phase`; the `instructions` guide to reading the phase log comes last. |
 | `start_refactor` | Begins a refactor. Refuses unless the bar is GREEN, and words the refusal for the phase you are in — "never refactor on a red bar" on RED, "no tests have been run yet" at START, "a refactor is already in progress" in REFACTOR. |

@@ -52,7 +52,9 @@ use crate::bootstrap::{
     LOOP_CLOSED, attempt_work, ensure_project, ensure_spec, has_readable_spec, project_detected,
     refresh_project_memory, run_and_narrate,
 };
+use crate::domain::attribution::foreign_failures;
 use crate::domain::decision::Judgment;
+use crate::domain::generation::brief_failure;
 use crate::domain::language::Language;
 use crate::domain::layout::in_feature_root;
 use crate::domain::memory::ProjectStructure;
@@ -836,6 +838,29 @@ impl Deliver {
         if report.build_broken() {
             return Ok(Bar::stopped(broken_build(req_id), Some(report.phase)));
         }
+        // The other red bar no attempt can turn green: failures that are
+        // not this requirement's. Implementing it leaves them failing,
+        // so the budget would be spent reading the same bar three
+        // times - minutes per read on a local model. Read fresh, so the
+        // feature file the scenario step just recorded is a marker too.
+        let foreign: Vec<String> = self
+            .spec()?
+            .requirements
+            .iter()
+            .find(|r| r.id == req_id)
+            .map(|requirement| {
+                foreign_failures(&report.failure_details, requirement)
+                    .into_iter()
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default();
+        if !foreign.is_empty() {
+            return Ok(Bar::stopped(
+                foreign_red_bar(req_id, &foreign),
+                Some(report.phase),
+            ));
+        }
         if self.llm.is_none() {
             return Ok(Bar::stopped(
                 format!(
@@ -1513,6 +1538,35 @@ fn broken_build(req_id: &str) -> String {
         "The build failed before any test ran, so there is no red bar to implement {req_id} \
          against - the generated unit test is the usual cause. Fix the build, then run \
          spec deliver {req_id} again."
+    )
+}
+
+/// How many foreign failures the stop names in full before counting the
+/// rest. Enough to recognize the suite; the whole list is in spec state.
+const FOREIGN_FAILURES_NAMED: usize = 5;
+
+/// Why the loop will not spend attempts on a bar that is red for some
+/// other reason. Each failure is named by its first line, so the
+/// developer can tell a drifted test from a broken fixture without
+/// opening anything.
+fn foreign_red_bar(req_id: &str, foreign: &[String]) -> String {
+    let mut named: Vec<String> = foreign
+        .iter()
+        .take(FOREIGN_FAILURES_NAMED)
+        .map(|failure| brief_failure(failure))
+        .collect();
+    if foreign.len() > FOREIGN_FAILURES_NAMED {
+        named.push(format!(
+            "and {} more",
+            foreign.len() - FOREIGN_FAILURES_NAMED
+        ));
+    }
+    format!(
+        "The bar is RED with {} failure(s) that are not {req_id}'s: {}. Implementing \
+         {req_id} cannot turn that bar green, so no attempt was made. Make the suite pass \
+         on its own (spec test shows every failure), then run spec deliver {req_id} again.",
+        foreign.len(),
+        named.join("; ")
     )
 }
 
@@ -2343,6 +2397,66 @@ mod tests {
         let reason = stopped_because(&outcome);
         assert!(reason.contains("never answered"), "{reason}");
         assert!(reason.contains("spec deliver REQ-001 again"), "{reason}");
+    }
+
+    /// A suite that is red for some other reason is not a bar this
+    /// requirement can turn green. The loop stops before the first
+    /// attempt - the model is never asked - and names what is failing.
+    #[test]
+    fn a_red_bar_with_failures_that_are_not_the_requirements_stops_before_any_attempt() {
+        let dir = kata(one_criterion());
+        let mut prompter = Script::default();
+        let foreign_red = Ok(crate::domain::model::TestRunSummary {
+            tests: 2,
+            failures: 2,
+            failure_details: vec![
+                "Req001Test.emptyString: TODO: assert".into(),
+                "every_documented_version_floor_is_the_version_this_crate_ships: FAILED\n\
+                 claims floor 0.7.15, but this crate ships 0.7.17"
+                    .into(),
+            ],
+            ..Default::default()
+        });
+        let outcome = deliver_one(
+            dir.path(),
+            &mut prompter,
+            vec![foreign_red],
+            model(Err("the model must not be asked about a bar it cannot fix")),
+            DeliverOptions {
+                attempts: 3,
+                ..no_refactor()
+            },
+        );
+        let reason = stopped_because(&outcome);
+        assert!(
+            reason.contains("1 failure(s) that are not REQ-001's"),
+            "{reason}"
+        );
+        assert!(
+            reason.contains("every_documented_version_floor_is_the_version_this_crate_ships"),
+            "{reason}"
+        );
+        assert!(
+            !reason.contains("claims floor"),
+            "first line only: {reason}"
+        );
+        assert!(reason.contains("spec deliver REQ-001 again"), "{reason}");
+        assert!(
+            !prompter.said("Attempt 1 of 3."),
+            "no attempt is made: {:?}",
+            prompter.told
+        );
+    }
+
+    /// The stop names a handful and counts the rest, so a suite with
+    /// forty drifted tests reads as one line rather than a page.
+    #[test]
+    fn the_foreign_bar_stop_names_a_few_failures_and_counts_the_rest() {
+        let foreign: Vec<String> = (1..=7).map(|n| format!("other_test_{n}: FAILED")).collect();
+        let stop = foreign_red_bar("REQ-001", &foreign);
+        assert!(stop.contains("7 failure(s)"), "{stop}");
+        assert!(stop.contains("other_test_5: FAILED; and 2 more"), "{stop}");
+        assert!(!stop.contains("other_test_6"), "{stop}");
     }
 
     /// A build that fails outright is not a red bar and not a missing

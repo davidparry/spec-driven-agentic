@@ -686,6 +686,7 @@ where
 
     /// One scenario for one criterion. `None` is the template: the model
     /// never produced a scenario the examiner would keep.
+    #[allow(clippy::too_many_arguments)]
     fn author_one_scenario(
         &self,
         prompter: &mut dyn Prompter,

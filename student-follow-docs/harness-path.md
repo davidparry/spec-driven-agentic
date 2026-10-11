@@ -33,10 +33,10 @@ cargo install --path harness
 spec --version
 ```
 
-Requires `spec` **0.7.15 or newer** — check with `spec --version`. The
+Requires `spec` **0.7.17 or newer** — check with `spec --version`. The
 generation behavior this page describes, where the polish pass sees only
 the newly generated members, arrived during 0.5.x development, but the
-floor is 0.7.15 because this page reads and writes `.spec/config.toml`:
+floor is 0.7.17 because this page reads and writes `.spec/config.toml`:
 the `.spec/` directory replaced the flat `.spec.toml` in 0.6.0, and
 0.7.10 is the newest release, so it is the one everything here was
 checked against. The ones that change what you do, rather than what you
@@ -426,7 +426,7 @@ reachable with `spec reword`, which is what the advice used to name.
 
 A second, separate local model that writes nothing and answers one
 bounded question with a typed value and a probability. Needs Ollama
-0.35+ (`/v1/systemone`), and `spec` 0.7.15 or newer — the decision
+0.35+ (`/v1/systemone`), and `spec` 0.7.17 or newer — the decision
 plane is in no earlier release, so `spec judge` does not answer on one.
 Off until configured; nothing above depends on it.
 
