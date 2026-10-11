@@ -15,10 +15,13 @@ cd "$(dirname "$0")/.."
 bump_patch() {
     manifest="harness/Cargo.toml"
     current=$(sed -n 's/^version = "\(.*\)"$/\1/p' "$manifest" | head -1)
-    next=$(printf '%s\n' "$current" | awk -F. '{printf "%d.%d.%d", $1, $2, $3 + 1}')
-    perl -pi -e "s/^version = \"\Q$current\E\"\$/version = \"$next\"/" "$manifest"
-    echo "spec-harness $current -> $next"
+   # next=$(printf '%s\n' "$current" | awk -F. '{printf "%d.%d.%d", $1, $2, $3 + 1}')
+   # perl -pi -e "s/^version = \"\Q$current\E\"\$/version = \"$next\"/" "$manifest"
+   # echo "spec-harness $current -> $next"
+   echo "spec-harness $current "
+
 }
+
 
 # The plane-wide [decision] mode, not a per-gate override. An active
 # mode line is rewritten. A commented one is what the file uses to show
