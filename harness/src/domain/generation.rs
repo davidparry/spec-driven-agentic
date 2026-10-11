@@ -938,11 +938,24 @@ pub fn parse_file_updates(reply: &str) -> Vec<FileUpdate> {
 /// Parse with a reason when the reply held no usable file update.
 pub fn parse_file_updates_checked(reply: &str) -> Result<Vec<FileUpdate>, String> {
     let updates = parse_file_updates(reply);
-    if updates.is_empty() {
-        Err("the reply was not a JSON array of {path, content} file updates".into())
-    } else {
-        Ok(updates)
+    if !updates.is_empty() {
+        return Ok(updates);
     }
+    // A reply that opened a JSON update and never closed it is the model
+    // stopping mid-answer (observed live: three in a row, 23 to 288
+    // tokens, each cut inside a `///` doc line, each reported as "not a
+    // JSON array"). Saying which it was tells a developer to look at the
+    // model rather than at the prompt.
+    let body = strip_code_fences(reply);
+    let opened = body.trim_start().starts_with(['[', '{']);
+    if opened && serde_json::from_str::<serde_json::Value>(&body).is_err() {
+        return Err(format!(
+            "the reply began a JSON file update and stopped before it was complete \
+             ({} characters) - the model ended its answer early",
+            body.chars().count()
+        ));
+    }
+    Err("the reply was not a JSON array of {path, content} file updates".into())
 }
 
 /// The complete `{path, content}` objects in a JSON array the model did
@@ -3750,6 +3763,21 @@ io.cucumber.junit.platform.engine.UndefinedStepException: The step 'the result i
         assert!(parse_file_updates("Sure! Here is the code:").is_empty());
         assert!(parse_file_updates(r#"[{"path": "", "content": "x"}]"#).is_empty());
         assert!(parse_file_updates(r#"[{"path": "src/lib.rs", "content": "  "}]"#).is_empty());
+    }
+
+    /// Observed live: three replies in a row ended inside the first
+    /// file's content, and each was refused as "not a JSON array".
+    #[test]
+    fn a_reply_that_stopped_mid_update_says_so() {
+        let cut = r#"{"path":"src/report.rs","content":"/// Status of a"#;
+        let reason = parse_file_updates_checked(cut).unwrap_err();
+        assert!(
+            reason.contains("stopped before it was complete"),
+            "{reason}"
+        );
+        assert!(reason.contains("ended its answer early"), "{reason}");
+        let prose = parse_file_updates_checked("Sure! Here is the code:").unwrap_err();
+        assert!(prose.contains("not a JSON array"), "{prose}");
     }
 
     #[test]

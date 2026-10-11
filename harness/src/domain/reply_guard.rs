@@ -22,6 +22,7 @@
 //! no correct attempt has ever done.
 
 use super::language::Language;
+use super::module_declaration::declared_modules;
 use super::neighborhood::declared_symbols;
 
 /// How many dropped names to name before the message stops being one.
@@ -63,10 +64,24 @@ impl Damage {
 /// the two things that are never right.
 pub fn damage(language: Language, before: &str, after: &str) -> Option<Damage> {
     let kept = declared_symbols(language, after);
-    let dropped: Vec<String> = declared_symbols(language, before)
+    let mut dropped: Vec<String> = declared_symbols(language, before)
         .into_iter()
         .filter(|name| !kept.contains(name))
         .collect();
+    // A Rust crate root is mostly `mod` lines, which `declared_symbols`
+    // leaves out on purpose. Here they are the file: a reply that hands
+    // `lib.rs` back with only its own `pub mod` line takes every other
+    // module out of the crate (observed live - `workspace`, `domain`,
+    // `adapters` all gone, and every test file reading E0433).
+    if language == Language::Rust {
+        let kept_modules = declared_modules(after);
+        dropped.extend(
+            declared_modules(before)
+                .into_iter()
+                .filter(|module| !kept_modules.contains(module))
+                .map(|module| format!("mod {module}")),
+        );
+    }
     if !dropped.is_empty() {
         return Some(Damage::Drops(dropped));
     }
@@ -234,6 +249,23 @@ mod tests {
             damage(Language::Rust, before, after),
             Some(Damage::Drops(vec!["advertise".to_string()]))
         );
+    }
+
+    /// Observed live: `lib.rs` came back holding only the module the
+    /// attempt added, and every other module left the crate with it.
+    #[test]
+    fn a_crate_root_that_loses_its_modules_is_damage() {
+        let before = "//! Kata.\n\npub mod adapters;\npub mod domain;\npub mod workspace;\n";
+        assert_eq!(
+            damage(Language::Rust, before, "pub mod report;\n"),
+            Some(Damage::Drops(vec![
+                "mod adapters".to_string(),
+                "mod domain".to_string(),
+                "mod workspace".to_string(),
+            ]))
+        );
+        let added = "//! Kata.\n\npub mod adapters;\npub mod domain;\npub mod report;\npub mod workspace;\n";
+        assert_eq!(damage(Language::Rust, before, added), None);
     }
 
     #[test]

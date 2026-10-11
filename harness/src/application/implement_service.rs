@@ -28,7 +28,9 @@ use crate::domain::language::Language;
 use crate::domain::layout::allowed_targets;
 use crate::domain::memory::ProjectStructure;
 use crate::domain::model::Spec;
-use crate::domain::module_declaration::{declare_rust_module, top_level_module};
+use crate::domain::module_declaration::{
+    declare_rust_module, declared_modules, library_paths_from_test_crate, top_level_module,
+};
 use crate::domain::neighborhood::declared_symbols;
 use crate::domain::reply_guard::{Damage, damage};
 use crate::domain::step_fill;
@@ -196,6 +198,14 @@ fn accept_filled_definitions(
         }
     }
     Ok(FilledSteps { bodies, fields })
+}
+
+/// Whether `path` is a Rust file cargo compiles as its own crate: one
+/// directly under `tests/`.
+fn is_test_crate_file(path: &str) -> bool {
+    let normalized = path.trim_start_matches("./");
+    normalized.ends_with(".rs")
+        && (normalized.starts_with("tests/") || normalized.contains("/tests/"))
 }
 
 /// Why a reply whose bodies use world fields nobody declared is sent
@@ -572,6 +582,13 @@ where
         {
             content = step_fill::insert_fields(self.language, &content, &world, &unique_fields);
         }
+        // A step file under `tests/` is its own crate: a body or field
+        // reaching the library as `crate::...` resolves nothing there.
+        if is_test_crate_file(&file.path)
+            && let Some((crate_name, modules)) = self.library_crate(&production)?
+        {
+            content = library_paths_from_test_crate(&content, &crate_name, &modules);
+        }
         let kept = extract_patterns(self.language, &content);
         if kept != declared {
             return Err(ServiceError(
@@ -844,6 +861,7 @@ where
         }
         let mut warnings: Vec<String> = Vec::new();
         warnings.extend(self.declare_new_modules(prompter, req_id, &files, &mut targets)?);
+        self.reach_the_library_by_name(req_id, &files, &targets)?;
         // One of three declared files written is not an incomplete
         // attempt - the test run decides that. Only an attempt that
         // touched none of them has demonstrably left the bar where it
@@ -982,6 +1000,65 @@ where
                 .join(", ")
         ));
         Ok(Vec::new())
+    }
+
+    /// The library a Rust test file reaches by name: the crate's import
+    /// name from `Cargo.toml` and the modules its root declares - read
+    /// from the store first (this attempt may have just declared one),
+    /// then from the files the attempt was shown. `None` off Rust, or
+    /// when either is missing.
+    fn library_crate(
+        &self,
+        files: &[(String, String)],
+    ) -> Result<Option<(String, Vec<String>)>, ServiceError> {
+        if self.language != Language::Rust {
+            return Ok(None);
+        }
+        let Some(cargo) = self.store.read("Cargo.toml")? else {
+            return Ok(None);
+        };
+        let Some(name) = crate::domain::memory::crate_name(&cargo) else {
+            return Ok(None);
+        };
+        let root_dir = self.layout.production.as_deref().unwrap_or("src");
+        let lib = format!("{root_dir}/lib.rs");
+        let content = match self.store.read(&lib)? {
+            Some(content) => content,
+            None => match files.iter().find(|(path, _)| *path == lib) {
+                Some((_, content)) => content.clone(),
+                None => return Ok(None),
+            },
+        };
+        Ok(Some((name, declared_modules(&content))))
+    }
+
+    /// Rewrite `crate::<library module>` in every test file the attempt
+    /// wrote as `<crate name>::<module>`. An integration test is its own
+    /// crate, so `crate::` there never reaches the library - observed
+    /// live as E0433 for a module that existed.
+    fn reach_the_library_by_name(
+        &self,
+        req_id: &str,
+        files: &[(String, String)],
+        targets: &[String],
+    ) -> Result<(), ServiceError> {
+        let Some((crate_name, modules)) = self.library_crate(files)? else {
+            return Ok(());
+        };
+        for path in targets.iter().filter(|path| is_test_crate_file(path)) {
+            let Some(content) = self.store.read(path)? else {
+                continue;
+            };
+            let rewritten = library_paths_from_test_crate(&content, &crate_name, &modules);
+            if rewritten != content {
+                self.store.write(
+                    path,
+                    &rewritten,
+                    &format!("reach the library as {crate_name} from {path} for {req_id}"),
+                )?;
+            }
+        }
+        Ok(())
     }
 
     /// The implement preflight: survey every prerequisite of an
@@ -1920,6 +1997,116 @@ mod tests {
         );
         let prompt = service.llm.as_ref().unwrap().chat().prompts.borrow()[0].clone();
         assert!(prompt.contains("ONLY the new fields"), "{prompt}");
+    }
+
+    /// Observed live: the fill declared a world field of type
+    /// `crate::report::Criterion` in `tests/cucumber.rs`, where `crate`
+    /// is the test file, and the bar read E0433 for a module that
+    /// existed. Paths into the library's modules are written by the
+    /// crate's name; the test crate's own `crate::` paths are kept.
+    #[test]
+    fn a_filled_step_file_under_tests_reaches_the_library_by_its_crate_name() {
+        let steps = SourceFile {
+            path: "tests/cucumber.rs".into(),
+            content: "use cucumber::{World, then, when};\n\nmod helpers { pub fn ok() -> bool { true } }\n\n#[derive(Debug, Default, World)]\npub struct KataWorld {\n    result: Option<u32>,\n}\n\n#[when(expr = \"add is called with {string}\")]\nfn b(_w: &mut KataWorld, _s: String) {\n    todo!(\"implement step: add is called with {string}\");\n}\n\n#[then(expr = \"the result is {int}\")]\nfn c(_w: &mut KataWorld, _n: u32) {\n    todo!(\"implement step: the result is 3\");\n}\n".into(),
+        };
+        let lib = SourceFile {
+            path: "src/lib.rs".into(),
+            content: "pub mod report;\n".into(),
+        };
+        let reply = "pub struct KataWorld {\n    seen: Option<crate::report::Criterion>,\n}\n\n#[when(expr = \"add is called with {string}\")]\nfn b(w: &mut KataWorld, _s: String) {\n    w.seen = Some(crate::report::Criterion::new());\n}\n\n#[then(expr = \"the result is {int}\")]\nfn c(w: &mut KataWorld, _n: u32) {\n    assert!(crate::helpers::ok());\n    assert!(w.seen.is_some());\n}\n";
+        let service = ImplementService::new(
+            calculator_catalog(),
+            FakeSources(vec![steps, lib]),
+            InMemoryWorkTree::default(),
+            InMemorySpecRepository(Ok(calculator_spec())),
+            Language::Rust,
+            flat_layout(Language::Rust),
+            Some(FakeLlm::replying(reply)),
+        );
+        service
+            .store
+            .write(
+                "Cargo.toml",
+                "[package]\nname = \"spec-kata\"\nversion = \"0.1.0\"\n",
+                "fixture",
+            )
+            .unwrap();
+        service
+            .store
+            .write("src/lib.rs", "pub mod report;\n", "fixture")
+            .unwrap();
+        let report = service
+            .fill_pending_steps(&mut NullPrompter, "REQ-001", &[])
+            .unwrap()
+            .expect("two pending steps to fill");
+        assert_eq!((report.filled, report.fields_added), (2, 1));
+        let written = service
+            .store
+            .read("tests/cucumber.rs")
+            .unwrap()
+            .expect("the step file was written");
+        assert!(
+            written.contains("seen: Option<spec_kata::report::Criterion>,"),
+            "{written}"
+        );
+        assert!(
+            written.contains("w.seen = Some(spec_kata::report::Criterion::new());"),
+            "{written}"
+        );
+        assert!(
+            written.contains("assert!(crate::helpers::ok());"),
+            "{written}"
+        );
+        assert!(!written.contains("crate::report"), "{written}");
+    }
+
+    /// The same for a test file the implementation reply wrote: the
+    /// module it declares this attempt counts too.
+    #[test]
+    fn a_test_file_the_attempt_wrote_reaches_the_library_by_its_crate_name() {
+        let sources = vec![
+            SourceFile {
+                path: "src/lib.rs".into(),
+                content: "//! Kata.\n".into(),
+            },
+            SourceFile {
+                path: "tests/kata_test.rs".into(),
+                content: "#[test]\nfn adds() { todo!(\"TODO: assert\"); }\n".into(),
+            },
+        ];
+        let reply = r#"[{"path": "src/adds_two_numbers.rs", "content": "pub fn add(a: u32, b: u32) -> u32 { a + b }\n"}, {"path": "tests/kata_test.rs", "content": "use crate::adds_two_numbers::add;\n#[test]\nfn adds() { assert_eq!(add(1, 2), 3); }\n"}]"#;
+        let service = ImplementService::new(
+            calculator_catalog(),
+            FakeSources(sources),
+            InMemoryWorkTree::default(),
+            InMemorySpecRepository(Ok(calculator_spec())),
+            Language::Rust,
+            flat_layout(Language::Rust),
+            Some(FakeLlm::replying(reply)),
+        );
+        service
+            .store
+            .write(
+                "Cargo.toml",
+                "[package]\nname = \"spec-kata\"\nversion = \"0.1.0\"\n",
+                "fixture",
+            )
+            .unwrap();
+        service
+            .generate(
+                &mut NullPrompter,
+                "REQ-001",
+                &[],
+                &[],
+                &[],
+                Some("src/adds_two_numbers.rs"),
+            )
+            .unwrap();
+        assert_eq!(
+            service.store.read("tests/kata_test.rs").unwrap().unwrap(),
+            "use spec_kata::adds_two_numbers::add;\n#[test]\nfn adds() { assert_eq!(add(1, 2), 3); }\n"
+        );
     }
 
     /// Observed right after a reply that asked for its fields properly:

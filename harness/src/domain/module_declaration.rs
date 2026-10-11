@@ -96,9 +96,79 @@ pub fn top_level_module<'a>(path: &'a str, production_root: &str) -> Option<&'a 
     (!matches!(stem, "lib" | "main" | "mod")).then_some(stem)
 }
 
+/// Every module the crate root declares at its top level, in order.
+pub fn declared_modules(crate_root: &str) -> Vec<String> {
+    crate_root
+        .lines()
+        .filter_map(declared_module)
+        .map(str::to_string)
+        .collect()
+}
+
+/// `code` from a file under `tests/`, with every `crate::<module>` path
+/// that names one of the library's `modules` written as
+/// `<crate_name>::<module>`.
+///
+/// An integration test is its own crate: there, `crate::` is the test
+/// file, and the library's modules are reached by the library's name.
+/// Observed live: a step-body fill declared a world field of type
+/// `crate::report_status::Criterion` in `tests/cucumber.rs`, and the
+/// bar read E0433 for a module that existed - in the other crate. Only
+/// paths into the library's declared modules are rewritten; `crate::`
+/// into the test file's own items is left as it is.
+pub fn library_paths_from_test_crate(code: &str, crate_name: &str, modules: &[String]) -> String {
+    let mut out = code.to_string();
+    for module in modules {
+        let from = format!("crate::{module}");
+        let to = format!("{crate_name}::{module}");
+        let mut rewritten = String::with_capacity(out.len());
+        let mut rest = out.as_str();
+        while let Some(at) = rest.find(&from) {
+            let (before, after_from) = rest.split_at(at);
+            let tail = &after_from[from.len()..];
+            let preceded_by_path_char = before
+                .chars()
+                .next_back()
+                .is_some_and(|c| c.is_alphanumeric() || c == '_' || c == ':');
+            let followed_by_ident_char = tail
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_alphanumeric() || c == '_');
+            rewritten.push_str(before);
+            if preceded_by_path_char || followed_by_ident_char {
+                rewritten.push_str(&from);
+            } else {
+                rewritten.push_str(&to);
+            }
+            rest = tail;
+        }
+        rewritten.push_str(rest);
+        out = rewritten;
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn library_paths_in_a_test_file_are_reached_by_the_crate_name() {
+        let modules = vec!["report".to_string(), "domain".to_string()];
+        let code = "use crate::report::Criterion;\n\
+                    struct W { seen: Option<crate::report::Status>, own: crate::Helper }\n\
+                    fn f() { crate::domain::x(); crate::reporting::y(); my_crate::report::z(); }\n";
+        assert_eq!(
+            library_paths_from_test_crate(code, "spec_harness", &modules),
+            "use spec_harness::report::Criterion;\n\
+             struct W { seen: Option<spec_harness::report::Status>, own: crate::Helper }\n\
+             fn f() { spec_harness::domain::x(); crate::reporting::y(); my_crate::report::z(); }\n"
+        );
+        assert_eq!(
+            declared_modules("//! x\npub mod a;\nmod b;\nmod tests {\n}\n"),
+            vec!["a".to_string(), "b".to_string()]
+        );
+    }
 
     #[test]
     fn a_module_is_declared_after_the_last_existing_one() {
