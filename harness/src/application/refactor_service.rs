@@ -22,8 +22,8 @@ use crate::domain::language::Language;
 use crate::domain::memory::ProjectStructure;
 use crate::domain::model::{Requirement, TestRunSummary};
 use crate::domain::refactor::{
-    RefactorRound, RefactorScope, declared_libraries, is_test_path, manifest_names,
-    parse_refactor_updates, refactor_prompt, scope,
+    RefactorRound, RefactorScope, declared_libraries, manifest_names, parse_refactor_updates,
+    refactor_prompt, scope,
 };
 use crate::domain::steps::source_extension;
 use crate::ports::{
@@ -379,7 +379,11 @@ where
             // not move" is the promise of this command, so it is verified
             // against the bytes rather than inferred from the guard.
             if let Some(moved) = self.tests_that_moved(&scope)? {
-                let restored = self.restore(&snapshot, &scope.writable)?;
+                // Against the disk, not `scope.writable`: that still holds
+                // what the round read, and the round's rewrite is what has
+                // to go. Observed live: "restored" was said and the
+                // rewrite stayed, and the next bar was its build error.
+                let restored = self.restore(&snapshot, &self.reread(&writable)?)?;
                 return Ok(self.gave_up(
                     goal,
                     round,
@@ -496,14 +500,14 @@ where
         Ok(restored)
     }
 
-    /// The read-only file whose bytes no longer match what the loop was
-    /// shown, if any.
+    /// The test file whose bytes no longer match what the loop started
+    /// from, if any. Checked against every test file whole, not the
+    /// excerpt the prompt carried.
     fn tests_that_moved(&self, scope: &RefactorScope) -> Result<Option<String>, ServiceError> {
         let now = self.project_files()?;
         Ok(scope
-            .readonly
+            .preserved
             .iter()
-            .filter(|(path, _)| is_test_path(path, &self.layout))
             .find(|(path, before)| {
                 now.iter()
                     .find(|(candidate, _)| candidate == path)
@@ -585,6 +589,10 @@ mod tests {
     struct Tree {
         applied: RefCell<BTreeMap<String, String>>,
         summaries: RefCell<Vec<String>>,
+        /// A test file edited under the loop's feet: applied along with
+        /// the first write of production code, the way an editor's save
+        /// lands while the model is answering.
+        edit_test_on_first_write: RefCell<Option<(String, String)>>,
     }
 
     impl Tree {
@@ -616,6 +624,9 @@ mod tests {
                 .borrow_mut()
                 .insert(path.to_string(), content.to_string());
             self.summaries.borrow_mut().push(summary.to_string());
+            if let Some((test, edited)) = self.edit_test_on_first_write.borrow_mut().take() {
+                self.applied.borrow_mut().insert(test, edited);
+            }
             Ok(FileChange {
                 path: path.into(),
                 action: if existed { "modify" } else { "create" }.into(),
@@ -847,6 +858,69 @@ mod tests {
             report.goal.as_deref(),
             Some("extract comma delimiter constant")
         );
+    }
+
+    /// Observed live: a test file moved during the round, "restored" was
+    /// said, and the round's rewrite stayed on disk - the restore
+    /// compared the snapshot with what the round had read, not with the
+    /// disk. The next bar was the rewrite's build error.
+    #[test]
+    fn a_test_that_moves_during_the_round_reverts_the_rewrite_from_the_disk() {
+        let tree = kata();
+        *tree.edit_test_on_first_write.borrow_mut() = Some((
+            UNIT_TEST.to_string(),
+            "class StringCalculatorTest { /* edited in the IDE */ }".to_string(),
+        ));
+        let service = service(&tree, &[&rewrite(PRODUCTION, CLEANED)], 3);
+        let suite = suite(&tree, always_green);
+        let report = service
+            .run(&mut Quiet::default(), &suite, Some("tidy up"), None)
+            .unwrap();
+        assert!(!report.applied, "report: {report:?}");
+        assert!(report.reverted, "the rewrite on disk had to be put back");
+        assert!(
+            report
+                .warning
+                .as_deref()
+                .unwrap()
+                .contains("changed during the refactor"),
+            "{:?}",
+            report.warning
+        );
+        assert_eq!(tree.on_disk(PRODUCTION), ORIGINAL);
+        assert_eq!(
+            suite.runs.get(),
+            1,
+            "only the baseline ran; nothing was measured on a moved suite"
+        );
+    }
+
+    /// The check reads every test file whole. A long step file reaches
+    /// the prompt as an excerpt, and that excerpt is not what the bytes
+    /// are compared with - a round on an untouched suite is not "moved".
+    #[test]
+    fn an_untouched_long_test_file_is_not_read_as_moved() {
+        let long_test: String = (0..300)
+            .map(|i| {
+                if i == 150 {
+                    "    StringCalculator c;\n".to_string()
+                } else {
+                    format!("    // line {i}\n")
+                }
+            })
+            .collect();
+        let tree = Tree::holding(&[(PRODUCTION, ORIGINAL), (UNIT_TEST, &long_test)]);
+        let service = service(&tree, &[&rewrite(PRODUCTION, CLEANED)], 3);
+        let suite = suite(&tree, always_green);
+        let report = service
+            .run(&mut Quiet::default(), &suite, Some("tidy up"), None)
+            .unwrap();
+        assert!(report.applied, "report: {report:?}");
+        assert_eq!(tree.on_disk(PRODUCTION), CLEANED);
+        let prompt = service.llm.as_ref().unwrap().chat().prompts.borrow()[0].clone();
+        assert!(prompt.contains("StringCalculator c;"), "{prompt}");
+        assert!(prompt.contains("// ..."), "{prompt}");
+        assert!(!prompt.contains("// line 10\n"), "{prompt}");
     }
 
     #[test]

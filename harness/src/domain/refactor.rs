@@ -38,8 +38,15 @@ pub struct RefactorScope {
     /// Production sources, the only paths a reply may name.
     pub writable: Vec<(String, String)>,
     /// Tests, step definitions, features and manifests: the behaviour
-    /// being preserved, and the context needed to preserve it.
+    /// being preserved, and the context needed to preserve it. What the
+    /// model is shown - the tests that reach the file under refactor,
+    /// long ones as an excerpt.
     pub readonly: Vec<(String, String)>,
+    /// Every test file in the project, whole, as it was when the scope
+    /// was taken: what "the tests did not move" is checked against. The
+    /// prompt's excerpt could not be, and the check covers the suite,
+    /// not just the files that travelled.
+    pub preserved: Vec<(String, String)>,
 }
 
 impl RefactorScope {
@@ -108,6 +115,7 @@ pub fn scope(
     let focus_symbol = symbol_of(focus);
     for (path, content) in files {
         if is_test_path(path, structure) {
+            scope.preserved.push((path.clone(), content.clone()));
             // The tests that exercise the file under refactor are the
             // behaviour being preserved; the rest of the suite is not
             // context, it is weight. Measured live on this harness: every
@@ -705,6 +713,7 @@ mod tests {
         let scope = RefactorScope {
             writable: vec![(PRODUCTION.to_string(), "class Calc {}".into())],
             readonly: vec![(UNIT_TEST.to_string(), "class CalcTest {}".into())],
+            preserved: Vec::new(),
         };
         let prompt = refactor_prompt(
             Language::Java,
@@ -737,6 +746,7 @@ mod tests {
         let scope = RefactorScope {
             writable: vec![(PRODUCTION.to_string(), "class Calc {}".into())],
             readonly: Vec::new(),
+            preserved: Vec::new(),
         };
         let history = vec![RefactorRound {
             targets: vec![PRODUCTION.to_string()],
