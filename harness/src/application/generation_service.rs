@@ -21,7 +21,7 @@ use crate::domain::decision::{
 };
 use crate::domain::feature;
 use crate::domain::generation::{
-    append_step_definitions, escape_literal, implementation_target_path,
+    append_step_definitions, escape_literal, escape_pending_messages, implementation_target_path,
     looks_like_step_definitions, looks_like_step_fragment, looks_like_unit_test,
     looks_like_unit_test_for, looks_like_unit_test_fragment, polish_fragment_prompt, polish_prompt,
     splice_step_definitions, splice_unit_tests, step_definitions_fragment,
@@ -344,6 +344,7 @@ where
             "{verb} pending step definitions for {} missing step(s) ({source})",
             missing.len()
         );
+        let content = escape_pending_messages(self.language, &content);
         self.store.write(&target, &content, &summary)?;
         Ok(GenerationReport {
             target,

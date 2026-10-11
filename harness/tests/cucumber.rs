@@ -4281,6 +4281,7 @@ fn run_agent(world: &mut SpecWorld, user: &str, fail: bool, nonsure: bool) {
         section: "ask".into(),
         system: "answer".into(),
         user: user.into(),
+        tool_rules: String::new(),
     };
     let result = agent.ask(&mut prompter, &prompt, parse, |_, _, _| {});
     world.agent_told = prompter.told;

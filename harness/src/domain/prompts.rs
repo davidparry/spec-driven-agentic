@@ -38,6 +38,29 @@ pub struct RenderedPrompt {
     pub section: String,
     pub system: String,
     pub user: String,
+    /// The `[tool_rules]` block. Goes onto the system prompt only when
+    /// the call offers tools - see [`RenderedPrompt::system_for`].
+    pub tool_rules: String,
+}
+
+impl RenderedPrompt {
+    /// The system prompt as sent: the section's own text, with the
+    /// tool rules after it when `tools_offered`.
+    ///
+    /// Rules about tools in a call that has none are not inert. They
+    /// tell the model to "call a tool to look up a file path rather
+    /// than guessing", and a model that reads them answers "Let me
+    /// start by looking at the project structure." - a tool call it
+    /// cannot make - and stops. Observed live on three implementation
+    /// attempts in a row, each refused as not a JSON array, each paid
+    /// for in full. Without the rules the same prompt gets the files.
+    pub fn system_for(&self, tools_offered: bool) -> String {
+        if tools_offered && !self.tool_rules.is_empty() {
+            format!("{}\n\n{}", self.system, self.tool_rules)
+        } else {
+            self.system.clone()
+        }
+    }
 }
 
 #[derive(serde::Deserialize)]
@@ -220,14 +243,11 @@ pub fn decision_prompt(name: &str) -> &'static DecisionPrompt {
 /// Render one section's system and user templates with the same context.
 pub(crate) fn render(section: &str, context: impl Serialize) -> RenderedPrompt {
     let value = minijinja::Value::from_serialize(&context);
-    let rules = render_one("tool_rules.system", &minijinja::Value::from_serialize(()));
     RenderedPrompt {
         section: section.to_string(),
-        system: format!(
-            "{}\n\n{rules}",
-            render_one(&format!("{section}.system"), &value)
-        ),
+        system: render_one(&format!("{section}.system"), &value),
         user: render_one(&format!("{section}.user"), &value),
+        tool_rules: render_one("tool_rules.system", &minijinja::Value::from_serialize(())),
     }
 }
 

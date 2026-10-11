@@ -245,6 +245,68 @@ fn step_definition(
     }
 }
 
+/// `code` with the braces inside every Rust pending marker's message
+/// doubled, so the message is a string and not a format string.
+///
+/// `todo!("implement step: a requirement with {int} criteria")` does
+/// not compile: `{int}` is an inline format argument naming a variable
+/// that does not exist (E0425). The template writes the step's text
+/// there, which has no braces; the polish pass that renames the
+/// template's functions was observed swapping in the cucumber
+/// expression, placeholders and all, and the whole step file stopped
+/// compiling before any test ran. The message is for a reader, so
+/// doubling is lossless; an already-doubled brace stays doubled.
+pub fn escape_pending_messages(language: Language, code: &str) -> String {
+    if language != Language::Rust {
+        return code.to_string();
+    }
+    let next_marker = |rest: &str| {
+        pending_markers(language)
+            .iter()
+            .filter_map(|marker| {
+                let open = format!("{marker}(\"");
+                rest.find(&open).map(|at| (at, open))
+            })
+            .min_by_key(|(at, _)| *at)
+    };
+    let mut out = String::with_capacity(code.len());
+    let mut rest = code;
+    while let Some((at, marker)) = next_marker(rest) {
+        let literal_start = at + marker.len();
+        out.push_str(&rest[..literal_start]);
+        let Some(literal_len) = string_literal_len(&rest[literal_start..]) else {
+            break;
+        };
+        let literal = &rest[literal_start..literal_start + literal_len];
+        out.push_str(
+            &literal
+                .replace("{{", "{")
+                .replace("}}", "}")
+                .replace('{', "{{")
+                .replace('}', "}}"),
+        );
+        rest = &rest[literal_start + literal_len..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// The length of the string literal body starting at `s` (just after
+/// the opening quote), up to but not including the closing quote,
+/// honouring backslash escapes. `None` when it never closes.
+fn string_literal_len(s: &str) -> Option<usize> {
+    let bytes = s.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'\\' => index += 2,
+            b'"' => return Some(index),
+            _ => index += 1,
+        }
+    }
+    None
+}
+
 /// What [`step_definition`] leaves in a body it has not filled in, per
 /// ecosystem. Kept beside the code that writes them so the two cannot
 /// drift apart.
@@ -1659,6 +1721,31 @@ impl MemberNames {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Observed live: the polish pass put the cucumber expression into
+    /// the stub's message, and `{int}` made it a format string naming a
+    /// variable that does not exist. The file stopped compiling before
+    /// a test ran.
+    #[test]
+    fn braces_in_a_pending_message_are_doubled_so_it_is_not_a_format_string() {
+        let code = "fn a() {\n    todo!(\"implement step: a requirement with {int} criteria and {string}\");\n}\nfn b() {\n    unimplemented!(\"already {{ok}}\");\n}\nfn c() { let s = \"{int} elsewhere\"; }\n";
+        let out = escape_pending_messages(Language::Rust, code);
+        assert!(
+            out.contains(
+                "todo!(\"implement step: a requirement with {{int}} criteria and {{string}}\");"
+            ),
+            "{out}"
+        );
+        assert!(out.contains("unimplemented!(\"already {{ok}}\");"), "{out}");
+        assert!(
+            out.contains("let s = \"{int} elsewhere\";"),
+            "other strings are not touched: {out}"
+        );
+        assert_eq!(
+            escape_pending_messages(Language::Java, "throw new PendingException(); // {int}"),
+            "throw new PendingException(); // {int}"
+        );
+    }
 
     fn missing(keyword: &str, text: &str) -> MissingStep {
         MissingStep {

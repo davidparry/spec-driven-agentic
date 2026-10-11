@@ -124,7 +124,7 @@ impl<C: LlmConversation, B: ToolBroker> Agent<C, B> {
         mut on_retry: impl FnMut(u32, u32, &str),
     ) -> Result<T, LlmReplyError> {
         let mut messages = vec![
-            ChatMessage::system(prompt.system.clone()),
+            ChatMessage::system(prompt.system_for(!self.tools.is_empty())),
             ChatMessage::user(prompt.user.clone()),
         ];
         let mut answers = 0u32;
@@ -220,6 +220,7 @@ mod tests {
     struct ScriptedConversation {
         turns: RefCell<Vec<Result<ChatTurn, LlmError>>>,
         offered: RefCell<Vec<Vec<String>>>,
+        systems: RefCell<Vec<String>>,
     }
 
     impl LlmConversation for ScriptedConversation {
@@ -232,6 +233,9 @@ mod tests {
             self.offered
                 .borrow_mut()
                 .push(tools.iter().map(|t| t.name.clone()).collect());
+            if let Some(system) = _messages.first() {
+                self.systems.borrow_mut().push(system.content.clone());
+            }
             let mut turns = self.turns.borrow_mut();
             if turns.is_empty() {
                 return Err(LlmError("script exhausted".into()));
@@ -304,6 +308,7 @@ mod tests {
             section: "next_step".into(),
             system: "advise".into(),
             user: "what next".into(),
+            tool_rules: String::new(),
         }
     }
 
@@ -327,11 +332,58 @@ mod tests {
             ScriptedConversation {
                 turns: RefCell::new(turns),
                 offered: RefCell::new(Vec::new()),
+                systems: RefCell::new(Vec::new()),
             },
             broker,
             vec![tool("get_tdd_state"), tool("command_run")],
             AgentConfig::new("next_step", attempts, max_rounds, confirm),
         )
+    }
+
+    /// Tool rules in a call with no tools make the model announce a
+    /// lookup it cannot do and stop - three implementation attempts in
+    /// a row, observed live. The rules travel only with the tools.
+    #[test]
+    fn tool_rules_reach_the_model_only_when_tools_are_offered() {
+        let prompt = RenderedPrompt {
+            tool_rules: "Tool rules:\n- Only call tools from the list.".into(),
+            ..prompt()
+        };
+        let without = Agent::new(
+            "m",
+            ScriptedConversation {
+                turns: RefCell::new(vec![Ok(ChatTurn {
+                    content: "fine".into(),
+                    tool_calls: vec![],
+                })]),
+                offered: RefCell::new(Vec::new()),
+                systems: RefCell::new(Vec::new()),
+            },
+            FakeBroker::default(),
+            Vec::new(),
+            AgentConfig::new("next_step", 1, 1, Vec::new()),
+        );
+        without
+            .ask(&mut silent(), &prompt, parse_ok, |_, _, _| {})
+            .unwrap();
+        assert_eq!(without.chat.systems.borrow().as_slice(), ["advise"]);
+
+        let with = make_agent(
+            vec![Ok(ChatTurn {
+                content: "fine".into(),
+                tool_calls: vec![],
+            })],
+            FakeBroker::default(),
+            Vec::new(),
+            1,
+            1,
+        );
+        with.ask(&mut silent(), &prompt, parse_ok, |_, _, _| {})
+            .unwrap();
+        assert_eq!(
+            with.chat.systems.borrow().as_slice(),
+            ["advise\n\nTool rules:\n- Only call tools from the list."]
+        );
     }
 
     fn silent() -> ScriptedPrompter {
@@ -435,6 +487,7 @@ mod tests {
                     }),
                 ]),
                 offered: RefCell::new(Vec::new()),
+                systems: RefCell::new(Vec::new()),
             },
             RecBroker(calls.clone()),
             vec![tool("get_tdd_state"), tool("command_run")],
@@ -500,6 +553,7 @@ mod tests {
                         }),
                     ]),
                     offered: RefCell::new(Vec::new()),
+                    systems: RefCell::new(Vec::new()),
                 },
                 FakeBroker::default(),
                 vec![tool("command_run")],
