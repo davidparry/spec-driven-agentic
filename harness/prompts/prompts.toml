@@ -13,7 +13,8 @@ brief = '''
 Project memory:
 - Language: {{ language }} ({{ bdd_framework }}){% if build_tool %}, build {{ build_tool }}{% endif %}
 - Libraries: {% if libraries %}{{ libraries | join(", ") }}{% else %}(none recorded){% endif %}
-- Layout: {{ layout }}
+{% if crate_name %}- Crate: {{ crate_name }} - integration tests and step files import the library as `use {{ crate_name }}::...;` (never any other name)
+{% endif %}- Layout: {{ layout }}
 '''
 
 # `spec draft` (assisted): break a plain-words description into

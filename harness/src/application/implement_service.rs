@@ -189,7 +189,25 @@ fn accept_filled_definitions(
             patterns.len()
         ));
     }
+    if let Some(world) = world {
+        let missing = step_fill::undeclared_world_fields(language, &code, world, &fields);
+        if !missing.is_empty() {
+            return Err(undeclared_fields_reason(&missing, world));
+        }
+    }
     Ok(FilledSteps { bodies, fields })
+}
+
+/// Why a reply whose bodies use world fields nobody declared is sent
+/// back: it names the fields, and where to put them.
+fn undeclared_fields_reason(missing: &[String], world: &step_fill::WorldSpan) -> String {
+    format!(
+        "the bodies use fields the world type does not have: {}. Reply again with a \
+         `struct {} {{ ... }}` block first, holding ONLY those new fields (Default-able \
+         types, values wrapped in Option), then the same definitions",
+        missing.join(", "),
+        world.name
+    )
 }
 
 fn accept_filled_definition(
@@ -206,6 +224,12 @@ fn accept_filled_definition(
         return Err(format!("the reply did not keep the expression {pattern:?}"));
     };
     let body = found.text(&code).to_string();
+    if let Some(world) = world {
+        let missing = step_fill::undeclared_world_fields(language, &body, world, &fields);
+        if !missing.is_empty() {
+            return Err(undeclared_fields_reason(&missing, world));
+        }
+    }
     match placeholder_exam(pattern, is_pending_step_body(language, &body)) {
         Exam::Accept => Ok((body, fields)),
         Exam::Retry(reason) => Err(reason),
@@ -1896,6 +1920,58 @@ mod tests {
         );
         let prompt = service.llm.as_ref().unwrap().chat().prompts.borrow()[0].clone();
         assert!(prompt.contains("ONLY the new fields"), "{prompt}");
+    }
+
+    /// Observed right after a reply that asked for its fields properly:
+    /// the next one used `world.verified_flags` and declared nothing,
+    /// and the file did not compile. The reply is sent back naming the
+    /// fields, and the one that declares them is taken.
+    #[test]
+    fn a_fill_reply_using_undeclared_world_fields_is_asked_again_for_them() {
+        let steps = SourceFile {
+            path: "tests/steps/kata.rs".into(),
+            content: "use cucumber::{World, given, then, when};\n\n#[derive(Debug, Default, World)]\npub struct KataWorld {\n    result: Option<u32>,\n}\n\n#[when(expr = \"add is called with {string}\")]\nfn b(_w: &mut KataWorld, _s: String) {\n    todo!(\"implement step: add is called with {string}\");\n}\n\n#[then(expr = \"the result is {int}\")]\nfn c(_w: &mut KataWorld, _n: u32) {\n    todo!(\"implement step: the result is 3\");\n}\n".into(),
+        };
+        let lib = SourceFile {
+            path: "src/lib.rs".into(),
+            content: "pub fn add(a: u32, b: u32) -> u32 { a + b }\n".into(),
+        };
+        let bodies = "#[when(expr = \"add is called with {string}\")]\nfn b(w: &mut KataWorld, _s: String) {\n    w.flags.push(true);\n}\n\n#[then(expr = \"the result is {int}\")]\nfn c(w: &mut KataWorld, _n: u32) {\n    assert!(w.flags[0]);\n}\n";
+        let declared = format!("pub struct KataWorld {{\n    flags: Vec<bool>,\n}}\n\n{bodies}");
+        let service = ImplementService::new(
+            calculator_catalog(),
+            FakeSources(vec![steps, lib]),
+            InMemoryWorkTree::default(),
+            InMemorySpecRepository(Ok(calculator_spec())),
+            Language::Rust,
+            flat_layout(Language::Rust),
+            Some(FakeLlm::replying_in_turn(&[bodies, &declared])),
+        );
+        let report = service
+            .fill_pending_steps(&mut NullPrompter, "REQ-001", &[])
+            .unwrap()
+            .expect("filled on the second reply");
+        assert_eq!((report.filled, report.fields_added), (2, 1));
+        let written = service
+            .store
+            .read("tests/steps/kata.rs")
+            .unwrap()
+            .expect("written");
+        assert!(written.contains("    flags: Vec<bool>,\n}"), "{written}");
+        let prompts = service
+            .llm
+            .as_ref()
+            .unwrap()
+            .chat()
+            .prompts
+            .borrow()
+            .clone();
+        assert!(
+            prompts
+                .iter()
+                .any(|p| p.contains("fields the world type does not have: flags")),
+            "{prompts:#?}"
+        );
     }
 
     #[test]

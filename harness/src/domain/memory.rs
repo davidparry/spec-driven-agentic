@@ -94,6 +94,13 @@ pub struct ProjectMemory {
     pub build_tool: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub libraries: Vec<Library>,
+    /// The name code outside the crate imports it by - `spec_harness`
+    /// for a package named `spec-harness`. Rust only. An integration
+    /// test or step file that guesses this name does not compile, and
+    /// the model guessed twice in a row (`spec_workshop`, `harness`)
+    /// before this was told to it.
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "crateName")]
+    pub crate_name: Option<String>,
     #[serde(default)]
     pub structure: ProjectStructure,
     /// Where version control stands, as of the last scan. Recorded so
@@ -172,6 +179,10 @@ pub fn scan_memory(input: &ScanInput<'_>) -> MemoryScan {
             bdd_framework: language.bdd_framework().to_string(),
             build_tool: infer_build_tool(language, input.manifests),
             libraries,
+            crate_name: match language {
+                Language::Rust => input.manifests.cargo_toml.as_deref().and_then(crate_name),
+                _ => None,
+            },
             structure,
             git: input.git.clone(),
             refreshed_at: input.now.to_string(),
@@ -275,6 +286,7 @@ pub fn memory_brief(memory: &ProjectMemory) -> String {
             bdd_framework => memory.bdd_framework.as_str(),
             build_tool => memory.build_tool.clone().unwrap_or_default(),
             libraries,
+            crate_name => memory.crate_name.clone().unwrap_or_default(),
             layout => layout_line(memory),
         },
     )
@@ -403,6 +415,26 @@ pub fn parse_package_json(text: &str) -> Vec<Library> {
         }
     }
     libraries
+}
+
+/// The crate's import name from its manifest: `[lib] name` when set,
+/// else `[package] name` with hyphens as underscores, which is how
+/// cargo exposes it to `use`.
+pub fn crate_name(cargo_toml: &str) -> Option<String> {
+    let table = cargo_toml.parse::<toml::Table>().ok()?;
+    let lib = table
+        .get("lib")
+        .and_then(|v| v.as_table())
+        .and_then(|lib| lib.get("name"))
+        .and_then(|v| v.as_str());
+    let package = table
+        .get("package")
+        .and_then(|v| v.as_table())
+        .and_then(|package| package.get("name"))
+        .and_then(|v| v.as_str());
+    lib.or(package)
+        .map(|name| name.replace('-', "_"))
+        .filter(|name| !name.is_empty())
 }
 
 pub fn parse_cargo_toml(text: &str) -> Vec<Library> {
@@ -719,6 +751,38 @@ cucumber = { version = "0.23", features = ["libtest"] }
             assert_eq!(memory.build_tool.as_deref(), Some("npm"));
             assert_eq!(memory.structure.production.as_deref(), Some("src"));
         }
+    }
+
+    /// A model writing `use spec_workshop::...` into an integration
+    /// test of a crate named `spec-harness` does not compile, and it
+    /// guessed twice. The brief states the import name.
+    #[test]
+    fn a_rust_scan_records_the_crate_import_name_and_briefs_it() {
+        let rust = scan(
+            Language::Rust,
+            Manifests {
+                cargo_toml: Some(
+                    "[package]\nname = \"spec-harness\"\nversion = \"0.1.0\"\n\n[dependencies]\n"
+                        .into(),
+                ),
+                ..Default::default()
+            },
+            &["Cargo.toml", "src/lib.rs"],
+        );
+        assert_eq!(rust.crate_name.as_deref(), Some("spec_harness"));
+        let brief = rust.brief();
+        assert!(
+            brief.contains("- Crate: spec_harness - integration tests and step files import the library as `use spec_harness::...;`"),
+            "{brief}"
+        );
+        assert_eq!(
+            crate_name("[package]\nname = \"kata\"\n\n[lib]\nname = \"kata_lib\"\n").as_deref(),
+            Some("kata_lib")
+        );
+        assert_eq!(crate_name("[dependencies]\n"), None);
+        let java = java_scan(Manifests::default(), &["pom.xml"]);
+        assert_eq!(java.crate_name, None);
+        assert!(!java.brief().contains("- Crate:"), "{}", java.brief());
     }
 
     #[test]

@@ -432,6 +432,65 @@ pub fn insert_fields(
     out
 }
 
+/// The world fields the Rust definitions in `code` read or write that
+/// neither the world nor `added` declares, in first-use order.
+///
+/// A body may ask for the state it needs; one that uses it without
+/// asking does not compile (E0609), and a reply like that was observed
+/// right after one that asked properly. The names are what the retry
+/// tells the model to declare. Methods (`world.x()`) are not fields,
+/// and only the parameter bound to the world type is read. Other
+/// languages reach fields as bare names and are not checked.
+pub fn undeclared_world_fields(
+    language: Language,
+    code: &str,
+    world: &WorldSpan,
+    added: &[String],
+) -> Vec<String> {
+    if language != Language::Rust {
+        return Vec::new();
+    }
+    let known: Vec<String> = world
+        .fields
+        .iter()
+        .cloned()
+        .chain(added.iter().filter_map(|line| field_name(language, line)))
+        .collect();
+    let mut missing: Vec<String> = Vec::new();
+    for span in definition_spans(language, code) {
+        let text = span.text(code);
+        let Some(param) = WORLD_PARAM_NAME
+            .captures(text)
+            .filter(|captures| &captures[2] == world.name.as_str())
+            .map(|captures| captures[1].to_string())
+        else {
+            continue;
+        };
+        let access = Regex::new(&format!(
+            r"\b{}\.([a-z_][A-Za-z0-9_]*)\b(\s*\()?",
+            regex::escape(&param)
+        ))
+        .expect("valid regex");
+        for captures in access.captures_iter(text) {
+            if captures.get(2).is_some() {
+                continue;
+            }
+            let field = captures[1].to_string();
+            if !known.contains(&field) && !missing.contains(&field) {
+                missing.push(field);
+            }
+        }
+    }
+    missing
+}
+
+/// The parameter a Rust definition binds its world to: `w: &mut
+/// KataWorld` gives (`w`, `KataWorld`).
+static WORLD_PARAM_NAME: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"fn\s+[A-Za-z_][A-Za-z0-9_]*\s*\(\s*(?:mut\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*:\s*&(?:'\w+\s+)?mut\s+([A-Za-z_][A-Za-z0-9_]*)")
+        .expect("valid regex")
+});
+
 /// The step class of a Java or C# step file: the first `class` declared.
 static STEP_CLASS: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\bclass\s+([A-Za-z_][A-Za-z0-9_]*)").expect("valid regex"));
@@ -977,6 +1036,28 @@ fn add(w: &mut W) {
             out,
             "public class GeneratedSteps {\n    private Kata kata;\n}\n"
         );
+    }
+
+    #[test]
+    fn fields_the_bodies_use_without_declaring_are_named() {
+        let world = world_span(Language::Rust, RUST_FILE).unwrap();
+        let reply = "#[when(expr = \"add is called\")]\nfn add_is_called(w: &mut KataWorld) {\n    w.report = Some(kata::add(w.result.unwrap_or(0)));\n    w.flags.push(true);\n    w.reset();\n}\n\n#[then(expr = \"the result is {int}\")]\nfn the_result_is(world: &mut KataWorld, n: i32) {\n    assert_eq!(world.report.as_ref().map(|r| r.total), Some(n));\n}\n";
+        assert_eq!(
+            undeclared_world_fields(Language::Rust, reply, &world, &[]),
+            ["report", "flags"]
+        );
+        assert_eq!(
+            undeclared_world_fields(
+                Language::Rust,
+                reply,
+                &world,
+                &["report: Option<Report>,".into(), "flags: Vec<bool>,".into()]
+            ),
+            Vec::<String>::new()
+        );
+        // A parameter of another type is not the world.
+        let other = "#[when(expr = \"add is called\")]\nfn a(ctx: &mut Other) {\n    ctx.anything = 1;\n}\n";
+        assert!(undeclared_world_fields(Language::Rust, other, &world, &[]).is_empty());
     }
 
     #[test]

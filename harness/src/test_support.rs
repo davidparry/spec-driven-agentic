@@ -472,6 +472,9 @@ impl SourceFiles for FailingSources {
 /// prompt joined with a newline, replies with a fixed text turn.
 pub struct FakeLlm {
     pub response: Result<String, LlmError>,
+    /// Replies given before `response` takes over, one per call, for
+    /// a conversation whose first answer is sent back.
+    pub first: RefCell<Vec<String>>,
     pub prompts: RefCell<Vec<String>>,
 }
 
@@ -481,6 +484,21 @@ impl FakeLlm {
             "fake-model",
             FakeLlm {
                 response: Ok(response.to_string()),
+                first: RefCell::new(Vec::new()),
+                prompts: RefCell::new(Vec::new()),
+            },
+        )
+    }
+
+    /// Replies with each of `replies` in turn, then keeps replying with
+    /// the last one.
+    pub fn replying_in_turn(replies: &[&str]) -> ResolvedLlm<FakeLlm> {
+        let (last, first) = replies.split_last().expect("at least one reply");
+        ResolvedLlm::new(
+            "fake-model",
+            FakeLlm {
+                response: Ok(last.to_string()),
+                first: RefCell::new(first.iter().map(|r| r.to_string()).collect()),
                 prompts: RefCell::new(Vec::new()),
             },
         )
@@ -491,6 +509,7 @@ impl FakeLlm {
             "fake-model",
             FakeLlm {
                 response: Err(LlmError("model crashed".into())),
+                first: RefCell::new(Vec::new()),
                 prompts: RefCell::new(Vec::new()),
             },
         )
@@ -506,6 +525,10 @@ impl LlmConversation for FakeLlm {
     ) -> Result<ChatTurn, LlmError> {
         let (system, user) = crate::domain::tools::system_and_user(messages);
         self.prompts.borrow_mut().push(format!("{system}\n{user}"));
+        let mut first = self.first.borrow_mut();
+        if !first.is_empty() {
+            return Ok(text_turn(first.remove(0)));
+        }
         self.response.clone().map(text_turn)
     }
 }
