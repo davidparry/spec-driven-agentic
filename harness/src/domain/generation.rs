@@ -98,7 +98,7 @@ static WORLD_PARAM: LazyLock<Regex> = LazyLock::new(|| {
 /// Failing that, the struct the derive is written on. Attributes may sit
 /// between the two - `#[world(init = Self::new)]` is common - so the
 /// span up to `struct` is skipped rather than required to be empty.
-static WORLD_DERIVE: LazyLock<Regex> = LazyLock::new(|| {
+pub(crate) static WORLD_DERIVE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?s)#\[derive\([^)]*\bWorld\b[^)]*\)\][^;{]*?\bstruct\s+([A-Za-z_][A-Za-z0-9_]*)")
         .expect("valid regex")
 });

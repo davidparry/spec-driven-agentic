@@ -13,6 +13,10 @@
 //! return a 5,600-line file to fill. The pending definitions themselves
 //! are a few dozen lines. That is the brief.
 
+use std::sync::LazyLock;
+
+use regex::Regex;
+
 use crate::domain::generation::{best_practices, is_pending_step_body, looks_like_step_fragment};
 use crate::domain::language::Language;
 use crate::domain::model::Requirement;
@@ -198,14 +202,312 @@ pub fn fill_steps_prompt(
     )
 }
 
+/// The world type a step file's definitions share state through, and
+/// where its body is - the Rust struct deriving `World`, or the step
+/// class for Java and C#. `body_start..body_end` is the text between
+/// the braces; `fields` is the names already declared in it.
+///
+/// A Rust world the template left as a unit struct (`struct W;`) has
+/// no body yet: `body_start == body_end` sits on the `;`, and
+/// [`insert_fields`] gives it braces.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorldSpan {
+    pub name: String,
+    pub body_start: usize,
+    pub body_end: usize,
+    pub fields: Vec<String>,
+    unit: bool,
+}
+
+/// What a fill reply carried besides the definitions: the new world
+/// fields it asked for, and the definitions with that fragment taken
+/// out so the usual readers see only definitions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorldFragment {
+    pub definitions: String,
+    pub fields: Vec<String>,
+}
+
+/// Where the world type is declared in `source`, when the language has
+/// one and the file declares it. The JS family keeps state in `this`
+/// and has nothing to declare, so it is `None` there.
+pub fn world_span(language: Language, source: &str) -> Option<WorldSpan> {
+    let (name, after_name) = match language {
+        Language::Rust => {
+            let captures = crate::domain::generation::WORLD_DERIVE.captures(source)?;
+            let name = captures.get(1)?;
+            (name.as_str().to_string(), name.end())
+        }
+        Language::Java | Language::DotNet => {
+            let captures = STEP_CLASS.captures(source)?;
+            let name = captures.get(1)?;
+            (name.as_str().to_string(), name.end())
+        }
+        Language::JavaScript | Language::TypeScript => return None,
+    };
+    let rest = &source[after_name..];
+    let next = after_name + rest.len() - rest.trim_start().len();
+    match source.as_bytes().get(next)? {
+        b';' if language == Language::Rust => Some(WorldSpan {
+            name,
+            body_start: next,
+            body_end: next,
+            fields: Vec::new(),
+            unit: true,
+        }),
+        b'{' => {
+            let close = closing_brace(source, next)?;
+            let body = &source[next + 1..close];
+            let fields = body
+                .lines()
+                .filter_map(|line| field_name(language, line))
+                .collect();
+            Some(WorldSpan {
+                name,
+                body_start: next + 1,
+                body_end: close,
+                fields,
+                unit: false,
+            })
+        }
+        _ => None,
+    }
+}
+
+/// The reply to a fill prompt, split into the definitions and the new
+/// world fields it declares, if any. The world block - `struct Name {
+/// ... }` or `class Name { ... }`, attributes above it included - comes
+/// out whole; what it held must be fields, every one of them new.
+///
+/// Refused with a reason the model can act on when the block holds a
+/// method or another member, or when the reply declares a type that
+/// is neither a definition nor the world: a second struct cannot be
+/// spliced anywhere.
+pub fn split_world_fragment(
+    language: Language,
+    reply: &str,
+    world: &WorldSpan,
+) -> Result<WorldFragment, String> {
+    let keyword = match language {
+        Language::Rust => "struct",
+        Language::Java | Language::DotNet => "class",
+        Language::JavaScript | Language::TypeScript => {
+            return Ok(WorldFragment {
+                definitions: reply.to_string(),
+                fields: Vec::new(),
+            });
+        }
+    };
+    let declaration = Regex::new(&format!(
+        r"(?m)^[ \t]*(?:pub(?:\([^)]*\))?\s+|public\s+|final\s+|static\s+)*{keyword}\s+{}\b",
+        regex::escape(&world.name)
+    ))
+    .expect("valid regex");
+    let Some(found) = declaration.find(reply) else {
+        return Ok(WorldFragment {
+            definitions: reply.to_string(),
+            fields: Vec::new(),
+        });
+    };
+    let open = found.end()
+        + reply[found.end()..]
+            .find('{')
+            .ok_or_else(|| format!("the {} fragment in the reply has no body", world.name))?;
+    let close = closing_brace(reply, open)
+        .ok_or_else(|| format!("the {} fragment in the reply never closes", world.name))?;
+    let mut fields = Vec::new();
+    for line in reply[open + 1..close].lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with("//") || trimmed.starts_with("///") {
+            continue;
+        }
+        let Some(name) = field_name(language, line) else {
+            return Err(format!(
+                "the {} fragment may hold only its new fields, but it held {trimmed:?}; \
+                 declare fields there and nothing else",
+                world.name
+            ));
+        };
+        if world.fields.contains(&name)
+            || fields
+                .iter()
+                .any(|f: &String| field_name(language, f) == Some(name.clone()))
+        {
+            continue;
+        }
+        fields.push(normalized_field(language, trimmed));
+    }
+    let start = declaration_start(reply, found.start());
+    let end = reply[close..]
+        .find('\n')
+        .map_or(reply.len(), |n| close + n + 1);
+    let mut definitions = String::with_capacity(reply.len());
+    definitions.push_str(&reply[..start]);
+    definitions.push_str(&reply[end..]);
+    let definitions = definitions.trim_start_matches('\n').to_string();
+    if language == Language::Rust && OTHER_STRUCT.is_match(&definitions) {
+        return Err(
+            "the reply declared another struct; only the definitions asked for and new \
+             fields on the world type can be used"
+                .into(),
+        );
+    }
+    Ok(WorldFragment {
+        definitions,
+        fields,
+    })
+}
+
+/// `source` with `fields` added to the world's body, one per line at
+/// the body's indentation. A Rust struct body is all fields, so they
+/// go at its end; a class body holds methods too, so they go after
+/// the last field already there, or first when there is none. A unit
+/// struct gets braces.
+pub fn insert_fields(
+    language: Language,
+    source: &str,
+    world: &WorldSpan,
+    fields: &[String],
+) -> String {
+    if fields.is_empty() {
+        return source.to_string();
+    }
+    let body = &source[world.body_start..world.body_end];
+    let closing_indent = body.rfind('\n').map_or("", |n| &body[n + 1..]);
+    let closing_indent = if closing_indent.chars().all(char::is_whitespace) {
+        closing_indent
+    } else {
+        ""
+    };
+    let indent = body
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .map(|line| &line[..line.len() - line.trim_start().len()])
+        .filter(|indent| !indent.is_empty())
+        .map_or_else(|| format!("{closing_indent}    "), str::to_string);
+    let block: String = fields
+        .iter()
+        .map(|field| format!("{indent}{field}\n"))
+        .collect();
+    let (replace_from, replace_to, new_text) = if world.unit {
+        (
+            world.body_start,
+            world.body_end + 1,
+            format!(" {{\n{block}}}"),
+        )
+    } else if body.trim().is_empty() {
+        (
+            world.body_start,
+            world.body_end,
+            format!("\n{block}{closing_indent}"),
+        )
+    } else if language == Language::Rust {
+        (
+            world.body_start,
+            world.body_end,
+            format!("{}\n{block}{closing_indent}", body.trim_end()),
+        )
+    } else {
+        // After the last field line, or at the top of the body.
+        let mut after = world.body_start + 1;
+        let mut offset = 0;
+        for line in body.split_inclusive('\n') {
+            if field_name(language, line).is_some() {
+                after = world.body_start + offset + line.len();
+            }
+            offset += line.len();
+        }
+        let at = after.min(world.body_end);
+        let lead = if source[..at].ends_with('\n') {
+            ""
+        } else {
+            "\n"
+        };
+        (at, at, format!("{lead}{block}"))
+    };
+    let mut out = String::with_capacity(source.len() + new_text.len());
+    out.push_str(&source[..replace_from]);
+    out.push_str(&new_text);
+    out.push_str(&source[replace_to..]);
+    out
+}
+
+/// The step class of a Java or C# step file: the first `class` declared.
+static STEP_CLASS: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\bclass\s+([A-Za-z_][A-Za-z0-9_]*)").expect("valid regex"));
+
+/// A struct declaration at the start of a line - what a Rust reply may
+/// not carry once the world block is out.
+static OTHER_STRUCT: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?m)^[ \t]*(?:pub(?:\([^)]*\))?\s+)?struct\s+[A-Za-z_]").expect("valid regex")
+});
+
+/// A Rust field: `name: Type` with an optional `pub` and trailing comma.
+static RUST_FIELD: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^\s*(?:pub(?:\([^)]*\))?\s+)?([a-z_][A-Za-z0-9_]*)\s*:\s*[^,]+,?\s*$")
+        .expect("valid regex")
+});
+
+/// The name a field line declares, or `None` when the line is not a
+/// field: a method, an attribute, a nested type.
+pub fn field_name(language: Language, line: &str) -> Option<String> {
+    let trimmed = line.trim();
+    match language {
+        Language::Rust => RUST_FIELD
+            .captures(trimmed)
+            .map(|captures| captures[1].to_string()),
+        Language::Java | Language::DotNet => {
+            let statement = trimmed.strip_suffix(';')?;
+            let declaration = statement.split('=').next()?.trim();
+            if declaration.contains('(') || declaration.contains('{') {
+                return None;
+            }
+            let name = declaration.rsplit(|c: char| c.is_whitespace()).next()?;
+            let is_name = !name.is_empty()
+                && name.chars().all(|c| c.is_alphanumeric() || c == '_')
+                && declaration.split_whitespace().count() >= 2;
+            is_name.then(|| name.to_string())
+        }
+        Language::JavaScript | Language::TypeScript => None,
+    }
+}
+
+/// A field line as the file will carry it: Rust fields end in a comma.
+fn normalized_field(language: Language, line: &str) -> String {
+    match language {
+        Language::Rust if !line.ends_with(',') => format!("{line},"),
+        _ => line.to_string(),
+    }
+}
+
 /// Where a definition's text begins: the start of the attribute's
 /// line, or of the first comment line in the run directly above it.
 fn span_start(source: &str, attribute_at: usize) -> usize {
-    let mut start = source[..attribute_at].rfind('\n').map_or(0, |i| i + 1);
+    line_run_start(source, attribute_at, |line| {
+        line.starts_with("//") || line.starts_with("/*") || line.starts_with('*')
+    })
+}
+
+/// Where a type declaration's text begins: its line, or the first
+/// attribute or comment line in the run directly above it.
+fn declaration_start(source: &str, declaration_at: usize) -> usize {
+    line_run_start(source, declaration_at, |line| {
+        line.starts_with("//")
+            || line.starts_with("/*")
+            || line.starts_with('*')
+            || line.starts_with("#[")
+            || line.starts_with('[')
+    })
+}
+
+/// The start of the line holding `at`, moved up over every directly
+/// preceding line `leads` accepts.
+fn line_run_start(source: &str, at: usize, leads: impl Fn(&str) -> bool) -> usize {
+    let mut start = source[..at].rfind('\n').map_or(0, |i| i + 1);
     while let Some(previous_end) = start.checked_sub(1) {
         let previous_start = source[..previous_end].rfind('\n').map_or(0, |i| i + 1);
         let line = source[previous_start..previous_end].trim();
-        if !(line.starts_with("//") || line.starts_with("/*") || line.starts_with('*')) {
+        if !leads(line) {
             break;
         }
         start = previous_start;
@@ -221,6 +523,25 @@ fn span_start(source: &str, attribute_at: usize) -> usize {
 fn span_end(language: Language, source: &str, after_attribute: usize) -> Option<usize> {
     let bytes = source.as_bytes();
     let open = after_attribute + source[after_attribute..].find('{')?;
+    let close = closing_brace(source, open)?;
+    let mut end = close + 1;
+    if matches!(language, Language::JavaScript | Language::TypeScript) {
+        while end < bytes.len() && matches!(bytes[end], b')' | b';' | b' ') {
+            end += 1;
+        }
+    }
+    Some(
+        source[end..]
+            .find('\n')
+            .map_or(bytes.len(), |n| end + n + 1),
+    )
+}
+
+/// The index of the `}` closing the `{` at `open`, skipping strings
+/// and line comments so a brace inside them does not count. `None`
+/// when the braces never balance.
+fn closing_brace(source: &str, open: usize) -> Option<usize> {
+    let bytes = source.as_bytes();
     let mut depth = 0usize;
     let mut index = open;
     while index < bytes.len() {
@@ -236,17 +557,7 @@ fn span_end(language: Language, source: &str, after_attribute: usize) -> Option<
             b'}' => {
                 depth -= 1;
                 if depth == 0 {
-                    let mut end = index + 1;
-                    if matches!(language, Language::JavaScript | Language::TypeScript) {
-                        while end < bytes.len() && matches!(bytes[end], b')' | b';' | b' ') {
-                            end += 1;
-                        }
-                    }
-                    return Some(
-                        source[end..]
-                            .find('\n')
-                            .map_or(bytes.len(), |n| end + n + 1),
-                    );
+                    return Some(index);
                 }
             }
             _ => {}
@@ -540,6 +851,143 @@ fn add(w: &mut W) {
     fn a_body_whose_braces_never_close_is_not_a_span() {
         let source = "#[when(expr = \"add is called\")]\nfn add(_w: &mut W) {\n    let n = 1;\n";
         assert!(definition_spans(Language::Rust, source).is_empty());
+    }
+
+    #[test]
+    fn the_rust_world_is_the_struct_deriving_world_with_its_fields() {
+        let world = world_span(Language::Rust, RUST_FILE).unwrap();
+        assert_eq!(world.name, "KataWorld");
+        assert_eq!(world.fields, ["result"]);
+        assert_eq!(
+            &RUST_FILE[world.body_start..world.body_end],
+            "\n    result: Option<i32>,\n"
+        );
+    }
+
+    #[test]
+    fn a_unit_struct_world_gets_braces_when_fields_are_added() {
+        let source = "use cucumber::World;\n\n#[derive(Debug, Default, World)]\npub struct GeneratedWorld;\n\n#[given(expr = \"a\")]\nfn a(_w: &mut GeneratedWorld) {}\n";
+        let world = world_span(Language::Rust, source).unwrap();
+        assert!(world.fields.is_empty());
+        let out = insert_fields(
+            Language::Rust,
+            source,
+            &world,
+            &["kata: Option<Kata>,".into(), "result: Option<u32>,".into()],
+        );
+        assert!(
+            out.contains(
+                "pub struct GeneratedWorld {\n    kata: Option<Kata>,\n    result: Option<u32>,\n}\n\n#[given"
+            ),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn fields_are_added_at_the_end_of_an_existing_body() {
+        let world = world_span(Language::Rust, RUST_FILE).unwrap();
+        let out = insert_fields(
+            Language::Rust,
+            RUST_FILE,
+            &world,
+            &["report: Option<Report>,".into()],
+        );
+        assert!(
+            out.contains(
+                "struct KataWorld {\n    result: Option<i32>,\n    report: Option<Report>,\n}\n"
+            ),
+            "{out}"
+        );
+        // Everything else is as it was.
+        assert_eq!(
+            definition_spans(Language::Rust, &out).len(),
+            definition_spans(Language::Rust, RUST_FILE).len()
+        );
+    }
+
+    #[test]
+    fn a_reply_with_a_new_fields_only_world_block_is_split_from_its_definitions() {
+        let world = world_span(Language::Rust, RUST_FILE).unwrap();
+        let reply = "#[derive(Debug, Default, World)]\nstruct KataWorld {\n    result: Option<i32>,\n    report: Option<Report>\n    proven: Vec<String>,\n}\n\n#[when(expr = \"add is called\")]\nfn add_is_called(w: &mut KataWorld) {\n    w.report = Some(kata::report());\n}\n";
+        let split = split_world_fragment(Language::Rust, reply, &world).unwrap();
+        // The field the head already shows is dropped; the comma the
+        // model forgot is supplied.
+        assert_eq!(
+            split.fields,
+            ["report: Option<Report>,", "proven: Vec<String>,"]
+        );
+        assert!(
+            split.definitions.starts_with("#[when(expr"),
+            "{:?}",
+            split.definitions
+        );
+        assert!(!split.definitions.contains("struct KataWorld"));
+        let spans = definition_spans(Language::Rust, &split.definitions);
+        assert_eq!(spans.len(), 1);
+    }
+
+    #[test]
+    fn a_reply_without_a_world_block_has_no_fields_to_add() {
+        let world = world_span(Language::Rust, RUST_FILE).unwrap();
+        let reply =
+            "#[when(expr = \"add is called\")]\nfn a(w: &mut KataWorld) { w.result = Some(3); }\n";
+        let split = split_world_fragment(Language::Rust, reply, &world).unwrap();
+        assert!(split.fields.is_empty());
+        assert_eq!(split.definitions, reply);
+    }
+
+    #[test]
+    fn a_world_block_holding_a_method_or_a_second_struct_is_refused() {
+        let world = world_span(Language::Rust, RUST_FILE).unwrap();
+        let with_method = "struct KataWorld {\n    fn reset(&mut self) {}\n}\n#[when(expr = \"add is called\")]\nfn a(w: &mut KataWorld) {}\n";
+        let error = split_world_fragment(Language::Rust, with_method, &world).unwrap_err();
+        assert!(error.contains("only its new fields"), "{error}");
+        let second = "struct KataWorld {\n    report: Option<Report>,\n}\nstruct Report { ok: bool }\n#[when(expr = \"add is called\")]\nfn a(w: &mut KataWorld) {}\n";
+        let error = split_world_fragment(Language::Rust, second, &world).unwrap_err();
+        assert!(error.contains("another struct"), "{error}");
+    }
+
+    #[test]
+    fn the_java_world_is_the_step_class_and_its_fields() {
+        let java = "import io.cucumber.java.en.*;\n\npublic class GeneratedSteps {\n    private int result;\n\n    @When(\"add is called\")\n    public void addIsCalled() {\n        throw new PendingException();\n    }\n}\n";
+        let world = world_span(Language::Java, java).unwrap();
+        assert_eq!(world.name, "GeneratedSteps");
+        assert_eq!(world.fields, ["result"]);
+        let reply = "public class GeneratedSteps {\n    private Kata kata;\n    private int result;\n}\n\n    @When(\"add is called\")\n    public void addIsCalled() {\n        result = kata.add(\"1,2\");\n    }\n";
+        let split = split_world_fragment(Language::Java, reply, &world).unwrap();
+        assert_eq!(split.fields, ["private Kata kata;"]);
+        assert_eq!(
+            definition_spans(Language::Java, &split.definitions).len(),
+            1
+        );
+        let out = insert_fields(Language::Java, java, &world, &split.fields);
+        assert!(
+            out.contains("    private int result;\n    private Kata kata;\n\n    @When"),
+            "{out}"
+        );
+        assert!(out.ends_with("    }\n}\n"), "{out}");
+    }
+
+    #[test]
+    fn an_empty_java_class_body_gets_its_first_field() {
+        let java = "public class GeneratedSteps {\n\n}\n";
+        let world = world_span(Language::Java, java).unwrap();
+        let out = insert_fields(Language::Java, java, &world, &["private Kata kata;".into()]);
+        assert_eq!(
+            out,
+            "public class GeneratedSteps {\n    private Kata kata;\n}\n"
+        );
+    }
+
+    #[test]
+    fn the_js_family_has_no_world_to_extend() {
+        assert_eq!(
+            world_span(
+                Language::JavaScript,
+                "const { Given } = require('@cucumber/cucumber');"
+            ),
+            None
+        );
     }
 
     /// An unclosed quote runs to the end of the file, so the body has

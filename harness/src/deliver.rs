@@ -797,7 +797,7 @@ impl Deliver {
         before: &[SourceFile],
     ) -> Result<(), String> {
         prompter.warn(&template_unit_test_fallback(req_id, target));
-        self.restore_sources(language, before)?;
+        self.restore_sources(language, before, &[target.to_string()])?;
         let template = crate::wiring::generation_service(
             &self.root,
             language,
@@ -876,18 +876,21 @@ impl Deliver {
         for attempt in 1..=budget {
             prompter.tell(&format!("Attempt {attempt} of {budget}."));
             let before = self.source_snapshot(language)?;
-            if self.attempt_implementation(prompter, &implement, tdd, req_id)? {
-                return Ok(Bar::stopped(
-                    format!(
-                        "The model never answered the implementation prompt, so {req_id} \
-                         was not attempted. Implement by hand, then run spec deliver \
-                         {req_id} again - or raise timeout_seconds under [llm] if the \
-                         model was still generating when the wait ran out."
-                    ),
-                    Some(report.phase.clone()),
-                ));
-            }
-            self.fill_steps(prompter, &implement, tdd, req_id);
+            let mut wrote = match self.attempt_implementation(prompter, &implement, tdd, req_id)? {
+                Attempted::Unanswered => {
+                    return Ok(Bar::stopped(
+                        format!(
+                            "The model never answered the implementation prompt, so {req_id} \
+                             was not attempted. Implement by hand, then run spec deliver \
+                             {req_id} again - or raise timeout_seconds under [llm] if the \
+                             model was still generating when the wait ran out."
+                        ),
+                        Some(report.phase.clone()),
+                    ));
+                }
+                Attempted::Ran { wrote } => wrote,
+            };
+            wrote.extend(self.fill_steps(prompter, &implement, tdd, req_id));
             let judged = match run_and_narrate(tdd, runner, prompter)? {
                 Some(report) => report,
                 None => {
@@ -908,9 +911,16 @@ impl Deliver {
             // budget leaves the break on disk. Put the code back and let
             // the remaining attempts read the bar this one was given.
             if judged.build_broken() {
-                let restored = self.restore_sources(language, &before)?;
-                if !restored.is_empty() {
-                    prompter.warn(&reverted_attempt(attempt, &restored));
+                let restored = self.restore_sources(language, &before, &wrote)?;
+                for path in &restored.left_alone {
+                    prompter.warn(&changed_outside_the_attempt(path));
+                }
+                if !restored.put_back.is_empty() {
+                    prompter.warn(&reverted_attempt(
+                        attempt,
+                        &restored.put_back,
+                        &restored.created,
+                    ));
                     if attempt == budget {
                         continue;
                     }
@@ -1087,18 +1097,21 @@ impl Deliver {
         >,
         tdd: &TddService<FsStateStore>,
         req_id: &str,
-    ) {
+    ) -> Option<String> {
         let failures = tdd
             .implementation_brief(req_id)
             .map(|brief| brief.failures)
             .unwrap_or_default();
         match implement.fill_pending_steps(prompter, req_id, &failures) {
-            Ok(Some(report)) => prompter.tell(&format!(
-                "Filled {} pending step bodies in {} ({}).",
-                report.filled, report.target, report.source
-            )),
-            Ok(None) => {}
-            Err(error) => prompter.warn(&error.0),
+            Ok(Some(report)) => {
+                prompter.tell(&filled_steps_notice(&report));
+                Some(report.target)
+            }
+            Ok(None) => None,
+            Err(error) => {
+                prompter.warn(&error.0);
+                None
+            }
         }
     }
 
@@ -1108,8 +1121,9 @@ impl Deliver {
     /// answered at all the loop stops: nothing was staged, and the same
     /// prompt would only wait out another timeout.
     ///
-    /// `Ok(true)` is that stop; `Ok(false)` ran the attempt to whatever
-    /// verdict the reply earned.
+    /// [`Attempted::Unanswered`] is that stop; [`Attempted::Ran`] ran the
+    /// attempt to whatever verdict the reply earned, and names the files
+    /// it wrote so a revert can be confined to them.
     fn attempt_implementation(
         &self,
         prompter: &mut dyn Prompter,
@@ -1122,7 +1136,7 @@ impl Deliver {
         >,
         tdd: &TddService<FsStateStore>,
         req_id: &str,
-    ) -> Result<bool, String> {
+    ) -> Result<Attempted, String> {
         let brief = tdd.implementation_brief(req_id).map_err(tdd_message)?;
         // Nobody is at the keyboard to answer --into. Evidence still
         // decides wherever it can; only when it names nothing does an
@@ -1136,7 +1150,7 @@ impl Deliver {
             }
             Err(error) => {
                 prompter.warn(&format!("{} Implement by hand instead.", error.0));
-                return Ok(false);
+                return Ok(Attempted::Ran { wrote: Vec::new() });
             }
         };
         let destinations = implement.attempt_destinations(req_id).unwrap_or_default();
@@ -1150,9 +1164,11 @@ impl Deliver {
             into.as_deref(),
         );
         drop(work);
+        let mut wrote = Vec::new();
         match outcome {
             Ok(attempt) => {
                 self.reviewed(prompter, req_id, "drive_to_green", attempt.judgments);
+                wrote.clone_from(&attempt.targets);
                 for target in &attempt.targets {
                     let full = std::path::absolute(self.root.join(target))
                         .unwrap_or_else(|_| self.root.join(target));
@@ -1199,12 +1215,12 @@ impl Deliver {
                 // remaining attempts proving that.
                 if implement.take_unanswered().is_some() {
                     prompter.warn(&format!("{} Implement by hand instead.", error.0));
-                    return Ok(true);
+                    return Ok(Attempted::Unanswered);
                 }
                 prompter.warn(&format!("{} Implement by hand instead.", error.0));
             }
         }
-        Ok(false)
+        Ok(Attempted::Ran { wrote })
     }
 
     /// Every source file an implement attempt could write, read before
@@ -1216,7 +1232,16 @@ impl Deliver {
             .map_err(|e| e.0)
     }
 
-    /// Put back every snapshotted file the attempt moved, and name them.
+    /// Put back every snapshotted file the attempt wrote and moved, and
+    /// name them; name separately the files that moved without the
+    /// attempt writing them.
+    ///
+    /// Only `wrote` is put back. The snapshot is the whole source tree,
+    /// and the tree is not the attempt's alone: a developer with the
+    /// project open in an editor edits it while the model thinks, and a
+    /// revert that put back every file that differed put back their
+    /// edit too, with one line of warning for the loss. Observed live.
+    /// A file that differs and is not in `wrote` is theirs, and stays.
     ///
     /// A file the attempt *created* is not in the snapshot and stays:
     /// [`WorkTree`] writes and reads, and deliberately cannot delete.
@@ -1226,10 +1251,11 @@ impl Deliver {
         &self,
         language: Language,
         snapshot: &[SourceFile],
-    ) -> Result<Vec<String>, String> {
+        wrote: &[String],
+    ) -> Result<Restored, String> {
         let now = self.source_snapshot(language)?;
         let tree = self.work_tree();
-        let mut restored = Vec::new();
+        let mut restored = Restored::default();
         for file in snapshot {
             let unchanged = now
                 .iter()
@@ -1237,9 +1263,18 @@ impl Deliver {
             if unchanged {
                 continue;
             }
+            if !wrote.contains(&file.path) {
+                restored.left_alone.push(file.path.clone());
+                continue;
+            }
             tree.write(&file.path, &file.content, RESTORE_SUMMARY)
                 .map_err(|e| e.0)?;
-            restored.push(file.path.clone());
+            restored.put_back.push(file.path.clone());
+        }
+        for path in wrote {
+            if !snapshot.iter().any(|file| &file.path == path) && !restored.created.contains(path) {
+                restored.created.push(path.clone());
+            }
         }
         Ok(restored)
     }
@@ -1542,6 +1577,51 @@ fn undefined_steps_remain(req_id: &str, count: usize) -> String {
 /// The summary written against every file an abandoned attempt moved.
 const RESTORE_SUMMARY: &str = "restore the code the attempt started from";
 
+/// What one implementation attempt did to the tree, as far as a revert
+/// needs to know.
+#[derive(Debug, PartialEq, Eq)]
+enum Attempted {
+    /// The model never answered; nothing was written.
+    Unanswered,
+    /// The attempt ran. `wrote` is every path it wrote - empty when the
+    /// reply was refused.
+    Ran { wrote: Vec<String> },
+}
+
+/// What [`Deliver::restore_sources`] did: the files it put back, and
+/// the files that had changed but were nobody's to put back.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct Restored {
+    put_back: Vec<String>,
+    left_alone: Vec<String>,
+    /// Files the attempt created. They stay - the tree cannot delete -
+    /// and the notice names them so a new, unreferenced file is not a
+    /// surprise to whoever reads the project next.
+    created: Vec<String>,
+}
+
+/// What the step-filling pass did, fields included when it added any.
+fn filled_steps_notice(report: &crate::application::implement_service::StepFillReport) -> String {
+    if report.fields_added > 0 {
+        format!(
+            "Filled {} pending step bodies and added {} world field(s) in {} ({}).",
+            report.filled, report.fields_added, report.target, report.source
+        )
+    } else {
+        format!(
+            "Filled {} pending step bodies in {} ({}).",
+            report.filled, report.target, report.source
+        )
+    }
+}
+
+/// A file that changed during the attempt without the attempt writing
+/// it - an editor open on the project, usually. Said once per file, so
+/// whoever made the edit knows it survived.
+fn changed_outside_the_attempt(path: &str) -> String {
+    format!("{path} changed during the attempt but not by it, so it was left as it is.")
+}
+
 /// Said when the model's unit test stopped the build and the template
 /// is written in its place. A warning, because the polish the run paid
 /// a model call for is gone and the assertions it printed a moment ago
@@ -1593,10 +1673,18 @@ fn foreign_red_bar(req_id: &str, foreign: &[String]) -> String {
 }
 
 /// What an attempt that broke the build cost, and what was kept instead.
-fn reverted_attempt(attempt: u32, restored: &[String]) -> String {
+fn reverted_attempt(attempt: u32, restored: &[String], created: &[String]) -> String {
+    let kept = if created.is_empty() {
+        String::new()
+    } else {
+        format!(
+            " {} did not exist before the attempt and stays as the attempt wrote it.",
+            created.join(", ")
+        )
+    };
     format!(
         "Attempt {attempt} left the build not compiling, so {} was restored to what the \
-         attempt read. The bar is where it was before it ran.",
+         attempt read.{kept} The bar is where it was before it ran.",
         restored.join(", ")
     )
 }
@@ -1660,7 +1748,11 @@ mod tests {
     /// run from one that never wrote anything.
     #[test]
     fn the_revert_notice_names_the_attempt_and_every_file_put_back() {
-        let notice = reverted_attempt(2, &["src/lib.rs".into(), "tests/req_001_test.rs".into()]);
+        let notice = reverted_attempt(
+            2,
+            &["src/lib.rs".into(), "tests/req_001_test.rs".into()],
+            &[],
+        );
         assert!(notice.contains("Attempt 2"), "{notice}");
         assert!(notice.contains("src/lib.rs"), "{notice}");
         assert!(notice.contains("tests/req_001_test.rs"), "{notice}");
@@ -2668,6 +2760,91 @@ mod tests {
         assert!(
             !second.contains("';' expected"),
             "not with the error the restore undid: {second}"
+        );
+    }
+
+    /// A runner that, on its last scripted run, writes a file the way a
+    /// developer's editor would while the delivery is going.
+    struct EditingQueue {
+        runs: Queue,
+        edit: (std::path::PathBuf, &'static str),
+    }
+
+    impl TestRunner for EditingQueue {
+        fn run(&self, filter: &TestFilter) -> TestOutcome {
+            let outcome = self.runs.run(filter);
+            if self.runs.0.lock().unwrap().is_empty() {
+                std::fs::write(&self.edit.0, self.edit.1).unwrap();
+            }
+            outcome
+        }
+    }
+
+    /// The tree is not the attempt's alone. A revert that put back every
+    /// file differing from the snapshot put back a developer's own edit
+    /// made while the model was thinking - observed live, on this
+    /// harness. Only what the attempt wrote goes back; the rest is named
+    /// and left alone.
+    #[test]
+    fn a_revert_puts_back_only_what_the_attempt_wrote() {
+        let dir = kata(one_criterion());
+        std::fs::create_dir_all(dir.path().join("src/main/java")).unwrap();
+        std::fs::write(
+            dir.path().join("src/main/java/Kata.java"),
+            "public class Kata { int add(String input) { return 0; } }\n",
+        )
+        .unwrap();
+        let helper = dir.path().join("src/main/java/Helper.java");
+        std::fs::write(&helper, "public class Helper { }\n").unwrap();
+        let queue = Arc::new(std::sync::Mutex::new(
+            vec![red(), broken_build_run()].into_iter().collect(),
+        ));
+        let edit = helper.clone();
+        let factory: RunnerFactory = Arc::new(move |_: &Path| {
+            Ok(Box::new(EditingQueue {
+                runs: Queue(Arc::clone(&queue)),
+                edit: (
+                    edit.clone(),
+                    "public class Helper { int handEdit() { return 7; } }\n",
+                ),
+            }) as Box<dyn TestRunner>)
+        });
+        let mut prompter = Script::default();
+        let outcome = Deliver::with_runner_factory(
+            dir.path().to_path_buf(),
+            factory,
+            model(Ok(
+                r#"[{"path":"src/main/java/Kata.java","content":"public class Kata { int add( }\n"}]"#,
+            )),
+            DeliverOptions {
+                attempts: 1,
+                ..no_refactor()
+            },
+        )
+        .deliver_one(&mut prompter, Language::Java, "REQ-001")
+        .expect("the delivery reports rather than errors");
+        assert!(matches!(outcome, Outcome::Stopped { .. }), "{outcome:?}");
+        let kata = std::fs::read_to_string(dir.path().join("src/main/java/Kata.java")).unwrap();
+        assert!(kata.contains("return 0;"), "put back: {kata}");
+        let helper = std::fs::read_to_string(&helper).unwrap();
+        assert!(helper.contains("handEdit"), "left alone: {helper}");
+        assert!(prompter.said(
+            "Attempt 1 left the build not compiling, so src/main/java/Kata.java was restored"
+        ));
+        assert!(prompter.said(
+            "src/main/java/Helper.java changed during the attempt but not by it, so it was \
+             left as it is."
+        ));
+    }
+
+    /// A file the attempt created cannot be deleted by the tree, so the
+    /// revert notice says it stays.
+    #[test]
+    fn the_revert_notice_names_files_the_attempt_created_and_kept() {
+        let notice = reverted_attempt(1, &["src/lib.rs".into()], &["src/report.rs".into()]);
+        assert!(
+            notice.contains("src/report.rs did not exist before the attempt and stays"),
+            "{notice}"
         );
     }
 

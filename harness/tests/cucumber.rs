@@ -154,6 +154,11 @@ struct SpecWorld {
     llm_step_fill: Option<String>,
     llm_failure: Option<String>,
     greenfield_runs: Vec<Result<TestRunSummary, RunnerError>>,
+    /// Files someone edits by hand while a delivery runs, as (path,
+    /// content). The scripted runner writes them during the last test
+    /// run, which is after the attempt took its snapshot and before a
+    /// broken build makes it put files back.
+    outside_edits: Vec<(String, String)>,
     greenfield_factory_error: Option<String>,
     greenfield_llm: bool,
     greenfield_report: Option<GreenfieldReport>,
@@ -2487,6 +2492,14 @@ fn a_project_source_file(world: &mut SpecWorld, path: String, step: &Step) {
     std::fs::write(absolute, content.trim_start_matches('\n')).unwrap();
 }
 
+#[given(regex = r#"^"([^"]+)" is edited outside the run to contain:$"#)]
+fn a_file_is_edited_outside_the_run(world: &mut SpecWorld, path: String, step: &Step) {
+    let content = step.docstring.clone().expect("a docstring");
+    world
+        .outside_edits
+        .push((path, content.trim_start_matches('\n').to_string()));
+}
+
 #[given("the model will reply:")]
 fn the_model_will_reply(world: &mut SpecWorld, step: &Step) {
     world.llm_reply = Some(
@@ -2866,15 +2879,34 @@ fn generation_error_contains(world: &mut SpecWorld, expected: String) {
 // ---- greenfield orchestration steps ------------------------------------------
 
 /// A [`TestRunner`] that replays a queue of scripted outcomes, one per run.
-struct QueuedRunner(Arc<Mutex<std::collections::VecDeque<Result<TestRunSummary, RunnerError>>>>);
+struct QueuedRunner {
+    runs: Arc<Mutex<std::collections::VecDeque<Result<TestRunSummary, RunnerError>>>>,
+    /// Absolute paths and contents written while the last scripted run
+    /// is "going" - a developer's editor saving over the project.
+    outside_edits: Vec<(std::path::PathBuf, String)>,
+}
+
+impl QueuedRunner {
+    fn scripted(
+        runs: Arc<Mutex<std::collections::VecDeque<Result<TestRunSummary, RunnerError>>>>,
+    ) -> Self {
+        Self {
+            runs,
+            outside_edits: Vec::new(),
+        }
+    }
+}
 
 impl TestRunner for QueuedRunner {
     fn run(&self, _: &TestFilter) -> Result<TestRunSummary, RunnerError> {
-        self.0
-            .lock()
-            .unwrap()
-            .pop_front()
-            .expect("another scripted greenfield run")
+        let mut runs = self.runs.lock().unwrap();
+        let outcome = runs.pop_front().expect("another scripted greenfield run");
+        if runs.is_empty() {
+            for (path, content) in &self.outside_edits {
+                std::fs::write(path, content).expect("the outside edit lands");
+            }
+        }
+        outcome
     }
 }
 
@@ -2957,7 +2989,7 @@ fn the_greenfield_loop_runs(world: &mut SpecWorld) {
     let factory_error = world.greenfield_factory_error.clone();
     let factory: RunnerFactory = Arc::new(move |_| match &factory_error {
         Some(message) => Err(message.clone()),
-        None => Ok(Box::new(QueuedRunner(runs.clone())) as Box<dyn TestRunner>),
+        None => Ok(Box::new(QueuedRunner::scripted(runs.clone())) as Box<dyn TestRunner>),
     });
     let llm = world.greenfield_llm.then(|| {
         (
@@ -3137,9 +3169,17 @@ fn run_delivery(world: &mut SpecWorld, target: Option<&str>) {
         std::mem::take(&mut world.greenfield_runs),
     )));
     let factory_error = world.greenfield_factory_error.clone();
+    let outside_edits: Vec<(std::path::PathBuf, String)> = world
+        .outside_edits
+        .drain(..)
+        .map(|(path, content)| (root.join(path), content))
+        .collect();
     let factory: RunnerFactory = Arc::new(move |_| match &factory_error {
         Some(message) => Err(message.clone()),
-        None => Ok(Box::new(QueuedRunner(runs.clone())) as Box<dyn TestRunner>),
+        None => Ok(Box::new(QueuedRunner {
+            runs: runs.clone(),
+            outside_edits: outside_edits.clone(),
+        }) as Box<dyn TestRunner>),
     });
     let llm = world.greenfield_llm.then(|| {
         let conversation = match world.llm_failure.clone() {

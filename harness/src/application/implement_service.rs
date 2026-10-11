@@ -28,6 +28,8 @@ use crate::domain::language::Language;
 use crate::domain::layout::allowed_targets;
 use crate::domain::memory::ProjectStructure;
 use crate::domain::model::Spec;
+use crate::domain::module_declaration::{declare_rust_module, top_level_module};
+use crate::domain::neighborhood::declared_symbols;
 use crate::domain::reply_guard::{Damage, damage};
 use crate::domain::step_fill;
 use crate::domain::steps::{extract_patterns, source_extension};
@@ -42,6 +44,8 @@ use crate::ports::{
 pub struct StepFillReport {
     pub target: String,
     pub filled: usize,
+    /// Fields the reply added to the world type so the bodies compile.
+    pub fields_added: usize,
     pub source: String,
 }
 
@@ -138,35 +142,63 @@ where
 /// question - while the per-step pass pays a fresh prompt per step.
 /// Observed from a model told not to think: "Let me look at the world
 /// type and any relevant status report fields." and nothing else.
+/// What a fill reply gave: the bodies by pattern, and the fields it
+/// asked the world type for.
+#[derive(Debug, Default)]
+struct FilledSteps {
+    bodies: std::collections::HashMap<String, String>,
+    fields: Vec<String>,
+}
+
+/// The reply's definitions and world fields, the world block taken
+/// out. A file with no world type to extend - the JS family, a Rust
+/// file the regex cannot read - keeps the whole reply as definitions.
+fn definitions_and_fields(
+    language: Language,
+    reply: &str,
+    world: Option<&step_fill::WorldSpan>,
+) -> Result<(String, Vec<String>), String> {
+    let code = strip_code_fences(reply);
+    match world {
+        Some(world) => {
+            let split = step_fill::split_world_fragment(language, &code, world)?;
+            Ok((split.definitions, split.fields))
+        }
+        None => Ok((code, Vec::new())),
+    }
+}
+
 fn accept_filled_definitions(
     language: Language,
     reply: &str,
     patterns: &[String],
-) -> Result<std::collections::HashMap<String, String>, String> {
-    let code = strip_code_fences(reply);
-    let filled: std::collections::HashMap<String, String> =
+    world: Option<&step_fill::WorldSpan>,
+) -> Result<FilledSteps, String> {
+    let (code, fields) = definitions_and_fields(language, reply, world)?;
+    let bodies: std::collections::HashMap<String, String> =
         step_fill::definition_spans(language, &code)
             .into_iter()
             .filter(|span| patterns.contains(&span.pattern))
             .filter(|span| !is_pending_step_body(language, span.text(&code)))
             .map(|span| (span.pattern.clone(), span.text(&code).to_string()))
             .collect();
-    if filled.is_empty() {
+    if bodies.is_empty() {
         return Err(format!(
             "the reply held none of the {} definition(s) asked for with its placeholder \
              replaced; reply with the definitions themselves, bodies written, and no prose",
             patterns.len()
         ));
     }
-    Ok(filled)
+    Ok(FilledSteps { bodies, fields })
 }
 
 fn accept_filled_definition(
     language: Language,
     reply: &str,
     pattern: &str,
-) -> Result<String, String> {
-    let code = strip_code_fences(reply);
+    world: Option<&step_fill::WorldSpan>,
+) -> Result<(String, Vec<String>), String> {
+    let (code, fields) = definitions_and_fields(language, reply, world)?;
     let Some(found) = step_fill::definition_spans(language, &code)
         .into_iter()
         .find(|span| span.pattern == pattern)
@@ -175,9 +207,9 @@ fn accept_filled_definition(
     };
     let body = found.text(&code).to_string();
     match placeholder_exam(pattern, is_pending_step_body(language, &body)) {
-        Exam::Accept => Ok(body),
+        Exam::Accept => Ok((body, fields)),
         Exam::Retry(reason) => Err(reason),
-        Exam::Ask(_) => Ok(body),
+        Exam::Ask(_) => Ok((body, fields)),
     }
 }
 
@@ -383,6 +415,13 @@ where
             .collect();
         let preamble = step_fill::step_file_preamble(self.language, &file.content);
         let declared = extract_patterns(self.language, &file.content);
+        let symbols = declared_symbols(self.language, &file.content);
+        // The world type the bodies share state through. A body that
+        // needs a field the world does not have may ask for it, and
+        // the rule used to forbid that: three measured attempts wrote
+        // `world.proven_report` against a world with no such field,
+        // and every bar read E0609.
+        let world = step_fill::world_span(self.language, &file.content);
         let language = self.language;
         // Last definition first, so a splice does not move the offsets
         // of the definitions still waiting.
@@ -420,13 +459,16 @@ where
                 failures,
             },
         );
-        let mut bodies = match llm.ask(
+        let FilledSteps {
+            mut bodies,
+            mut fields,
+        } = match llm.ask(
             prompter,
             &prompt,
-            |reply| accept_filled_definitions(language, reply, &patterns),
+            |reply| accept_filled_definitions(language, reply, &patterns, world.as_ref()),
             |_, _, _| {},
         ) {
-            Ok(bodies) => bodies,
+            Ok(filled) => filled,
             Err(LlmReplyError::Call(error)) => {
                 drop(batch);
                 return Err(ServiceError(LlmReplyError::call_failed(&error)));
@@ -463,13 +505,14 @@ where
                 let outcome = llm.ask(
                     prompter,
                     &prompt,
-                    |reply| accept_filled_definition(language, reply, &pattern),
+                    |reply| accept_filled_definition(language, reply, &pattern, world.as_ref()),
                     |_, _, _| {},
                 );
                 drop(work);
                 match outcome {
-                    Ok(body) => {
+                    Ok((body, more_fields)) => {
                         bodies.insert(span.pattern.clone(), body);
+                        fields.extend(more_fields);
                     }
                     Err(LlmReplyError::Call(error)) => {
                         return Err(ServiceError(LlmReplyError::call_failed(&error)));
@@ -485,23 +528,59 @@ where
         if filled == 0 {
             return Ok(None);
         }
+        // The fields go in last: the world sits above every definition,
+        // and the splices above were made against the offsets of the
+        // file as it was read. Re-read where the world is now, and
+        // keep one line per field name whatever the replies repeated.
+        let mut unique_fields: Vec<String> = Vec::new();
+        for field in fields {
+            let name = step_fill::field_name(language, &field);
+            if !unique_fields
+                .iter()
+                .any(|kept| step_fill::field_name(language, kept) == name)
+            {
+                unique_fields.push(field);
+            }
+        }
+        let fields_added = unique_fields.len();
+        if fields_added > 0
+            && let Some(world) = step_fill::world_span(self.language, &content)
+        {
+            content = step_fill::insert_fields(self.language, &content, &world, &unique_fields);
+        }
         let kept = extract_patterns(self.language, &content);
         if kept != declared {
             return Err(ServiceError(
                 "splicing the filled steps in would change which steps the file declares".into(),
             ));
         }
-        let summary = format!("fill {filled} pending step definition(s) for {req_id}");
+        if declared_symbols(self.language, &content) != symbols {
+            return Err(ServiceError(
+                "splicing the filled steps in would change which types and functions the \
+                 file declares"
+                    .into(),
+            ));
+        }
+        let summary = if fields_added > 0 {
+            format!(
+                "fill {filled} pending step definition(s) and add {fields_added} world \
+                 field(s) for {req_id}"
+            )
+        } else {
+            format!("fill {filled} pending step definition(s) for {req_id}")
+        };
         self.store.write(&file.path, &content, &summary)?;
         tracing::info!(
             requirement = %req_id,
             target = %file.path,
             filled,
+            fields_added,
             "pending step bodies written"
         );
         Ok(Some(StepFillReport {
             target: file.path.clone(),
             filled,
+            fields_added,
             source: "llm".into(),
         }))
     }
@@ -739,6 +818,8 @@ where
             self.store.write(&update.path, &update.content, &summary)?;
             targets.push(update.path.clone());
         }
+        let mut warnings: Vec<String> = Vec::new();
+        warnings.extend(self.declare_new_modules(prompter, req_id, &files, &mut targets)?);
         // One of three declared files written is not an incomplete
         // attempt - the test run decides that. Only an attempt that
         // touched none of them has demonstrably left the bar where it
@@ -751,10 +832,7 @@ where
         let production_refused = refused
             .iter()
             .any(|(path, _)| allowed.contains(&(*path).to_string()));
-        let mut warnings: Vec<String> = refused
-            .iter()
-            .map(|(path, damage)| damage.describe(path))
-            .collect();
+        warnings.extend(refused.iter().map(|(path, damage)| damage.describe(path)));
         if let Some(reason) = refusal {
             warnings.insert(0, reason);
         }
@@ -800,6 +878,86 @@ where
             judgments,
             next_step,
         })
+    }
+
+    /// Wire every new top-level Rust source file the attempt created
+    /// into the crate root, so the next build compiles it.
+    ///
+    /// A `src/<module>.rs` no `mod` line names is not in the crate, and
+    /// the tests that call it fail with E0433 whatever it says. Three
+    /// measured attempts wrote the file correctly and never touched
+    /// `lib.rs`: the prompt asks for the production file, and the
+    /// declaration is a line in a file it was not asked about. The
+    /// crate root is `lib.rs` when there is one, else `main.rs`; one
+    /// the model wrote itself this attempt is read as written. Other
+    /// languages have no such line and are left alone.
+    fn declare_new_modules(
+        &self,
+        prompter: &mut dyn Prompter,
+        req_id: &str,
+        files: &[(String, String)],
+        targets: &mut Vec<String>,
+    ) -> Result<Vec<String>, ServiceError> {
+        if self.language != Language::Rust {
+            return Ok(Vec::new());
+        }
+        let root_dir = self.layout.production.as_deref().unwrap_or("src");
+        let on_disk_before = |path: &str| files.iter().any(|(existing, _)| existing == path);
+        let new_modules: Vec<String> = targets
+            .iter()
+            .filter(|path| !on_disk_before(path))
+            .filter_map(|path| top_level_module(path, root_dir).map(str::to_string))
+            .collect();
+        if new_modules.is_empty() {
+            return Ok(Vec::new());
+        }
+        let candidates = [format!("{root_dir}/lib.rs"), format!("{root_dir}/main.rs")];
+        let mut crate_root = None;
+        for candidate in candidates {
+            if let Some(content) = self.store.read(&candidate)? {
+                crate_root = Some((candidate, content));
+                break;
+            }
+            if let Some((_, content)) = files.iter().find(|(path, _)| *path == candidate) {
+                crate_root = Some((candidate, content.clone()));
+                break;
+            }
+        }
+        let Some((crate_root, mut content)) = crate_root else {
+            return Ok(vec![format!(
+                "{} is not declared anywhere: {root_dir}/lib.rs and {root_dir}/main.rs are \
+                 both missing, so the module has no crate root to be declared in. Add the \
+                 `mod` line by hand.",
+                new_modules.join(", ")
+            )]);
+        };
+        let mut declared = Vec::new();
+        for module in new_modules {
+            if let Some(updated) = declare_rust_module(&content, &module) {
+                content = updated;
+                declared.push(module);
+            }
+        }
+        if declared.is_empty() {
+            return Ok(Vec::new());
+        }
+        self.store.write(
+            &crate_root,
+            &content,
+            &format!("declare module {} for {req_id}", declared.join(", ")),
+        )?;
+        if !targets.contains(&crate_root) {
+            targets.push(crate_root.clone());
+        }
+        prompter.tell(&format!(
+            "Declared {} in {crate_root}.",
+            declared
+                .iter()
+                .map(|module| format!("`pub mod {module};`"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+        Ok(Vec::new())
     }
 
     /// The implement preflight: survey every prerequisite of an
@@ -1084,6 +1242,28 @@ mod tests {
         )
     }
 
+    /// A prompter that keeps what it was told, for the tests that
+    /// check the narration.
+    #[derive(Default)]
+    struct RecordingPrompter {
+        told: Vec<String>,
+    }
+
+    impl Prompter for RecordingPrompter {
+        fn tell(&mut self, message: &str) {
+            self.told.push(message.to_string());
+        }
+        fn warn(&mut self, message: &str) {
+            self.told.push(message.to_string());
+        }
+        fn ask(&mut self, question: &str) -> Result<String, crate::ports::PromptError> {
+            panic!("no question is asked, but {question:?} was");
+        }
+        fn confirm(&mut self, question: &str) -> Result<bool, crate::ports::PromptError> {
+            panic!("nothing is confirmed, but {question:?} was");
+        }
+    }
+
     /// The same service with REQ-001 declaring where its production code
     /// lives - a port and the adapter beside it, which is the case one
     /// path cannot describe.
@@ -1166,6 +1346,127 @@ mod tests {
                 conventional: "src/adds_two_numbers.rs".into(),
             }
         );
+    }
+
+    /// A Rust file no `mod` line names is not in the crate. Three
+    /// measured attempts wrote `src/<module>.rs` correctly and never
+    /// touched `lib.rs`, so every bar read E0433. The harness adds the
+    /// line, and the crate root joins the attempt's targets so a revert
+    /// knows it was written.
+    #[test]
+    fn a_new_rust_module_is_declared_in_the_crate_root() {
+        let sources = vec![
+            SourceFile {
+                path: "src/lib.rs".into(),
+                content: "//! Kata.\n\npub mod a;\n".into(),
+            },
+            SourceFile {
+                path: "src/a.rs".into(),
+                content: "pub fn a() {}\n".into(),
+            },
+        ];
+        let reply = r#"[{"path": "src/adds_two_numbers.rs", "content": "pub fn add(a: u32, b: u32) -> u32 { a + b }\n"}]"#;
+        let service = ImplementService::new(
+            calculator_catalog(),
+            FakeSources(sources),
+            InMemoryWorkTree::default(),
+            InMemorySpecRepository(Ok(calculator_spec())),
+            Language::Rust,
+            flat_layout(Language::Rust),
+            Some(FakeLlm::replying(reply)),
+        );
+        let mut prompter = RecordingPrompter::default();
+        let report = service
+            .generate(
+                &mut prompter,
+                "REQ-001",
+                &[],
+                &[],
+                &[],
+                Some("src/adds_two_numbers.rs"),
+            )
+            .unwrap();
+        assert_eq!(
+            report.targets,
+            vec![
+                "src/adds_two_numbers.rs".to_string(),
+                "src/lib.rs".to_string()
+            ]
+        );
+        assert_eq!(
+            service.store.read("src/lib.rs").unwrap().unwrap(),
+            "//! Kata.\n\npub mod a;\npub mod adds_two_numbers;\n"
+        );
+        assert!(
+            service
+                .store
+                .summaries()
+                .iter()
+                .any(|summary| summary == "declare module adds_two_numbers for REQ-001"),
+            "{:?}",
+            service.store.summaries()
+        );
+        assert!(
+            prompter
+                .told
+                .iter()
+                .any(|line| line == "Declared `pub mod adds_two_numbers;` in src/lib.rs."),
+            "{:?}",
+            prompter.told
+        );
+    }
+
+    /// A reply that already declares the module itself needs nothing
+    /// added, and a module that already existed is not "new".
+    #[test]
+    fn a_module_the_reply_declared_itself_is_not_declared_twice() {
+        let sources = vec![SourceFile {
+            path: "src/lib.rs".into(),
+            content: "pub mod a;\n".into(),
+        }];
+        let reply = r#"[{"path": "src/lib.rs", "content": "pub mod a;\npub mod adds_two_numbers;\n"},
+            {"path": "src/adds_two_numbers.rs", "content": "pub fn add() {}\n"}]"#;
+        let service = ImplementService::new(
+            calculator_catalog(),
+            FakeSources(sources),
+            InMemoryWorkTree::default(),
+            InMemorySpecRepository(Ok(calculator_spec())),
+            Language::Rust,
+            flat_layout(Language::Rust),
+            Some(FakeLlm::replying(reply)),
+        );
+        let report = service
+            .generate(
+                &mut NullPrompter,
+                "REQ-001",
+                &[],
+                &[],
+                &[],
+                Some("src/adds_two_numbers.rs"),
+            )
+            .unwrap();
+        assert_eq!(
+            report.targets,
+            vec![
+                "src/lib.rs".to_string(),
+                "src/adds_two_numbers.rs".to_string()
+            ]
+        );
+        assert_eq!(
+            service.store.read("src/lib.rs").unwrap().unwrap(),
+            "pub mod a;\npub mod adds_two_numbers;\n"
+        );
+    }
+
+    /// Java has no crate root. A new file there is written and nothing
+    /// else is touched.
+    #[test]
+    fn a_new_java_file_declares_nothing_anywhere() {
+        let reply = r#"[{"path": "src/main/java/Kata.java", "content": "public class Kata {}"}]"#;
+        let report = service(vec![], Some(FakeLlm::replying(reply)))
+            .generate(&mut NullPrompter, "REQ-001", &[], &[], &[], None)
+            .unwrap();
+        assert_eq!(report.targets, vec!["src/main/java/Kata.java".to_string()]);
     }
 
     /// Evidence still decides. The fallback is only reached when
@@ -1512,12 +1813,16 @@ mod tests {
             "add is called with {string}".to_string(),
             "the result is {int}".to_string(),
         ];
-        let whole = accept_filled_definitions(Language::Java, FILLED_STEPS, &patterns).unwrap();
+        let whole = accept_filled_definitions(Language::Java, FILLED_STEPS, &patterns, None)
+            .unwrap()
+            .bodies;
         assert_eq!(whole.len(), 2, "{whole:?}");
         assert!(whole["the result is {int}"].contains("assertEquals(n, result);"));
 
         let partial = "    @When(\"add is called with {string}\")\n    public void b(String s) {\n        result = new Kata().add(s);\n    }\n\n    @Then(\"the result is {int}\")\n    public void c(int n) {\n        throw new PendingException();\n    }\n\n    @Then(\"something REQ-002 asks\")\n    public void d() { result = 0; }\n";
-        let taken = accept_filled_definitions(Language::Java, partial, &patterns).unwrap();
+        let taken = accept_filled_definitions(Language::Java, partial, &patterns, None)
+            .unwrap()
+            .bodies;
         assert_eq!(
             taken.keys().collect::<Vec<_>>(),
             vec!["add is called with {string}"],
@@ -1525,8 +1830,72 @@ mod tests {
         );
 
         let prose = "Let me look at the world type and any relevant status report fields.";
-        let refused = accept_filled_definitions(Language::Java, prose, &patterns).unwrap_err();
+        let refused =
+            accept_filled_definitions(Language::Java, prose, &patterns, None).unwrap_err();
         assert!(refused.contains("none of the 2 definition(s)"), "{refused}");
+    }
+
+    /// Observed on this harness: the bodies needed `world.proven_report`,
+    /// the world had no such field, the rule forbade adding one, and
+    /// three attempts read E0609. A reply may now lead with the world
+    /// type holding only the new fields; they go into the struct and
+    /// the definitions go where they were.
+    #[test]
+    fn a_fill_reply_may_add_the_world_fields_its_bodies_need() {
+        let steps = SourceFile {
+            path: "tests/steps/kata.rs".into(),
+            content: "use cucumber::{World, given, then, when};\n\n#[derive(Debug, Default, World)]\npub struct KataWorld {\n    result: Option<u32>,\n}\n\n#[given(expr = \"a calculator\")]\nfn a(w: &mut KataWorld) {\n    w.result = None;\n}\n\n#[when(expr = \"add is called with {string}\")]\nfn b(_w: &mut KataWorld, _s: String) {\n    todo!(\"implement step: add is called with {string}\");\n}\n\n#[then(expr = \"the result is {int}\")]\nfn c(_w: &mut KataWorld, _n: u32) {\n    todo!(\"implement step: the result is 3\");\n}\n".into(),
+        };
+        let lib = SourceFile {
+            path: "src/lib.rs".into(),
+            content: "pub struct Report { pub ok: bool }\npub fn add(a: u32, b: u32) -> Report { Report { ok: a + b == 3 } }\n".into(),
+        };
+        let reply = "#[derive(Debug, Default, World)]\npub struct KataWorld {\n    result: Option<u32>,\n    report: Option<Report>,\n}\n\n#[when(expr = \"add is called with {string}\")]\nfn b(w: &mut KataWorld, _s: String) {\n    w.report = Some(kata::add(1, 2));\n}\n\n#[then(expr = \"the result is {int}\")]\nfn c(w: &mut KataWorld, _n: u32) {\n    assert!(w.report.as_ref().unwrap().ok);\n}\n";
+        let service = ImplementService::new(
+            calculator_catalog(),
+            FakeSources(vec![steps, lib]),
+            InMemoryWorkTree::default(),
+            InMemorySpecRepository(Ok(calculator_spec())),
+            Language::Rust,
+            flat_layout(Language::Rust),
+            Some(FakeLlm::replying(reply)),
+        );
+        let report = service
+            .fill_pending_steps(&mut NullPrompter, "REQ-001", &[])
+            .unwrap()
+            .expect("two pending steps to fill");
+        assert_eq!(report.filled, 2);
+        assert_eq!(report.fields_added, 1);
+        let written = service
+            .store
+            .read("tests/steps/kata.rs")
+            .unwrap()
+            .expect("the step file was written");
+        assert!(
+            written.contains(
+                "pub struct KataWorld {\n    result: Option<u32>,\n    report: Option<Report>,\n}\n"
+            ),
+            "{written}"
+        );
+        assert!(
+            written.contains("w.report = Some(kata::add(1, 2));"),
+            "{written}"
+        );
+        assert!(written.contains("w.result = None;"), "{written}");
+        assert!(!written.contains("todo!"), "{written}");
+        assert_eq!(written.matches("struct KataWorld").count(), 1, "{written}");
+        assert!(
+            service
+                .store
+                .summaries()
+                .iter()
+                .any(|s| s
+                    == "fill 2 pending step definition(s) and add 1 world field(s) for REQ-001"),
+            "{:?}",
+            service.store.summaries()
+        );
+        let prompt = service.llm.as_ref().unwrap().chat().prompts.borrow()[0].clone();
+        assert!(prompt.contains("ONLY the new fields"), "{prompt}");
     }
 
     #[test]

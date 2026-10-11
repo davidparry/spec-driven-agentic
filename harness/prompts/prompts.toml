@@ -223,12 +223,17 @@ Rules:
   asserts the outcome the step describes, through the world/fixture type in the file head.
   A Given prepares state on the world; a When calls the production code and stores what
   came back; a Then asserts on what was stored.
-- Use only what the file head and the production code declare. Do NOT invent helpers,
-  fields, or production functions that are not shown.
-- Do NOT emit imports, a package/module declaration, a class, a struct, or any member
-  that is not one of the {{ count }} definition(s).
+- Use only the helpers and production functions the file head and the production code
+  declare. Do NOT invent production functions that are not shown.
+- If a body needs state the world/fixture type does not have, add it: reply first with
+  the world type by its exact name containing ONLY the new fields (types that implement
+  Default; wrap values in Option), then the definitions. Never repeat fields the head
+  already shows, and put no method or other member in that block.
+- Do NOT emit imports, a package/module declaration, or any other type or member that
+  is not one of the {{ count }} definition(s) or the new-fields block above.
 - Do NOT leave any placeholder (todo!, unimplemented!, PendingException, 'pending') behind.
-Respond with only the definitions, no surrounding file, no explanation, no code fences.
+Respond with only the definitions (and the new-fields block, if any), no surrounding
+file, no explanation, no code fences.
 '''
 user = '''
 The requirement:

@@ -341,6 +341,57 @@ Feature: Deliver mode
     And the working tree file "src/test/java/GeneratedSteps.java" contains "result = kata.add("
     And the working tree file "src/test/java/GeneratedSteps.java" does not contain "PendingException();"
 
+  # A step body that needs state the world does not have may ask for
+  # it: the reply leads with the world type holding only the new
+  # fields, and they go into the file beside the bodies. The rule used
+  # to forbid this, and three measured attempts read E0609 for a field
+  # the model was not allowed to add.
+  Scenario: A step-filling reply may add the world fields its bodies need
+    Given a Java project marker
+    And a working spec with the pending requirements "REQ-001"
+    And a model is resolved
+    And the model will reply:
+      """
+      [{"path": "src/main/java/Kata.java", "content": "public class Kata { int add(String input) { return 0; } }"}]
+      """
+    And the model will also fill in the generated unit test
+    And the model will fill the step bodies with:
+      """
+      public class GeneratedSteps {
+          private Kata kata;
+          private int result;
+      }
+
+          @Given("a")
+          public void givenA() {
+              kata = new Kata();
+          }
+
+          @When("b")
+          public void whenB() {
+              result = kata.add("1,2");
+          }
+
+          @Then("{int}")
+          public void thenTheResultIs(int expected) {
+              org.junit.jupiter.api.Assertions.assertEquals(expected, result);
+          }
+      """
+    And the delivery skips the refactor
+    And the delivery budget is 3 attempts
+    And the test runs will report:
+      """
+      1 tests and 1 failures detailed "Req001Test: TODO: assert"
+      1 tests and 0 failures
+      """
+    When the delivery runs for "REQ-001"
+    Then the delivery completes
+    And the developer was told a finding containing "Filled 3 pending step bodies and added 2 world field(s) in src/test/java/GeneratedSteps.java (llm)."
+    And the working tree file "src/test/java/GeneratedSteps.java" contains "private Kata kata;"
+    And the working tree file "src/test/java/GeneratedSteps.java" contains "private int result;"
+    And the working tree file "src/test/java/GeneratedSteps.java" contains "result = kata.add("
+    And the working tree file "src/test/java/GeneratedSteps.java" does not contain "PendingException();"
+
   # A reply that leaves one definition pending keeps that stub and
   # writes the definitions that came back finished. The attempt is not
   # lost over the one that stayed a placeholder.
@@ -576,6 +627,46 @@ Feature: Deliver mode
     And the developer was told a finding containing "Attempt 1 left the build not compiling"
     And the developer was told a finding containing "src/main/java/Kata.java"
     And the working tree file "src/main/java/Kata.java" contains "return 0;"
+
+  # The tree is not the attempt's alone. A developer with the project
+  # open edits it while the model thinks, and a revert that put back
+  # every file that differed from the snapshot put back their edit too.
+  # Only the files the attempt wrote go back; the rest are named and
+  # left as they are.
+  Scenario: A revert puts back only what the attempt wrote
+    Given a Java project marker
+    And a project source file "src/main/java/Kata.java" containing:
+      """
+      public class Kata { int add(String input) { return 0; } }
+      """
+    And a project source file "src/main/java/Helper.java" containing:
+      """
+      public class Helper { }
+      """
+    And "src/main/java/Helper.java" is edited outside the run to contain:
+      """
+      public class Helper { int handEdit() { return 7; } }
+      """
+    And a working spec with the pending requirements "REQ-001"
+    And a model is resolved
+    And the model will reply:
+      """
+      [{"path": "src/main/java/Kata.java", "content": "public class Kata { int add( }"}]
+      """
+    And the model will also fill in the generated unit test
+    And the delivery skips the refactor
+    And the delivery budget is 1 attempt
+    And the test runs will report:
+      """
+      1 tests and 1 failures detailed "Req001Test: TODO: assert"
+      the build failed with "Kata.java:1: ')' expected"
+      """
+    When the delivery runs for "REQ-001"
+    Then the delivery is not completed
+    And the developer was told a finding containing "Attempt 1 left the build not compiling, so src/main/java/Kata.java"
+    And the developer was told a finding containing "src/main/java/Helper.java changed during the attempt but not by it, so it was left as it is."
+    And the working tree file "src/main/java/Kata.java" contains "return 0;"
+    And the working tree file "src/main/java/Helper.java" contains "handEdit"
 
   # The attempt after a reverted one is briefed from the last recorded
   # run. Left as the broken build, that is a compiler error for code no
