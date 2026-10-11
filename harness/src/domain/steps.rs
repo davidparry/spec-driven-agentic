@@ -241,7 +241,12 @@ fn translate_cucumber(expression: &str) -> String {
                 "int" => r"-?\d+",
                 "float" => r"-?\d+(?:\.\d+)?",
                 "word" => r"\S+",
-                "string" => r#""[^"]*"|'[^']*'"#,
+                // Grouped, or the `|` splits the whole expression in
+                // two and the `'...'$` half matches any step that ends
+                // in a single-quoted value - which is how `steps
+                // missing` once reported a feature fully defined while
+                // its Then lines had no definition at all.
+                "string" => r#"(?:"[^"]*"|'[^']*')"#,
                 _ => ".*",
             });
             continue;
@@ -618,6 +623,45 @@ mod tests {
         let feature = feature_with_steps(vec!["Given a calculator", "Then the result is 3"]);
         let patterns = vec!["a calculator".into(), "the result is {int}".into()];
         assert_eq!(find_missing(&[feature], &patterns), vec![]);
+    }
+
+    /// `{string}` accepts either quote style, and the alternation has
+    /// to stay inside the placeholder. Ungrouped, every `... {string}`
+    /// pattern matched any step ending in a single-quoted value, and
+    /// the prefix alone matched a double-quoted value with text after
+    /// it, so a feature with no definition for its Then lines was
+    /// reported fully defined.
+    #[test]
+    fn a_string_placeholder_does_not_match_beyond_its_own_pattern() {
+        let pattern = "the refusal hint is {string}";
+        assert!(pattern_matches(
+            pattern,
+            r#"the refusal hint is "install it""#
+        ));
+        assert!(pattern_matches(pattern, "the refusal hint is 'install it'"));
+        assert!(!pattern_matches(
+            pattern,
+            "the output includes 'Display error message -> unproven'"
+        ));
+        assert!(!pattern_matches(
+            pattern,
+            r#"the refusal hint is "install it" and then some"#
+        ));
+
+        let feature = feature_with_steps(vec![
+            "Given a requirement 'Empty cart checkout' exists in the catalog",
+            "Then the output includes 'Display error message -> unproven'",
+        ]);
+        let patterns = vec![
+            "a requirement 'Empty cart checkout' exists in the catalog".into(),
+            "the refusal hint is {string}".into(),
+        ];
+        let missing = find_missing(&[feature], &patterns);
+        assert_eq!(missing.len(), 1, "{missing:?}");
+        assert_eq!(
+            missing[0].text,
+            "the output includes 'Display error message -> unproven'"
+        );
     }
 
     #[test]
