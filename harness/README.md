@@ -267,7 +267,7 @@ a decision model answers. Ollama serves them at `/v1/systemone` from
 version 0.35: you send a bounded question and a brief, and get back a
 typed value with a probability rather than prose.
 
-`spec judge` needs 0.7.17 or newer. No earlier release carries a
+`spec judge` needs 0.7.18 or newer. No earlier release carries a
 decision plane, so nothing in this section answers on one.
 
 ```bash
