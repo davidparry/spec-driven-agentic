@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::domain::language::Language;
 use crate::domain::layout::{LayoutInput, ResolvedLayout, resolve_layout};
 use crate::domain::prompts::render_snippet;
+use crate::domain::session::{SessionEnvelope, SessionId};
 
 /// Schema version written into `.spec/memory.json`.
 pub const MEMORY_VERSION: u32 = 1;
@@ -122,6 +123,51 @@ impl ProjectMemory {
     pub fn brief(&self) -> String {
         memory_brief(self)
     }
+}
+
+/// `.spec/memory.json` as written: one [`ProjectMemory`] per session
+/// beside the `currentSession` pointer.
+pub type MemoryFile = SessionEnvelope<ProjectMemory>;
+
+/// Read the memory file in either shape. A file written before sessions
+/// existed - one memory at the top level - is adopted as one session
+/// named by `fresh`, which is current.
+pub fn parse_memory_file(
+    text: &str,
+    now: &str,
+    fresh: impl FnOnce() -> SessionId,
+) -> Result<MemoryFile, serde_json::Error> {
+    let value: serde_json::Value = serde_json::from_str(text)?;
+    if value.get("sessions").is_some() {
+        return serde_json::from_value(value);
+    }
+    let legacy: ProjectMemory = serde_json::from_value(value)?;
+    Ok(MemoryFile::adopt_legacy(legacy, now, fresh()))
+}
+
+/// A new session starts from the memory of the one before it: the
+/// language, libraries, and the module root the developer settled once
+/// are the project's, not the session's, so they are not asked again.
+/// With nothing recorded there is nothing to carry, and no slot is
+/// written until a scan records something.
+pub fn seed_memory(previous: Option<&ProjectMemory>) -> Option<ProjectMemory> {
+    previous.filter(|memory| !memory.is_empty()).cloned()
+}
+
+/// Every session with its dates and recorded language, for the startup
+/// list. An empty memory names no language.
+pub fn listed_memory(file: &MemoryFile) -> Vec<(SessionId, String, String, Option<String>)> {
+    file.sessions
+        .iter()
+        .map(|(id, slot)| {
+            (
+                id.clone(),
+                slot.started_at.clone(),
+                slot.last_active_at.clone(),
+                (!slot.body.language.is_empty()).then(|| slot.body.language.clone()),
+            )
+        })
+        .collect()
 }
 
 /// Manifest file contents the scanner already read.
@@ -876,6 +922,62 @@ cucumber = { version = "0.23", features = ["libtest"] }
         assert_eq!(
             memory.structure.spec.as_deref(),
             Some("nested/deep/requirements.json")
+        );
+    }
+
+    fn sid(n: u8) -> SessionId {
+        SessionId::parse(&format!("00000000-0000-4000-8000-{n:012x}")).unwrap()
+    }
+
+    #[test]
+    fn a_pre_session_memory_file_is_adopted_and_the_new_shape_reads_back() {
+        let legacy = java_scan(Manifests::default(), &["pom.xml"]);
+        let text = serde_json::to_string(&legacy).unwrap();
+        let file = parse_memory_file(&text, "t0", || sid(1)).unwrap();
+        assert_eq!(file.current_session, Some(sid(1)));
+        assert_eq!(file.current_body(), Some(&legacy));
+        let written = serde_json::to_string_pretty(&file).unwrap();
+        assert!(written.contains("\"language\": \"Java\""), "{written}");
+        assert!(written.contains("\"currentSession\""), "{written}");
+        let again = parse_memory_file(&written, "later", || panic!("no adoption")).unwrap();
+        assert_eq!(again, file);
+        assert!(parse_memory_file("[]", "t0", || sid(1)).is_err());
+    }
+
+    #[test]
+    fn a_new_session_is_seeded_from_the_previous_memory() {
+        let previous = ProjectMemory {
+            language: "Rust".into(),
+            structure: ProjectStructure {
+                module_root: Some("kata".into()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert_eq!(seed_memory(Some(&previous)), Some(previous));
+        assert_eq!(seed_memory(None), None);
+        assert_eq!(seed_memory(Some(&ProjectMemory::default())), None);
+    }
+
+    #[test]
+    fn listed_memory_names_the_language_only_when_one_was_recorded() {
+        let mut file = MemoryFile::default();
+        file.put(
+            &sid(1),
+            ProjectMemory {
+                language: "Rust".into(),
+                ..Default::default()
+            },
+            "t1",
+        );
+        file.put(&sid(2), ProjectMemory::default(), "t2");
+        let listed = listed_memory(&file);
+        assert_eq!(
+            listed,
+            vec![
+                (sid(1), "t1".into(), "t1".into(), Some("Rust".into())),
+                (sid(2), "t2".into(), "t2".into(), None),
+            ]
         );
     }
 }

@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-7d12d21a.js";
+            window.path_to_searchindex_js = "../searchindex-cd45a071.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-8557ae39.js"></script>
@@ -226,18 +226,30 @@ not in the catalog is a warning, not a hard failure.</p>
 <h2 id="specconfigtoml-per-command-mapping"><a class="header" href="#specconfigtoml-per-command-mapping"><code>.spec/config.toml</code> per-command mapping</a></h2>
 <p>Built-in defaults live in code and are also written into
 <code>[tools.profiles]</code> by <code>spec init</code> so you can see what each command
-offers the model. If that table names a caller with a list, that list
-<strong>replaces</strong> the default for that command. Omitted callers keep the
-code defaults. <code>[tools.enabled]</code> adds names;
-<code>[tools.disabled]</code> removes them. <code>spec tools enable</code> / <code>disable</code> write
-those last two tables.</p>
+offers the model. A command reads its list from the file first and
+then its defaults: the two are <strong>merged</strong>, so a tool named in both is
+offered once, a tool named only in the file is added, and a default
+left out of the file is still offered. The written table is a copy of
+the defaults to read and extend, not a replacement for them - a list
+that named one tool used to take the other four away. Omitted callers
+keep the code defaults. <code>[tools.enabled]</code> adds names;
+<code>[tools.disabled]</code> removes them, and is the one way to take a default
+away for every run. <code>spec tools enable</code> / <code>disable</code> write those last
+two tables. <code>--tools a,b</code> on a command sets the whole list for that
+one run, defaults and config set aside.</p>
 <p>After you add a server to <code>mcp.json</code>, run <code>spec tools refresh</code> and put
-the tool on the command that should use it:</p>
+the tool on the command that should use it, either in its profile or
+under <code>[tools.enabled]</code>; the two read the same:</p>
 <pre><code class="language-toml">[tools.profiles]
-implement = ["get_requirement", "feature_read", "playwright:browser_navigate"]
+implement = ["get_requirement", "feature_read", "step_definitions_find", "get_tdd_state", "run_tests", "command_run", "playwright:browser_navigate"]
 
 [tools.enabled]
 status = ["playwright:browser_navigate"]
+</code></pre>
+<p><code>spec tools profiles</code> prints each command’s resolved set and marks a
+tool the config added with <code>(config)</code>, so the shipped set stays
+recognisable:</p>
+<pre><code class="language-text">status	6	project_root, list_requirements, get_requirement, get_tdd_state, validate_spec, playwright__browser_navigate (config)
 </code></pre>
 <h3 id="name-collisions"><a class="header" href="#name-collisions">Name collisions</a></h3>
 <p>Built-in tools keep their catalog names (<code>validate_spec</code>). Tools from

@@ -14,8 +14,10 @@ use spec_harness::adapters::auto_prompt::AutoPrompter;
 use spec_harness::adapters::config::{
     TomlDecisionStore, TomlToolStore, config_path, inspect_config,
 };
+use spec_harness::adapters::fs_memory::FsMemoryStore;
 use spec_harness::adapters::fs_project::FsProjectFiles;
 use spec_harness::adapters::fs_scaffold::FsScaffoldWriter;
+use spec_harness::adapters::fs_session::FsSessionStore;
 use spec_harness::adapters::fs_sources::FsSourceFiles;
 use spec_harness::adapters::fs_spec::FsSpecRepository;
 use spec_harness::adapters::fs_state::FsStateStore;
@@ -48,6 +50,7 @@ use spec_harness::application::model_service::{
     DecisionReadiness, ModelResolution, ModelService, ModelSource, SessionDecision, SessionModel,
 };
 use spec_harness::application::scenario_service::ScenarioService;
+use spec_harness::application::session_service::SessionService;
 use spec_harness::application::spec_mutation_service::{
     DraftReport, IncludeReport, ListedRequirement, SpecMutationService,
 };
@@ -69,11 +72,14 @@ use spec_harness::domain::decision::{
     DEFAULT_MIN_CONFIDENCE, Judgment, Mode, Policies, Policy, Verdict,
 };
 use spec_harness::domain::feature::{FeatureDoc, FeatureSummary};
+use spec_harness::domain::human::Human;
 use spec_harness::domain::language::{Language, detect_languages};
 use spec_harness::domain::mcp_registry::{RegistryLoad, ServerSpec, parse_registry};
+use spec_harness::domain::memory::ProjectMemory;
 use spec_harness::domain::model::{Requirement, Spec, TestRunSummary};
 use spec_harness::domain::prompts::DecisionPrompt;
 use spec_harness::domain::refiner::RequirementRefiner;
+use spec_harness::domain::session::{SessionId, SessionStart};
 use spec_harness::domain::step_fill;
 use spec_harness::domain::tdd::{
     ImplementAttempt, StateEntry, TddPhase, TddSnapshot, TddStateMachine,
@@ -87,10 +93,11 @@ use spec_harness::greenfield::{Greenfield, GreenfieldReport};
 use spec_harness::mcp::{WorkflowServer, builtin_tool_definitions};
 use spec_harness::ports::{
     DecisionError, FeatureCatalog, FeatureError, FeatureFiles, FileChange, GitState,
-    InteractiveShell, LlmConversation, LlmError, McpRegistrySource, ModelCatalog, ModelInfo,
-    ModelStore, ProjectFiles, PromptError, Prompter, RunnerError, RuntimeProbe, ShellError,
-    ShellLine, SpecError, SpecRepository, StateStore, TestFilter, TestRunner, ToolBroker,
-    ToolDiscovery, ToolError, Vcs, VcsError, WorkTree, Working, WriteError,
+    InteractiveShell, LlmConversation, LlmError, McpRegistrySource, MemoryStore, ModelCatalog,
+    ModelInfo, ModelStore, ProjectFiles, PromptError, Prompter, RunnerError, RuntimeProbe,
+    SessionError, SessionStore, ShellError, ShellLine, SpecError, SpecRepository, StateStore,
+    TestFilter, TestRunner, ToolBroker, ToolDiscovery, ToolError, Vcs, VcsError, WorkTree, Working,
+    WriteError,
 };
 use spec_harness::repl::{Ending, ShellSummary, offer_greenfield, run_shell};
 use spec_harness::wiring::{DynLlm, RunnerFactory, project_memory_service};
@@ -247,6 +254,11 @@ struct SpecWorld {
     step_file: Option<String>,
     step_fill_reply: Option<String>,
     step_fill_reading: Option<StepFillReading>,
+    /// The session a scenario recorded ahead of the start under test,
+    /// the id it asks to resume, and what the start answered.
+    recorded_session: Option<SessionId>,
+    requested_session: Option<String>,
+    session_start: Option<Result<SessionStart, SessionError>>,
 }
 
 // ---- fakes implementing the ports ----------------------------------------
@@ -5797,4 +5809,243 @@ fn the_replys_bodies_call_no_undeclared_world_method_named(world: &mut SpecWorld
 fn the_replys_bodies_use_the_undeclared_world_field(world: &mut SpecWorld, name: String) {
     let used = &world.step_fill_reading().undeclared_fields;
     assert!(used.contains(&name), "{used:?}");
+}
+
+// ---- session steps ---------------------------------------------------------
+
+impl SpecWorld {
+    fn session_store(&mut self) -> FsSessionStore {
+        FsSessionStore::new(self.project_root())
+    }
+
+    /// A session opened ahead of the start under test, remembered so a
+    /// later step can ask for it by id.
+    fn record_session(&mut self) -> SessionId {
+        let opened = self.session_store().open(None).expect("a session opens");
+        self.recorded_session = Some(opened.id.clone());
+        opened.id
+    }
+
+    fn session_started(&self) -> &SessionStart {
+        match self.session_start.as_ref().expect("the session started") {
+            Ok(start) => start,
+            Err(error) => panic!("the session start was refused: {error}"),
+        }
+    }
+
+    fn session_refusal(&self) -> &SessionError {
+        match self.session_start.as_ref().expect("the session started") {
+            Ok(start) => panic!("the session start was not refused: {}", start.human()),
+            Err(error) => error,
+        }
+    }
+
+    fn start_session(&mut self, requested: Option<String>) {
+        let service = SessionService::new(self.session_store());
+        self.session_start = Some(service.start(requested.as_deref()));
+    }
+}
+
+#[given("a project with no sessions on record")]
+fn a_project_with_no_sessions(world: &mut SpecWorld) {
+    let root = world.project_root();
+    assert!(!spec_file(&root, "state.json").exists());
+    assert!(!spec_file(&root, "memory.json").exists());
+}
+
+#[given(regex = r"^a session recorded on (RED|GREEN)$")]
+#[given(regex = r"^a current session on (RED|GREEN)$")]
+fn a_session_recorded_on(world: &mut SpecWorld, phase: String) {
+    world.record_session();
+    let phase = match phase.as_str() {
+        "RED" => TddPhase::Red,
+        _ => TddPhase::Green,
+    };
+    FsStateStore::new(world.project_root())
+        .save(&TddSnapshot::at(phase))
+        .expect("the state saves");
+}
+
+#[given(regex = r"^(\d+) sessions on record$")]
+fn n_sessions_on_record(world: &mut SpecWorld, count: usize) {
+    for _ in 0..count {
+        world.record_session();
+    }
+}
+
+#[given(regex = r"^a state file written before sessions existed holding (\d+) entries$")]
+fn a_legacy_state_file(world: &mut SpecWorld, count: usize) {
+    let mut machine = TddStateMachine::new();
+    for _ in 0..count {
+        machine.record_test_run(TestRunSummary {
+            tests: 3,
+            failures: 1,
+            ..Default::default()
+        });
+    }
+    let path = spec_file(&world.project_root(), "state.json");
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(
+        &path,
+        serde_json::to_string_pretty(&machine.snapshot()).unwrap(),
+    )
+    .unwrap();
+}
+
+#[given("a session id that is not on record")]
+fn a_session_id_not_on_record(world: &mut SpecWorld) {
+    world.requested_session = Some("0f0e0d0c-0b0a-4908-8706-050403020100".into());
+}
+
+#[given(regex = r#"^a malformed session id "([^"]+)"$"#)]
+fn a_malformed_session_id(world: &mut SpecWorld, id: String) {
+    world.requested_session = Some(id);
+}
+
+#[given(regex = r#"^a current session remembering module root "([^"]+)"$"#)]
+fn a_current_session_remembering_module_root(world: &mut SpecWorld, module_root: String) {
+    world.record_session();
+    let memory = ProjectMemory {
+        version: 1,
+        language: "Java".into(),
+        bdd_framework: "Cucumber-JVM".into(),
+        structure: spec_harness::domain::memory::ProjectStructure {
+            module_root: Some(module_root),
+            step_definitions: Some("kata/src/test/java/Steps.java".into()),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    FsMemoryStore::new(world.project_root())
+        .save(&memory)
+        .expect("the memory saves");
+}
+
+#[when("the shell session starts")]
+#[when("a new shell session starts")]
+fn the_shell_session_starts(world: &mut SpecWorld) {
+    world.start_session(None);
+}
+
+#[when("the shell session starts with that session id")]
+fn the_shell_session_starts_with_that_id(world: &mut SpecWorld) {
+    let requested = world
+        .requested_session
+        .clone()
+        .or_else(|| world.recorded_session.as_ref().map(|id| id.to_string()))
+        .expect("a session id to ask for");
+    world.start_session(Some(requested));
+}
+
+#[when("the TDD state is read in a fresh invocation without a session id")]
+fn tdd_state_read_without_a_session_id(world: &mut SpecWorld) {
+    world.state_report = Some(world.tdd_service().state().unwrap());
+}
+
+#[then(regex = r#"^the session shown is "(new|resumed)"$"#)]
+fn the_session_shown_is(world: &mut SpecWorld, how: String) {
+    let opened = &world.session_started().opened;
+    assert_eq!(opened.resumed, how == "resumed", "opened: {opened:?}");
+    let line = world.session_started().human();
+    assert!(line.contains(&format!("({how}")), "{line}");
+}
+
+#[then(regex = r"^the session id is a GUID of (\d+) characters$")]
+fn the_session_id_is_a_guid(world: &mut SpecWorld, length: usize) {
+    let id = world.session_started().opened.id.to_string();
+    assert_eq!(id.len(), length, "{id}");
+    assert!(SessionId::parse(&id).is_ok(), "{id}");
+}
+
+#[then("the session line names the session id")]
+fn the_session_line_names_the_id(world: &mut SpecWorld) {
+    let start = world.session_started();
+    let first = start.human().lines().next().unwrap_or_default().to_string();
+    assert!(first.contains(start.opened.id.as_str()), "{first}");
+}
+
+#[then(regex = r#"^the session shown has phase "([^"]+)"$"#)]
+fn the_session_shown_has_phase(world: &mut SpecWorld, phase: String) {
+    let start = world.session_started();
+    assert_eq!(start.opened.phase.to_string(), phase);
+    assert!(start.human().contains(&phase), "{}", start.human());
+}
+
+#[then(regex = r"^the session list names (\d+) sessions?$")]
+fn the_session_list_names(world: &mut SpecWorld, count: usize) {
+    let sessions = &world.session_started().sessions;
+    assert_eq!(sessions.len(), count, "{sessions:?}");
+}
+
+#[then(regex = r#"^the current session is marked "([^"]+)" in the list$"#)]
+fn the_current_session_is_marked(world: &mut SpecWorld, mark: String) {
+    let start = world.session_started();
+    let current = start.opened.id.as_str();
+    let marked: Vec<&str> = start
+        .human()
+        .lines()
+        .filter(|line| line.contains(current) && line.trim_start().starts_with(&mark))
+        .map(|_| current)
+        .collect();
+    assert_eq!(marked.len(), 1, "{}", start.human());
+    assert!(
+        start.sessions.iter().filter(|s| s.current).count() == 1,
+        "{:?}",
+        start.sessions
+    );
+}
+
+#[then("the newest session is listed first")]
+fn the_newest_session_is_listed_first(world: &mut SpecWorld) {
+    let sessions = &world.session_started().sessions;
+    assert!(sessions[0].current, "{sessions:?}");
+    for pair in sessions.windows(2) {
+        assert!(
+            pair[0].last_active_at >= pair[1].last_active_at,
+            "{sessions:?}"
+        );
+    }
+}
+
+#[then(regex = r"^(\d+) questions are asked at session start$")]
+fn questions_asked_at_session_start(world: &mut SpecWorld, count: usize) {
+    let text = world.session_started().human();
+    assert_eq!(text.matches("[y/N]").count(), count, "{text}");
+    assert_eq!(text.matches('?').count(), count, "{text}");
+}
+
+#[then(regex = r#"^the session start names the resume command "([^"]+)"$"#)]
+fn the_session_start_names_the_resume_command(world: &mut SpecWorld, command: String) {
+    let text = world.session_started().human();
+    assert!(text.contains(&command), "{text}");
+}
+
+#[then(regex = r"^the adopted session keeps (\d+) entries$")]
+fn the_adopted_session_keeps_entries(world: &mut SpecWorld, count: usize) {
+    let snapshot = FsStateStore::new(world.project_root()).load().unwrap();
+    assert_eq!(snapshot.entries.len(), count, "{:?}", snapshot.entries);
+}
+
+#[then(regex = r#"^the start is refused naming "([^"]+)"$"#)]
+fn the_start_is_refused_naming(world: &mut SpecWorld, fragment: String) {
+    let error = world.session_refusal();
+    assert!(error.0.contains(&fragment), "{}", error.0);
+}
+
+#[then(regex = r#"^the new session's memory names module root "([^"]+)"$"#)]
+fn the_new_sessions_memory_names_module_root(world: &mut SpecWorld, module_root: String) {
+    let memory = FsMemoryStore::new(world.project_root())
+        .load()
+        .unwrap()
+        .expect("the new session has memory");
+    assert_eq!(
+        memory.structure.module_root.as_deref(),
+        Some(module_root.as_str())
+    );
+}
+
+#[then(regex = r"^the new session's state log holds (\d+) entries$")]
+fn the_new_sessions_state_log_holds(world: &mut SpecWorld, count: usize) {
+    let snapshot = FsStateStore::new(world.project_root()).load().unwrap();
+    assert_eq!(snapshot.entries.len(), count, "{:?}", snapshot.entries);
 }

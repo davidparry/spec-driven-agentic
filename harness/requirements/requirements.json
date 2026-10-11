@@ -227,6 +227,23 @@
         "Given a git repository on \"main\" and no one left to answer, when the branch gate runs, then 0 branches are created"
       ],
       "featureFile": "tests/features/branch_gate.feature"
+    },
+    {
+      "id": "HARNESS-019",
+      "title": "Every run belongs to a GUID session that can be resumed by id",
+      "status": "implemented",
+      "story": "As a developer returning to a project, I want each run of the harness to belong to a GUID-identified session that I can resume by id so that the TDD state and project memory I pick up are the ones I left.",
+      "acceptanceCriteria": [
+        "Given a project with no sessions on record, when the shell session starts, then the session shown is \"new\" and its id is a GUID of 36 characters",
+        "Given a session recorded on GREEN, when the shell session starts with that session id, then the session shown is \"resumed\" with phase \"GREEN\"",
+        "Given 2 sessions on record, when the shell session starts, then the session list names 3 sessions with the current one marked \"*\" and 0 questions are asked",
+        "Given a state file written before sessions existed holding 2 entries, when the shell session starts, then the adopted session keeps 2 entries",
+        "Given a session id that is not on record, when the shell session starts with that session id, then the start is refused naming \".spec/state.json\"",
+        "Given a malformed session id \"not-a-guid\", when the shell session starts with that session id, then the start is refused naming \"not a GUID\"",
+        "Given a current session on RED, when the TDD state is read in a fresh invocation without a session id, then the persisted phase is \"RED\"",
+        "Given a current session remembering module root \"kata\", when a new shell session starts, then the new session's memory names module root \"kata\""
+      ],
+      "featureFile": "tests/features/sessions.feature"
     }
   ]
 }

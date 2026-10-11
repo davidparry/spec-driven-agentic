@@ -39,15 +39,17 @@ The harness writes your project's real files — feature files, step definitions
 ```text
 .spec/
   config.toml    tracked — LLM, decision model, timeouts, tool profiles
-  state.json     TDD phase log
-  memory.json    discovered language, libraries, and layout
+  state.json     TDD phase log, one per GUID session
+  memory.json    discovered language, libraries, and layout, per session
   history        interactive-shell command history
   cache/         cached LLM responses and discovered tool catalogs
   log/           daily diagnostic logs (spec.log.YYYY-MM-DD)
   .lock          advisory lock serializing concurrent writes
 ```
 
-Only `config.toml` is meant to be committed. The other children are gitignored. Deleting `cache/` or `log/` is always safe. Deleting `state.json` resets the phase to START.
+Only `config.toml` is meant to be committed. The other children are gitignored. Deleting `cache/` or `log/` is always safe. Deleting `state.json` resets the phase to START and forgets every session.
+
+State and memory are kept per **session**. Bare `spec` starts a new session (a GUID), prints its id and a read-only list of every session the project has on record, and every command in that shell acts on it. `spec --session <guid>` resumes one you left, with its phase and memory; one-shot commands without the flag continue the current session.
 
 ## Install `spec`
 

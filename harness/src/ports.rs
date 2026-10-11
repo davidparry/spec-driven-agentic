@@ -592,6 +592,28 @@ pub trait StateStore {
 pub struct StateError(pub String);
 string_error!(StateError);
 
+/// The sessions both state and memory are kept by
+/// (`.spec/state.json` and `.spec/memory.json` share one
+/// `currentSession` pointer). Opening is the one write; the rest reads.
+pub trait SessionStore {
+    /// Open `requested` - which must be on record - or a new session
+    /// when nothing was requested, and make it current in both files.
+    fn open(
+        &self,
+        requested: Option<&crate::domain::session::SessionId>,
+    ) -> Result<crate::domain::session::SessionOpened, SessionError>;
+
+    /// Every session either file knows, newest activity first.
+    fn list(&self) -> Result<Vec<crate::domain::session::SessionInfo>, SessionError>;
+
+    /// The session commands act on, when one has been opened.
+    fn current(&self) -> Result<Option<crate::domain::session::SessionId>, SessionError>;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionError(pub String);
+string_error!(SessionError);
+
 /// Narrows a test run to one feature file and/or one scenario name.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TestFilter {

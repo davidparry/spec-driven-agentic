@@ -9,15 +9,17 @@
 //!   refactor on a red bar)
 //!
 //! Persistence is a chronological log of timestamped entries in
-//! `.spec/state.json`. The file keeps the full history; an LLM brief
-//! only receives the three latest entries plus the interpretation
-//! instructions.
+//! `.spec/state.json`, one log per session (see
+//! [`crate::domain::session`]). The file keeps the full history; an
+//! LLM brief only receives the three latest entries plus the
+//! interpretation instructions.
 
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
 use crate::domain::model::TestRunSummary;
+use crate::domain::session::{SessionEnvelope, SessionId};
 
 /// How many dated state entries an LLM may be briefed with.
 pub const LLM_STATE_ENTRIES: usize = 3;
@@ -26,6 +28,8 @@ pub const LLM_STATE_ENTRIES: usize = 3;
 /// opening it knows the schema without a side document.
 pub const STATE_INSTRUCTIONS: &str = "\
 This file is the TDD phase log. `instructions` is this guide, not workflow state. \
+`sessions` holds one log per GUID session and `currentSession` names the one commands act on; \
+bare `spec` starts a new session or resumes the one `--session` names. \
 `entries` is chronological, oldest first; each entry is the machine at `timestamp` (UTC RFC 3339). \
 `phase` is START, RED, GREEN, or REFACTOR. Never refactor on RED; never mark a requirement implemented off GREEN. \
 `lastRun` is test counts at that moment; failure details live on the test-run reply. \
@@ -152,6 +156,121 @@ impl TddSnapshot {
     pub fn recent_entries(&self) -> &[StateEntry] {
         let start = self.entries.len().saturating_sub(LLM_STATE_ENTRIES);
         &self.entries[start..]
+    }
+}
+
+/// One session's slice of the state file: its log.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionEntries {
+    pub entries: Vec<StateEntry>,
+}
+
+/// `.spec/state.json` as written: the guide once, then one log per
+/// session beside the `currentSession` pointer. A [`TddSnapshot`] is one
+/// session's view of it, which is all the machine ever sees.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TddStateFile {
+    pub instructions: String,
+    #[serde(flatten)]
+    pub sessions: SessionEnvelope<SessionEntries>,
+}
+
+impl Default for TddStateFile {
+    fn default() -> Self {
+        Self {
+            instructions: STATE_INSTRUCTIONS.to_string(),
+            sessions: SessionEnvelope::default(),
+        }
+    }
+}
+
+impl TddStateFile {
+    /// Read the file in either shape. A file written before sessions
+    /// existed - a single `entries` log at the top level - is adopted
+    /// as one session named by `fresh`, which is current.
+    pub fn parse(
+        text: &str,
+        now: &str,
+        fresh: impl FnOnce() -> SessionId,
+    ) -> Result<Self, serde_json::Error> {
+        let value: serde_json::Value = serde_json::from_str(text)?;
+        if value.get("sessions").is_some() {
+            return serde_json::from_value(value);
+        }
+        let legacy: TddSnapshot = serde_json::from_value(value)?;
+        Ok(Self::adopted(legacy, now, fresh()))
+    }
+
+    /// A pre-session snapshot as a one-session file.
+    pub fn adopted(legacy: TddSnapshot, now: &str, id: SessionId) -> Self {
+        Self {
+            instructions: legacy.instructions,
+            sessions: SessionEnvelope::adopt_legacy(
+                SessionEntries {
+                    entries: legacy.entries,
+                },
+                now,
+                id,
+            ),
+        }
+    }
+
+    /// One session's view: the guide plus its log, or the START state
+    /// when the file holds nothing for it.
+    pub fn snapshot_of(&self, id: &SessionId) -> TddSnapshot {
+        TddSnapshot {
+            instructions: self.instructions.clone(),
+            entries: self
+                .sessions
+                .body_of(id)
+                .map(|body| body.entries.clone())
+                .unwrap_or_default(),
+        }
+    }
+
+    /// The view of the current session, or START when there is none.
+    pub fn current_snapshot(&self) -> TddSnapshot {
+        match &self.sessions.current_session {
+            Some(id) => self.snapshot_of(id),
+            None => TddSnapshot::default(),
+        }
+    }
+
+    pub fn phase_of(&self, id: &SessionId) -> TddPhase {
+        self.snapshot_of(id).phase()
+    }
+
+    /// Store one session's log, keeping the guide the snapshot carries.
+    pub fn put(&mut self, id: &SessionId, snapshot: &TddSnapshot, now: &str) {
+        self.instructions = snapshot.instructions.clone();
+        self.sessions.put(
+            id,
+            SessionEntries {
+                entries: snapshot.entries.clone(),
+            },
+            now,
+        );
+    }
+
+    /// Every session with its dates and the phase its log ends on, for
+    /// the startup list.
+    pub fn listed(&self) -> Vec<(SessionId, String, String, TddPhase)> {
+        self.sessions
+            .sessions
+            .iter()
+            .map(|(id, slot)| {
+                (
+                    id.clone(),
+                    slot.started_at.clone(),
+                    slot.last_active_at.clone(),
+                    TddSnapshot {
+                        instructions: String::new(),
+                        entries: slot.body.entries.clone(),
+                    }
+                    .phase(),
+                )
+            })
+            .collect()
     }
 }
 
@@ -720,5 +839,88 @@ mod tests {
         machine.record_test_run(failing_run());
         assert!(machine.start_refactor(Some("nope")).is_err());
         assert_eq!(machine.snapshot().entries.len(), 1);
+    }
+
+    fn session(n: u8) -> SessionId {
+        SessionId::parse(&format!("00000000-0000-4000-8000-{n:012x}")).unwrap()
+    }
+
+    #[test]
+    fn the_instructions_explain_sessions() {
+        assert!(STATE_INSTRUCTIONS.contains("`sessions`"));
+        assert!(STATE_INSTRUCTIONS.contains("`currentSession`"));
+        assert!(STATE_INSTRUCTIONS.contains("three most recent entries"));
+    }
+
+    /// A state file from before sessions existed is one session's log,
+    /// and the one that is current - nothing it recorded is dropped.
+    #[test]
+    fn a_pre_session_file_is_adopted_as_the_current_session() {
+        let mut machine = TddStateMachine::new();
+        machine.record_test_run(failing_run());
+        machine.record_test_run(passing_run());
+        let legacy = serde_json::to_string(&machine.snapshot()).unwrap();
+        let file = TddStateFile::parse(&legacy, "t0", || session(1)).unwrap();
+        assert_eq!(file.sessions.current_session, Some(session(1)));
+        assert_eq!(file.current_snapshot().entries.len(), 2);
+        assert_eq!(file.phase_of(&session(1)), TddPhase::Green);
+        assert_eq!(file.instructions, STATE_INSTRUCTIONS);
+        let slot = file.sessions.slot(&session(1)).unwrap();
+        assert_eq!(
+            (slot.started_at.as_str(), slot.last_active_at.as_str()),
+            ("t0", "t0")
+        );
+    }
+
+    #[test]
+    fn a_session_file_round_trips_and_answers_per_session() {
+        let mut file = TddStateFile::default();
+        file.put(&session(1), &TddSnapshot::at(TddPhase::Red), "t1");
+        file.put(&session(2), &TddSnapshot::at(TddPhase::Green), "t2");
+        let json = serde_json::to_string_pretty(&file).unwrap();
+        assert!(
+            json.contains("\"currentSession\": \"00000000-0000-4000-8000-000000000001\""),
+            "{json}"
+        );
+        assert!(json.contains("\"sessions\""), "{json}");
+        assert!(json.contains("\"entries\""), "{json}");
+        assert!(json.contains("\"startedAt\": \"t2\""), "{json}");
+        let back = TddStateFile::parse(&json, "never", || panic!("not legacy")).unwrap();
+        assert_eq!(back, file);
+        assert_eq!(back.current_snapshot().phase(), TddPhase::Red);
+        assert_eq!(back.snapshot_of(&session(2)).phase(), TddPhase::Green);
+        assert_eq!(back.snapshot_of(&session(3)), TddSnapshot::default());
+        assert_eq!(back.phase_of(&session(3)), TddPhase::Start);
+        let mut listed = back.listed();
+        listed.sort_by(|a, b| a.0.cmp(&b.0));
+        assert_eq!(
+            listed,
+            vec![
+                (
+                    session(1),
+                    "t1".to_string(),
+                    "t1".to_string(),
+                    TddPhase::Red
+                ),
+                (
+                    session(2),
+                    "t2".to_string(),
+                    "t2".to_string(),
+                    TddPhase::Green
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_file_with_no_current_session_views_as_start() {
+        let file = TddStateFile::default();
+        assert_eq!(file.current_snapshot(), TddSnapshot::default());
+        assert!(file.listed().is_empty());
+        assert!(TddStateFile::parse("nonsense", "t", || session(1)).is_err());
+        assert!(
+            TddStateFile::parse("{}", "t", || session(1)).is_err(),
+            "a legacy shape is still strict"
+        );
     }
 }

@@ -10,6 +10,7 @@ pub mod console_prompt;
 pub mod fs_memory;
 pub mod fs_project;
 pub mod fs_scaffold;
+pub mod fs_session;
 pub mod fs_sources;
 pub mod fs_spec;
 pub mod fs_state;

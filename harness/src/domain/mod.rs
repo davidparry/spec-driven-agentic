@@ -67,6 +67,7 @@ pub mod reply_guard;
 pub mod requirement_id;
 pub mod scaffold;
 pub mod scenario;
+pub mod session;
 pub mod spec_validator;
 pub mod step_fill;
 pub mod steps;

@@ -150,6 +150,12 @@ struct Cli {
     #[arg(long, global = true)]
     no_branch: bool,
 
+    /// Resume the session with this GUID (one from the list the shell
+    /// prints at start). Without it, bare `spec` begins a new session
+    /// and one-shot commands continue the current one.
+    #[arg(long, global = true, value_name = "GUID")]
+    session: Option<String>,
+
     /// Omitted entirely: print help and open the interactive shell
     #[command(subcommand)]
     command: Option<Command>,
@@ -668,6 +674,15 @@ fn main() -> anyhow::Result<()> {
     match cli.command {
         Some(ref command) => {
             let resumes = resumes_the_shell(command);
+            // A one-shot command with --session switches to it quietly;
+            // without the flag it continues the current session.
+            if let Some(requested) = cli.session.as_deref()
+                && let Err(refusal) = wiring::session_service(&root).start(Some(requested))
+            {
+                eprintln!("\x1b[31merror: {}\x1b[0m", refusal.0);
+                drop(log_guard);
+                std::process::exit(1)
+            }
             match execute(
                 &root,
                 cli.model.as_deref(),
@@ -692,12 +707,19 @@ fn main() -> anyhow::Result<()> {
                 other => other,
             }
         }
-        None => run_shell_mode(
+        None => match run_shell_mode(
             &root,
             cli.model.as_deref(),
             cli.decision_model.as_deref(),
             cli.retry,
-        ),
+            cli.session.as_deref(),
+        ) {
+            Err(error) if error.is::<NonzeroExit>() => {
+                drop(log_guard);
+                std::process::exit(1)
+            }
+            other => other,
+        },
     }
 }
 
@@ -1160,6 +1182,7 @@ fn run_shell_mode(
     model: Option<&str>,
     decision_model: Option<&str>,
     retry: Option<u32>,
+    session: Option<&str>,
 ) -> anyhow::Result<()> {
     use clap::CommandFactory as _;
     use std::io::IsTerminal as _;
@@ -1168,6 +1191,12 @@ fn run_shell_mode(
         return Ok(());
     }
     print_banner();
+    // Bare `spec` begins a new session; `--session` resumes one. Either
+    // way the session line and the read-only list come first, so every
+    // later command in this shell is known to act on that session.
+    if !open_session(root, session) {
+        return Err(NonzeroExit.into());
+    }
     let model_ready = announce_session_model(root, model);
     announce_decision_model(root, decision_model);
     // Session start is where the layout question belongs: a human is
@@ -1189,6 +1218,23 @@ fn run_shell_mode(
         spec_rel(HISTORY_FILE)
     );
     interactive_shell_loop(root, model, decision_model, retry, true, model_ready)
+}
+
+/// Open the session the shell runs in and print the session line plus
+/// the list of every session on record. A refusal - text that is not
+/// a GUID, or a GUID the project does not know - is printed and
+/// reported as `false`; nothing has changed on disk in that case.
+fn open_session(root: &Path, requested: Option<&str>) -> bool {
+    match wiring::session_service(root).start(requested) {
+        Ok(start) => {
+            println!("{}", start.human());
+            true
+        }
+        Err(refusal) => {
+            eprintln!("\x1b[31merror: {}\x1b[0m", refusal.0);
+            false
+        }
+    }
 }
 
 /// After a one-shot orchestrator run (`spec greenfield`, `spec deliver`)
@@ -1236,6 +1282,12 @@ fn interactive_shell_loop(
                 }
                 Some(command) => {
                     let line_root = cli.root.as_deref().unwrap_or(root);
+                    // Commands inherit the shell's session through the
+                    // `currentSession` pointer; a line naming --session
+                    // switches the shell to that one first.
+                    if cli.session.is_some() && !open_session(line_root, cli.session.as_deref()) {
+                        return;
+                    }
                     let line_model = cli.model.as_deref().or(model);
                     let line_decision = cli.decision_model.as_deref().or(decision_model);
                     let line_retry = cli.retry.or(retry);

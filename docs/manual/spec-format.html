@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "searchindex-7d12d21a.js";
+            window.path_to_searchindex_js = "searchindex-cd45a071.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-8557ae39.js"></script>
@@ -239,6 +239,7 @@ test runner executes.</p>
 <tr><td><code>story</code></td><td>yes</td><td>The user story, <code>As a …, I want … so that …</code>. <code>spec refine</code> reviews it for a missing actor, missing benefit, and ambiguous words.</td></tr>
 <tr><td><code>acceptanceCriteria</code></td><td>at least one</td><td>Each criterion must be phrased Given/When/Then. This is the load-bearing field: agents translate these lines into the Gherkin scenarios and unit tests you then implement.</td></tr>
 <tr><td><code>featureFile</code></td><td>when implemented</td><td>Repo-root-relative path to the feature file carrying the scenario. Optional while <code>pending</code>; once <code>implemented</code>, validation requires the file to exist <em>and</em> to contain a scenario tagged <code>@&lt;id&gt;</code>. <code>spec mark-implemented</code> records it automatically.</td></tr>
+<tr><td><code>productionFiles</code></td><td>no</td><td>Where this requirement’s production code lives, as an array — one requirement’s code is not always one file. Declared with <a href="commands/spec.html#spec-set-production"><code>spec set-production</code></a> and added to by a delivery recording what it wrote. When absent, <code>spec implement</code> infers a conventional path from <code>project</code> instead.</td></tr>
 </tbody>
 </table>
 </div>
@@ -272,9 +273,9 @@ files fails validation naming the file that declared it first.</li>
 including a file twice, including a file that does not exist, or
 escaping the spec directory each report a single actionable issue.</li>
 <li><strong>Mutations write back to the declaring file.</strong> <code>spec reword</code>,
-<code>set-feature</code>, and <code>mark-implemented</code> find the file a requirement
-lives in and stage only that file. <code>spec draft</code> appends to the
-root by default, or to a chosen file with <code>--file</code>.</li>
+<code>set-feature</code>, <code>set-production</code>, and <code>mark-implemented</code> find the file
+a requirement lives in and stage only that file. <code>spec draft</code> appends
+to the root by default, or to a chosen file with <code>--file</code>.</li>
 </ul>
 <h3 id="growing-the-catalog"><a class="header" href="#growing-the-catalog">Growing the catalog</a></h3>
 <pre><code class="language-bash"># Write a new (empty) spec file and the include entry on the root:

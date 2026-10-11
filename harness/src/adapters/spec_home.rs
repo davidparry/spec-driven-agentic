@@ -39,6 +39,31 @@ pub fn ensure_parent(path: &Path) -> io::Result<()> {
     Ok(())
 }
 
+/// Distinguishes this process's concurrent writes from each other; the
+/// process id distinguishes them from everybody else's.
+static WRITES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Write `path` whole or not at all: the bytes go to a scratch file in
+/// the same directory and are renamed over the target, so a reader gets
+/// the old file or the new one and never a torn one. The parent is
+/// created when missing.
+pub fn write_atomically(path: &Path, text: &str) -> io::Result<()> {
+    ensure_parent(path)?;
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let scratch = path.with_file_name(format!(
+        ".{name}.{}.{}.writing",
+        std::process::id(),
+        WRITES.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
+    fs::write(&scratch, text)?;
+    fs::rename(&scratch, path).inspect_err(|_| {
+        let _ = fs::remove_file(&scratch);
+    })
+}
+
 /// Create `.spec/` and move each legacy artifact into it when the new
 /// path does not already exist. An existing new file is left as it is;
 /// the old one stays where it was.
@@ -99,6 +124,33 @@ mod tests {
             "cached"
         );
         assert!(!root.join(".spec-cache").exists());
+    }
+
+    #[test]
+    fn an_atomic_write_lands_whole_and_leaves_no_scratch_behind() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = spec_file(dir.path(), STATE_FILE);
+        write_atomically(&target, "first").unwrap();
+        write_atomically(&target, "second").unwrap();
+        assert_eq!(fs::read_to_string(&target).unwrap(), "second");
+        let leftovers: Vec<_> = fs::read_dir(target.parent().unwrap())
+            .unwrap()
+            .flatten()
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.ends_with(".writing"))
+            .collect();
+        assert!(leftovers.is_empty(), "{leftovers:?}");
+        // A target that cannot be renamed over: the scratch is removed.
+        let blocked = dir.path().join("blocked");
+        fs::create_dir_all(blocked.join("child")).unwrap();
+        assert!(write_atomically(&blocked, "x").is_err());
+        let scratch: Vec<_> = fs::read_dir(dir.path())
+            .unwrap()
+            .flatten()
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.ends_with(".writing"))
+            .collect();
+        assert!(scratch.is_empty(), "{scratch:?}");
     }
 
     #[test]

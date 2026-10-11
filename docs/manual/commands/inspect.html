@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-7d12d21a.js";
+            window.path_to_searchindex_js = "../searchindex-cd45a071.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-8557ae39.js"></script>
@@ -218,6 +218,12 @@ tells you up front what will run and what will refuse.</p>
       "runtimeVersion": "cargo 1.97.0"
     }
   ],
+  "layout": {
+    "production": "src",
+    "tests": "tests",
+    "features": "tests/features",
+    "stepDefinitions": "tests/steps/generated.rs"
+  },
   "nextStep": "The runtime is present. 'spec test' will execute the suite."
 }
 </code></pre>
@@ -237,6 +243,29 @@ tells you up front what will run and what will refuse.</p>
 </code></pre>
 <p>An empty directory reports no languages and points you at
 <a href="init.html"><code>spec init</code></a>.</p>
+<h2 id="layout"><a class="header" href="#layout">Layout</a></h2>
+<p><code>layout</code> is where this project keeps its code, as the resolver settled
+it and as <code>.spec/memory.json</code> records it — not a convention guessed per
+language. Every path the harness writes comes from here, so it is also
+the answer to “where do I put this?”: a feature file created anywhere
+else is one the harness will not read back.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>What it names</th></tr>
+</thead>
+<tbody>
+<tr><td><code>moduleRoot</code></td><td>The directory whose build file the test runner is pointed at. Absent when that is the project root.</td></tr>
+<tr><td><code>production</code></td><td>The production source root.</td></tr>
+<tr><td><code>tests</code></td><td>The test source root.</td></tr>
+<tr><td><code>features</code></td><td>Where <code>.feature</code> files live — <code>tests/features</code> for Rust, <code>src/test/resources/features</code> for Maven, <code>features</code> elsewhere.</td></tr>
+<tr><td><code>stepDefinitions</code></td><td>The file generated step definitions are appended to.</td></tr>
+</tbody>
+</table>
+</div>
+<p>A field is absent when the layout has not been resolved yet, which is
+the honest answer: a path in this reply is one the harness will
+actually read back.</p>
 <h2 id="project-memory"><a class="header" href="#project-memory">Project memory</a></h2>
 <p>Session start (<code>spec</code> shell, <code>spec mcp serve</code>), <a href="init.html"><code>spec init</code></a>,
 <a href="greenfield.html"><code>spec greenfield</code></a>, and every LLM command refresh

@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+- **Every run belongs to a GUID session that can be resumed by id**
+  (HARNESS-019). `.spec/state.json` and `.spec/memory.json` used to
+  hold one phase log and one memory for the whole project, so a
+  returning developer picked up whatever the last run left, with no
+  way to tell which run that was or to go back to an earlier one. Both
+  files now hold `sessions` - one slot per GUID, with `startedAt`,
+  `lastActiveAt`, and that session's log or memory - and
+  `currentSession`, the one every command acts on. Bare `spec` mints a
+  new session (its memory seeded from the previous current one, so the
+  language and layout already settled carry forward; its log empty at
+  START) and prints, right after the banner, the session line and a
+  read-only list of every session on record, newest first, the current
+  one marked `*`, with the resume command under it - a list to read,
+  not a menu, so startup still asks nothing. `spec --session <guid>`
+  resumes a recorded session instead, in the shell or in front of any
+  one-shot command, and the line names its phase and when it was last
+  active. One-shot commands and `spec mcp serve` without the flag
+  continue the current session, so a shell and a hook beside it see the
+  same phase. Text that is not a GUID, or a GUID neither file knows, is
+  refused before anything is written, naming the known sessions. A
+  file written before sessions existed is adopted as one session on
+  the first read. Writes to either file now run under `.spec/.lock`
+  and land by scratch-file-and-rename, since each file holds every
+  session and a write from a stale read would drop the others. The
+  frozen MCP reply shapes are unchanged: `get_tdd_state` and friends
+  are the per-session view they always were.
 - **`spec deliver`'s per-requirement budget is a config key, and every
   budget is written where it can be seen.** `--attempts` was the only
   way to change how many RED-to-GREEN rounds a requirement got; with

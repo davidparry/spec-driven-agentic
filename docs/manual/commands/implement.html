@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-7d12d21a.js";
+            window.path_to_searchindex_js = "../searchindex-cd45a071.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-8557ae39.js"></script>
@@ -305,6 +305,23 @@ truncated or junk reply rather than a wrong one — the test run is what
 decides whether an attempt is any good, and it never gets to run when
 the reply deletes the code the tests were going to call. The refusal
 is per file, so the rest of an otherwise fine attempt is still written.</p>
+<h3 id="the-step-bodies-are-a-second-pass"><a class="header" href="#the-step-bodies-are-a-second-pass">The step bodies are a second pass</a></h3>
+<p>One file is never asked for whole: the step-definition file. It is
+shared by every requirement and is the largest file in a project that
+has been at this for a while, and a model asked to return it complete
+returns the production file instead - measured three runs in a row on
+this repository’s own 5,600-line <code>tests/cucumber.rs</code>, with the bar RED
+on three <code>todo!()</code> bodies at the end of every one.</p>
+<p>So after the reply above is written, the step definitions this
+requirement’s scenarios run through that still carry a generated
+placeholder (<code>todo!</code>, <code>PendingException</code>, <code>'pending'</code>) go to the model
+on their own: just those definitions, the head of their file (imports,
+the world type, fixtures) for reading, and the production code they
+should call. Exactly those definitions come back and are spliced in
+where they were; nothing else in the file is retyped. The reply is
+refused, and the stubs left as they were, if it keeps a placeholder,
+drops a step expression, or brings a class or struct of its own.
+Printed as <code>wrote: &lt;file&gt; (N pending step bodies, llm)</code>; <code>spec deliver</code> does the same inside every attempt.</p>
 <h2 id="where-the-work-lands"><a class="header" href="#where-the-work-lands">Where the work lands</a></h2>
 <p>The production file is resolved in this order, and the first answer
 wins:</p>

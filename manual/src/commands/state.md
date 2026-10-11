@@ -16,7 +16,10 @@ MCP tool equivalent: `get_tdd_state`.
 | --- | --- |
 | `--json` | Print the JSON reply on a terminal too. See [output](../global-flags.md#output-readable-on-a-terminal-json-everywhere-else). |
 
-Otherwise only the [global flags](../global-flags.md) (`--root`, `--model`).
+Otherwise only the [global flags](../global-flags.md) (`--root`,
+`--model`, `--session`). Without `--session` the phase shown is the
+current session's; `spec --session <guid> state` switches to that
+session and shows its phase.
 
 On a terminal this prints the phase, the last run's counts, the
 refactor log, and the recent entries. `instructions` is left out
@@ -70,13 +73,36 @@ Before any test has ever run, the phase is the starting state and
 
 ## Where the state lives
 
-`.spec/state.json`, inside the project's `.spec/` directory. It is a chronological log of
-timestamped entries — one per test run, refactor, or implementation
-attempt — plus `instructions` that explain how to read the schema. The
-file keeps the full history so a human can audit the loop; `spec state`
-and every model brief include **only the three latest entries**. Delete
-the file to reset the phase machine (there is deliberately no `reset`
-command — losing the log should be an explicit filesystem act).
+`.spec/state.json`, inside the project's `.spec/` directory. The file
+holds one log per [session](../interactive-shell.md#sessions) under
+`sessions`, keyed by the session's GUID, and `currentSession` names the
+one `spec state` and every other command read. Each log is a
+chronological list of timestamped `entries` — one per test run,
+refactor, or implementation attempt — and the file-level `instructions`
+explain how to read the schema. The file keeps the full history of
+every session so a human can audit the loop; `spec state` and every
+model brief include **only the three latest entries** of the current
+session. Delete the file to reset the phase machine and forget every
+session (there is deliberately no `reset` command — losing the log
+should be an explicit filesystem act).
+
+```json
+{
+  "instructions": "This file is the TDD phase log. ...",
+  "currentSession": "20bd0242-eae5-4edc-8b25-0c954a5c3b3f",
+  "sessions": {
+    "20bd0242-eae5-4edc-8b25-0c954a5c3b3f": {
+      "startedAt": "2026-10-11T20:31:24Z",
+      "lastActiveAt": "2026-10-11T20:31:24Z",
+      "entries": [ ... ]
+    }
+  }
+}
+```
+
+A file written before sessions existed — `instructions` and `entries`
+at the top level — is adopted as one session on the first read and
+written back in this shape on the next save.
 
 The same file also carries `attemptLog` — the record of every model
 implementation attempt that [`spec implement`](implement.md) and the

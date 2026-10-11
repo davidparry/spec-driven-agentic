@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-7d12d21a.js";
+            window.path_to_searchindex_js = "../searchindex-cd45a071.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-8557ae39.js"></script>
@@ -190,7 +190,8 @@ merged view of the whole tree.</p>
 <pre><code class="language-text">spec list             spec refine &lt;REQ_ID&gt;
 spec show &lt;REQ_ID&gt;    spec reword &lt;REQ_ID&gt;
 spec draft            spec set-feature &lt;REQ_ID&gt; --file &lt;FILE&gt;
-spec validate         spec mark-implemented &lt;REQ_ID&gt;
+spec validate         spec set-production &lt;REQ_ID&gt; --file &lt;FILE&gt;
+                      spec mark-implemented &lt;REQ_ID&gt;
                       spec include add &lt;PATH&gt;
 </code></pre>
 <p>MCP tool equivalents: <code>list_requirements</code>, <code>get_requirement</code>,
@@ -288,7 +289,7 @@ the widest numeric part already in use, with a minimum of three digits.</p>
 </thead>
 <tbody>
 <tr><td><code>REQ-001</code> … <code>REQ-006</code></td><td><code>REQ-007</code></td></tr>
-<tr><td><code>HARNESS-001</code> … <code>HARNESS-018</code></td><td><code>HARNESS-019</code></td></tr>
+<tr><td><code>HARNESS-001</code> … <code>HARNESS-019</code></td><td><code>HARNESS-020</code></td></tr>
 <tr><td><code>REQ-0007</code></td><td><code>REQ-0008</code></td></tr>
 <tr><td>none at all</td><td><code>REQ-001</code></td></tr>
 </tbody>
@@ -491,6 +492,27 @@ on an extracted project. <code>spec scenario add</code> already updates
 <code>featureFile</code> when it is missing or stale.</p>
 <pre><code class="language-bash">spec set-feature REQ-003 --file src/test/resources/features/string_calculator.feature
 </code></pre>
+<hr>
+<h2 id="spec-set-production"><a class="header" href="#spec-set-production">spec set-production</a></h2>
+<p>Declare where a requirement’s production code lives. Without it,
+<code>spec implement</code> infers a conventional path from the project name —
+right for a kata, wrong for anything with a package layout of its own,
+and wrong every time for a requirement whose code is more than one
+file.</p>
+<pre><code class="language-text">Usage: spec set-production [OPTIONS] &lt;REQ_ID&gt; --file &lt;FILE&gt;
+</code></pre>
+<p>Repeat <code>--file</code> for each file; the list replaces whatever was declared
+before, so naming one file after naming two means the second is no
+longer part of this requirement.</p>
+<pre><code class="language-bash">spec set-production REQ-003 \
+  --file src/main/java/com/example/StringCalculator.java \
+  --file src/main/java/com/example/DelimiterParser.java
+</code></pre>
+<p>A delivery records what it actually wrote here too, adding to the list
+rather than replacing it — so the second attempt at a requirement is
+briefed with the files the first one touched instead of guessing again.
+Paths are project-relative; one that could reach outside the project
+root is refused by either route.</p>
 <hr>
 <h2 id="spec-mark-implemented"><a class="header" href="#spec-mark-implemented">spec mark-implemented</a></h2>
 <p>Flip a requirement’s status to <code>implemented</code> and record its

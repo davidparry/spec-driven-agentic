@@ -168,6 +168,22 @@ spec --no-branch deliver "sum comma-separated numbers"
 
 Every other command ignores the flag, because no other command asks.
 
+## `--session <GUID>`
+
+Resume the [session](interactive-shell.md#sessions) with this id - one
+from the list the shell prints at start. TDD state and project memory
+are kept per session; without the flag, bare `spec` begins a new
+session and every one-shot command continues the current one.
+
+```bash
+spec --session ffca332f-4258-4c98-a8a7-ce1c180c03e3          # resume it in the shell
+spec --session ffca332f-4258-4c98-a8a7-ce1c180c03e3 state    # read its phase, one shot
+```
+
+Text that is not a GUID, or a GUID the project has no record of, is
+refused before anything is written, naming the sessions that are on
+record.
+
 ## `-V`, `--version`
 
 Prints the version compiled into the binary (from `Cargo.toml` at

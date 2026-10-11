@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-7d12d21a.js";
+            window.path_to_searchindex_js = "../searchindex-cd45a071.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-8557ae39.js"></script>
@@ -195,8 +195,8 @@ there.</p>
 <tbody>
 <tr><td><code>--root &lt;ROOT&gt;</code></td><td>Project root. Defaults to the nearest enclosing project, <a href="../global-flags.html#discovery-what-happens-when-you-say-nothing">searching upward</a> from the working directory.</td></tr>
 <tr><td><code>--model &lt;MODEL&gt;</code></td><td>LLM model for the generation steps, this run only.</td></tr>
-<tr><td><code>--retry &lt;N&gt;</code></td><td>Max attempts when a model reply fails validation. Default 3.</td></tr>
-<tr><td><code>--attempts &lt;N&gt;</code></td><td>RED-to-GREEN rounds per requirement. Default 3.</td></tr>
+<tr><td><code>--retry &lt;N&gt;</code></td><td>Max attempts when a model reply fails validation, this run only. Otherwise <code>[llm] retry</code> in <code>.spec/config.toml</code>, default 3.</td></tr>
+<tr><td><code>--attempts &lt;N&gt;</code></td><td>RED-to-GREEN rounds per requirement, this run only. Otherwise <code>[deliver] attempts</code> in <code>.spec/config.toml</code>, default 3.</td></tr>
 <tr><td><code>--fail-fast</code></td><td>Stop at the first requirement that falls short instead of carrying on.</td></tr>
 <tr><td><code>--no-refactor</code></td><td>Skip the refactor step even on a green bar.</td></tr>
 <tr><td><code>--file &lt;FILE&gt;</code></td><td>Draft new requirements into this included spec file. Omitted, the drafted requirement lands in the catalog document covering the working directory — see <a href="spec.html#spec-draft"><code>spec draft</code></a>.</td></tr>
@@ -257,7 +257,8 @@ the work back rather than walking you through wording it — that is what
 <pre><code class="language-text">1. scenario            Gherkin scenario tagged @REQ-...
 2. steps               step definitions for every undefined step
 3. test → RED          the scenario fails honestly
-4. implement           the model attempts, up to --attempts times
+4. implement           the model attempts, up to --attempts times:
+                       production code, then the pending step bodies
 5. test → GREEN
 6. refactor            optional; only on GREEN, and only with a model
 7. mark implemented    status flipped, validated, committed, read back
@@ -279,11 +280,56 @@ Running the tests - working ...
 <p>A step that loops on its own is called once and its loop is trusted:
 drafting’s validate-and-reword rounds, <code>spec implement</code>’s attempts,
 and <code>spec refactor</code>’s rounds are not wrapped in a second loop here.</p>
+<p>Each implementation attempt is two model calls, the same two
+<a href="implement.html#the-step-bodies-are-a-second-pass"><code>spec implement</code></a>
+makes: the production code and the unit test as whole files, then the
+step definitions this requirement’s scenarios still run through as
+placeholders, as a fragment of their own. The second is what turns a
+RED bar that reads only <code>Given …: FAILED</code> green: the step-definition
+file is shared by every requirement and is never asked for whole, so
+without it an attempt could write perfect production code and leave
+the bar exactly where it was - measured three runs in a row on this
+repository. A fill reply the pass cannot use is said and the stubs
+stand; the attempt is not lost over it.</p>
+<h2 id="what-the-decision-model-is-asked-along-the-way"><a class="header" href="#what-the-decision-model-is-asked-along-the-way">What the decision model is asked along the way</a></h2>
+<p>With a <a href="judge.html">decision model</a> configured, every generating stage
+puts the writing model’s reply to the same bounded question the
+hand-run command would. The gate and the stage that asks it:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Stage</th><th>Gate</th><th>The question</th></tr>
+</thead>
+<tbody>
+<tr><td><code>author_steps</code></td><td><code>STEPS_BIND_SCENARIO</code></td><td>would this step expression match that step line?</td></tr>
+<tr><td><code>drive_to_green</code></td><td><code>UNIT_TEST_ASSERTS</code></td><td>does this test body assert the criterion, or pass regardless?</td></tr>
+<tr><td><code>drive_to_green</code></td><td><code>IMPLEMENTATION_COMPLETE</code></td><td>how completely does this code implement its criterion - stub, partial, complete?</td></tr>
+<tr><td><code>refactor</code></td><td><code>REFACTOR_PRESERVES_BEHAVIOUR</code></td><td>did this refactoring leave behaviour alone?</td></tr>
+</tbody>
+</table>
+</div>
+<p><code>author_scenarios</code> is deterministic and asks nothing;
+<code>SCENARIO_EXERCISES_CRITERION</code> is the hand-run <code>spec scenario generate</code>’s gate. All four ship at <code>advisory</code>, where a verdict is
+recorded and changes nothing, and that ceiling holds whatever <code>[decision] mode</code> says until a project raises a gate by name:</p>
+<pre><code class="language-toml">[decision.gates.UNIT_TEST_ASSERTS]
+mode = "enforce"
+</code></pre>
+<p>Under <code>enforce</code> a <code>FAILS</code> becomes a <code>REWORK</code>: the writing model is
+re-asked with the finding as the complaint, riding the same retry a
+malformed reply gets, and nothing else changes. A judgment can never
+approve anything - a reply that holds every gate still has to compile
+and go green. Each judgment is printed as a <code>second review</code> block as the
+stage finishes and rides in the final JSON under <code>judgments</code>, one entry
+per requirement per stage, so a run nobody watched can be read back.
+With no decision model configured none of this happens and the report
+carries no <code>judgments</code> key. A gate that has a judge and nothing to put
+to it - a reply whose expressions do not pair with the missing steps -
+says so in <code>.spec/log</code> and records nothing.</p>
 <h2 id="--judge-draft-the-decision-model-during-drafting"><a class="header" href="#--judge-draft-the-decision-model-during-drafting"><code>--judge-draft</code>: the decision model during drafting</a></h2>
 <p>Delivering a description rather than an id means the spec is written by
 a model with nobody reading it. <code>--judge-draft</code> puts the
-<a href="judge.html">decision model</a> in that loop — the only place in the harness
-its answer is used as <strong>feedback rather than a gate</strong>.</p>
+decision model in that loop too — the one place in the harness its
+answer is used as <strong>feedback rather than a gate</strong>.</p>
 <p>With the flag, a proposal that clears the deterministic edge-case rule
 has each of its criteria put to the question <code>measurable/v2</code>. Anything
 the model cannot read as an assertion comes back as a rejection reason,

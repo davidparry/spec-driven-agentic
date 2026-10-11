@@ -1,10 +1,18 @@
 # The interactive shell
 
 Running `spec` with no subcommand in a terminal opens a REPL. It prints
-the help once, shows the banner and the session's model status, and
-then reads commands until you leave.
+the help once, shows the banner, opens the session and lists the ones
+on record, shows the session's model status, and then reads commands
+until you leave.
 
 ```text
+Session 20bd0242-eae5-4edc-8b25-0c954a5c3b3f (new).
+Sessions on record (2):
+* 20bd0242-eae5-4edc-8b25-0c954a5c3b3f  started 2026-10-11T20:31:24Z  active 2026-10-11T20:31:24Z  START
+  ffca332f-4258-4c98-a8a7-ce1c180c03e3  started 2026-10-11T20:31:14Z  active 2026-10-11T20:31:14Z  GREEN  Rust
+Resume one with: spec --session <id>
+Inference model set: qwen3.8-flash-next:125b-mlx (from configuration).
+Decision model set: nimble (from configuration).
 spec> list
 [
   { "id": "REQ-001", "title": "Empty string returns zero", "status": "implemented" }
@@ -27,6 +35,11 @@ spec --root ~/code/calculator --model qwen3.8-flash-next:125b-mlx --retry 5
 # and retries invalid model replies up to 5 times
 ```
 
+- **Inherited session.** Every command typed into the shell acts on
+  the session the shell opened (see [Sessions](#sessions) below). A
+  line carrying `--session <guid>` switches the shell to that session
+  first and prints the session line again.
+
 - **Quoting works.** Lines are tokenized with shell rules, so
   `scenario add --step "Given a calculator"` behaves as expected.
   Unbalanced quotes report `unreadable input` and the shell continues.
@@ -44,6 +57,51 @@ spec --root ~/code/calculator --model qwen3.8-flash-next:125b-mlx --retry 5
 - <kbd>Ctrl</kbd>+<kbd>D</kbd> (end of input)
 
 On exit the shell prints a summary of how many commands ran.
+
+## Sessions
+
+Every shell runs in a **session** named by a GUID. The TDD phase log in
+`.spec/state.json` and the project memory in `.spec/memory.json` are
+kept per session, under `sessions` keyed by that GUID, and each file's
+`currentSession` names the one commands act on.
+
+Bare `spec` begins a new session. Its phase log starts empty at START;
+its memory is seeded from the previous current session, so a language,
+module root, or layout already settled is not asked for again. The
+first line after the banner names it:
+
+```text
+Session 20bd0242-eae5-4edc-8b25-0c954a5c3b3f (new).
+```
+
+`spec --session <guid>` resumes a recorded session instead, and the
+line says what you are picking up:
+
+```text
+Session ffca332f-4258-4c98-a8a7-ce1c180c03e3 (resumed - GREEN, last active 2026-10-11T20:31:14Z).
+```
+
+Either way, the lines after it list every session the project has on
+record, newest activity first, the current one marked `*`, each with
+when it started, when it was last active, its phase, and the language
+its memory holds. It is a list to read, not a menu: nothing is asked,
+and the resume command is printed under it so an id can be copied into
+the next launch.
+
+A `--session` value that is not a GUID, or a GUID neither file knows,
+is refused before anything is written:
+
+```text
+error: "not-a-guid" is not a GUID - a session id looks like 6f1c2d3e-4b5a-4c6d-8e9f-0a1b2c3d4e5f.
+error: No session 6f1c2d3e-... is on record in .spec/state.json or .spec/memory.json. Known sessions: 20bd0242-..., ffca332f-.... Start without --session to begin a new one.
+```
+
+One-shot commands (`spec state`, `spec test`, `spec mcp serve`, …)
+continue the current session without the flag - a shell and a hook
+running beside it see the same phase - and `spec --session <guid> state`
+switches to another one quietly. A `state.json` or `memory.json`
+written before sessions existed is adopted as one session, the current
+one, on the first read; nothing is lost.
 
 ## Session history
 

@@ -28,15 +28,17 @@ Every project file the harness owns sits in `.spec/` under the project root (the
 ```text
 .spec/
   config.toml    tracked — [llm], [tools], [decision] (spec model use, spec judge use, spec config)
-  state.json     TDD phase log, including implement attemptLog
-  memory.json    discovered language, libraries, and layout
+  state.json     TDD phase log per session, including implement attemptLog
+  memory.json    discovered language, libraries, and layout, per session
   history        interactive-shell history, reloaded on the next session
   cache/         LLM response cache and .spec/cache/tools/ catalogs
   log/           daily diagnostics: spec.log.YYYY-MM-DD
   .lock          advisory lock serializing concurrent writes
 ```
 
-`spec init` gitignores `.spec/*` and re-includes `.spec/config.toml`, so configuration is shared and the generated children are not. Deleting `cache/` or `log/` is always safe. Deleting `state.json` resets the phase machine to START.
+`spec init` gitignores `.spec/*` and re-includes `.spec/config.toml`, so configuration is shared and the generated children are not. Deleting `cache/` or `log/` is always safe. Deleting `state.json` resets the phase machine to START and forgets every session.
+
+`state.json` and `memory.json` are keyed by **session**: a GUID minted when a shell starts. Each file holds `sessions` (one slot per GUID, with `startedAt`, `lastActiveAt`, and that session's log or memory) and `currentSession`, the one every command acts on. Bare `spec` begins a new session and prints the list of those on record; `spec --session <guid>` resumes one, in the shell or in front of any one-shot command; a one-shot command without the flag continues the current session. A file written before sessions existed is adopted as a single session on the first read. See [Interactive shell](#interactive-shell).
 
 ## The core theme
 
@@ -525,6 +527,11 @@ $ spec
   ▲                                  │
   ╰──────────────────────────────────╯
 
+Session 20bd0242-eae5-4edc-8b25-0c954a5c3b3f (new).
+Sessions on record (2):
+* 20bd0242-eae5-4edc-8b25-0c954a5c3b3f  started 2026-10-11T20:31:24Z  active 2026-10-11T20:31:24Z  START
+  ffca332f-4258-4c98-a8a7-ce1c180c03e3  started 2026-10-11T20:31:14Z  active 2026-10-11T20:31:14Z  GREEN  Rust
+Resume one with: spec --session <id>
 Inference model set for this session: qwen3.8-flash-next:125b-mlx (not saved - keep it with: spec model use qwen3.8-flash-next:125b-mlx).
 Decision model set for this session: nimble (not saved - keep it with: spec judge use nimble).
 spec> list
@@ -536,6 +543,23 @@ Session over - 3 commands run.
 
 The banner is the harness mark in ASCII — the red→green cycle looping
 around the prompt — with the compiled-in version.
+
+Right after it comes the **session**. Every shell runs in a session
+named by a GUID; the TDD phase log in `.spec/state.json` and the project
+memory in `.spec/memory.json` are kept per session, and the session the
+shell opens is the one every command typed into it acts on. Bare `spec`
+mints a new one (its memory is seeded from the previous current session,
+so the language and layout already settled carry forward; its phase log
+starts empty at START). `spec --session <guid>` resumes a recorded one
+instead and the line says so, with its phase and when it was last
+active: `Session ffca332f-... (resumed - GREEN, last active
+2026-10-11T20:31:14Z).` Below the line is the read-only list of every
+session on record, newest first, the current one marked `*` - it is a
+list to read, not a menu; nothing is asked. A `--session` that is not a
+GUID, or a GUID neither file knows, is refused before anything is
+written, naming the known sessions. One-shot commands (`spec state`,
+`spec test`, an MCP server) continue the current session without the
+flag, or switch to one with it: `spec --session <guid> state`.
 
 The shell announces both model roles on startup, one line each and each
 naming which role it is, because they are two different models doing

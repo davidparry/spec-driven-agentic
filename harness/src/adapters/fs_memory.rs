@@ -1,12 +1,14 @@
-//! Filesystem project memory: `.spec/memory.json` plus a tree inventory
-//! of the project root (skipping build output and dependency directories).
+//! Filesystem project memory: the current session's slice of
+//! `.spec/memory.json` plus a tree inventory of the project root
+//! (skipping build output and dependency directories).
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::adapters::spec_home::{ensure_parent, spec_file};
+use crate::adapters::fs_session::{SessionFiles, claim, fresh_id, now_rfc3339};
 use crate::domain::SPEC_DIR;
 use crate::domain::memory::ProjectMemory;
+use crate::domain::session::SessionId;
 use crate::domain::{MEMORY_FILE, spec_rel};
 use crate::ports::{MemoryError, MemoryStore, ProjectInventory};
 
@@ -21,37 +23,53 @@ const SKIPPED_DIRS: [&str; 7] = [
 ];
 
 pub struct FsMemoryStore {
-    file: PathBuf,
+    root: PathBuf,
+    /// The session this store is bound to; `None` follows the pointer.
+    session: Option<SessionId>,
 }
 
 impl FsMemoryStore {
+    /// A store on the current session: whichever `currentSession` names
+    /// at the moment of each read or write.
     pub fn new(root: PathBuf) -> Self {
         Self {
-            file: spec_file(&root, MEMORY_FILE),
+            root,
+            session: None,
         }
+    }
+
+    /// A store bound to one session regardless of the pointer.
+    pub fn for_session(root: PathBuf, session: SessionId) -> Self {
+        Self {
+            root,
+            session: Some(session),
+        }
+    }
+
+    fn session_in(&self, files: &SessionFiles) -> Option<SessionId> {
+        self.session.clone().or_else(|| files.current())
     }
 }
 
 impl MemoryStore for FsMemoryStore {
     fn load(&self) -> Result<Option<ProjectMemory>, MemoryError> {
-        if !self.file.is_file() {
-            return Ok(None);
-        }
-        let shown = spec_rel(MEMORY_FILE);
-        let text = fs::read_to_string(&self.file)
-            .map_err(|e| MemoryError(format!("{shown} is not readable - {e}")))?;
-        serde_json::from_str(&text)
-            .map(Some)
-            .map_err(|e| MemoryError(format!("{shown} is not valid JSON - {e}")))
+        let files = SessionFiles::read(&self.root).map_err(MemoryError)?;
+        Ok(self
+            .session_in(&files)
+            .and_then(|id| files.memory.body_of(&id).cloned()))
     }
 
+    /// Under the project lock, like the state store, and for the same
+    /// reason: the file holds every session, so a write from a stale
+    /// read would drop the others.
     fn save(&self, memory: &ProjectMemory) -> Result<(), MemoryError> {
-        let text =
-            serde_json::to_string_pretty(memory).expect("project memory is always serializable");
         let shown = spec_rel(MEMORY_FILE);
-        ensure_parent(&self.file)
-            .and_then(|()| fs::write(&self.file, format!("{text}\n")))
-            .map_err(|e| MemoryError(format!("{shown} is not writable - {e}")))
+        let _claim = claim(&self.root, &shown).map_err(MemoryError)?;
+        let mut files = SessionFiles::read(&self.root).map_err(MemoryError)?;
+        let id = self.session_in(&files).unwrap_or_else(fresh_id);
+        files.memory.put(&id, memory.clone(), &now_rfc3339());
+        files.touch_memory();
+        files.write().map_err(MemoryError)
     }
 }
 
@@ -109,13 +127,83 @@ fn collect_tree(dir: &Path, root: &Path, into: &mut Vec<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::adapters::fs_state::FsStateStore;
+    use crate::adapters::spec_home::spec_file;
+    use crate::domain::STATE_FILE;
     use crate::domain::memory::MEMORY_VERSION;
+    use crate::domain::tdd::{TddPhase, TddSnapshot};
+    use crate::ports::StateStore;
 
     #[test]
     fn a_missing_file_loads_as_none() {
         let dir = tempfile::tempdir().unwrap();
         let store = FsMemoryStore::new(dir.path().to_path_buf());
         assert_eq!(store.load().unwrap(), None);
+    }
+
+    /// The two files share one pointer: a session the state store
+    /// opened is the one the memory store writes into, and the reverse.
+    #[test]
+    fn memory_follows_the_session_the_state_file_names() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        FsStateStore::new(root.clone())
+            .save(&TddSnapshot::at(TddPhase::Red))
+            .unwrap();
+        let state = fs::read_to_string(spec_file(&root, STATE_FILE)).unwrap();
+        let store = FsMemoryStore::new(root.clone());
+        assert_eq!(store.load().unwrap(), None, "no memory recorded yet");
+        store
+            .save(&ProjectMemory {
+                language: "Rust".into(),
+                ..Default::default()
+            })
+            .unwrap();
+        let memory = fs::read_to_string(spec_file(&root, MEMORY_FILE)).unwrap();
+        let pointer = |text: &str| {
+            text.lines()
+                .find(|line| line.contains("\"currentSession\""))
+                .map(str::to_string)
+        };
+        assert_eq!(pointer(&state), pointer(&memory), "{state}\n{memory}");
+        assert_eq!(store.load().unwrap().unwrap().language, "Rust");
+    }
+
+    #[test]
+    fn a_bound_store_keeps_to_its_own_session() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        let current = FsMemoryStore::new(root.clone());
+        current
+            .save(&ProjectMemory {
+                language: "Java".into(),
+                ..Default::default()
+            })
+            .unwrap();
+        let bound = FsMemoryStore::for_session(root, fresh_id());
+        assert_eq!(bound.load().unwrap(), None);
+        bound
+            .save(&ProjectMemory {
+                language: "Rust".into(),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(bound.load().unwrap().unwrap().language, "Rust");
+        assert_eq!(current.load().unwrap().unwrap().language, "Java");
+    }
+
+    #[test]
+    fn a_file_from_before_sessions_loads_as_it_was() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = spec_file(dir.path(), MEMORY_FILE);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(
+            &path,
+            r#"{"version":1,"language":"Rust","refreshedAt":"2026-01-01T00:00:00Z"}"#,
+        )
+        .unwrap();
+        let store = FsMemoryStore::new(dir.path().to_path_buf());
+        assert_eq!(store.load().unwrap().unwrap().language, "Rust");
     }
 
     #[test]

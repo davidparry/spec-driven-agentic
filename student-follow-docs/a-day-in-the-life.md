@@ -96,9 +96,9 @@ are one directory too high.
 Confirm the starting state:
 
 ```bash
-spec list       # 17 requirements, every one implemented
+spec list       # 18 requirements, every one implemented
 spec validate   # "The spec is valid."
-spec status     # Next id  HARNESS-019
+spec status     # Next id  HARNESS-020
 cargo test --manifest-path Cargo.toml --test spec_completeness
 ```
 
@@ -195,9 +195,9 @@ then walks you straight into a second wizard over what it just wrote:
 
 ```text
 Accepted requirements were written to requirements/requirements.json as pending:
-  HARNESS-019 Acceptance criteria of one requirement are each reported proven or unproven
-Walking through HARNESS-019. Each prompt shows the proposal - Enter accepts it, or type your own wording.
-HARNESS-019 title [Acceptance criteria of one requirement are …] (Enter keeps it):
+  HARNESS-020 Acceptance criteria of one requirement are each reported proven or unproven
+Walking through HARNESS-020. Each prompt shows the proposal - Enter accepts it, or type your own wording.
+HARNESS-020 title [Acceptance criteria of one requirement are …] (Enter keeps it):
 ```
 
 Title, then story, then each criterion, each with the model's proposal
@@ -207,18 +207,18 @@ happens, deliberately and with both reviews in front of you. Decline
 the wizard and nothing is lost either: the requirement is already in
 `requirements.json` under the model's wording.
 
-What lands there is `HARNESS-019`:
+What lands there is `HARNESS-020`:
 
 ```text
 {
-  "id": "HARNESS-019",
+  "id": "HARNESS-020",
   "title": "Each acceptance criterion gets a proven or unproven verdict",
   "written": true
 }
 ```
 
 **Nobody typed `HARNESS`.** The highest id in this catalog is
-`HARNESS-018`, so the next one is `HARNESS-019`: the prefix is read off
+`HARNESS-019`, so the next one is `HARNESS-020`: the prefix is read off
 the requirements already in the file, the number is `max + 1` across the
 whole merged catalog so two included files cannot collide, and the
 zero-padding matches the width that is already there. Run the same
@@ -238,7 +238,7 @@ Two different questions, two different tools:
 
 ```bash
 spec validate            # "The spec is valid."   — the shape is fine
-spec refine HARNESS-019  # "HARNESS-019 is clean." — no findings at all
+spec refine HARNESS-020  # "HARNESS-020 is clean." — no findings at all
 ```
 
 A green result, and it is the most interesting moment of the morning.
@@ -254,7 +254,7 @@ gate has done its work.
 The second review is a different model, answering one bounded question
 per criterion: could a test check this with a single unambiguous
 result? It writes no prose and returns a probability. The full record
-is in the JSON reply, so run `spec refine HARNESS-019 --json` and
+is in the JSON reply, so run `spec refine HARNESS-020 --json` and
 scroll up in it:
 
 ```text
@@ -302,7 +302,7 @@ argument above is unaffected, and it is the one that matters.
 Rewrite it so that every criterion **names the tool you are building**.
 The behaviour barely changes; the contract does.
 
-Run bare, `spec reword HARNESS-019` opens a wizard that asks for the
+Run bare, `spec reword HARNESS-020` opens a wizard that asks for the
 title, the story and then each criterion in turn, with a proposal
 already in the brackets. Here the flags are the better door: they skip
 the wizard, and `--criterion` **replaces** the criteria list, so the
@@ -310,7 +310,7 @@ four below are the four you end up with however many your draft had.
 This is the version the talk uses — one command:
 
 ```bash
-spec reword HARNESS-019 \
+spec reword HARNESS-020 \
   --title "Uncovered acceptance criteria are reported per requirement" \
   --story "As a developer closing out a requirement, I want each acceptance criterion reported as covered or uncovered by its scenarios and tests so that I can see what is still unproven before I mark the work implemented." \
   --criterion 'Given a requirement whose every criterion is matched by a tagged scenario and an asserting test, when the criteria_coverage MCP tool is called with its id, then the verdict is "covered"' \
@@ -325,7 +325,7 @@ with no flags and the wizard walks you through the same three fields.
 
 ```bash
 git diff requirements/    # read what you just changed
-spec refine HARNESS-019 --json   # clean again, and the judgments are worth a look
+spec refine HARNESS-020 --json   # clean again, and the judgments are worth a look
 ```
 
 Look hard at that last line. The rule set had nothing to say about the
@@ -340,18 +340,18 @@ for your judgment.
 
 ### The review that is not a rule
 
-Run `spec refine HARNESS-019` again on your reworded version, this
+Run `spec refine HARNESS-020` again on your reworded version, this
 time *without* `--json`, and the second review lays out what it made
 of each criterion:
 
 ```text
-HARNESS-019 is clean.
+HARNESS-020 is clean.
 
 A second review (CRITERION_MEASURABLE, measurable/v2) judged 4 criteria:
-  HARNESS-019 acceptance criterion 1  INCONCLUSIVE  probability of true 0.211
-  HARNESS-019 acceptance criterion 2  INCONCLUSIVE  probability of true 0.583
-  HARNESS-019 acceptance criterion 3  HOLDS         probability of true 0.985
-  HARNESS-019 acceptance criterion 4  INCONCLUSIVE  probability of true 0.315
+  HARNESS-020 acceptance criterion 1  INCONCLUSIVE  probability of true 0.211
+  HARNESS-020 acceptance criterion 2  INCONCLUSIVE  probability of true 0.583
+  HARNESS-020 acceptance criterion 3  HOLDS         probability of true 0.985
+  HARNESS-020 acceptance criterion 4  INCONCLUSIVE  probability of true 0.315
 
 Judgment: CONTINUE - advisory mode, so nothing here blocks
 ```
@@ -552,8 +552,8 @@ answers, so the next command reads it straight away:
 
 ```bash
 spec feature create --path tests/features/tool_coverage.feature --name "Criteria coverage"
-spec scenario generate HARNESS-019 --feature tests/features/tool_coverage.feature
-spec unittest generate HARNESS-019
+spec scenario generate HARNESS-020 --feature tests/features/tool_coverage.feature
+spec unittest generate HARNESS-020
 git status            # two new files - git diff cannot show those yet
 git diff              # requirements.json, from 9:20
 spec steps missing
@@ -602,7 +602,7 @@ you have already written, step by step; `generate` is the one that reads
 the acceptance criteria and derives the scenarios from them.
 
 The scenarios are derived from the acceptance criteria and tagged
-`@HARNESS-019`. Nobody re-typed the requirement into a test, which is
+`@HARNESS-020`. Nobody re-typed the requirement into a test, which is
 exactly how a spec and a suite stop disagreeing.
 
 ## 10:00 — red
@@ -641,7 +641,7 @@ Refused: `Never refactor on a red bar`. That is a state machine in
 ## 10:15 — write the code
 
 ```bash
-spec implement HARNESS-019
+spec implement HARNESS-020
 git diff       # read the model's code before you trust the bar
 spec test      # RED on the tool count - 10:50 is about that
 ```
@@ -650,7 +650,7 @@ spec test      # RED on the tool count - 10:50 is about that
 right: the tool you just added moved the served count from 22 to 23,
 and three Rust tests pin 22. That is the failure 10:50 is built around,
 so a RED whose only failures name a tool count is the bar you want. A
-RED that also names your `@HARNESS-019` scenarios is a different thing:
+RED that also names your `@HARNESS-020` scenarios is a different thing:
 a measured run's Gherkin reused two existing steps with the wrong
 shape (`the requirement has criterion` with no requirement before it,
 `with arg "REQ-999"` where the step wants `id=REQ-999`), and no amount
@@ -690,14 +690,14 @@ not yours. Check this line every time, and when it names the wrong
 file, say so:
 
 ```bash
-spec implement HARNESS-019 --into src/mcp.rs
+spec implement HARNESS-020 --into src/mcp.rs
 ```
 
 That is cheaper than finding out an hour later, and it is the same
 flag the refusal below asks for.
 
 **If it refuses instead**, saying it cannot tell which production file
-`HARNESS-019` belongs in, the inference worked correctly and found
+`HARNESS-020` belongs in, the inference worked correctly and found
 nothing to go on. That happens when every step your scenarios bind to
 is still a `todo!()` stub: a pending step names no production code, so
 there is nothing pointing anywhere. Two independent names are needed
@@ -706,7 +706,7 @@ not enough. Either write a step body or two against the real types, or
 name the file yourself:
 
 ```bash
-spec implement HARNESS-019 --into src/mcp.rs
+spec implement HARNESS-020 --into src/mcp.rs
 ```
 
 Refusing is the point. A guess here writes a morning's work into an
@@ -865,14 +865,14 @@ to "what does one more tool cost".
 ## 11:05 — close it out
 
 ```bash
-spec mark-implemented HARNESS-019
+spec mark-implemented HARNESS-020
 cargo test --manifest-path Cargo.toml --test spec_completeness
 ```
 
 `mark-implemented` is gated twice: the bar must be GREEN, and a scenario
 must carry the requirement's tag. The drift gate is scoped to implemented
-requirements, so it now covers 18 instead of 17 — and because
-`HARNESS-019` is one of them, its wording is checked on every build from
+requirements, so it now covers 19 instead of 18 — and because
+`HARNESS-020` is one of them, its wording is checked on every build from
 here on.
 
 ## 11:10 — the same morning, with nobody driving
@@ -983,7 +983,7 @@ everything except the one decision nothing is checking.
 ## 11:15 — let the morning grade itself
 
 ```bash
-spec mcp call criteria_coverage --arg id=HARNESS-019
+spec mcp call criteria_coverage --arg id=HARNESS-020
 ```
 
 ```json
@@ -1036,7 +1036,7 @@ Three callers are worth it, for different reasons:
 | --- | --- | --- |
 | `implement-advice` | `spec implement` preflight | The preflight's whole job is saying whether `implement` can succeed. A criterion with no asserting test is exactly a reason it cannot — going green would be a false green. |
 | `status` | `spec status` | The `next_step` prompt already renders per-requirement *gaps*. An uncovered criterion is the gap that decides between `spec unittest generate` and `spec implement`. |
-| `ask` | `spec ask` | The read-only catch-all already holds every other non-mutating reader, so `spec ask "is HARNESS-019 covered?"` currently has to guess. |
+| `ask` | `spec ask` | The read-only catch-all already holds every other non-mutating reader, so `spec ask "is HARNESS-020 covered?"` currently has to guess. |
 
 Three callers are worth *skipping*, and the reasons are more interesting
 than the ones above:
@@ -1082,7 +1082,7 @@ places, in descending order of value:
 This is the command you are being asked to build, not one to run:
 
 ```text
-spec coverage HARNESS-019      # does not exist yet
+spec coverage HARNESS-020      # does not exist yet
 ```
 
 A new arm on `Command` in `harness/src/main.rs`, an application service
@@ -1173,14 +1173,14 @@ cargo install --path . --force
 # 4. confirm you are back at the start
 git status --short          # clean
 cd harness
-spec list                   # 17 requirements, every one implemented
-spec status                 # Next id  HARNESS-019
+spec list                   # 18 requirements, every one implemented
+spec status                 # Next id  HARNESS-020
 ```
 
 The check that matters is **0 pending**. If something is pending, the
 requirement you drafted at 9:00 survived — you are still on
 `my-morning`, or you did the morning on `trunk`. If `nextId` has moved
-past `HARNESS-019`, a previous run's draft was committed;
+past `HARNESS-020`, a previous run's draft was committed;
 `git checkout trunk -- harness/requirements/` puts it back.
 
 ## Where to go next

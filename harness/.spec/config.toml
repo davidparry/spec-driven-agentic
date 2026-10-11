@@ -28,7 +28,7 @@ timeout_seconds = 3600
 cache_ttl_seconds = 86400
 # How many times to try a model call when the reply fails validation;
 # each retry includes the invalid reply. `--retry` wins for one run.
-retry = 3
+retry = 15
 
 # Every budget and timeout a command reads is written below with the
 # value in use, so what each command does is on the page rather than

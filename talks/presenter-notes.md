@@ -25,8 +25,8 @@ git switch -c talk-$(date +%Y%m%d)         # never demo on trunk
 scripts/preflight.sh                       # model, binary, toolchains
 cd harness                                 # everything after this runs from here
 spec validate                              # must be valid: true
-spec list                                  # 17 requirements, 0 pending
-spec status                                # nextId: HARNESS-019
+spec list                                  # 18 requirements, 0 pending
+spec status                                # nextId: HARNESS-020
 cargo test --manifest-path Cargo.toml --test spec_completeness
 mvn -f ../smoke-test/pom.xml test -Dspec.binary=$(which spec)
 ```
@@ -44,9 +44,9 @@ requirement, a previous talk was not reset — see the reset section.
 
 **`spec status` tells you the id before you draft it.** Read `nextId`
 during preflight and use that number in your patter. It is derived from
-the catalog, so if the room sees `HARNESS-019` appear, it is because
-`HARNESS-018` is the highest id in the file, not because you typed it.
-If preflight says something other than `HARNESS-019`, the catalog has
+the catalog, so if the room sees `HARNESS-020` appear, it is because
+`HARNESS-019` is the highest id in the file, not because you typed it.
+If preflight says something other than `HARNESS-020`, the catalog has
 moved on since these notes were written — use what it says, the beat is
 identical.
 
@@ -57,7 +57,7 @@ server grows a tool the plan does not name, and the best beat in the
 talk does not fire. Verified: the planned set green, one tool past it
 `BUILD FAILURE`.
 
-The starting state is: 17 implemented requirements, nothing pending,
+The starting state is: 18 implemented requirements, nothing pending,
 exactly the planned tools served, every bar green. If `spec_completeness`
 is red before you start, the catalog and the feature tags have drifted —
 fix that, do not demo around it.
@@ -156,10 +156,10 @@ discarded, unbuilt, and that is you deciding scope rather than the
 machine deciding it for you. Say that out loud — it is the first of the
 morning's human moments and the cheapest to miss.
 
-What stages is `HARNESS-019`.
+What stages is `HARNESS-020`.
 
 **Stop on the id.** Nobody typed `HARNESS`. The catalog's highest id is
-`HARNESS-018`, so the next one is `HARNESS-019` — the prefix is read off
+`HARNESS-019`, so the next one is `HARNESS-020` — the prefix is read off
 the neighbours, the number is `max + 1` across the merged catalog, and
 the padding matches what is already there. Point out that the same
 binary drafting into `requirements/` at the repo root would have said
@@ -181,7 +181,7 @@ context rather than being told it.
 
 ```bash
 spec validate            # valid: true
-spec refine HARNESS-019  # clean: true, judgmentAction: CONTINUE
+spec refine HARNESS-020  # clean: true, judgmentAction: CONTINUE
 ```
 
 **This is not the beat the old version of this talk had, and it is a
@@ -266,9 +266,9 @@ model's own wording and got back a plain `requirement_coverage()`
 function, green on every criterion and no use at all to the 10:50 beat.
 
 ```bash
-spec reword HARNESS-019
+spec reword HARNESS-020
 git diff requirements/  # read the edit out loud
-spec refine HARNESS-019 # clean, same as before the edit
+spec refine HARNESS-020 # clean, same as before the edit
 ```
 
 Point at that last line. `refine` said `clean` before the reword and
@@ -356,7 +356,7 @@ say it on purpose rather than discovering it.
 
 ```bash
 spec feature create --path tests/features/tool_coverage.feature --name "Criteria coverage"
-spec scenario generate HARNESS-019 --feature tests/features/tool_coverage.feature
+spec scenario generate HARNESS-020 --feature tests/features/tool_coverage.feature
 git diff tests/features/
 ```
 
@@ -372,7 +372,7 @@ model call. Have something to say while it runs: this is the natural
 place for the "who wrote the test" argument.
 
 Four scenarios come back, written **from the acceptance criteria** and
-tagged `@HARNESS-019` — one per criterion. Nobody re-typed the
+tagged `@HARNESS-020` — one per criterion. Nobody re-typed the
 requirement into a test.
 
 > **Deliver parity, and a real divergence.** This is `deliver`'s
@@ -394,7 +394,7 @@ scenarios are not what you meant.
 ## 9:50 — the unit test
 
 ```bash
-spec unittest generate HARNESS-019
+spec unittest generate HARNESS-020
 git diff
 spec steps missing
 ```
@@ -454,7 +454,7 @@ talk its way past it.
 ## 10:15 — the developer agent writes the code
 
 ```bash
-spec implement HARNESS-019
+spec implement HARNESS-020
 ```
 
 What it is allowed to touch: no shell, no free-hand write. It writes
@@ -476,7 +476,7 @@ cannot decide it. Recover by naming the file yourself and carry on —
 the refusal is a better story than a lucky guess:
 
 ```bash
-spec implement HARNESS-019 --into src/mcp.rs
+spec implement HARNESS-020 --into src/mcp.rs
 ```
 
 ### Do not run this live without a rehearsed result in the cache
@@ -563,7 +563,7 @@ commands, a different prefix — read, not configured.
 ## 11:05 — close it out
 
 ```bash
-spec mark-implemented HARNESS-019
+spec mark-implemented HARNESS-020
 ```
 
 Gated twice: GREEN, plus a scenario carrying the tag. Then:
@@ -572,7 +572,7 @@ Gated twice: GREEN, plus a scenario carrying the tag. Then:
 cargo test --manifest-path Cargo.toml --test spec_completeness
 ```
 
-The drift gate now covers 18 requirements, and HARNESS-019's wording is
+The drift gate now covers 19 requirements, and HARNESS-020's wording is
 checked because it is implemented.
 
 > **Deliver parity.** `mark_implemented`, the last stage, behind the
@@ -686,7 +686,7 @@ the one decision no machine is checking.*
 Run the tool you just built, on the requirement you just wrote:
 
 ```bash
-spec mcp call criteria_coverage --arg id=HARNESS-019
+spec mcp call criteria_coverage --arg id=HARNESS-020
 ```
 
 Every acceptance criterion written at 9:10 has an asserting test. The
@@ -798,12 +798,12 @@ Confirm you are back at the starting state:
 git status --short                   # clean
 cd harness
 spec mcp tools | wc -l               # the planned count, not one more
-spec list                            # 17 requirements, 0 pending
-spec status                          # nextId: HARNESS-019
+spec list                            # 18 requirements, 0 pending
+spec status                          # nextId: HARNESS-020
 mvn -f ../smoke-test/pom.xml test -Dspec.binary=$(which spec)   # green
 ```
 
-The check that matters is **`0 pending` and `nextId: HARNESS-019`**. If
+The check that matters is **`0 pending` and `nextId: HARNESS-020`**. If
 anything is pending, the drafted requirement survived the reset and the
 9:00 beat is dead — you are still on the talk branch, or you gave the
 talk on `trunk`. If `nextId` has moved past 018, a previous run's

@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "searchindex-7d12d21a.js";
+            window.path_to_searchindex_js = "searchindex-cd45a071.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-8557ae39.js"></script>
@@ -498,6 +498,17 @@ there to answer.</p>
 <pre><code class="language-bash">spec --no-branch deliver "sum comma-separated numbers"
 </code></pre>
 <p>Every other command ignores the flag, because no other command asks.</p>
+<h2 id="--session-guid"><a class="header" href="#--session-guid"><code>--session &lt;GUID&gt;</code></a></h2>
+<p>Resume the <a href="#sessions">session</a> with this id - one
+from the list the shell prints at start. TDD state and project memory
+are kept per session; without the flag, bare <code>spec</code> begins a new
+session and every one-shot command continues the current one.</p>
+<pre><code class="language-bash">spec --session ffca332f-4258-4c98-a8a7-ce1c180c03e3          # resume it in the shell
+spec --session ffca332f-4258-4c98-a8a7-ce1c180c03e3 state    # read its phase, one shot
+</code></pre>
+<p>Text that is not a GUID, or a GUID the project has no record of, is
+refused before anything is written, naming the sessions that are on
+record.</p>
 <h2 id="-v---version"><a class="header" href="#-v---version"><code>-V</code>, <code>--version</code></a></h2>
 <p>Prints the version compiled into the binary (from <code>Cargo.toml</code> at
 build time).</p>
@@ -545,9 +556,17 @@ model-required operation, unparseable arguments, and similar.</li>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="the-interactive-shell"><a class="header" href="#the-interactive-shell">The interactive shell</a></h1>
 <p>Running <code>spec</code> with no subcommand in a terminal opens a REPL. It prints
-the help once, shows the banner and the session’s model status, and
-then reads commands until you leave.</p>
-<pre><code class="language-text">spec&gt; list
+the help once, shows the banner, opens the session and lists the ones
+on record, shows the session’s model status, and then reads commands
+until you leave.</p>
+<pre><code class="language-text">Session 20bd0242-eae5-4edc-8b25-0c954a5c3b3f (new).
+Sessions on record (2):
+* 20bd0242-eae5-4edc-8b25-0c954a5c3b3f  started 2026-10-11T20:31:24Z  active 2026-10-11T20:31:24Z  START
+  ffca332f-4258-4c98-a8a7-ce1c180c03e3  started 2026-10-11T20:31:14Z  active 2026-10-11T20:31:14Z  GREEN  Rust
+Resume one with: spec --session &lt;id&gt;
+Inference model set: qwen3.8-flash-next:125b-mlx (from configuration).
+Decision model set: nimble (from configuration).
+spec&gt; list
 [
   { "id": "REQ-001", "title": "Empty string returns zero", "status": "implemented" }
 ]
@@ -567,15 +586,29 @@ is forgiven if you type it anyway.</li>
 # and retries invalid model replies up to 5 times
 </code></pre>
 <ul>
-<li><strong>Quoting works.</strong> Lines are tokenized with shell rules, so
+<li>
+<p><strong>Inherited session.</strong> Every command typed into the shell acts on
+the session the shell opened (see <a href="#sessions">Sessions</a> below). A
+line carrying <code>--session &lt;guid&gt;</code> switches the shell to that session
+first and prints the session line again.</p>
+</li>
+<li>
+<p><strong>Quoting works.</strong> Lines are tokenized with shell rules, so
 <code>scenario add --step "Given a calculator"</code> behaves as expected.
-Unbalanced quotes report <code>unreadable input</code> and the shell continues.</li>
-<li><strong>Errors don’t kill the shell.</strong> A failing command prints its error
-and returns to the prompt.</li>
-<li><strong>Blank lines</strong> are ignored.</li>
-<li><strong>After <code>greenfield</code>.</strong> A one-shot <code>spec greenfield</code> that finishes on
+Unbalanced quotes report <code>unreadable input</code> and the shell continues.</p>
+</li>
+<li>
+<p><strong>Errors don’t kill the shell.</strong> A failing command prints its error
+and returns to the prompt.</p>
+</li>
+<li>
+<p><strong>Blank lines</strong> are ignored.</p>
+</li>
+<li>
+<p><strong>After <code>greenfield</code>.</strong> A one-shot <code>spec greenfield</code> that finishes on
 a real terminal stays in this shell (the <code>spec&gt;</code> prompt) so you can
-run <code>list</code>, <code>greenfield</code>, or anything else without relaunching.</li>
+run <code>list</code>, <code>greenfield</code>, or anything else without relaunching.</p>
+</li>
 </ul>
 <h2 id="leaving"><a class="header" href="#leaving">Leaving</a></h2>
 <ul>
@@ -584,6 +617,38 @@ run <code>list</code>, <code>greenfield</code>, or anything else without relaunc
 <li><kbd>Ctrl</kbd>+<kbd>D</kbd> (end of input)</li>
 </ul>
 <p>On exit the shell prints a summary of how many commands ran.</p>
+<h2 id="sessions"><a class="header" href="#sessions">Sessions</a></h2>
+<p>Every shell runs in a <strong>session</strong> named by a GUID. The TDD phase log in
+<code>.spec/state.json</code> and the project memory in <code>.spec/memory.json</code> are
+kept per session, under <code>sessions</code> keyed by that GUID, and each file’s
+<code>currentSession</code> names the one commands act on.</p>
+<p>Bare <code>spec</code> begins a new session. Its phase log starts empty at START;
+its memory is seeded from the previous current session, so a language,
+module root, or layout already settled is not asked for again. The
+first line after the banner names it:</p>
+<pre><code class="language-text">Session 20bd0242-eae5-4edc-8b25-0c954a5c3b3f (new).
+</code></pre>
+<p><code>spec --session &lt;guid&gt;</code> resumes a recorded session instead, and the
+line says what you are picking up:</p>
+<pre><code class="language-text">Session ffca332f-4258-4c98-a8a7-ce1c180c03e3 (resumed - GREEN, last active 2026-10-11T20:31:14Z).
+</code></pre>
+<p>Either way, the lines after it list every session the project has on
+record, newest activity first, the current one marked <code>*</code>, each with
+when it started, when it was last active, its phase, and the language
+its memory holds. It is a list to read, not a menu: nothing is asked,
+and the resume command is printed under it so an id can be copied into
+the next launch.</p>
+<p>A <code>--session</code> value that is not a GUID, or a GUID neither file knows,
+is refused before anything is written:</p>
+<pre><code class="language-text">error: "not-a-guid" is not a GUID - a session id looks like 6f1c2d3e-4b5a-4c6d-8e9f-0a1b2c3d4e5f.
+error: No session 6f1c2d3e-... is on record in .spec/state.json or .spec/memory.json. Known sessions: 20bd0242-..., ffca332f-.... Start without --session to begin a new one.
+</code></pre>
+<p>One-shot commands (<code>spec state</code>, <code>spec test</code>, <code>spec mcp serve</code>, …)
+continue the current session without the flag - a shell and a hook
+running beside it see the same phase - and <code>spec --session &lt;guid&gt; state</code>
+switches to another one quietly. A <code>state.json</code> or <code>memory.json</code>
+written before sessions existed is adopted as one session, the current
+one, on the first read; nothing is lost.</p>
 <h2 id="session-history"><a class="header" href="#session-history">Session history</a></h2>
 <p>Line history is kept across sessions in <code>.spec/history</code>. Use
 <kbd>↑</kbd>/<kbd>↓</kbd> to recall previous
@@ -831,6 +896,7 @@ test runner executes.</p>
 <tr><td><code>story</code></td><td>yes</td><td>The user story, <code>As a …, I want … so that …</code>. <code>spec refine</code> reviews it for a missing actor, missing benefit, and ambiguous words.</td></tr>
 <tr><td><code>acceptanceCriteria</code></td><td>at least one</td><td>Each criterion must be phrased Given/When/Then. This is the load-bearing field: agents translate these lines into the Gherkin scenarios and unit tests you then implement.</td></tr>
 <tr><td><code>featureFile</code></td><td>when implemented</td><td>Repo-root-relative path to the feature file carrying the scenario. Optional while <code>pending</code>; once <code>implemented</code>, validation requires the file to exist <em>and</em> to contain a scenario tagged <code>@&lt;id&gt;</code>. <code>spec mark-implemented</code> records it automatically.</td></tr>
+<tr><td><code>productionFiles</code></td><td>no</td><td>Where this requirement’s production code lives, as an array — one requirement’s code is not always one file. Declared with <a href="#spec-set-production"><code>spec set-production</code></a> and added to by a delivery recording what it wrote. When absent, <code>spec implement</code> infers a conventional path from <code>project</code> instead.</td></tr>
 </tbody>
 </table>
 </div>
@@ -864,9 +930,9 @@ files fails validation naming the file that declared it first.</li>
 including a file twice, including a file that does not exist, or
 escaping the spec directory each report a single actionable issue.</li>
 <li><strong>Mutations write back to the declaring file.</strong> <code>spec reword</code>,
-<code>set-feature</code>, and <code>mark-implemented</code> find the file a requirement
-lives in and stage only that file. <code>spec draft</code> appends to the
-root by default, or to a chosen file with <code>--file</code>.</li>
+<code>set-feature</code>, <code>set-production</code>, and <code>mark-implemented</code> find the file
+a requirement lives in and stage only that file. <code>spec draft</code> appends
+to the root by default, or to a chosen file with <code>--file</code>.</li>
 </ul>
 <h3 id="growing-the-catalog"><a class="header" href="#growing-the-catalog">Growing the catalog</a></h3>
 <pre><code class="language-bash"># Write a new (empty) spec file and the include entry on the root:
@@ -1169,8 +1235,8 @@ there.</p>
 <tbody>
 <tr><td><code>--root &lt;ROOT&gt;</code></td><td>Project root. Defaults to the nearest enclosing project, <a href="#discovery-what-happens-when-you-say-nothing">searching upward</a> from the working directory.</td></tr>
 <tr><td><code>--model &lt;MODEL&gt;</code></td><td>LLM model for the generation steps, this run only.</td></tr>
-<tr><td><code>--retry &lt;N&gt;</code></td><td>Max attempts when a model reply fails validation. Default 3.</td></tr>
-<tr><td><code>--attempts &lt;N&gt;</code></td><td>RED-to-GREEN rounds per requirement. Default 3.</td></tr>
+<tr><td><code>--retry &lt;N&gt;</code></td><td>Max attempts when a model reply fails validation, this run only. Otherwise <code>[llm] retry</code> in <code>.spec/config.toml</code>, default 3.</td></tr>
+<tr><td><code>--attempts &lt;N&gt;</code></td><td>RED-to-GREEN rounds per requirement, this run only. Otherwise <code>[deliver] attempts</code> in <code>.spec/config.toml</code>, default 3.</td></tr>
 <tr><td><code>--fail-fast</code></td><td>Stop at the first requirement that falls short instead of carrying on.</td></tr>
 <tr><td><code>--no-refactor</code></td><td>Skip the refactor step even on a green bar.</td></tr>
 <tr><td><code>--file &lt;FILE&gt;</code></td><td>Draft new requirements into this included spec file. Omitted, the drafted requirement lands in the catalog document covering the working directory — see <a href="#spec-draft"><code>spec draft</code></a>.</td></tr>
@@ -1231,7 +1297,8 @@ the work back rather than walking you through wording it — that is what
 <pre><code class="language-text">1. scenario            Gherkin scenario tagged @REQ-...
 2. steps               step definitions for every undefined step
 3. test → RED          the scenario fails honestly
-4. implement           the model attempts, up to --attempts times
+4. implement           the model attempts, up to --attempts times:
+                       production code, then the pending step bodies
 5. test → GREEN
 6. refactor            optional; only on GREEN, and only with a model
 7. mark implemented    status flipped, validated, committed, read back
@@ -1253,11 +1320,56 @@ Running the tests - working ...
 <p>A step that loops on its own is called once and its loop is trusted:
 drafting’s validate-and-reword rounds, <code>spec implement</code>’s attempts,
 and <code>spec refactor</code>’s rounds are not wrapped in a second loop here.</p>
+<p>Each implementation attempt is two model calls, the same two
+<a href="#the-step-bodies-are-a-second-pass"><code>spec implement</code></a>
+makes: the production code and the unit test as whole files, then the
+step definitions this requirement’s scenarios still run through as
+placeholders, as a fragment of their own. The second is what turns a
+RED bar that reads only <code>Given …: FAILED</code> green: the step-definition
+file is shared by every requirement and is never asked for whole, so
+without it an attempt could write perfect production code and leave
+the bar exactly where it was - measured three runs in a row on this
+repository. A fill reply the pass cannot use is said and the stubs
+stand; the attempt is not lost over it.</p>
+<h2 id="what-the-decision-model-is-asked-along-the-way"><a class="header" href="#what-the-decision-model-is-asked-along-the-way">What the decision model is asked along the way</a></h2>
+<p>With a <a href="#spec-judge">decision model</a> configured, every generating stage
+puts the writing model’s reply to the same bounded question the
+hand-run command would. The gate and the stage that asks it:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Stage</th><th>Gate</th><th>The question</th></tr>
+</thead>
+<tbody>
+<tr><td><code>author_steps</code></td><td><code>STEPS_BIND_SCENARIO</code></td><td>would this step expression match that step line?</td></tr>
+<tr><td><code>drive_to_green</code></td><td><code>UNIT_TEST_ASSERTS</code></td><td>does this test body assert the criterion, or pass regardless?</td></tr>
+<tr><td><code>drive_to_green</code></td><td><code>IMPLEMENTATION_COMPLETE</code></td><td>how completely does this code implement its criterion - stub, partial, complete?</td></tr>
+<tr><td><code>refactor</code></td><td><code>REFACTOR_PRESERVES_BEHAVIOUR</code></td><td>did this refactoring leave behaviour alone?</td></tr>
+</tbody>
+</table>
+</div>
+<p><code>author_scenarios</code> is deterministic and asks nothing;
+<code>SCENARIO_EXERCISES_CRITERION</code> is the hand-run <code>spec scenario generate</code>’s gate. All four ship at <code>advisory</code>, where a verdict is
+recorded and changes nothing, and that ceiling holds whatever <code>[decision] mode</code> says until a project raises a gate by name:</p>
+<pre><code class="language-toml">[decision.gates.UNIT_TEST_ASSERTS]
+mode = "enforce"
+</code></pre>
+<p>Under <code>enforce</code> a <code>FAILS</code> becomes a <code>REWORK</code>: the writing model is
+re-asked with the finding as the complaint, riding the same retry a
+malformed reply gets, and nothing else changes. A judgment can never
+approve anything - a reply that holds every gate still has to compile
+and go green. Each judgment is printed as a <code>second review</code> block as the
+stage finishes and rides in the final JSON under <code>judgments</code>, one entry
+per requirement per stage, so a run nobody watched can be read back.
+With no decision model configured none of this happens and the report
+carries no <code>judgments</code> key. A gate that has a judge and nothing to put
+to it - a reply whose expressions do not pair with the missing steps -
+says so in <code>.spec/log</code> and records nothing.</p>
 <h2 id="--judge-draft-the-decision-model-during-drafting"><a class="header" href="#--judge-draft-the-decision-model-during-drafting"><code>--judge-draft</code>: the decision model during drafting</a></h2>
 <p>Delivering a description rather than an id means the spec is written by
 a model with nobody reading it. <code>--judge-draft</code> puts the
-<a href="#spec-judge">decision model</a> in that loop — the only place in the harness
-its answer is used as <strong>feedback rather than a gate</strong>.</p>
+decision model in that loop too — the one place in the harness its
+answer is used as <strong>feedback rather than a gate</strong>.</p>
 <p>With the flag, a proposal that clears the deterministic edge-case rule
 has each of its criteria put to the question <code>measurable/v2</code>. Anything
 the model cannot read as an assertion comes back as a rejection reason,
@@ -1643,7 +1755,8 @@ merged view of the whole tree.</p>
 <pre><code class="language-text">spec list             spec refine &lt;REQ_ID&gt;
 spec show &lt;REQ_ID&gt;    spec reword &lt;REQ_ID&gt;
 spec draft            spec set-feature &lt;REQ_ID&gt; --file &lt;FILE&gt;
-spec validate         spec mark-implemented &lt;REQ_ID&gt;
+spec validate         spec set-production &lt;REQ_ID&gt; --file &lt;FILE&gt;
+                      spec mark-implemented &lt;REQ_ID&gt;
                       spec include add &lt;PATH&gt;
 </code></pre>
 <p>MCP tool equivalents: <code>list_requirements</code>, <code>get_requirement</code>,
@@ -1741,7 +1854,7 @@ the widest numeric part already in use, with a minimum of three digits.</p>
 </thead>
 <tbody>
 <tr><td><code>REQ-001</code> … <code>REQ-006</code></td><td><code>REQ-007</code></td></tr>
-<tr><td><code>HARNESS-001</code> … <code>HARNESS-018</code></td><td><code>HARNESS-019</code></td></tr>
+<tr><td><code>HARNESS-001</code> … <code>HARNESS-019</code></td><td><code>HARNESS-020</code></td></tr>
 <tr><td><code>REQ-0007</code></td><td><code>REQ-0008</code></td></tr>
 <tr><td>none at all</td><td><code>REQ-001</code></td></tr>
 </tbody>
@@ -1945,6 +2058,27 @@ on an extracted project. <code>spec scenario add</code> already updates
 <pre><code class="language-bash">spec set-feature REQ-003 --file src/test/resources/features/string_calculator.feature
 </code></pre>
 <hr>
+<h2 id="spec-set-production"><a class="header" href="#spec-set-production">spec set-production</a></h2>
+<p>Declare where a requirement’s production code lives. Without it,
+<code>spec implement</code> infers a conventional path from the project name —
+right for a kata, wrong for anything with a package layout of its own,
+and wrong every time for a requirement whose code is more than one
+file.</p>
+<pre><code class="language-text">Usage: spec set-production [OPTIONS] &lt;REQ_ID&gt; --file &lt;FILE&gt;
+</code></pre>
+<p>Repeat <code>--file</code> for each file; the list replaces whatever was declared
+before, so naming one file after naming two means the second is no
+longer part of this requirement.</p>
+<pre><code class="language-bash">spec set-production REQ-003 \
+  --file src/main/java/com/example/StringCalculator.java \
+  --file src/main/java/com/example/DelimiterParser.java
+</code></pre>
+<p>A delivery records what it actually wrote here too, adding to the list
+rather than replacing it — so the second attempt at a requirement is
+briefed with the files the first one touched instead of guessing again.
+Paths are project-relative; one that could reach outside the project
+root is refused by either route.</p>
+<hr>
 <h2 id="spec-mark-implemented"><a class="header" href="#spec-mark-implemented">spec mark-implemented</a></h2>
 <p>Flip a requirement’s status to <code>implemented</code> and record its
 <code>featureFile</code> — the feature carrying the <code>@REQ-...</code> tag — in the same
@@ -2050,6 +2184,12 @@ tells you up front what will run and what will refuse.</p>
       "runtimeVersion": "cargo 1.97.0"
     }
   ],
+  "layout": {
+    "production": "src",
+    "tests": "tests",
+    "features": "tests/features",
+    "stepDefinitions": "tests/steps/generated.rs"
+  },
   "nextStep": "The runtime is present. 'spec test' will execute the suite."
 }
 </code></pre>
@@ -2069,6 +2209,29 @@ tells you up front what will run and what will refuse.</p>
 </code></pre>
 <p>An empty directory reports no languages and points you at
 <a href="#spec-init"><code>spec init</code></a>.</p>
+<h2 id="layout"><a class="header" href="#layout">Layout</a></h2>
+<p><code>layout</code> is where this project keeps its code, as the resolver settled
+it and as <code>.spec/memory.json</code> records it — not a convention guessed per
+language. Every path the harness writes comes from here, so it is also
+the answer to “where do I put this?”: a feature file created anywhere
+else is one the harness will not read back.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>What it names</th></tr>
+</thead>
+<tbody>
+<tr><td><code>moduleRoot</code></td><td>The directory whose build file the test runner is pointed at. Absent when that is the project root.</td></tr>
+<tr><td><code>production</code></td><td>The production source root.</td></tr>
+<tr><td><code>tests</code></td><td>The test source root.</td></tr>
+<tr><td><code>features</code></td><td>Where <code>.feature</code> files live — <code>tests/features</code> for Rust, <code>src/test/resources/features</code> for Maven, <code>features</code> elsewhere.</td></tr>
+<tr><td><code>stepDefinitions</code></td><td>The file generated step definitions are appended to.</td></tr>
+</tbody>
+</table>
+</div>
+<p>A field is absent when the layout has not been resolved yet, which is
+the honest answer: a path in this reply is one the harness will
+actually read back.</p>
 <h2 id="project-memory"><a class="header" href="#project-memory">Project memory</a></h2>
 <p>Session start (<code>spec</code> shell, <code>spec mcp serve</code>), <a href="#spec-init"><code>spec init</code></a>,
 <a href="#spec-greenfield"><code>spec greenfield</code></a>, and every LLM command refresh
@@ -2607,6 +2770,23 @@ truncated or junk reply rather than a wrong one — the test run is what
 decides whether an attempt is any good, and it never gets to run when
 the reply deletes the code the tests were going to call. The refusal
 is per file, so the rest of an otherwise fine attempt is still written.</p>
+<h3 id="the-step-bodies-are-a-second-pass"><a class="header" href="#the-step-bodies-are-a-second-pass">The step bodies are a second pass</a></h3>
+<p>One file is never asked for whole: the step-definition file. It is
+shared by every requirement and is the largest file in a project that
+has been at this for a while, and a model asked to return it complete
+returns the production file instead - measured three runs in a row on
+this repository’s own 5,600-line <code>tests/cucumber.rs</code>, with the bar RED
+on three <code>todo!()</code> bodies at the end of every one.</p>
+<p>So after the reply above is written, the step definitions this
+requirement’s scenarios run through that still carry a generated
+placeholder (<code>todo!</code>, <code>PendingException</code>, <code>'pending'</code>) go to the model
+on their own: just those definitions, the head of their file (imports,
+the world type, fixtures) for reading, and the production code they
+should call. Exactly those definitions come back and are spliced in
+where they were; nothing else in the file is retyped. The reply is
+refused, and the stubs left as they were, if it keeps a placeholder,
+drops a step expression, or brings a class or struct of its own.
+Printed as <code>wrote: &lt;file&gt; (N pending step bodies, llm)</code>; <code>spec deliver</code> does the same inside every attempt.</p>
 <h2 id="where-the-work-lands"><a class="header" href="#where-the-work-lands">Where the work lands</a></h2>
 <p>The production file is resolved in this order, and the first answer
 wins:</p>
@@ -2842,7 +3022,10 @@ it never changes anything.</p>
 </tbody>
 </table>
 </div>
-<p>Otherwise only the <a href="#global-flags">global flags</a> (<code>--root</code>, <code>--model</code>).</p>
+<p>Otherwise only the <a href="#global-flags">global flags</a> (<code>--root</code>,
+<code>--model</code>, <code>--session</code>). Without <code>--session</code> the phase shown is the
+current session’s; <code>spec --session &lt;guid&gt; state</code> switches to that
+session and shows its phase.</p>
 <p>On a terminal this prints the phase, the last run’s counts, the
 refactor log, and the recent entries. <code>instructions</code> is left out
 there: it is guidance written to brief a model, and <code>spec state</code> is
@@ -2887,13 +3070,33 @@ the command you run to find out what phase you are in. A pipe and
 <p>Before any test has ever run, the phase is the starting state and
 <code>lastRun</code> is all zeros; <code>nextStep</code> points you at <code>spec test</code>.</p>
 <h2 id="where-the-state-lives"><a class="header" href="#where-the-state-lives">Where the state lives</a></h2>
-<p><code>.spec/state.json</code>, inside the project’s <code>.spec/</code> directory. It is a chronological log of
-timestamped entries — one per test run, refactor, or implementation
-attempt — plus <code>instructions</code> that explain how to read the schema. The
-file keeps the full history so a human can audit the loop; <code>spec state</code>
-and every model brief include <strong>only the three latest entries</strong>. Delete
-the file to reset the phase machine (there is deliberately no <code>reset</code>
-command — losing the log should be an explicit filesystem act).</p>
+<p><code>.spec/state.json</code>, inside the project’s <code>.spec/</code> directory. The file
+holds one log per <a href="#sessions">session</a> under
+<code>sessions</code>, keyed by the session’s GUID, and <code>currentSession</code> names the
+one <code>spec state</code> and every other command read. Each log is a
+chronological list of timestamped <code>entries</code> — one per test run,
+refactor, or implementation attempt — and the file-level <code>instructions</code>
+explain how to read the schema. The file keeps the full history of
+every session so a human can audit the loop; <code>spec state</code> and every
+model brief include <strong>only the three latest entries</strong> of the current
+session. Delete the file to reset the phase machine and forget every
+session (there is deliberately no <code>reset</code> command — losing the log
+should be an explicit filesystem act).</p>
+<pre><code class="language-json">{
+  "instructions": "This file is the TDD phase log. ...",
+  "currentSession": "20bd0242-eae5-4edc-8b25-0c954a5c3b3f",
+  "sessions": {
+    "20bd0242-eae5-4edc-8b25-0c954a5c3b3f": {
+      "startedAt": "2026-10-11T20:31:24Z",
+      "lastActiveAt": "2026-10-11T20:31:24Z",
+      "entries": [ ... ]
+    }
+  }
+}
+</code></pre>
+<p>A file written before sessions existed — <code>instructions</code> and <code>entries</code>
+at the top level — is adopted as one session on the first read and
+written back in this shape on the next save.</p>
 <p>The same file also carries <code>attemptLog</code> — the record of every model
 implementation attempt that <a href="#spec-implement"><code>spec implement</code></a> and the
 greenfield loop brief the next attempt with: the files it wrote
@@ -3615,6 +3818,44 @@ somewhere else.</p>
 <p>A misspelled mode is no mode, so it takes the default — which means a
 typo keeps gating rather than silently stopping. That is the direction
 a typo in a gate should fail in.</p>
+<h3 id="decisiongatesgate"><a class="header" href="#decisiongatesgate"><code>[decision.gates.&lt;GATE&gt;]</code></a></h3>
+<p><code>mode</code> and <code>min_confidence</code> apply to the whole plane. One gate can be
+read differently:</p>
+<pre><code class="language-toml">[decision]
+mode = "enforce"
+
+[decision.gates.UNIT_TEST_ASSERTS]
+mode = "advisory"
+
+[decision.gates.CRITERION_MEASURABLE]
+min_confidence = 0.9
+</code></pre>
+<p>Each half of an override falls back to the plane’s setting rather than
+to a built-in, so a gate that names only a mode keeps the threshold set
+once above it. The gate names are the ones printed in every judgment
+and <code>second review</code> block:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Gate</th><th>Asked by</th><th>Ships at</th></tr>
+</thead>
+<tbody>
+<tr><td><code>CRITERION_MEASURABLE</code></td><td><code>spec refine</code>, <code>refine_requirement</code>, <code>--judge-draft</code></td><td><code>enforce</code></td></tr>
+<tr><td><code>SCENARIO_EXERCISES_CRITERION</code></td><td><code>spec scenario generate</code></td><td><code>advisory</code></td></tr>
+<tr><td><code>STEPS_BIND_SCENARIO</code></td><td><code>spec steps generate</code>, <code>deliver</code></td><td><code>advisory</code></td></tr>
+<tr><td><code>UNIT_TEST_ASSERTS</code></td><td><code>spec implement</code>, <code>deliver</code></td><td><code>advisory</code></td></tr>
+<tr><td><code>IMPLEMENTATION_COMPLETE</code></td><td><code>spec implement</code>, <code>deliver</code></td><td><code>advisory</code></td></tr>
+<tr><td><code>REFACTOR_PRESERVES_BEHAVIOUR</code></td><td><code>spec refactor</code>, <code>deliver</code></td><td><code>advisory</code></td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Ships at</strong> is a ceiling, not a default. A gate with no entry of its
+own is read at the weaker of the plane’s mode and that ceiling, so
+<code>mode = "enforce"</code> turns up the one calibrated question and leaves the
+other five advisory. An explicit <code>[decision.gates.&lt;GATE&gt;]</code> entry is
+taken at its word, which is how a project that has measured a gate on
+its own work turns it up. The labelled sets behind each ceiling run
+with <code>cargo test --test decision_live -- --ignored --nocapture</code>.</p>
 <h3 id="decisionmin_confidence"><a class="header" href="#decisionmin_confidence"><code>decision.min_confidence</code></a></h3>
 <p>A dead band, not a quality bar. For the boolean question the harness
 asks, a probability at or above this reads as <code>HOLDS</code>, at or below
@@ -3938,6 +4179,7 @@ tools.call_timeout_seconds	300	(default)
 tools.cache_ttl_seconds	86400	(default)
 tools.mcp_config	(unset)	(default)
 refactor.attempts	10	(default)
+deliver.attempts	3	(default)
 decision.model	(unset)	(default)
 decision.endpoint	http://localhost:11434	/Users/you/code/calculator/.spec/config.toml
 decision.timeout_seconds	60	(default)
@@ -3962,15 +4204,28 @@ started from. Each round costs a model call and a full test run, so it is
 that command’s whole cost ceiling. Zero or a non-number falls back to the
 default rather than to a budget of nothing, which would revert without
 ever having tried.</p>
+<p><code>deliver.attempts</code> is the same kind of budget for
+<a href="#spec-deliver"><code>spec deliver</code></a>: how many RED-to-GREEN rounds one
+requirement gets before the run reports it fallen short and moves on.
+Each round is a full <code>spec implement</code>, which spends <code>llm.retry</code> model
+attempts of its own inside it. <code>--attempts</code> wins for one run; zero or
+junk in the file falls back to the default.</p>
+<p>Every budget and timeout follows the same order: the flag for one run,
+then the key in <code>.spec/config.toml</code>, then the compiled-in default. A
+project that wants to see what it is running on can write each key with
+its value, as this repository’s own config files do; <code>spec config</code> then
+attributes every row to the file.</p>
 <p>In a project that has never run <code>spec model use</code>, the first row is the
 name Ollama supplied:</p>
 <pre><code class="language-text">llm.model	qwen3:8b	(discovered)
 </code></pre>
-<p>A <code>[tools.profiles]</code> list for a caller <strong>replaces</strong> that command’s
-built-in tools and is attributed to the file. <code>spec init</code> writes every
-caller’s default list so those rows show as from the file. Callers not
-listed keep the code default. <code>[tools.enabled]</code> / <code>[tools.disabled]</code>
-rows appear only when those tables are set.</p>
+<p>A <code>[tools.profiles]</code> list for a caller is <strong>merged</strong> with that
+command’s built-in tools - defaults first, then whatever the file adds,
+each tool once - and the row shows the merged set attributed to the
+file. <code>spec init</code> writes every caller’s default list so those rows show
+as from the file with the same tools the code would have offered.
+Callers not listed keep the code default. <code>[tools.enabled]</code> /
+<code>[tools.disabled]</code> rows appear only when those tables are set.</p>
 <p>Optional keys with nothing to show print <code>(unset)</code> with source
 <code>(default)</code>: <code>tools.mcp_config</code>, and <code>llm.model</code> when Ollama is down
 or has no models pulled.</p>
@@ -4280,18 +4535,30 @@ not in the catalog is a warning, not a hard failure.</p>
 <h2 id="specconfigtoml-per-command-mapping"><a class="header" href="#specconfigtoml-per-command-mapping"><code>.spec/config.toml</code> per-command mapping</a></h2>
 <p>Built-in defaults live in code and are also written into
 <code>[tools.profiles]</code> by <code>spec init</code> so you can see what each command
-offers the model. If that table names a caller with a list, that list
-<strong>replaces</strong> the default for that command. Omitted callers keep the
-code defaults. <code>[tools.enabled]</code> adds names;
-<code>[tools.disabled]</code> removes them. <code>spec tools enable</code> / <code>disable</code> write
-those last two tables.</p>
+offers the model. A command reads its list from the file first and
+then its defaults: the two are <strong>merged</strong>, so a tool named in both is
+offered once, a tool named only in the file is added, and a default
+left out of the file is still offered. The written table is a copy of
+the defaults to read and extend, not a replacement for them - a list
+that named one tool used to take the other four away. Omitted callers
+keep the code defaults. <code>[tools.enabled]</code> adds names;
+<code>[tools.disabled]</code> removes them, and is the one way to take a default
+away for every run. <code>spec tools enable</code> / <code>disable</code> write those last
+two tables. <code>--tools a,b</code> on a command sets the whole list for that
+one run, defaults and config set aside.</p>
 <p>After you add a server to <code>mcp.json</code>, run <code>spec tools refresh</code> and put
-the tool on the command that should use it:</p>
+the tool on the command that should use it, either in its profile or
+under <code>[tools.enabled]</code>; the two read the same:</p>
 <pre><code class="language-toml">[tools.profiles]
-implement = ["get_requirement", "feature_read", "playwright:browser_navigate"]
+implement = ["get_requirement", "feature_read", "step_definitions_find", "get_tdd_state", "run_tests", "command_run", "playwright:browser_navigate"]
 
 [tools.enabled]
 status = ["playwright:browser_navigate"]
+</code></pre>
+<p><code>spec tools profiles</code> prints each command’s resolved set and marks a
+tool the config added with <code>(config)</code>, so the shipped set stays
+recognisable:</p>
+<pre><code class="language-text">status	6	project_root, list_requirements, get_requirement, get_tdd_state, validate_spec, playwright__browser_navigate (config)
 </code></pre>
 <h3 id="name-collisions"><a class="header" href="#name-collisions">Name collisions</a></h3>
 <p>Built-in tools keep their catalog names (<code>validate_spec</code>). Tools from

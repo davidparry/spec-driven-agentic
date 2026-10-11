@@ -12,6 +12,7 @@ use std::sync::Arc;
 use crate::adapters::config::{DecisionSettings, TomlModelStore, config_path, decision_settings};
 use crate::adapters::fs_memory::{FsMemoryStore, FsProjectInventory};
 use crate::adapters::fs_project::FsProjectFiles;
+use crate::adapters::fs_session::FsSessionStore;
 use crate::adapters::fs_sources::FsSourceFiles;
 use crate::adapters::fs_spec::{FsFeatureFiles, FsSpecRepository};
 use crate::adapters::fs_state::FsStateStore;
@@ -28,6 +29,7 @@ use crate::application::memory_service::{MemoryAwareConversation, MemoryService}
 use crate::application::model_service::{ModelService, ModelSource, SessionDecision};
 use crate::application::refactor_service::RefactorService;
 use crate::application::scenario_service::ScenarioService;
+use crate::application::session_service::SessionService;
 use crate::application::spec_mutation_service::SpecMutationService;
 use crate::application::spec_service::{ProjectLayout, SpecService};
 use crate::application::tdd_service::TddService;
@@ -179,6 +181,12 @@ pub fn scenario_service(root: &Path) -> ScenarioService<FsWorkTree, ProjectFeatu
 
 pub fn tdd_store(root: &Path) -> FsStateStore {
     FsStateStore::new(root.to_path_buf())
+}
+
+/// The session service on the project's `.spec/state.json` and
+/// `.spec/memory.json`.
+pub fn session_service(root: &Path) -> SessionService<FsSessionStore> {
+    SessionService::new(FsSessionStore::new(root.to_path_buf()))
 }
 
 pub fn tdd_service(root: &Path) -> TddService<FsStateStore> {

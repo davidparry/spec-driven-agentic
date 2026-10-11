@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-7d12d21a.js";
+            window.path_to_searchindex_js = "../searchindex-cd45a071.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-8557ae39.js"></script>
@@ -227,6 +227,7 @@ tools.call_timeout_seconds	300	(default)
 tools.cache_ttl_seconds	86400	(default)
 tools.mcp_config	(unset)	(default)
 refactor.attempts	10	(default)
+deliver.attempts	3	(default)
 decision.model	(unset)	(default)
 decision.endpoint	http://localhost:11434	/Users/you/code/calculator/.spec/config.toml
 decision.timeout_seconds	60	(default)
@@ -251,15 +252,28 @@ started from. Each round costs a model call and a full test run, so it is
 that command’s whole cost ceiling. Zero or a non-number falls back to the
 default rather than to a budget of nothing, which would revert without
 ever having tried.</p>
+<p><code>deliver.attempts</code> is the same kind of budget for
+<a href="deliver.html"><code>spec deliver</code></a>: how many RED-to-GREEN rounds one
+requirement gets before the run reports it fallen short and moves on.
+Each round is a full <code>spec implement</code>, which spends <code>llm.retry</code> model
+attempts of its own inside it. <code>--attempts</code> wins for one run; zero or
+junk in the file falls back to the default.</p>
+<p>Every budget and timeout follows the same order: the flag for one run,
+then the key in <code>.spec/config.toml</code>, then the compiled-in default. A
+project that wants to see what it is running on can write each key with
+its value, as this repository’s own config files do; <code>spec config</code> then
+attributes every row to the file.</p>
 <p>In a project that has never run <code>spec model use</code>, the first row is the
 name Ollama supplied:</p>
 <pre><code class="language-text">llm.model	qwen3:8b	(discovered)
 </code></pre>
-<p>A <code>[tools.profiles]</code> list for a caller <strong>replaces</strong> that command’s
-built-in tools and is attributed to the file. <code>spec init</code> writes every
-caller’s default list so those rows show as from the file. Callers not
-listed keep the code default. <code>[tools.enabled]</code> / <code>[tools.disabled]</code>
-rows appear only when those tables are set.</p>
+<p>A <code>[tools.profiles]</code> list for a caller is <strong>merged</strong> with that
+command’s built-in tools - defaults first, then whatever the file adds,
+each tool once - and the row shows the merged set attributed to the
+file. <code>spec init</code> writes every caller’s default list so those rows show
+as from the file with the same tools the code would have offered.
+Callers not listed keep the code default. <code>[tools.enabled]</code> /
+<code>[tools.disabled]</code> rows appear only when those tables are set.</p>
 <p>Optional keys with nothing to show print <code>(unset)</code> with source
 <code>(default)</code>: <code>tools.mcp_config</code>, and <code>llm.model</code> when Ollama is down
 or has no models pulled.</p>

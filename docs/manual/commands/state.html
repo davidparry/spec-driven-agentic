@@ -35,7 +35,7 @@
             const path_to_root = "../";
             const default_light_theme = "ayu";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-7d12d21a.js";
+            window.path_to_searchindex_js = "../searchindex-cd45a071.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-8557ae39.js"></script>
@@ -198,7 +198,10 @@ it never changes anything.</p>
 </tbody>
 </table>
 </div>
-<p>Otherwise only the <a href="../global-flags.html">global flags</a> (<code>--root</code>, <code>--model</code>).</p>
+<p>Otherwise only the <a href="../global-flags.html">global flags</a> (<code>--root</code>,
+<code>--model</code>, <code>--session</code>). Without <code>--session</code> the phase shown is the
+current session’s; <code>spec --session &lt;guid&gt; state</code> switches to that
+session and shows its phase.</p>
 <p>On a terminal this prints the phase, the last run’s counts, the
 refactor log, and the recent entries. <code>instructions</code> is left out
 there: it is guidance written to brief a model, and <code>spec state</code> is
@@ -243,13 +246,33 @@ the command you run to find out what phase you are in. A pipe and
 <p>Before any test has ever run, the phase is the starting state and
 <code>lastRun</code> is all zeros; <code>nextStep</code> points you at <code>spec test</code>.</p>
 <h2 id="where-the-state-lives"><a class="header" href="#where-the-state-lives">Where the state lives</a></h2>
-<p><code>.spec/state.json</code>, inside the project’s <code>.spec/</code> directory. It is a chronological log of
-timestamped entries — one per test run, refactor, or implementation
-attempt — plus <code>instructions</code> that explain how to read the schema. The
-file keeps the full history so a human can audit the loop; <code>spec state</code>
-and every model brief include <strong>only the three latest entries</strong>. Delete
-the file to reset the phase machine (there is deliberately no <code>reset</code>
-command — losing the log should be an explicit filesystem act).</p>
+<p><code>.spec/state.json</code>, inside the project’s <code>.spec/</code> directory. The file
+holds one log per <a href="../interactive-shell.html#sessions">session</a> under
+<code>sessions</code>, keyed by the session’s GUID, and <code>currentSession</code> names the
+one <code>spec state</code> and every other command read. Each log is a
+chronological list of timestamped <code>entries</code> — one per test run,
+refactor, or implementation attempt — and the file-level <code>instructions</code>
+explain how to read the schema. The file keeps the full history of
+every session so a human can audit the loop; <code>spec state</code> and every
+model brief include <strong>only the three latest entries</strong> of the current
+session. Delete the file to reset the phase machine and forget every
+session (there is deliberately no <code>reset</code> command — losing the log
+should be an explicit filesystem act).</p>
+<pre><code class="language-json">{
+  "instructions": "This file is the TDD phase log. ...",
+  "currentSession": "20bd0242-eae5-4edc-8b25-0c954a5c3b3f",
+  "sessions": {
+    "20bd0242-eae5-4edc-8b25-0c954a5c3b3f": {
+      "startedAt": "2026-10-11T20:31:24Z",
+      "lastActiveAt": "2026-10-11T20:31:24Z",
+      "entries": [ ... ]
+    }
+  }
+}
+</code></pre>
+<p>A file written before sessions existed — <code>instructions</code> and <code>entries</code>
+at the top level — is adopted as one session on the first read and
+written back in this shape on the next save.</p>
 <p>The same file also carries <code>attemptLog</code> — the record of every model
 implementation attempt that <a href="implement.html"><code>spec implement</code></a> and the
 greenfield loop brief the next attempt with: the files it wrote
