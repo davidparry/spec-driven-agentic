@@ -6,7 +6,7 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
-use super::{build_failure, run_command, tail};
+use super::{build_failure, run_command_merged, tail};
 use crate::domain::model::TestRunSummary;
 use crate::ports::{RunnerError, RuntimeProbe, TestFilter, TestRunner};
 
@@ -72,7 +72,7 @@ impl<R: RuntimeProbe> TestRunner for CargoRunner<R> {
         if let Some(scenario) = &filter.scenario {
             command.push(scenario.clone());
         }
-        let outcome = run_command(&command, &self.root)?;
+        let outcome = run_command_merged(&command, &self.root)?;
         let combined = outcome.combined();
         // A cucumber-rs target is declared `harness = false`, so it
         // prints its own scenario tally instead of libtest's `test
@@ -338,6 +338,28 @@ mod tests {
                 "harness_020_test::test_empty_acceptance_criteria_list: FAILED",
                 "harness_020_test::test_criterion_verification_status_reporting: FAILED",
             ]
+        );
+    }
+
+    /// Cargo announces the target on stderr and libtest reports the
+    /// test on stdout. Observed live: captured separately, every
+    /// `Running` line came after every failure and the requirement's
+    /// own unit test was reported bare - and read as a foreign failure.
+    #[test]
+    fn the_target_announced_on_stderr_still_names_the_failure_on_stdout() {
+        let dir = tempfile::tempdir().unwrap();
+        let summary = runner(
+            dir.path(),
+            "echo '     Running tests/harness_020_test.rs (target/debug/deps/x)' >&2; \
+             echo 'test reports_status ... FAILED'; \
+             echo 'test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured'; \
+             exit 101",
+        )
+        .run(&TestFilter::default())
+        .unwrap();
+        assert_eq!(
+            summary.failure_details,
+            vec!["harness_020_test::reports_status: FAILED"]
         );
     }
 

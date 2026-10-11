@@ -107,6 +107,57 @@ pub(crate) fn run_command(command: &[String], dir: &Path) -> Result<CommandOutco
     })
 }
 
+/// Run with stdout and stderr written to one stream, in the order the
+/// process produced them.
+///
+/// `run_command` captures the two separately and `combined` puts stdout
+/// first, which loses the order between them. Cargo announces each
+/// target on stderr (`Running tests/harness_020_test.rs`) and libtest
+/// prints the test lines on stdout, so read separately every `Running`
+/// line lands after every `test ... FAILED` line and no failure can be
+/// matched to its target. Both descriptors are the same file here, so
+/// the lines keep the order they were written in.
+pub(crate) fn run_command_merged(
+    command: &[String],
+    dir: &Path,
+) -> Result<CommandOutcome, RunnerError> {
+    tracing::info!(command = %command.join(" "), dir = %dir.display(), "running test command");
+    let launch_failed = |e: &dyn std::fmt::Display| {
+        tracing::warn!(program = %command[0], error = %e, "test command failed to launch");
+        RunnerError::Failed(format!("unable to launch {} - {e}", command[0]))
+    };
+    let path = std::env::temp_dir().join(format!(
+        "spec-harness-run-{}-{}.log",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or_default()
+    ));
+    let sink = std::fs::OpenOptions::new()
+        .create_new(true)
+        .read(true)
+        .write(true)
+        .open(&path)
+        .map_err(|e| launch_failed(&e))?;
+    let stderr_sink = sink.try_clone().map_err(|e| launch_failed(&e))?;
+    let status = Command::new(&command[0])
+        .args(&command[1..])
+        .current_dir(dir)
+        .stdout(sink)
+        .stderr(stderr_sink)
+        .status();
+    let merged = std::fs::read(&path).unwrap_or_default();
+    let _ = std::fs::remove_file(&path);
+    let status = status.map_err(|e| launch_failed(&e))?;
+    tracing::info!(success = status.success(), "test command finished");
+    Ok(CommandOutcome {
+        stdout: String::from_utf8_lossy(&merged).into_owned(),
+        stderr: String::new(),
+        success: status.success(),
+    })
+}
+
 /// The shared compile-error reply: no reports plus a nonzero exit.
 pub(crate) fn build_failure(output: &str) -> crate::domain::model::TestRunSummary {
     crate::domain::model::TestRunSummary {
