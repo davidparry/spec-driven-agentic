@@ -11,7 +11,7 @@ use crate::application::assets::{
     unattended_production_file, unit_test_path,
 };
 use crate::application::decision_service::{Brief, TaskJudge, gated};
-use crate::application::generation_service::ResolvedLlm;
+use crate::application::generation_service::{ResolvedLlm, retry_note};
 use crate::application::incremental::Exam;
 use crate::application::incremental::placeholder_exam;
 use crate::application::spec_service::ServiceError;
@@ -561,6 +561,10 @@ where
             },
         );
         let mut complete = Vec::new();
+        // A refused reply costs another full model call - minutes on a
+        // local model. Each re-ask leaves its reason behind, so a wait
+        // that spans several reads as retries rather than one hung call.
+        let retries = std::cell::RefCell::new(Vec::<String>::new());
         let attempt = llm.ask(
             prompter,
             &prompt,
@@ -574,8 +578,15 @@ where
                 },
                 asserts_gate,
             ),
-            |_, _, _| {},
+            |attempt, of, reason| {
+                retries
+                    .borrow_mut()
+                    .push(retry_note(attempt, of, reason, "the implementation"));
+            },
         );
+        for note in retries.into_inner() {
+            prompter.warn(&note);
+        }
         judgments.append(&mut asserts);
         judgments.append(&mut complete);
         let updates = match attempt {
@@ -1622,6 +1633,49 @@ mod tests {
             );
             assert!(error.0.contains(expected), "{}", error.0);
         }
+    }
+
+    /// A refused reply costs another full model call - minutes on a
+    /// local model. Each re-ask leaves its reason behind, so a wait
+    /// spanning several reads as retries rather than one hung call.
+    #[test]
+    fn refused_replies_narrate_each_retry() {
+        #[derive(Default)]
+        struct Recording {
+            warned: Vec<String>,
+        }
+        impl Prompter for Recording {
+            fn tell(&mut self, _message: &str) {}
+            fn warn(&mut self, message: &str) {
+                self.warned.push(message.to_string());
+            }
+            fn ask(&mut self, question: &str) -> Result<String, crate::ports::PromptError> {
+                panic!("no question is asked, but {question:?} was");
+            }
+            fn confirm(&mut self, question: &str) -> Result<bool, crate::ports::PromptError> {
+                panic!("nothing is confirmed, but {question:?} was");
+            }
+        }
+        let reply = r#"[{"path": "not/a/project/file.java", "content": "x"}]"#;
+        let service = service(vec![], Some(FakeLlm::replying(reply)));
+        let mut prompter = Recording::default();
+        let error = service
+            .generate(&mut prompter, "REQ-001", &[], &[], &[], None)
+            .unwrap_err();
+        assert!(
+            error.0.starts_with("The model's reply was refused:"),
+            "{}",
+            error.0
+        );
+        assert!(
+            prompter
+                .warned
+                .iter()
+                .any(|warning| warning.contains("asking again")
+                    && warning.contains("no usable file update")),
+            "each re-ask leaves its reason: {:?}",
+            prompter.warned
+        );
     }
 
     /// A generated unit test as `spec unittest generate` leaves it: a

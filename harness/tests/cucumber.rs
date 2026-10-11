@@ -5752,8 +5752,12 @@ fn the_output_lists_with_verdict_with_verdict_and_with_verdict(
 }
 
 #[given(expr = "a requirement with criteria C1, C2, and C3 where C1 and C3 have passing tests")]
-fn a_requirement_with_criteria_c1_c2_and_c3_where_c1_and_c3_have_passing_tests(_world: &mut SpecWorld) {
-    todo!("implement step: a requirement with criteria C1, C2, and C3 where C1 and C3 have passing tests");
+fn a_requirement_with_criteria_c1_c2_and_c3_where_c1_and_c3_have_passing_tests(
+    _world: &mut SpecWorld,
+) {
+    todo!(
+        "implement step: a requirement with criteria C1, C2, and C3 where C1 and C3 have passing tests"
+    );
 }
 
 #[when(expr = "the status report is generated for that requirement")]
@@ -5761,14 +5765,18 @@ fn the_status_report_is_generated_for_that_requirement(_world: &mut SpecWorld) {
     todo!("implement step: the status report is generated for that requirement");
 }
 
-#[then(expr = "C1 is reported as {string}, C2 is reported as {string}, and C3 is reported as {string}")]
+#[then(
+    expr = "C1 is reported as {string}, C2 is reported as {string}, and C3 is reported as {string}"
+)]
 fn c1_is_reported_as_c2_is_reported_as_and_c3_is_reported_as(
     _world: &mut SpecWorld,
     arg0: String,
     arg1: String,
     arg2: String,
 ) {
-    todo!("implement step: C1 is reported as \"proven\", C2 is reported as \"unproven\", and C3 is reported as \"proven\"");
+    todo!(
+        "implement step: C1 is reported as \"proven\", C2 is reported as \"unproven\", and C3 is reported as \"proven\""
+    );
 }
 
 #[given(expr = "a requirement with criteria C1 and C2 where both have passing tests")]
@@ -5799,4 +5807,42 @@ fn a_requirement_identifier_that_does_not_exist_in_the_catalog(_world: &mut Spec
 #[then(expr = "an error is raised stating the requirement was not found")]
 fn an_error_is_raised_stating_the_requirement_was_not_found(_world: &mut SpecWorld) {
     todo!("implement step: an error is raised stating the requirement was not found");
+}
+
+#[given(expr = "a requirement with an acceptance criterion whose verification returns true")]
+fn a_requirement_with_an_acceptance_criterion_whose_verification_returns_true(
+    _world: &mut SpecWorld,
+) {
+    todo!(
+        "implement step: a requirement with an acceptance criterion whose verification returns true"
+    );
+}
+
+#[when(expr = "the status report is generated")]
+fn the_status_report_is_generated(_world: &mut SpecWorld) {
+    todo!("implement step: the status report is generated");
+}
+
+#[then(expr = "the criterion is labeled {string}")]
+fn the_criterion_is_labeled(_world: &mut SpecWorld, arg0: String) {
+    todo!("implement step: the criterion is labeled \"proven\"");
+}
+
+#[given(expr = "a requirement with an acceptance criterion whose verification returns null")]
+fn a_requirement_with_an_acceptance_criterion_whose_verification_returns_null(
+    _world: &mut SpecWorld,
+) {
+    todo!(
+        "implement step: a requirement with an acceptance criterion whose verification returns null"
+    );
+}
+
+#[then(expr = "the criterion is not labeled {string}")]
+fn the_criterion_is_not_labeled(_world: &mut SpecWorld, arg0: String) {
+    todo!("implement step: the criterion is not labeled \"proven\"");
+}
+
+#[then(expr = "no criteria appear and the report contains no {string} entries")]
+fn no_criteria_appear_and_the_report_contains_no_entries(_world: &mut SpecWorld, arg0: String) {
+    todo!("implement step: no criteria appear and the report contains no \"proven\" entries");
 }

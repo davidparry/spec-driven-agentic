@@ -900,7 +900,7 @@ fn scenario_briefs(id: &str, criteria: &[&String], scenarios: &[ProposedScenario
 /// difference between a command that is working and one that looks
 /// stuck: three silent attempts at six seconds each is where most of
 /// the wait in `spec unittest generate` goes.
-fn retry_note(attempt: u32, of: u32, reason: &str, what: &str) -> String {
+pub(crate) fn retry_note(attempt: u32, of: u32, reason: &str, what: &str) -> String {
     format!("The reply was not usable as {what} ({reason}) - asking again ({attempt} of {of})")
 }
 

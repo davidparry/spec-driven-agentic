@@ -35,7 +35,7 @@ Java.
 
 You need:
 
-- **`spec` on PATH** (`spec --version`) — GitHub release, `cargo install --path harness`, or `harness/target/release/spec`. Cursor will not connect without it, and it must report **0.7.10 or newer** — the tool replies quoted on this page were captured from 0.7.0 and still read the same, the `.spec/` directory this page uses replaced the flat `.spec.toml` in 0.6.0, and both the refinement loop in Step 4 and the homework's account of `spec steps generate` behave differently below it.
+- **`spec` on PATH** (`spec --version`) — GitHub release, `cargo install --path harness`, or `harness/target/release/spec`. Cursor will not connect without it, and it must report **0.7.15 or newer** — the tool replies quoted on this page were captured from 0.7.0 and still read the same, the `.spec/` directory this page uses replaced the flat `.spec.toml` in 0.6.0, and both the refinement loop in Step 4 and the homework's account of `spec steps generate` behave differently below it.
 - **Java 21+** (`java -version`)
 - **Maven 3.9+** (`mvn -version`)
 - **Cursor** (or any MCP-capable agent — Claude Desktop works with the same JSON)
@@ -861,7 +861,7 @@ Ten minutes, needs Ollama 0.35+ and one more model pulled, and nothing
 else depends on it. This is the one homework item that changes what your
 agent sees from `refine_requirement`.
 
-It also needs `spec` 0.7.10 or newer. The decision plane is in no
+It also needs `spec` 0.7.15 or newer. The decision plane is in no
 earlier release, so a binary from before it does not have `spec judge`
 and will answer with an unrecognised-subcommand error.
 
@@ -946,7 +946,7 @@ git checkout trunk && git branch -D workshop && git checkout -b workshop trunk
 - **Build red:** pair with a neighbor first; the presenter won't debug from
   stage.
 - **Cursor MCP connection red:** `spec --version` must work and must report
-  0.7.10 or newer. Launch Cursor from that terminal or put the absolute path
+  0.7.15 or newer. Launch Cursor from that terminal or put the absolute path
   to `spec` in `command`, then toggle the server off/on in Cursor's MCP
   settings. Note: a server restart resets the TDD phase — have the agent
   call `run_tests` once before any `start_refactor`, or the server will
