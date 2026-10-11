@@ -230,10 +230,18 @@ fn step_definition(
             )
         }
         Language::Rust => {
+            // `parameter_list` joins with ", "; the world parameter in
+            // front is the only separator this arm adds. Prefixing each
+            // parameter as well put ", ," between two placeholders.
             let params = parameter_list(&expression, |i, kind| match kind {
-                "{int}" => format!(", arg{i}: i64"),
-                _ => format!(", arg{i}: String"),
+                "{int}" => format!("arg{i}: i64"),
+                _ => format!("arg{i}: String"),
             });
+            let params = if params.is_empty() {
+                params
+            } else {
+                format!(", {params}")
+            };
             format!(
                 "#[{keyword}(expr = \"{expr}\")]\nfn {name}(_world: &mut {world}{params}) {{\n    todo!(\"implement step: {text}\");\n}}\n",
                 keyword = step.keyword.to_lowercase(),
@@ -1020,7 +1028,7 @@ pub(crate) fn decode_json<T: serde::de::DeserializeOwned>(body: &str, open: char
 pub fn strip_code_fences(response: &str) -> String {
     let trimmed = strip_think_block(response.trim());
     let Some(rest) = trimmed.strip_prefix("```") else {
-        return trimmed;
+        return fenced_block_after_prose(&trimmed).unwrap_or(trimmed);
     };
     let after_language = rest.split_once('\n').map_or("", |(_, body)| body);
     after_language
@@ -1028,6 +1036,19 @@ pub fn strip_code_fences(response: &str) -> String {
         .map_or(after_language, |(body, _)| body)
         .trim()
         .to_string()
+}
+
+/// The body of the first closed code fence in a reply that talked
+/// before it. Observed live: a polish reply opened with four paragraphs
+/// of reasoning, then the members in a ```rust fence - and the whole
+/// thing, prose first, was written into `tests/cucumber.rs`. A fence
+/// counts only at the start of a line, so a pair of backticks inside the
+/// code itself is not read as one.
+fn fenced_block_after_prose(reply: &str) -> Option<String> {
+    let open = reply.find("\n```")? + 1;
+    let after_language = reply[open + 3..].split_once('\n')?.1;
+    let close = after_language.find("\n```")?;
+    Some(after_language[..close].trim().to_string())
 }
 
 pub fn strip_think_block(text: &str) -> String {
@@ -1155,7 +1176,35 @@ pub fn looks_like_step_fragment(language: Language, fragment: &str, expected: &[
         return false;
     }
     let kept = extract_patterns(language, fragment);
-    kept.len() == expected.len() && expected.iter().all(|pattern| kept.contains(pattern))
+    kept.len() == expected.len()
+        && expected.iter().all(|pattern| kept.contains(pattern))
+        && nothing_but_definitions(language, fragment)
+}
+
+/// Whether every non-blank line of `fragment` outside its step
+/// definitions is a comment. The fragment is spliced into a source file
+/// as it is, so a reply that kept the definitions it was asked for and
+/// explained itself around them (observed live: four paragraphs of
+/// reasoning before the code) would be written in as code.
+fn nothing_but_definitions(language: Language, fragment: &str) -> bool {
+    let spans = crate::domain::step_fill::definition_spans(language, fragment);
+    let mut cursor = 0;
+    let mut outside = String::new();
+    for span in &spans {
+        if span.start > cursor {
+            outside.push_str(&fragment[cursor..span.start]);
+            outside.push('\n');
+        }
+        cursor = cursor.max(span.end);
+    }
+    outside.push_str(&fragment[cursor..]);
+    outside.lines().map(str::trim).all(|line| {
+        line.is_empty()
+            || line.starts_with("//")
+            || line.starts_with("/*")
+            || line.starts_with('*')
+            || line.starts_with('#')
+    })
 }
 
 /// The text every generated TODO placeholder carries, whatever quote
@@ -2058,6 +2107,24 @@ mod tests {
         assert!(code.contains("fn the_result_is_3(_world: &mut GeneratedWorld, arg0: i64)"));
     }
 
+    /// Observed live: two `{string}` placeholders produced
+    /// `arg0: String, , arg1: String`, which does not parse.
+    #[test]
+    fn rust_steps_with_two_placeholders_separate_them_with_one_comma() {
+        let code = step_definitions_template(
+            Language::Rust,
+            &[missing(
+                "Then",
+                "the output contains \"proven\" for the first and \"proven\" for the second",
+            )],
+        );
+        assert!(
+            code.contains("(_world: &mut GeneratedWorld, arg0: String, arg1: String)"),
+            "{code}"
+        );
+        assert!(!code.contains(", ,"), "{code}");
+    }
+
     /// What this module writes as a placeholder is what it has to
     /// recognise later. A marker changed on one side and not the other
     /// quietly turns generated boilerplate back into evidence.
@@ -2280,6 +2347,34 @@ mod tests {
             );
         }
         assert!(!looks_like_step_fragment(Language::Java, "  \n", &expected));
+    }
+
+    /// Observed live: the reply kept every expression and wrapped them in
+    /// an explanation, which the splice wrote into the file as code.
+    #[test]
+    fn the_step_fragment_gate_refuses_prose_around_the_definitions() {
+        let expected = vec!["it works".to_string(), "the count is {int}".to_string()];
+        let definitions = "#[then(expr = \"it works\")]\nfn it_works(_w: &mut W) {\n    todo!(\"x\");\n}\n\n\
+                           #[then(expr = \"the count is {int}\")]\nfn the_count_is(_w: &mut W, n: i64) {\n    todo!(\"y\");\n}\n";
+        assert!(looks_like_step_fragment(
+            Language::Rust,
+            definitions,
+            &expected
+        ));
+        let commented = format!("// the two steps\n{definitions}");
+        assert!(looks_like_step_fragment(
+            Language::Rust,
+            &commented,
+            &expected
+        ));
+        let explained = format!(
+            "The input holds 2 functions, which contradicts the count of 1.\n\n{definitions}\nI kept the `todo!` placeholders as written."
+        );
+        assert!(!looks_like_step_fragment(
+            Language::Rust,
+            &explained,
+            &expected
+        ));
     }
 
     #[test]
@@ -3705,6 +3800,30 @@ io.cucumber.junit.platform.engine.UndefinedStepException: The step 'the result i
         assert_eq!(
             strip_code_fences("<think>scratch</think>\n[{\"title\":\"T\"}]"),
             "[{\"title\":\"T\"}]"
+        );
+    }
+
+    /// Observed live: the reasoning before the fence was written into the
+    /// step file as code.
+    #[test]
+    fn a_reply_that_talks_before_its_fence_yields_only_the_fenced_code() {
+        let reply = "Let's look at the input. There is a `, ,` in the parameters.\n\n\
+                     Here is the corrected block.\n\n\
+                     ```rust\n#[then(expr = \"it works\")]\nfn it_works(_w: &mut W) {}\n```\n\n\
+                     That keeps the `todo!` as written.";
+        assert_eq!(
+            strip_code_fences(reply),
+            "#[then(expr = \"it works\")]\nfn it_works(_w: &mut W) {}"
+        );
+        // Prose with no closed fence is returned as it is - the gates after
+        // this one are what refuse it.
+        assert_eq!(
+            strip_code_fences("just words\nmore words"),
+            "just words\nmore words"
+        );
+        assert_eq!(
+            strip_code_fences("words\n```rust\nunclosed"),
+            "words\n```rust\nunclosed"
         );
     }
 

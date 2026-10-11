@@ -829,7 +829,11 @@ where
         let Some(llm) = &self.llm else {
             return (ending_in_newline(template), "template".into());
         };
-        let prompt = polish_fragment_prompt(self.language, fragment, count_members(fragment));
+        let prompt = polish_fragment_prompt(
+            self.language,
+            fragment,
+            count_members(self.language, fragment),
+        );
         let work = prompter.working(&format!("Asking {} to write {what} - working", llm.model()));
         let retries = std::cell::RefCell::new(Vec::<String>::new());
         let outcome = llm.ask(
@@ -907,12 +911,20 @@ pub(crate) fn retry_note(attempt: u32, of: u32, reason: &str, what: &str) -> Str
 }
 
 /// How many members a generated fragment holds, for the prompt's count.
-/// Definitions are joined with a blank line, so counting the annotation
-/// or `function` markers is close enough to keep the model honest.
-fn count_members(fragment: &str) -> usize {
-    let markers = [
-        "@Given", "@When", "@Then", "@Test", "[Given(", "[When(", "[Then(", "[Fact]",
-    ];
+/// Definitions are joined with a blank line, so counting the language's
+/// annotation markers is close enough to keep the model honest. The
+/// markers are the language's own: a Rust fragment of eight `#[then]`
+/// definitions counted against Java's `@Then` read as "1 member", and
+/// the model spent its reply arguing with the number (observed live).
+fn count_members(language: Language, fragment: &str) -> usize {
+    let markers: &[&str] = match language {
+        Language::Java => &["@Given", "@When", "@Then", "@Test"],
+        Language::DotNet => &["[Given(", "[When(", "[Then(", "[Fact]"],
+        Language::Rust => &["#[given", "#[when", "#[then", "#[test]"],
+        Language::JavaScript | Language::TypeScript => {
+            &["Given(", "When(", "Then(", "test(", "it("]
+        }
+    };
     let counted: usize = markers
         .iter()
         .map(|marker| fragment.matches(marker).count())
@@ -954,6 +966,20 @@ mod tests {
         FailingSources, FakeLlm, FakeSources, InMemoryFeatureCatalog, InMemorySpecRepository,
         InMemoryWorkTree, calculator_catalog, calculator_spec, flat_layout,
     };
+
+    #[test]
+    fn members_are_counted_by_the_language_s_own_markers() {
+        let rust = "#[given(expr = \"a\")]\nfn a() {}\n\n#[then(expr = \"b\")]\nfn b() {}\n";
+        assert_eq!(count_members(Language::Rust, rust), 2);
+        assert_eq!(count_members(Language::Java, rust), 1);
+        let java =
+            "    @Given(\"a\")\n    public void a() {}\n    @Then(\"b\")\n    public void b() {}\n";
+        assert_eq!(count_members(Language::Java, java), 2);
+        let js = "Given('a', function () {});\nThen('b', function () {});\n";
+        assert_eq!(count_members(Language::JavaScript, js), 2);
+        let dotnet = "    [Given(\"a\")]\n    public void A() {}\n";
+        assert_eq!(count_members(Language::DotNet, dotnet), 1);
+    }
 
     fn service(
         sources: Vec<crate::ports::SourceFile>,
