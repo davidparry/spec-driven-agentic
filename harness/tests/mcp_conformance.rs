@@ -391,10 +391,17 @@ async fn refine_requirement_asks_no_judgment_when_the_mode_is_off() {
     client.cancel().await.unwrap();
 }
 
+/// The decision role is switched off and aimed at a closed port: this
+/// test is about the deterministic findings and the next step, and with
+/// no `[decision]` block the tool would discover whatever decision model
+/// the machine running the test has pulled and ask it live, three times.
+/// On a box also serving the generating model that load is what turns
+/// the `spec deliver` RED bar on this crate into a minutes-long swap.
 #[tokio::test]
 async fn refine_requirement_reports_clean_and_unknown_ids_error() {
     let dir = tempfile::tempdir().unwrap();
     write_project(dir.path());
+    write_decision_config(dir.path(), &closed_endpoint(), "off");
     let client = connect_default(dir.path()).await;
 
     let body = call_json(&client, "refine_requirement", json!({"id": "REQ-001"})).await;
