@@ -15,7 +15,12 @@ static RESULT_LINE: LazyLock<Regex> = LazyLock::new(|| {
         .expect("valid regex")
 });
 static FAILED_TEST: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?m)^test (\S+) \.\.\. FAILED$").expect("valid regex"));
+    LazyLock::new(|| Regex::new(r"^test (\S+) \.\.\. FAILED$").expect("valid regex"));
+/// The line cargo prints before each target's tests: `Running
+/// tests/harness_020_test.rs (target/debug/deps/...)`, `Running
+/// unittests src/lib.rs (...)`, `Doc-tests spec_harness`.
+static RUNNING_TARGET: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^\s*Running (?:unittests )?(\S+)").expect("valid regex"));
 static SCENARIO_LINE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(\d+) scenarios? \(([^)]*)\)").expect("valid regex"));
 static FAILED_SCENARIO: LazyLock<Regex> =
@@ -137,10 +142,40 @@ pub fn parse_cargo_output(output: &str) -> Option<TestRunSummary> {
     if !found {
         return None;
     }
-    for captures in FAILED_TEST.captures_iter(output) {
-        summary
-            .failure_details
-            .push(format!("{}: FAILED", &captures[1]));
+    // A test in an integration target is named by the target too:
+    // `harness_020_test::test_empty_list`. Libtest prints the bare
+    // function name, and a model-written test is named however the
+    // model liked - observed: `test_criterion_verification_status`,
+    // for a requirement called HARNESS-020. Named bare, nothing about
+    // that failure says whose it is, and the attribution pass read the
+    // requirement's own unit test as a foreign red bar and stopped the
+    // delivery before an attempt was made. The file is the one thing
+    // in the failure that is reliably the requirement's.
+    let mut target: Option<String> = None;
+    for line in output.lines() {
+        if let Some(captures) = RUNNING_TARGET.captures(line) {
+            let path = Path::new(&captures[1]);
+            target = path
+                .starts_with("tests")
+                .then(|| {
+                    path.file_stem()
+                        .and_then(|s| s.to_str())
+                        .map(str::to_string)
+                })
+                .flatten();
+            continue;
+        }
+        if line.starts_with("Doc-tests") || line.trim_start().starts_with("Doc-tests") {
+            target = None;
+            continue;
+        }
+        if let Some(captures) = FAILED_TEST.captures(line) {
+            let name = match &target {
+                Some(stem) => format!("{stem}::{}", &captures[1]),
+                None => captures[1].to_string(),
+            };
+            summary.failure_details.push(format!("{name}: FAILED"));
+        }
     }
     Some(summary)
 }
@@ -274,6 +309,36 @@ mod tests {
         assert_eq!(summary.tests, 5);
         assert_eq!(summary.failures, 1);
         assert_eq!(summary.failure_details, vec!["domain::adds: FAILED"]);
+    }
+
+    /// A failing test in an integration target is named by its file,
+    /// so a model-named test still says whose it is. Unit tests keep
+    /// their module path. (Doc-test names hold spaces and are not read
+    /// as failures, as before.)
+    #[test]
+    fn integration_target_failures_carry_their_file_name() {
+        let output = "     Running unittests src/lib.rs (target/debug/deps/spec_harness-1)\n\
+                      running 1 tests\n\
+                      test domain::adds ... FAILED\n\
+                      test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out\n\
+                      \x20    Running tests/harness_020_test.rs (target/debug/deps/harness_020_test-2)\n\
+                      running 2 tests\n\
+                      test test_empty_acceptance_criteria_list ... FAILED\n\
+                      test test_criterion_verification_status_reporting ... FAILED\n\
+                      test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out\n\
+                      \x20  Doc-tests spec_harness\n\
+                      running 1 tests\n\
+                      test src/lib.rs - add (line 3) ... FAILED\n\
+                      test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out\n";
+        let summary = parse_cargo_output(output).unwrap();
+        assert_eq!(
+            summary.failure_details,
+            vec![
+                "domain::adds: FAILED",
+                "harness_020_test::test_empty_acceptance_criteria_list: FAILED",
+                "harness_020_test::test_criterion_verification_status_reporting: FAILED",
+            ]
+        );
     }
 
     #[test]
