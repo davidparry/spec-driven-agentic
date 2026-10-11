@@ -170,12 +170,31 @@ fn definitions_and_fields(
     }
 }
 
+/// What a fill reply is read against: the world type it may extend and
+/// the functions the file already has, which are the only ones a body
+/// may call on the world.
+#[derive(Debug, Clone, Default)]
+struct StepFileShape {
+    world: Option<step_fill::WorldSpan>,
+    methods: Vec<String>,
+}
+
+impl StepFileShape {
+    fn of(language: Language, content: &str) -> Self {
+        Self {
+            world: step_fill::world_span(language, content),
+            methods: step_fill::declared_methods(language, content),
+        }
+    }
+}
+
 fn accept_filled_definitions(
     language: Language,
     reply: &str,
     patterns: &[String],
-    world: Option<&step_fill::WorldSpan>,
+    shape: &StepFileShape,
 ) -> Result<FilledSteps, String> {
+    let world = shape.world.as_ref();
     let (code, fields) = definitions_and_fields(language, reply, world)?;
     let bodies: std::collections::HashMap<String, String> =
         step_fill::definition_spans(language, &code)
@@ -192,12 +211,65 @@ fn accept_filled_definitions(
         ));
     }
     if let Some(world) = world {
-        let missing = step_fill::undeclared_world_fields(language, &code, world, &fields);
-        if !missing.is_empty() {
-            return Err(undeclared_fields_reason(&missing, world));
-        }
+        world_access_check(language, &code, world, &fields, &shape.methods)?;
     }
     Ok(FilledSteps { bodies, fields })
+}
+
+/// Whether every world member the bodies reach will resolve once they
+/// are spliced in: fields the world has or the reply adds, methods the
+/// file already declares. The methods first - a body that calls a
+/// helper the reply brought along has no fix in adding fields.
+fn world_access_check(
+    language: Language,
+    code: &str,
+    world: &step_fill::WorldSpan,
+    fields: &[String],
+    methods: &[String],
+) -> Result<(), String> {
+    let called = step_fill::undeclared_world_methods(language, code, world, methods);
+    if !called.is_empty() {
+        return Err(undeclared_methods_reason(&called, world));
+    }
+    let missing = step_fill::undeclared_world_fields(language, code, world, fields);
+    if !missing.is_empty() {
+        return Err(undeclared_fields_reason(&missing, world));
+    }
+    Ok(())
+}
+
+/// Said when the one-question-for-all reply was refused for the last
+/// time, with the last reason, before the steps are asked for one by
+/// one. Measured: a delivery stalled on refused fills for three
+/// attempts and the transcript never said why.
+fn batch_refused_notice(reason: &str) -> String {
+    format!(
+        "The reply for the whole batch of pending steps was refused ({reason}); asking \
+         for each step on its own."
+    )
+}
+
+/// Said when a step's own asks are all refused and its stub stays.
+fn step_refused_notice(pattern: &str, reason: &str) -> String {
+    format!("The step {pattern:?} stays pending: the last reply was refused ({reason}).")
+}
+
+/// Why a reply whose bodies call methods nobody declared is sent back:
+/// a reply cannot add methods, so the body has to read the state
+/// directly.
+fn undeclared_methods_reason(called: &[String], world: &step_fill::WorldSpan) -> String {
+    format!(
+        "the bodies call methods the {} type does not have: {}. A reply cannot add \
+         methods or impl blocks - only fields - so read the fields directly (for example \
+         `world.{}.as_ref().expect(...)`) and reply again with the same definitions",
+        world.name,
+        called
+            .iter()
+            .map(|name| format!("{name}()"))
+            .collect::<Vec<_>>()
+            .join(", "),
+        called[0]
+    )
 }
 
 /// Whether `path` is a Rust file cargo compiles as its own crate: one
@@ -224,8 +296,9 @@ fn accept_filled_definition(
     language: Language,
     reply: &str,
     pattern: &str,
-    world: Option<&step_fill::WorldSpan>,
+    shape: &StepFileShape,
 ) -> Result<(String, Vec<String>), String> {
+    let world = shape.world.as_ref();
     let (code, fields) = definitions_and_fields(language, reply, world)?;
     let Some(found) = step_fill::definition_spans(language, &code)
         .into_iter()
@@ -235,10 +308,7 @@ fn accept_filled_definition(
     };
     let body = found.text(&code).to_string();
     if let Some(world) = world {
-        let missing = step_fill::undeclared_world_fields(language, &body, world, &fields);
-        if !missing.is_empty() {
-            return Err(undeclared_fields_reason(&missing, world));
-        }
+        world_access_check(language, &body, world, &fields, &shape.methods)?;
     }
     match placeholder_exam(pattern, is_pending_step_body(language, &body)) {
         Exam::Accept => Ok((body, fields)),
@@ -404,6 +474,22 @@ where
         req_id: &str,
         failures: &[String],
     ) -> Result<Option<StepFillReport>, ServiceError> {
+        self.fill_pending_steps_on_attempt(prompter, req_id, failures, 1)
+    }
+
+    /// [`Self::fill_pending_steps`] as one attempt of a loop. The
+    /// attempt number goes into the prompt, so the second attempt's
+    /// question is not the first's: with the response cache on, an
+    /// identical prompt is answered from disk, and a delivery was
+    /// measured replaying attempt 2 as attempt 3 - same bodies, same
+    /// compiler error - without the model being asked.
+    pub fn fill_pending_steps_on_attempt(
+        &self,
+        prompter: &mut dyn Prompter,
+        req_id: &str,
+        failures: &[String],
+        attempt: u32,
+    ) -> Result<Option<StepFillReport>, ServiceError> {
         let Some(llm) = &self.llm else {
             return Ok(None);
         };
@@ -450,12 +536,14 @@ where
         let preamble = step_fill::step_file_preamble(self.language, &file.content);
         let declared = extract_patterns(self.language, &file.content);
         let symbols = declared_symbols(self.language, &file.content);
-        // The world type the bodies share state through. A body that
-        // needs a field the world does not have may ask for it, and
-        // the rule used to forbid that: three measured attempts wrote
-        // `world.proven_report` against a world with no such field,
-        // and every bar read E0609.
-        let world = step_fill::world_span(self.language, &file.content);
+        // The world type the bodies share state through, and the
+        // functions the file has. A body that needs a field the world
+        // does not have may ask for it, and the rule used to forbid
+        // that: three measured attempts wrote `world.proven_report`
+        // against a world with no such field, and every bar read E0609.
+        // A body may not call a method the file does not have: the
+        // `impl` block a reply brings along never lands.
+        let shape = StepFileShape::of(self.language, &file.content);
         let language = self.language;
         // Last definition first, so a splice does not move the offsets
         // of the definitions still waiting.
@@ -491,25 +579,32 @@ where
                 preamble,
                 production: &production,
                 failures,
+                attempt,
             },
         );
+        let asked = llm.ask(
+            prompter,
+            &prompt,
+            |reply| accept_filled_definitions(language, reply, &patterns, &shape),
+            |_, _, _| {},
+        );
+        drop(batch);
         let FilledSteps {
             mut bodies,
             mut fields,
-        } = match llm.ask(
-            prompter,
-            &prompt,
-            |reply| accept_filled_definitions(language, reply, &patterns, world.as_ref()),
-            |_, _, _| {},
-        ) {
+        } = match asked {
             Ok(filled) => filled,
             Err(LlmReplyError::Call(error)) => {
-                drop(batch);
                 return Err(ServiceError(LlmReplyError::call_failed(&error)));
             }
-            Err(LlmReplyError::Invalid { .. }) => Default::default(),
+            // Said, not swallowed: a run that stalls here used to leave
+            // the transcript with nothing but "Asking again", and the
+            // reason was only in the response cache.
+            Err(LlmReplyError::Invalid { reason }) => {
+                prompter.warn(&batch_refused_notice(&reason));
+                Default::default()
+            }
         };
-        drop(batch);
 
         // What the batch left pending is asked for one definition at a
         // time, each under its own line so a long wait has a name.
@@ -526,6 +621,7 @@ where
                         preamble,
                         production: &production,
                         failures,
+                        attempt,
                     },
                 );
                 let pattern = span.pattern.clone();
@@ -539,7 +635,7 @@ where
                 let outcome = llm.ask(
                     prompter,
                     &prompt,
-                    |reply| accept_filled_definition(language, reply, &pattern, world.as_ref()),
+                    |reply| accept_filled_definition(language, reply, &pattern, &shape),
                     |_, _, _| {},
                 );
                 drop(work);
@@ -551,7 +647,10 @@ where
                     Err(LlmReplyError::Call(error)) => {
                         return Err(ServiceError(LlmReplyError::call_failed(&error)));
                     }
-                    Err(LlmReplyError::Invalid { .. }) => continue,
+                    Err(LlmReplyError::Invalid { reason }) => {
+                        prompter.warn(&step_refused_notice(&pattern, &reason));
+                        continue;
+                    }
                 }
             }
             if let Some(body) = bodies.get(&span.pattern) {
@@ -1914,16 +2013,26 @@ mod tests {
             "add is called with {string}".to_string(),
             "the result is {int}".to_string(),
         ];
-        let whole = accept_filled_definitions(Language::Java, FILLED_STEPS, &patterns, None)
-            .unwrap()
-            .bodies;
+        let whole = accept_filled_definitions(
+            Language::Java,
+            FILLED_STEPS,
+            &patterns,
+            &StepFileShape::default(),
+        )
+        .unwrap()
+        .bodies;
         assert_eq!(whole.len(), 2, "{whole:?}");
         assert!(whole["the result is {int}"].contains("assertEquals(n, result);"));
 
         let partial = "    @When(\"add is called with {string}\")\n    public void b(String s) {\n        result = new Kata().add(s);\n    }\n\n    @Then(\"the result is {int}\")\n    public void c(int n) {\n        throw new PendingException();\n    }\n\n    @Then(\"something REQ-002 asks\")\n    public void d() { result = 0; }\n";
-        let taken = accept_filled_definitions(Language::Java, partial, &patterns, None)
-            .unwrap()
-            .bodies;
+        let taken = accept_filled_definitions(
+            Language::Java,
+            partial,
+            &patterns,
+            &StepFileShape::default(),
+        )
+        .unwrap()
+        .bodies;
         assert_eq!(
             taken.keys().collect::<Vec<_>>(),
             vec!["add is called with {string}"],
@@ -1932,7 +2041,8 @@ mod tests {
 
         let prose = "Let me look at the world type and any relevant status report fields.";
         let refused =
-            accept_filled_definitions(Language::Java, prose, &patterns, None).unwrap_err();
+            accept_filled_definitions(Language::Java, prose, &patterns, &StepFileShape::default())
+                .unwrap_err();
         assert!(refused.contains("none of the 2 definition(s)"), "{refused}");
     }
 
@@ -1997,6 +2107,105 @@ mod tests {
         );
         let prompt = service.llm.as_ref().unwrap().chat().prompts.borrow()[0].clone();
         assert!(prompt.contains("ONLY the new fields"), "{prompt}");
+    }
+
+    /// Measured: three attempts of refused fills, and the transcript
+    /// said only "Asking again". The reason each stub stayed is said.
+    #[test]
+    fn a_fill_that_is_refused_to_the_end_says_why_each_stub_stayed() {
+        let steps = SourceFile {
+            path: "tests/steps/kata.rs".into(),
+            content: "use cucumber::{World, then, when};\n\n#[derive(Debug, Default, World)]\npub struct KataWorld {\n    result: Option<u32>,\n}\n\n#[when(expr = \"add is called with {string}\")]\nfn b(_w: &mut KataWorld, _s: String) {\n    todo!(\"implement step: add is called with {string}\");\n}\n\n#[then(expr = \"the result is {int}\")]\nfn c(_w: &mut KataWorld, _n: u32) {\n    todo!(\"implement step: the result is 3\");\n}\n".into(),
+        };
+        let reply = "impl KataWorld {\n    fn total(&self) -> u32 { 3 }\n}\n\n#[when(expr = \"add is called with {string}\")]\nfn b(w: &mut KataWorld, _s: String) {\n    w.result = Some(w.total());\n}\n\n#[then(expr = \"the result is {int}\")]\nfn c(w: &mut KataWorld, n: u32) {\n    assert_eq!(w.total(), n);\n}\n";
+        let service = ImplementService::new(
+            calculator_catalog(),
+            FakeSources(vec![steps]),
+            InMemoryWorkTree::default(),
+            InMemorySpecRepository(Ok(calculator_spec())),
+            Language::Rust,
+            flat_layout(Language::Rust),
+            Some(FakeLlm::replying(reply)),
+        );
+        let mut prompter = RecordingPrompter::default();
+        let report = service
+            .fill_pending_steps(&mut prompter, "REQ-001", &[])
+            .unwrap();
+        assert!(report.is_none(), "{report:?}");
+        let batch = prompter
+            .told
+            .iter()
+            .find(|line| line.contains("whole batch"))
+            .expect("the batch refusal is said");
+        assert!(batch.contains("total()"), "{batch}");
+        for pattern in ["add is called with {string}", "the result is {int}"] {
+            assert!(
+                prompter
+                    .told
+                    .iter()
+                    .any(|line| line.contains("stays pending") && line.contains(pattern)),
+                "{:?}",
+                prompter.told
+            );
+        }
+    }
+
+    /// Observed live: a reply carried `impl SpecWorld { fn
+    /// generated_report(&self) ... }` and a body calling it. The impl
+    /// block is dropped on splice, the call passed the field check, and
+    /// the bar read E0599. The call is refused with the way out, and
+    /// the reply that reads the field instead is taken.
+    #[test]
+    fn a_fill_reply_calling_a_method_the_file_does_not_have_is_sent_back() {
+        let steps = SourceFile {
+            path: "tests/steps/kata.rs".into(),
+            content: "use cucumber::{World, given, then, when};\n\n#[derive(Debug, Default, World)]\npub struct KataWorld {\n    result: Option<u32>,\n    report: Option<Report>,\n}\n\nimpl KataWorld {\n    fn reset(&mut self) {\n        self.result = None;\n    }\n}\n\n#[given(expr = \"a calculator\")]\nfn a(w: &mut KataWorld) {\n    w.reset();\n}\n\n#[then(expr = \"the result is {int}\")]\nfn c(_w: &mut KataWorld, _n: u32) {\n    todo!(\"implement step: the result is 3\");\n}\n".into(),
+        };
+        let lib = SourceFile {
+            path: "src/lib.rs".into(),
+            content: "pub struct Report { pub ok: bool }\n".into(),
+        };
+        let calling = "impl KataWorld {\n    fn generated_report(&self) -> &Report {\n        self.report.as_ref().expect(\"a report\")\n    }\n}\n\n#[then(expr = \"the result is {int}\")]\nfn c(w: &mut KataWorld, _n: u32) {\n    w.reset();\n    assert!(w.generated_report().ok);\n}\n";
+        let reading = "#[then(expr = \"the result is {int}\")]\nfn c(w: &mut KataWorld, _n: u32) {\n    w.reset();\n    assert!(w\n        .report\n        .as_ref()\n        .expect(\"a report\")\n        .ok);\n}\n";
+        let service = ImplementService::new(
+            calculator_catalog(),
+            FakeSources(vec![steps, lib]),
+            InMemoryWorkTree::default(),
+            InMemorySpecRepository(Ok(calculator_spec())),
+            Language::Rust,
+            flat_layout(Language::Rust),
+            Some(FakeLlm::replying_in_turn(&[calling, reading])),
+        );
+        let report = service
+            .fill_pending_steps(&mut NullPrompter, "REQ-001", &[])
+            .unwrap()
+            .expect("one pending step to fill");
+        assert_eq!(report.filled, 1);
+        assert_eq!(report.fields_added, 0);
+        let written = service
+            .store
+            .read("tests/steps/kata.rs")
+            .unwrap()
+            .expect("the step file was written");
+        assert!(
+            written.contains(".expect(\"a report\")\n        .ok);"),
+            "{written}"
+        );
+        assert!(!written.contains("generated_report"), "{written}");
+        let prompts = service
+            .llm
+            .as_ref()
+            .unwrap()
+            .chat()
+            .prompts
+            .borrow()
+            .clone();
+        let retry = prompts
+            .iter()
+            .find(|p| p.contains("generated_report()"))
+            .expect("the refusal names the call");
+        assert!(retry.contains("cannot add methods"), "{retry}");
+        assert!(retry.contains("generated_report.as_ref()"), "{retry}");
     }
 
     /// Observed live: the fill declared a world field of type

@@ -261,3 +261,90 @@ Feature: Hybrid generation
       """
     When generating an implementation for "REQ-001" with the model fails
     Then the generation error contains "the reply held no usable file update for this project"
+
+  # A cucumber-rs step body shares state through the World struct, and
+  # a fill reply may add the fields it needs. Measured on this crate:
+  # the production function took `&[(&str, bool)]`, every reply asked
+  # for a `Vec<(String, bool)>` field, and the comma inside the tuple
+  # made the reader see "not a field" and refuse the whole reply.
+  # Three attempts, zero bodies filled.
+  Scenario: A Rust world field whose type holds a comma is read as a field
+    Given a Rust step file containing:
+      """
+      use cucumber::{World, given, when};
+
+      #[derive(Debug, Default, World)]
+      struct SpecWorld {
+          rows: HashMap<String, Vec<String>>,
+      }
+
+      #[given(expr = "a requirement")]
+      fn a_requirement(_world: &mut SpecWorld) {
+          todo!("implement step: a requirement");
+      }
+      """
+    And a step-filling reply:
+      """
+      struct SpecWorld {
+          criteria_results: Option<Vec<(String, bool)>>,
+          report: Option<
+              spec_harness::report::RequirementTestReport,
+          >,
+      }
+
+      #[given(expr = "a requirement")]
+      fn a_requirement(world: &mut SpecWorld) {
+          world.criteria_results = Some(vec![("one".into(), true)]);
+      }
+      """
+    When the reply is read against the step file
+    Then the world already declares the field "rows"
+    And the reply adds the field "criteria_results: Option<Vec<(String, bool)>>,"
+    And the reply adds the field "report: Option<spec_harness::report::RequirementTestReport>,"
+    And the reply's bodies reach no undeclared world member
+
+  # A reply cannot add methods: an impl block in it is dropped when the
+  # definitions are spliced in. Observed live: a reply carried
+  # `impl SpecWorld { fn generated_report(&self) ... }`, the body called
+  # it, the call passed the field check because it was a call, and the
+  # bar read E0599 for a method that was never going to land.
+  Scenario: A Rust step body calling a method the file does not have is named
+    Given a Rust step file containing:
+      """
+      use cucumber::{World, then};
+
+      #[derive(Debug, Default, World)]
+      struct SpecWorld {
+          generated_report: Option<Report>,
+      }
+
+      impl SpecWorld {
+          fn reset(&mut self) {}
+      }
+
+      #[then(expr = "the criteria list is empty.")]
+      fn the_criteria_list_is_empty(_world: &mut SpecWorld) {
+          todo!("implement step: the criteria list is empty.");
+      }
+      """
+    And a step-filling reply:
+      """
+      impl SpecWorld {
+          fn generated_report(&self) -> &Report {
+              self.generated_report.as_ref().expect("a report")
+          }
+      }
+
+      #[then(expr = "the criteria list is empty.")]
+      fn the_criteria_list_is_empty(world: &mut SpecWorld) {
+          world.reset();
+          assert!(world.generated_report().criteria.is_empty());
+          assert!(world
+              .missing_field
+              .is_none());
+      }
+      """
+    When the reply is read against the step file
+    Then the reply's bodies call the undeclared world method "generated_report"
+    And the reply's bodies call no undeclared world method named "reset"
+    And the reply's bodies use the undeclared world field "missing_field"

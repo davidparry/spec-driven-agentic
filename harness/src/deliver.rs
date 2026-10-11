@@ -875,24 +875,36 @@ impl Deliver {
         }
         let budget = self.options.attempts.max(1);
         let implement = self.implement_service(language);
+        // What the previous attempt broke, when it broke the build: the
+        // compiler's headlines, carried into the next attempt's brief.
+        // The bar is re-read after a revert so the record matches the
+        // tree, and that re-read loses the error; without it the next
+        // attempt is asked the same question and, with the response
+        // cache on, gets the same answer from disk.
+        let mut last_break: Vec<String> = Vec::new();
         for attempt in 1..=budget {
             prompter.tell(&format!("Attempt {attempt} of {budget}."));
             let before = self.source_snapshot(language)?;
-            let mut wrote = match self.attempt_implementation(prompter, &implement, tdd, req_id)? {
-                Attempted::Unanswered => {
-                    return Ok(Bar::stopped(
-                        format!(
-                            "The model never answered the implementation prompt, so {req_id} \
+            let round = AttemptRound {
+                attempt,
+                last_break: &last_break,
+            };
+            let mut wrote =
+                match self.attempt_implementation(prompter, &implement, tdd, req_id, &round)? {
+                    Attempted::Unanswered => {
+                        return Ok(Bar::stopped(
+                            format!(
+                                "The model never answered the implementation prompt, so {req_id} \
                              was not attempted. Implement by hand, then run spec deliver \
                              {req_id} again - or raise timeout_seconds under [llm] if the \
                              model was still generating when the wait ran out."
-                        ),
-                        Some(report.phase.clone()),
-                    ));
-                }
-                Attempted::Ran { wrote } => wrote,
-            };
-            wrote.extend(self.fill_steps(prompter, &implement, tdd, req_id));
+                            ),
+                            Some(report.phase.clone()),
+                        ));
+                    }
+                    Attempted::Ran { wrote } => wrote,
+                };
+            wrote.extend(self.fill_steps(prompter, &implement, tdd, req_id, &round));
             let judged = match run_and_narrate(tdd, runner, prompter)? {
                 Some(report) => report,
                 None => {
@@ -926,6 +938,10 @@ impl Deliver {
                     if attempt == budget {
                         continue;
                     }
+                    // The re-read below loses the error; keep its
+                    // headlines - a few lines, not the whole output -
+                    // for the next attempt's brief.
+                    last_break = compiler_headlines(&judged.failure_details);
                     // The next attempt is briefed from the last recorded
                     // run, and that is now the broken build: compiler
                     // errors for code that is no longer on disk, naming
@@ -948,6 +964,8 @@ impl Deliver {
                     continue;
                 }
             }
+            // The bar this attempt left is the whole brief for the next.
+            last_break.clear();
             report = judged;
         }
         Ok(Bar::stopped(
@@ -1099,12 +1117,13 @@ impl Deliver {
         >,
         tdd: &TddService<FsStateStore>,
         req_id: &str,
+        round: &AttemptRound<'_>,
     ) -> Option<String> {
         let failures = tdd
             .implementation_brief(req_id)
-            .map(|brief| brief.failures)
+            .map(|brief| round.failures(brief.failures))
             .unwrap_or_default();
-        match implement.fill_pending_steps(prompter, req_id, &failures) {
+        match implement.fill_pending_steps_on_attempt(prompter, req_id, &failures, round.attempt) {
             Ok(Some(report)) => {
                 prompter.tell(&filled_steps_notice(&report));
                 Some(report.target)
@@ -1138,8 +1157,10 @@ impl Deliver {
         >,
         tdd: &TddService<FsStateStore>,
         req_id: &str,
+        round: &AttemptRound<'_>,
     ) -> Result<Attempted, String> {
-        let brief = tdd.implementation_brief(req_id).map_err(tdd_message)?;
+        let mut brief = tdd.implementation_brief(req_id).map_err(tdd_message)?;
+        brief.failures = round.failures(brief.failures);
         // Nobody is at the keyboard to answer --into. Evidence still
         // decides wherever it can; only when it names nothing does an
         // unattended run fall back to convention, and say which file it
@@ -1579,6 +1600,55 @@ fn undefined_steps_remain(req_id: &str, count: usize) -> String {
 /// The summary written against every file an abandoned attempt moved.
 const RESTORE_SUMMARY: &str = "restore the code the attempt started from";
 
+/// Which attempt of the RED-to-GREEN loop is running, and what the
+/// attempt before it broke. Both go into the briefs, so no two attempts
+/// ask the model the same question.
+#[derive(Debug, Clone, Copy)]
+struct AttemptRound<'a> {
+    attempt: u32,
+    /// The compiler headlines of the previous attempt, when it was
+    /// reverted for breaking the build. Empty otherwise.
+    last_break: &'a [String],
+}
+
+impl AttemptRound<'_> {
+    /// The recorded failures with the previous break's headlines after
+    /// them, each marked as the attempt before this one's.
+    fn failures(&self, mut recorded: Vec<String>) -> Vec<String> {
+        if self.last_break.is_empty() {
+            return recorded;
+        }
+        recorded.push(format!(
+            "Attempt {} did not compile and was reverted; the compiler said:",
+            self.attempt.saturating_sub(1)
+        ));
+        recorded.extend(self.last_break.iter().cloned());
+        recorded
+    }
+}
+
+/// How many compiler lines a reverted attempt leaves for the next one.
+/// The headlines name the error and where it was; the rest of cargo's
+/// output is the code that is no longer on disk.
+const BREAK_HEADLINES: usize = 20;
+
+/// The lines of a broken build's output that say what the error was
+/// and where - `error[E0599]: ...` and `--> file:line` from rustc,
+/// `Kata.java:1: error: ...` from javac, `x.ts(3,5): error TS...` from
+/// tsc - in order, up to [`BREAK_HEADLINES`] of them. A few hundred
+/// bytes of what went wrong, where the whole output was measured at
+/// 216 KB when it went into a prompt.
+fn compiler_headlines(failure_details: &[String]) -> Vec<String> {
+    failure_details
+        .iter()
+        .flat_map(|detail| detail.lines())
+        .map(str::trim)
+        .filter(|line| line.starts_with("-->") || line.contains("error"))
+        .map(str::to_string)
+        .take(BREAK_HEADLINES)
+        .collect()
+}
+
 /// What one implementation attempt did to the tree, as far as a revert
 /// needs to know.
 #[derive(Debug, PartialEq, Eq)]
@@ -1733,6 +1803,53 @@ mod tests {
         assert!(notice.contains("src/main/java/Kata.java"), "{notice}");
         assert!(notice.contains("by convention"), "{notice}");
         assert!(notice.contains("spec implement REQ-001 --into"), "{notice}");
+    }
+
+    /// Measured: attempt 3 replayed attempt 2 from the response cache,
+    /// compiler error included, because the re-read after the revert
+    /// left the brief identical. The headlines are what carries over:
+    /// the error and where, never the code that was put back.
+    #[test]
+    fn a_reverted_attempt_leaves_its_compiler_headlines_for_the_next_brief() {
+        let output = "Build failed before tests could run:\n   Compiling spec-harness v0.7.18 (/x)\nerror[E0599]: no method named `generated_report` found for mutable reference `&mut SpecWorld`\n    --> tests/cucumber.rs:5716:15\n     |\n5716 |         world.generated_report().criteria.is_empty(),\n     |               ^^^^^^^^^^^^^^^^ field, not a method\nhelp: remove the arguments\nerror: could not compile `spec-harness` (test \"cucumber\") due to 2 previous errors\n";
+        let headlines = compiler_headlines(&[output.to_string()]);
+        assert_eq!(
+            headlines,
+            [
+                "error[E0599]: no method named `generated_report` found for mutable reference `&mut SpecWorld`",
+                "--> tests/cucumber.rs:5716:15",
+                "error: could not compile `spec-harness` (test \"cucumber\") due to 2 previous errors",
+            ]
+        );
+        assert_eq!(
+            compiler_headlines(&[
+                "Build failed:\nKata.java:1: error: ')' expected\n    int add( }\n            ^\n1 error\n".into()
+            ]),
+            ["Kata.java:1: error: ')' expected", "1 error"]
+        );
+        let many: Vec<String> = (0..50).map(|i| format!("error[E{i:04}]: x")).collect();
+        assert_eq!(
+            compiler_headlines(&[many.join("\n")]).len(),
+            BREAK_HEADLINES
+        );
+
+        let round = AttemptRound {
+            attempt: 3,
+            last_break: &headlines,
+        };
+        let failures = round.failures(vec!["Given a requirement: FAILED".into()]);
+        assert_eq!(failures[0], "Given a requirement: FAILED");
+        assert!(
+            failures[1].contains("Attempt 2 did not compile"),
+            "{failures:?}"
+        );
+        assert_eq!(failures.len(), 1 + 1 + headlines.len());
+        // Nothing broke: the recorded failures are the whole brief.
+        let clean = AttemptRound {
+            attempt: 2,
+            last_break: &[],
+        };
+        assert_eq!(clean.failures(vec!["x".into()]), vec!["x".to_string()]);
     }
 
     /// The stop has to separate the two red bars, because the way out of
@@ -2718,10 +2835,12 @@ mod tests {
     }
 
     /// An attempt that broke the build is put back, and the attempt
-    /// after it is briefed with the bar on disk - not the compiler error
-    /// from code that is no longer there. Measured live: the stale
-    /// error named the 216 KB step file, which went into the next
-    /// prompt whole.
+    /// after it is briefed with the bar on disk - plus the headlines
+    /// of what broke, not the whole compiler output for code that is
+    /// no longer there. Measured live, twice: the stale output named
+    /// the 216 KB step file, which went into the next prompt whole;
+    /// and with nothing of the break carried over, the next prompt was
+    /// identical to the last and the response cache replayed it.
     #[test]
     fn after_a_reverted_attempt_the_next_one_is_briefed_from_the_bar_on_disk() {
         let dir = kata(one_criterion());
@@ -2760,9 +2879,18 @@ mod tests {
             "briefed with the bar on disk: {second}"
         );
         assert!(
-            !second.contains("';' expected"),
-            "not with the error the restore undid: {second}"
+            second.contains("Attempt 1 did not compile and was reverted"),
+            "and told what the attempt before it broke: {second}"
         );
+        assert!(
+            second.contains("Kata.java:1: error: ';' expected"),
+            "by the compiler's headline: {second}"
+        );
+        let first = prompts
+            .iter()
+            .find(|prompt| prompt.contains("The failing tests"))
+            .expect("a first implementation prompt");
+        assert_ne!(first, second, "two attempts never ask the same question");
     }
 
     /// A runner that, on its last scripted run, writes a file the way a

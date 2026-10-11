@@ -164,6 +164,12 @@ pub struct FillBrief<'a> {
     pub preamble: &'a str,
     pub production: &'a [(String, String)],
     pub failures: &'a [String],
+    /// Which attempt of the delivery loop this fill belongs to, from 1.
+    /// In the prompt so two attempts never ask the same question: the
+    /// response cache answers an identical prompt from disk, and a run
+    /// was measured replaying its second attempt as its third, compiler
+    /// error included, without a model call.
+    pub attempt: u32,
 }
 
 /// The `[fill_steps]` prompt.
@@ -198,6 +204,7 @@ pub fn fill_steps_prompt(
             preamble => brief.preamble,
             production,
             failures => brief.failures,
+            attempt => brief.attempt,
         },
     )
 }
@@ -258,9 +265,9 @@ pub fn world_span(language: Language, source: &str) -> Option<WorldSpan> {
         b'{' => {
             let close = closing_brace(source, next)?;
             let body = &source[next + 1..close];
-            let fields = body
-                .lines()
-                .filter_map(|line| field_name(language, line))
+            let fields = body_declarations(language, body)
+                .iter()
+                .filter_map(|declaration| field_name(language, declaration))
                 .collect();
             Some(WorldSpan {
                 name,
@@ -316,12 +323,9 @@ pub fn split_world_fragment(
     let close = closing_brace(reply, open)
         .ok_or_else(|| format!("the {} fragment in the reply never closes", world.name))?;
     let mut fields = Vec::new();
-    for line in reply[open + 1..close].lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with("//") || trimmed.starts_with("///") {
-            continue;
-        }
-        let Some(name) = field_name(language, line) else {
+    for declaration in body_declarations(language, &reply[open + 1..close]) {
+        let trimmed = declaration.as_str();
+        let Some(name) = field_name(language, trimmed) else {
             return Err(format!(
                 "the {} fragment may hold only its new fields, but it held {trimmed:?}; \
                  declare fields there and nothing else",
@@ -457,6 +461,65 @@ pub fn undeclared_world_fields(
         .chain(added.iter().filter_map(|line| field_name(language, line)))
         .collect();
     let mut missing: Vec<String> = Vec::new();
+    for (member, called) in world_member_accesses(language, code, world) {
+        if !called && !known.contains(&member) && !missing.contains(&member) {
+            missing.push(member);
+        }
+    }
+    missing
+}
+
+/// The methods the Rust definitions in `code` call on the world
+/// (`world.x()`) that `declared` - the functions the step file already
+/// has - does not name, in first-use order.
+///
+/// A reply may not add methods: an `impl` block in it is dropped on
+/// splice, so a body that called one compiled against nothing.
+/// Observed: a reply carrying `impl SpecWorld { fn generated_report(&self)
+/// ... }` and a body reading `world.generated_report()` passed the
+/// field check - it is a call, not a field - and the bar read E0599.
+pub fn undeclared_world_methods(
+    language: Language,
+    code: &str,
+    world: &WorldSpan,
+    declared: &[String],
+) -> Vec<String> {
+    let mut missing: Vec<String> = Vec::new();
+    for (member, called) in world_member_accesses(language, code, world) {
+        if called && !declared.contains(&member) && !missing.contains(&member) {
+            missing.push(member);
+        }
+    }
+    missing
+}
+
+/// Every function the file declares, free or in an `impl` block - the
+/// names a step body may call on the world.
+pub fn declared_methods(language: Language, source: &str) -> Vec<String> {
+    if language != Language::Rust {
+        return Vec::new();
+    }
+    let mut seen: Vec<String> = Vec::new();
+    for captures in RUST_FN.captures_iter(source) {
+        let name = captures[1].to_string();
+        if !seen.contains(&name) {
+            seen.push(name);
+        }
+    }
+    seen
+}
+
+/// Each `param.member` the Rust definitions in `code` reach on the
+/// parameter bound to the world type, with whether it was called.
+/// Whitespace around the dot is allowed, because rustfmt puts a long
+/// chain's `.member` on its own line and the check that required
+/// `world.` to be adjacent let `world\n    .generated_report` through
+/// unread. Only the world parameter is read.
+fn world_member_accesses(language: Language, code: &str, world: &WorldSpan) -> Vec<(String, bool)> {
+    if language != Language::Rust {
+        return Vec::new();
+    }
+    let mut accesses = Vec::new();
     for span in definition_spans(language, code) {
         let text = span.text(code);
         let Some(param) = WORLD_PARAM_NAME
@@ -467,22 +530,20 @@ pub fn undeclared_world_fields(
             continue;
         };
         let access = Regex::new(&format!(
-            r"\b{}\.([a-z_][A-Za-z0-9_]*)\b(\s*\()?",
+            r"\b{}\s*\.\s*([a-z_][A-Za-z0-9_]*)\b(\s*\()?",
             regex::escape(&param)
         ))
         .expect("valid regex");
         for captures in access.captures_iter(text) {
-            if captures.get(2).is_some() {
-                continue;
-            }
-            let field = captures[1].to_string();
-            if !known.contains(&field) && !missing.contains(&field) {
-                missing.push(field);
-            }
+            accesses.push((captures[1].to_string(), captures.get(2).is_some()));
         }
     }
-    missing
+    accesses
 }
+
+/// A function declaration, wherever it sits: free or in an `impl`.
+static RUST_FN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\bfn\s+([A-Za-z_][A-Za-z0-9_]*)").expect("valid regex"));
 
 /// The parameter a Rust definition binds its world to: `w: &mut
 /// KataWorld` gives (`w`, `KataWorld`).
@@ -501,16 +562,109 @@ static OTHER_STRUCT: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?m)^[ \t]*(?:pub(?:\([^)]*\))?\s+)?struct\s+[A-Za-z_]").expect("valid regex")
 });
 
-/// A Rust field: `name: Type` with an optional `pub` and trailing comma.
+/// A Rust field: `name: Type` with an optional `pub` and trailing
+/// comma. The type is anything after the colon, commas included, so
+/// `Vec<(String, bool)>` and `HashMap<String, Vec<String>>` are fields,
+/// because [`body_declarations`] has already cut the body into one
+/// declaration per entry. A method (`fn x(a: i32)`) and a nested type
+/// have no colon straight after their first word and do not match.
 static RUST_FIELD: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^\s*(?:pub(?:\([^)]*\))?\s+)?([a-z_][A-Za-z0-9_]*)\s*:\s*[^,]+,?\s*$")
-        .expect("valid regex")
+    Regex::new(r"^(?:pub(?:\([^)]*\))?\s+)?([a-z_][A-Za-z0-9_]*)\s*:\s*\S.*$").expect("valid regex")
 });
 
-/// The name a field line declares, or `None` when the line is not a
+/// The declarations in a struct or class body, one entry each however
+/// many lines it took. A Rust declaration ends at a comma or a newline
+/// outside every bracket, so a type rustfmt wrapped (`Option<\n    T,\n>`)
+/// comes back whole, on one line, where the line-at-a-time reading
+/// this replaced saw a field named `spec_harness` and a stray `>,`.
+/// Comment and attribute lines are left out. Other languages keep
+/// their lines: a class body holds methods, and their fields are one
+/// line each.
+pub fn body_declarations(language: Language, body: &str) -> Vec<String> {
+    if language != Language::Rust {
+        return body
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty() && !line.starts_with("//"))
+            .map(str::to_string)
+            .collect();
+    }
+    let mut declarations = Vec::new();
+    let mut chunk = String::new();
+    let mut depth = 0usize;
+    let bytes = body.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        let line_rest = &body[index..];
+        if chunk.trim().is_empty() && byte == b'#' && line_rest.starts_with("#[") {
+            // An attribute line is not a field.
+            index = line_rest.find('\n').map_or(bytes.len(), |n| index + n);
+            continue;
+        }
+        if line_rest.starts_with("//") {
+            index = line_rest.find('\n').map_or(bytes.len(), |n| index + n);
+            continue;
+        }
+        match byte {
+            b'"' => {
+                let end = skip_string(bytes, index).unwrap_or(bytes.len());
+                chunk.push_str(&body[index..end]);
+                index = end;
+                continue;
+            }
+            b'<' | b'(' | b'[' | b'{' => depth += 1,
+            b'>' if index > 0 && bytes[index - 1] == b'-' => {}
+            b'>' | b')' | b']' | b'}' => depth = depth.saturating_sub(1),
+            b',' | b'\n' if depth == 0 => {
+                let declaration = collapse_declaration(&chunk);
+                if !declaration.is_empty() {
+                    declarations.push(declaration);
+                }
+                chunk.clear();
+                index += 1;
+                continue;
+            }
+            _ => {}
+        }
+        chunk.push(byte as char);
+        index += 1;
+    }
+    let declaration = collapse_declaration(&chunk);
+    if !declaration.is_empty() {
+        declarations.push(declaration);
+    }
+    declarations
+}
+
+/// A declaration gathered over several lines, on one: whitespace
+/// collapsed, none inside brackets, and the trailing comma rustfmt
+/// leaves before a closing bracket dropped.
+fn collapse_declaration(chunk: &str) -> String {
+    let mut out = chunk.split_whitespace().collect::<Vec<_>>().join(" ");
+    for (from, to) in [
+        ("< ", "<"),
+        (" >", ">"),
+        ("( ", "("),
+        (" )", ")"),
+        ("[ ", "["),
+        (" ]", "]"),
+        (",>", ">"),
+        (",)", ")"),
+        (",]", "]"),
+        (" ,", ","),
+    ] {
+        while out.contains(from) {
+            out = out.replace(from, to);
+        }
+    }
+    out
+}
+
+/// The name a field declaration declares, or `None` when it is not a
 /// field: a method, an attribute, a nested type.
 pub fn field_name(language: Language, line: &str) -> Option<String> {
-    let trimmed = line.trim();
+    let trimmed = line.trim().trim_end_matches(',').trim_end();
     match language {
         Language::Rust => RUST_FIELD
             .captures(trimmed)
@@ -849,19 +1003,23 @@ fn the_result_is(world: &mut KataWorld, expected: i32) {
         };
         let production = [("src/lib.rs".to_string(), "pub fn add() {}".to_string())];
         let failures = ["When add is called: FAILED".to_string()];
-        let prompt = fill_steps_prompt(
-            Language::Rust,
-            &requirement,
-            &FillBrief {
-                scenarios: "  @REQ-001\n  Scenario: adds\n    When add is called\n",
-                fragment: "#[when(expr = \"add is called\")]\nfn a(_w: &mut KataWorld) { todo!() }\n",
-                count: 1,
-                preamble: "struct KataWorld {}\n",
-                production: &production,
-                failures: &failures,
-            },
-        );
+        let brief = |attempt: u32| FillBrief {
+            scenarios: "  @REQ-001\n  Scenario: adds\n    When add is called\n",
+            fragment: "#[when(expr = \"add is called\")]\nfn a(_w: &mut KataWorld) { todo!() }\n",
+            count: 1,
+            preamble: "struct KataWorld {}\n",
+            production: &production,
+            failures: &failures,
+            attempt,
+        };
+        let prompt = fill_steps_prompt(Language::Rust, &requirement, &brief(1));
         assert_eq!(prompt.section, "fill_steps");
+        // A later attempt asks a different question, so the response
+        // cache cannot replay the earlier one.
+        let again = fill_steps_prompt(Language::Rust, &requirement, &brief(2));
+        assert_ne!(prompt.user, again.user);
+        assert!(again.user.contains("attempt 2"), "{}", again.user);
+        assert!(!prompt.user.contains("attempt 1"), "{}", prompt.user);
         for needle in [
             "REQ-001",
             "add is called",
@@ -1006,6 +1164,58 @@ fn add(w: &mut W) {
         assert!(error.contains("another struct"), "{error}");
     }
 
+    /// Measured: every reply for a function taking `&[(&str, bool)]`
+    /// asked for a `Vec<(String, bool)>` field, and the comma inside
+    /// the tuple made the whole block read as "not a field".
+    #[test]
+    fn fields_whose_types_hold_commas_are_fields() {
+        let world = world_span(Language::Rust, RUST_FILE).unwrap();
+        let reply = "struct KataWorld {\n    criteria_results: Option<Vec<(String, bool)>>,\n    rows: HashMap<String, Vec<String>>,\n    pub(crate) pairs: Vec<(u8, u8)>,\n}\n\n#[when(expr = \"add is called\")]\nfn a(w: &mut KataWorld) {\n    w.criteria_results = Some(vec![]);\n}\n";
+        let split = split_world_fragment(Language::Rust, reply, &world).unwrap();
+        assert_eq!(
+            split.fields,
+            [
+                "criteria_results: Option<Vec<(String, bool)>>,",
+                "rows: HashMap<String, Vec<String>>,",
+                "pub(crate) pairs: Vec<(u8, u8)>,"
+            ]
+        );
+        assert_eq!(
+            definition_spans(Language::Rust, &split.definitions).len(),
+            1
+        );
+    }
+
+    /// rustfmt wraps a long type over several lines; the line-at-a-time
+    /// reading saw a field named after the crate and a stray `>,`.
+    #[test]
+    fn a_field_wrapped_over_several_lines_is_one_field_on_one_line() {
+        let world = world_span(Language::Rust, RUST_FILE).unwrap();
+        let reply = "#[derive(Debug, Default)]\nstruct KataWorld {\n    req_id: Option<String>,\n    /// The report under test.\n    #[allow(dead_code)]\n    test_report_for_req: Option<\n        spec_harness::report::RequirementTestReport,\n    >,\n}\n\n#[when(expr = \"add is called\")]\nfn a(w: &mut KataWorld) {\n    w.req_id = Some(\"x\".into());\n}\n";
+        let split = split_world_fragment(Language::Rust, reply, &world).unwrap();
+        assert_eq!(
+            split.fields,
+            [
+                "req_id: Option<String>,",
+                "test_report_for_req: Option<spec_harness::report::RequirementTestReport>,"
+            ]
+        );
+        // The world's own fields are read the same way.
+        let source = "use cucumber::World;\n\n#[derive(Debug, Default, World)]\nstruct W {\n    profile_rows: HashMap<String, Vec<String>>,\n    wrapped: Option<\n        a::B,\n    >,\n    plain: u8,\n}\n";
+        let world = world_span(Language::Rust, source).unwrap();
+        assert_eq!(world.fields, ["profile_rows", "wrapped", "plain"]);
+    }
+
+    /// A method wrapped over lines is still a method, and still refused.
+    #[test]
+    fn a_multi_line_method_in_the_world_block_is_refused() {
+        let world = world_span(Language::Rust, RUST_FILE).unwrap();
+        let reply = "struct KataWorld {\n    fn report(&self) -> &Report {\n        self.report.as_ref().expect(\"a report, {\")\n    }\n}\n#[when(expr = \"add is called\")]\nfn a(w: &mut KataWorld) {}\n";
+        let error = split_world_fragment(Language::Rust, reply, &world).unwrap_err();
+        assert!(error.contains("only its new fields"), "{error}");
+        assert!(error.contains("fn report(&self)"), "{error}");
+    }
+
     #[test]
     fn the_java_world_is_the_step_class_and_its_fields() {
         let java = "import io.cucumber.java.en.*;\n\npublic class GeneratedSteps {\n    private int result;\n\n    @When(\"add is called\")\n    public void addIsCalled() {\n        throw new PendingException();\n    }\n}\n";
@@ -1058,6 +1268,37 @@ fn add(w: &mut W) {
         // A parameter of another type is not the world.
         let other = "#[when(expr = \"add is called\")]\nfn a(ctx: &mut Other) {\n    ctx.anything = 1;\n}\n";
         assert!(undeclared_world_fields(Language::Rust, other, &world, &[]).is_empty());
+    }
+
+    /// rustfmt puts a long chain's `.field` on its own line; the check
+    /// has to read it there too.
+    #[test]
+    fn a_field_reached_across_a_line_break_is_still_checked() {
+        let world = world_span(Language::Rust, RUST_FILE).unwrap();
+        let reply = "#[then(expr = \"the result is {int}\")]\nfn the_result_is(world: &mut KataWorld, n: i32) {\n    let report = world\n        .generated_report\n        .as_ref()\n        .expect(\"a report\");\n    assert_eq!(report.total, n);\n}\n";
+        assert_eq!(
+            undeclared_world_fields(Language::Rust, reply, &world, &[]),
+            ["generated_report"]
+        );
+    }
+
+    /// A body may call the helpers the file has; a helper the reply
+    /// brought along is dropped on splice, so calling it is refused.
+    #[test]
+    fn methods_the_bodies_call_that_the_file_does_not_declare_are_named() {
+        let world = world_span(Language::Rust, RUST_FILE).unwrap();
+        let declared = declared_methods(Language::Rust, RUST_FILE);
+        assert!(declared.contains(&"helper".to_string()), "{declared:?}");
+        let reply = "impl KataWorld {\n    fn report(&self) -> i32 {\n        self.result.unwrap()\n    }\n}\n\n#[then(expr = \"the result is {int}\")]\nfn the_result_is(world: &mut KataWorld, n: i32) {\n    assert_eq!(world.report(), n);\n    assert!(world\n        .total()\n        .is_some());\n    world.result.take();\n}\n";
+        assert_eq!(
+            undeclared_world_methods(Language::Rust, reply, &world, &declared),
+            ["report", "total"]
+        );
+        // Calls the file can resolve are fine; `take()` is on the field.
+        let fine = "#[then(expr = \"the result is {int}\")]\nfn the_result_is(world: &mut KataWorld, n: i32) {\n    world.helper();\n    assert_eq!(world.result.take(), Some(n));\n}\n";
+        assert!(undeclared_world_methods(Language::Rust, fine, &world, &declared).is_empty());
+        let with_impl = "impl KataWorld {\n    fn report(&self) -> i32 { 1 }\n}\n";
+        assert_eq!(declared_methods(Language::Rust, with_impl), ["report"]);
     }
 
     #[test]

@@ -228,8 +228,11 @@ Rules:
   declare. Do NOT invent production functions that are not shown.
 - If a body needs state the world/fixture type does not have, add it: reply first with
   the world type by its exact name containing ONLY the new fields (types that implement
-  Default; wrap values in Option), then the definitions. Never repeat fields the head
-  already shows, and put no method or other member in that block.
+  Default; wrap values in Option), then the definitions. Write each new field on one
+  line; tuple and generic types such as Option<Vec<(String, bool)>> are fine. Never
+  repeat fields the head already shows, and put no method or other member in that block.
+- Do NOT add impl blocks, helper methods, or functions: only the fields block and the
+  definitions can land in the file. Read world fields directly in the bodies.
 - Do NOT emit imports, a package/module declaration, or any other type or member that
   is not one of the {{ count }} definition(s) or the new-fields block above.
 - Do NOT leave any placeholder (todo!, unimplemented!, PendingException, 'pending') behind.
@@ -246,6 +249,9 @@ Acceptance criteria:
 {% endfor %}
 The scenarios these steps bind:
 {{ scenarios }}
+{% if attempt > 1 %}
+This is attempt {{ attempt }}: the bodies written before did not make the bar green.
+{% endif -%}
 {% if failures %}
 The failing steps as the last run reported them:
 {% for failure in failures -%}

@@ -74,6 +74,7 @@ use spec_harness::domain::mcp_registry::{RegistryLoad, ServerSpec, parse_registr
 use spec_harness::domain::model::{Requirement, Spec, TestRunSummary};
 use spec_harness::domain::prompts::DecisionPrompt;
 use spec_harness::domain::refiner::RequirementRefiner;
+use spec_harness::domain::step_fill;
 use spec_harness::domain::tdd::{
     ImplementAttempt, StateEntry, TddPhase, TddSnapshot, TddStateMachine,
 };
@@ -152,6 +153,9 @@ struct SpecWorld {
     llm_unit_test_polish: Option<String>,
     /// The model's answer to the step-filling prompt alone.
     llm_step_fill: Option<String>,
+    /// Every prompt the scripted model was asked, newest last, for the
+    /// scenarios that check what a later attempt was briefed with.
+    llm_prompts_seen: Arc<Mutex<Vec<String>>>,
     llm_failure: Option<String>,
     greenfield_runs: Vec<Result<TestRunSummary, RunnerError>>,
     /// Files someone edits by hand while a delivery runs, as (path,
@@ -239,6 +243,10 @@ struct SpecWorld {
     branch_transcript: Vec<String>,
     /// The root spec file as it stood before the run under test.
     spec_file_at_start: Option<Option<String>>,
+    /// A cucumber-rs step file and a fill reply, read against each other.
+    step_file: Option<String>,
+    step_fill_reply: Option<String>,
+    step_fill_reading: Option<StepFillReading>,
 }
 
 // ---- fakes implementing the ports ----------------------------------------
@@ -424,6 +432,7 @@ impl SpecWorld {
         };
         llm.polishing_unit_tests_into(self.llm_unit_test_polish.clone())
             .filling_steps_with(self.llm_step_fill.clone())
+            .recording_prompts_into(self.llm_prompts_seen.clone())
     }
 
     fn scenario_doc(&self, name: &str) -> &spec_harness::domain::feature::ScenarioDoc {
@@ -2237,6 +2246,9 @@ struct ScriptedLlm {
     /// The reply to the step-filling prompt alone, when a scenario
     /// scripts one.
     step_fill: Option<String>,
+    /// Where every prompt asked is kept, when a scenario wants to read
+    /// them back.
+    seen: Option<Arc<Mutex<Vec<String>>>>,
 }
 
 impl ScriptedLlm {
@@ -2246,6 +2258,7 @@ impl ScriptedLlm {
             filling_from: None,
             unit_test_polish: None,
             step_fill: None,
+            seen: None,
         }
     }
 
@@ -2255,6 +2268,14 @@ impl ScriptedLlm {
             filling_from: Some(root),
             unit_test_polish: None,
             step_fill: None,
+            seen: None,
+        }
+    }
+
+    fn recording_prompts_into(self, seen: Arc<Mutex<Vec<String>>>) -> Self {
+        Self {
+            seen: Some(seen),
+            ..self
         }
     }
 
@@ -2299,6 +2320,17 @@ impl LlmConversation for ScriptedLlm {
         messages: &[ChatMessage],
         _tools: &[ToolDefinition],
     ) -> Result<ChatTurn, LlmError> {
+        if let Some(seen) = &self.seen {
+            // The latest user turn is the question; earlier turns are
+            // the same conversation re-sent with a correction.
+            let latest = messages
+                .iter()
+                .rev()
+                .find(|m| m.role == spec_harness::domain::tools::ChatRole::User)
+                .map(|m| m.content.clone())
+                .unwrap_or_default();
+            seen.lock().unwrap().push(latest);
+        }
         if let Some(polish) = &self.unit_test_polish
             && asks_to_polish_a_unit_test(messages)
         {
@@ -5646,4 +5678,123 @@ fn assert_gate_said(world: &SpecWorld, fragment: &str) {
         "said: {:?}",
         world.branch_transcript
     );
+}
+
+// ---- step filling: the world type and what a reply may reach ---------
+
+#[then(regex = r#"^the model was asked a prompt containing "(.+)"$"#)]
+fn the_model_was_asked_a_prompt_containing(world: &mut SpecWorld, fragment: String) {
+    let seen = world.llm_prompts_seen.lock().unwrap();
+    assert!(
+        seen.iter().any(|prompt| prompt.contains(&fragment)),
+        "no prompt held {fragment:?}; {} prompt(s) were asked",
+        seen.len()
+    );
+}
+
+#[then(regex = r#"^the model was not asked a prompt containing "(.+)"$"#)]
+fn the_model_was_not_asked_a_prompt_containing(world: &mut SpecWorld, fragment: String) {
+    let seen = world.llm_prompts_seen.lock().unwrap();
+    assert!(
+        !seen.iter().any(|prompt| prompt.contains(&fragment)),
+        "a prompt held {fragment:?}"
+    );
+}
+
+#[given("a Rust step file containing:")]
+fn a_rust_step_file_containing(world: &mut SpecWorld, step: &Step) {
+    world.step_file = Some(docstring(step));
+}
+
+#[given("a step-filling reply:")]
+fn a_step_filling_reply(world: &mut SpecWorld, step: &Step) {
+    world.step_fill_reply = Some(docstring(step));
+}
+
+#[when("the reply is read against the step file")]
+fn the_reply_is_read_against_the_step_file(world: &mut SpecWorld) {
+    let file = world.step_file.clone().expect("a Rust step file");
+    let reply = world.step_fill_reply.clone().expect("a step-filling reply");
+    let span = step_fill::world_span(Language::Rust, &file).expect("a World struct in the file");
+    let split = step_fill::split_world_fragment(Language::Rust, &reply, &span)
+        .expect("a reply whose world block holds only fields");
+    let methods = step_fill::declared_methods(Language::Rust, &file);
+    world.step_fill_reading = Some(StepFillReading {
+        world_fields: span.fields.clone(),
+        added_fields: split.fields.clone(),
+        undeclared_fields: step_fill::undeclared_world_fields(
+            Language::Rust,
+            &split.definitions,
+            &span,
+            &split.fields,
+        ),
+        undeclared_methods: step_fill::undeclared_world_methods(
+            Language::Rust,
+            &split.definitions,
+            &span,
+            &methods,
+        ),
+    });
+}
+
+/// What a fill reply came to once read against its step file.
+#[derive(Debug, Clone, Default)]
+struct StepFillReading {
+    world_fields: Vec<String>,
+    added_fields: Vec<String>,
+    undeclared_fields: Vec<String>,
+    undeclared_methods: Vec<String>,
+}
+
+impl SpecWorld {
+    fn step_fill_reading(&self) -> &StepFillReading {
+        self.step_fill_reading
+            .as_ref()
+            .expect("the reply was read against the step file")
+    }
+}
+
+#[then(regex = r#"^the world already declares the field "([^"]+)"$"#)]
+fn the_world_already_declares_the_field(world: &mut SpecWorld, name: String) {
+    let fields = &world.step_fill_reading().world_fields;
+    assert!(fields.contains(&name), "{fields:?}");
+}
+
+#[then(regex = r#"^the reply adds the field "(.+)"$"#)]
+fn the_reply_adds_the_field(world: &mut SpecWorld, field: String) {
+    let added = &world.step_fill_reading().added_fields;
+    assert!(added.contains(&field), "{added:?}");
+}
+
+#[then("the reply's bodies reach no undeclared world member")]
+fn the_replys_bodies_reach_no_undeclared_world_member(world: &mut SpecWorld) {
+    let reading = world.step_fill_reading();
+    assert!(
+        reading.undeclared_fields.is_empty(),
+        "{:?}",
+        reading.undeclared_fields
+    );
+    assert!(
+        reading.undeclared_methods.is_empty(),
+        "{:?}",
+        reading.undeclared_methods
+    );
+}
+
+#[then(regex = r#"^the reply's bodies call the undeclared world method "([^"]+)"$"#)]
+fn the_replys_bodies_call_the_undeclared_world_method(world: &mut SpecWorld, name: String) {
+    let called = &world.step_fill_reading().undeclared_methods;
+    assert!(called.contains(&name), "{called:?}");
+}
+
+#[then(regex = r#"^the reply's bodies call no undeclared world method named "([^"]+)"$"#)]
+fn the_replys_bodies_call_no_undeclared_world_method_named(world: &mut SpecWorld, name: String) {
+    let called = &world.step_fill_reading().undeclared_methods;
+    assert!(!called.contains(&name), "{called:?}");
+}
+
+#[then(regex = r#"^the reply's bodies use the undeclared world field "([^"]+)"$"#)]
+fn the_replys_bodies_use_the_undeclared_world_field(world: &mut SpecWorld, name: String) {
+    let used = &world.step_fill_reading().undeclared_fields;
+    assert!(used.contains(&name), "{used:?}");
 }

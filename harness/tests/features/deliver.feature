@@ -930,3 +930,42 @@ Feature: Deliver mode
     And the delivery leaves "REQ-001" outstanding because "is Given/When/Then shaped"
     And the developer was told a finding containing "Skipping criterion"
     And the spec file is unchanged
+
+  # After a revert the bar is read again, and the re-read loses the
+  # compiler error. The next attempt still has to be a different
+  # question from the one before it: the response cache answers an
+  # identical prompt from disk, and a run was measured replaying its
+  # second attempt as its third - same bodies, same compiler error - with
+  # no model call at all. So the error's headlines ride into the next
+  # brief, with the attempt number, and a step fill the model never got
+  # right says why in the transcript rather than only in the cache.
+  Scenario: The attempt after a reverted one is told what broke
+    Given a Java project marker
+    And a project source file "src/main/java/Kata.java" containing:
+      """
+      public class Kata { int add(String input) { return 0; } }
+      """
+    And a working spec with the pending requirements "REQ-001"
+    And a model is resolved
+    And the model will reply:
+      """
+      [{"path": "src/main/java/Kata.java", "content": "public class Kata { int add(String i) { return 1; } }"}]
+      """
+    And the model will also fill in the generated unit test
+    And the delivery skips the refactor
+    And the delivery budget is 2 attempts
+    And the test runs will report:
+      """
+      1 tests and 1 failures detailed "Req001Test: TODO: assert"
+      the build failed with "Kata.java:1: error: ')' expected"
+      1 tests and 1 failures detailed "Req001Test: TODO: assert"
+      1 tests and 0 failures
+      """
+    When the delivery runs for "REQ-001"
+    Then the delivery completes
+    And the model was asked a prompt containing "Attempt 1 did not compile and was reverted"
+    And the model was asked a prompt containing "Kata.java:1: error: ')' expected"
+    And the model was asked a prompt containing "This is attempt 2"
+    And the model was not asked a prompt containing "This is attempt 1"
+    And the developer was told a finding containing "The reply for the whole batch of pending steps was refused"
+    And the developer was told a finding containing "stays pending: the last reply was refused"
