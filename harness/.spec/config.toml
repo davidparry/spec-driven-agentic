@@ -102,7 +102,7 @@ attempts = 10
 # round is a full `spec implement` with `[llm] retry` model attempts
 # inside it. `--attempts` wins for one run.
 [deliver]
-attempts = 3
+attempts = 15
 
 # The second model: [llm] above writes, this one answers the bounded
 # question the deterministic rules cannot. Pinned for the same reason,
