@@ -14,8 +14,8 @@ Usage: spec deliver [OPTIONS] [TARGET]...
 | --- | --- |
 | `--root <ROOT>` | Project root. Defaults to the nearest enclosing project, [searching upward](../global-flags.md#discovery-what-happens-when-you-say-nothing) from the working directory. |
 | `--model <MODEL>` | LLM model for the generation steps, this run only. |
-| `--retry <N>` | Max attempts when a model reply fails validation. Default 3. |
-| `--attempts <N>` | RED-to-GREEN rounds per requirement. Default 3. |
+| `--retry <N>` | Max attempts when a model reply fails validation, this run only. Otherwise `[llm] retry` in `.spec/config.toml`, default 3. |
+| `--attempts <N>` | RED-to-GREEN rounds per requirement, this run only. Otherwise `[deliver] attempts` in `.spec/config.toml`, default 3. |
 | `--fail-fast` | Stop at the first requirement that falls short instead of carrying on. |
 | `--no-refactor` | Skip the refactor step even on a green bar. |
 | `--file <FILE>` | Draft new requirements into this included spec file. Omitted, the drafted requirement lands in the catalog document covering the working directory — see [`spec draft`](spec.md#spec-draft). |

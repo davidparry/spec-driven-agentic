@@ -51,6 +51,7 @@ tools.call_timeout_seconds	300	(default)
 tools.cache_ttl_seconds	86400	(default)
 tools.mcp_config	(unset)	(default)
 refactor.attempts	10	(default)
+deliver.attempts	3	(default)
 decision.model	(unset)	(default)
 decision.endpoint	http://localhost:11434	/Users/you/code/calculator/.spec/config.toml
 decision.timeout_seconds	60	(default)
@@ -77,6 +78,19 @@ started from. Each round costs a model call and a full test run, so it is
 that command's whole cost ceiling. Zero or a non-number falls back to the
 default rather than to a budget of nothing, which would revert without
 ever having tried.
+
+`deliver.attempts` is the same kind of budget for
+[`spec deliver`](deliver.md): how many RED-to-GREEN rounds one
+requirement gets before the run reports it fallen short and moves on.
+Each round is a full `spec implement`, which spends `llm.retry` model
+attempts of its own inside it. `--attempts` wins for one run; zero or
+junk in the file falls back to the default.
+
+Every budget and timeout follows the same order: the flag for one run,
+then the key in `.spec/config.toml`, then the compiled-in default. A
+project that wants to see what it is running on can write each key with
+its value, as this repository's own config files do; `spec config` then
+attributes every row to the file.
 
 In a project that has never run `spec model use`, the first row is the
 name Ollama supplied:

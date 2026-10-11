@@ -79,8 +79,10 @@ use crate::workspace::project_layout;
 /// useful reporting the gap than spinning on it.
 pub const VERIFY_ROUNDS: u32 = 2;
 
-/// The default RED-to-GREEN budget for one requirement.
-pub const DEFAULT_ATTEMPTS: u32 = 3;
+/// The default RED-to-GREEN budget for one requirement. `[deliver]
+/// attempts` in `.spec/config.toml` overrides it; `--attempts` wins for
+/// one run.
+pub const DEFAULT_ATTEMPTS: u32 = crate::domain::config_report::DEFAULT_DELIVER_ATTEMPTS;
 
 /// What `spec deliver` was pointed at.
 #[derive(Debug, Clone, PartialEq, Eq)]

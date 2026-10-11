@@ -35,6 +35,11 @@ pub const DEFAULT_TOOLS_CACHE_TTL_SECONDS: u64 = 86_400;
 /// enough that a model which is converging gets to finish, low enough
 /// that one which is not stops wasting a laptop's evening.
 pub const DEFAULT_REFACTOR_ATTEMPTS: u32 = 10;
+/// How many RED-to-GREEN rounds `spec deliver` gives one requirement
+/// before it reports the requirement as fallen short and moves on.
+/// Each round is a full `spec implement` with its own model attempts
+/// inside, so three is already a long evening on a local model.
+pub const DEFAULT_DELIVER_ATTEMPTS: u32 = 3;
 
 /// The key whose value the provider resolves when the file is silent.
 pub const LLM_MODEL_KEY: &str = "llm.model";
@@ -187,6 +192,7 @@ pub(crate) struct PresentValues {
     pub call_timeout_seconds: Option<u64>,
     pub tools_cache_ttl_seconds: Option<u64>,
     pub refactor_attempts: Option<u32>,
+    pub deliver_attempts: Option<u32>,
     pub mcp_config: Option<String>,
     pub decision_model: Option<String>,
     pub decision_endpoint: Option<String>,
@@ -257,6 +263,8 @@ pub(crate) fn build_report(file: ConfigFileStatus, present: PresentValues) -> Co
     push(&mut settings, &file, "tools.mcp_config", value, set);
     let (value, set) = number_or(present.refactor_attempts, DEFAULT_REFACTOR_ATTEMPTS);
     push(&mut settings, &file, "refactor.attempts", value, set);
+    let (value, set) = number_or(present.deliver_attempts, DEFAULT_DELIVER_ATTEMPTS);
+    push(&mut settings, &file, "deliver.attempts", value, set);
     let (value, set) = optional_or(present.decision_model, UNSET);
     push(&mut settings, &file, DECISION_MODEL_KEY, value, set);
     // The decision endpoint inherits the generative one, because they

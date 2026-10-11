@@ -10,6 +10,8 @@ Feature: Project configuration dump
     And the config value "llm.endpoint" is "http://localhost:11434" from default
     And the config value "tools.max_rounds" is "12" from default
     And the config value "tools.profiles.implement" is from default
+    And the config value "refactor.attempts" is "10" from default
+    And the config value "deliver.attempts" is "3" from default
 
   Scenario: Values present in the file are attributed to that file
     Given the config file contains:
@@ -42,3 +44,18 @@ Feature: Project configuration dump
     When the configuration is listed
     Then the config file status contains "invalid TOML"
     And the config value "llm.model" is "(unset)" from default
+
+  Scenario: The attempt budgets are read from the file like every other key
+    Given the config file contains:
+      """
+      [llm]
+      retry = 5
+      [refactor]
+      attempts = 4
+      [deliver]
+      attempts = 2
+      """
+    When the configuration is listed
+    Then the config value "llm.retry" is "5" from the config file
+    And the config value "refactor.attempts" is "4" from the config file
+    And the config value "deliver.attempts" is "2" from the config file

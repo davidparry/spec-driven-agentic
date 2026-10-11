@@ -11,10 +11,11 @@ use std::time::Duration;
 use crate::adapters::spec_home::{ensure_parent, spec_file};
 use crate::domain::CONFIG_FILE;
 use crate::domain::config_report::{
-    ConfigFileStatus, ConfigReport, DEFAULT_DECISION_TIMEOUT_SECONDS, DEFAULT_LLM_ENDPOINT,
-    DEFAULT_REFACTOR_ATTEMPTS, DEFAULT_TOOLS_CACHE_TTL_SECONDS, DEFAULT_TOOLS_CALL_TIMEOUT_SECONDS,
-    DEFAULT_TOOLS_CONFIRM, DEFAULT_TOOLS_DISCOVERY_TIMEOUT_SECONDS, DEFAULT_TOOLS_MAX_ROUNDS,
-    GateOverride, PresentValues, build_report,
+    ConfigFileStatus, ConfigReport, DEFAULT_DECISION_TIMEOUT_SECONDS, DEFAULT_DELIVER_ATTEMPTS,
+    DEFAULT_LLM_ENDPOINT, DEFAULT_REFACTOR_ATTEMPTS, DEFAULT_TOOLS_CACHE_TTL_SECONDS,
+    DEFAULT_TOOLS_CALL_TIMEOUT_SECONDS, DEFAULT_TOOLS_CONFIRM,
+    DEFAULT_TOOLS_DISCOVERY_TIMEOUT_SECONDS, DEFAULT_TOOLS_MAX_ROUNDS, GateOverride, PresentValues,
+    build_report,
 };
 use crate::domain::decision::{DEFAULT_MIN_CONFIDENCE, Mode, Policies, Policy};
 use crate::domain::tool_profile::ProfileOverrides;
@@ -108,6 +109,9 @@ fn present_from_table(table: &toml::Table) -> PresentValues {
     }
     if let Some(refactor) = table.get("refactor").and_then(|v| v.as_table()) {
         present.refactor_attempts = toml_u32(refactor, "attempts").filter(|n| *n > 0);
+    }
+    if let Some(deliver) = table.get("deliver").and_then(|v| v.as_table()) {
+        present.deliver_attempts = toml_u32(deliver, "attempts").filter(|n| *n > 0);
     }
     if let Some(decision) = table.get("decision").and_then(|v| v.as_table()) {
         present.decision_model = toml_string(decision, "model");
@@ -362,6 +366,16 @@ pub fn refactor_attempts(path: &Path) -> u32 {
     present_values(path)
         .refactor_attempts
         .unwrap_or(DEFAULT_REFACTOR_ATTEMPTS)
+}
+
+/// `[deliver] attempts`, the RED-to-GREEN rounds `spec deliver` gives
+/// one requirement before reporting it fallen short. Read on the same
+/// terms as the refactor budget: missing, zero, or junk is the default,
+/// and `--attempts` wins for one run.
+pub fn deliver_attempts(path: &Path) -> u32 {
+    present_values(path)
+        .deliver_attempts
+        .unwrap_or(DEFAULT_DELIVER_ATTEMPTS)
 }
 
 fn present_values(path: &Path) -> PresentValues {
@@ -915,6 +929,25 @@ mod tests {
         assert_eq!(
             refactor_attempts(&dir.path().join("no-such-file.toml")),
             DEFAULT_REFACTOR_ATTEMPTS
+        );
+    }
+
+    #[test]
+    fn a_configured_deliver_budget_is_read_and_zero_or_junk_fall_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(CONFIG_FILE);
+        fs::write(&path, "[deliver]\nattempts = 5\n").unwrap();
+        assert_eq!(deliver_attempts(&path), 5);
+        fs::write(&path, "[deliver]\nattempts = 0\n").unwrap();
+        assert_eq!(deliver_attempts(&path), DEFAULT_DELIVER_ATTEMPTS);
+        fs::write(&path, "[deliver]\nattempts = \"three\"\n").unwrap();
+        assert_eq!(deliver_attempts(&path), DEFAULT_DELIVER_ATTEMPTS);
+        // The refactor budget is a different knob and does not leak.
+        fs::write(&path, "[refactor]\nattempts = 7\n").unwrap();
+        assert_eq!(deliver_attempts(&path), DEFAULT_DELIVER_ATTEMPTS);
+        assert_eq!(
+            deliver_attempts(&dir.path().join("no-such-file.toml")),
+            DEFAULT_DELIVER_ATTEMPTS
         );
     }
 

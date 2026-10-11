@@ -11,8 +11,8 @@ use clap::{Args, Parser, Subcommand};
 use spec_harness::adapters::auto_prompt::AutoPrompter;
 use spec_harness::adapters::chat_cache::{CachedConversation, DEFAULT_CACHE_TTL};
 use spec_harness::adapters::config::{
-    TomlDecisionStore, TomlModelStore, TomlToolStore, config_path, inspect_config,
-    refactor_attempts, tools_settings,
+    TomlDecisionStore, TomlModelStore, TomlToolStore, config_path, deliver_attempts,
+    inspect_config, refactor_attempts, tools_settings,
 };
 use spec_harness::adapters::console_prompt::{ConsolePrompter, MUTED_YELLOW};
 use spec_harness::adapters::fs_project::FsProjectFiles;
@@ -49,7 +49,7 @@ use spec_harness::application::tdd_service::TddError;
 use spec_harness::application::tool_call_service::ToolCallService;
 use spec_harness::application::tool_service::ToolService;
 use spec_harness::bootstrap::{prompt_language, refresh_project_memory, settle_project_memory};
-use spec_harness::deliver::{DEFAULT_ATTEMPTS, Deliver, DeliverOptions, parse_target};
+use spec_harness::deliver::{Deliver, DeliverOptions, parse_target};
 use spec_harness::domain::config_report::{ConfigSource, LLM_MODEL_KEY};
 use spec_harness::domain::decision::{DECISION_PLANE_HELP, Transition};
 use spec_harness::domain::human::{Human, counted};
@@ -2207,7 +2207,11 @@ fn run_deliver(
     args: &DeliverArgs,
 ) -> anyhow::Result<()> {
     let options = DeliverOptions {
-        attempts: args.attempts.unwrap_or(DEFAULT_ATTEMPTS).max(1),
+        // Flag, then `[deliver] attempts` in the config, then the default.
+        attempts: args
+            .attempts
+            .unwrap_or_else(|| deliver_attempts(&config_path(root)))
+            .max(1),
         fail_fast: args.fail_fast,
         refactor: !args.no_refactor,
         file: args.file.clone(),

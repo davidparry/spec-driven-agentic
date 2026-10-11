@@ -26,6 +26,26 @@ timeout_seconds = 3600
 # 600 that only held if the rehearsal was in the same ten minutes as
 # the talk, which is no use the night before.
 cache_ttl_seconds = 86400
+# How many times to try a model call when the reply fails validation;
+# each retry includes the invalid reply. `--retry` wins for one run.
+retry = 3
+
+# Every budget and timeout a command reads is written below with the
+# value in use, so what each command does is on the page rather than
+# in the binary. A key is read from here first and the compiled-in
+# default only when it is absent; the values below are those defaults.
+[tools]
+# Tool-call rounds Agent::ask may take before it must return a reply.
+# `--max-rounds` wins for one run.
+max_rounds = 12
+# Names that must be confirmed by the human before the call runs.
+confirm = ["command_run"]
+# How long connecting to an mcp.json server may take.
+discovery_timeout_seconds = 10
+# How long one tool invocation may take.
+call_timeout_seconds = 300
+# How long discovered mcp.json tool lists stay cached under .spec/cache/tools/.
+cache_ttl_seconds = 86400
 
 # Tools offered to the model on each LLM-backed command. These are the
 # built-in defaults, written out so what each command may call is on
@@ -45,8 +65,6 @@ cache_ttl_seconds = 86400
 #
 # `spec deliver` and `spec greenfield` are not listed: neither offers
 # the model any tools.
-[tools]
-
 [tools.profiles]
 # spec draft
 spec-draft = ["list_requirements", "get_requirement", "validate_spec", "refine_requirement"]
@@ -73,6 +91,19 @@ ask = ["project_root", "list_requirements", "get_requirement", "validate_spec", 
 # spec diff
 diff = ["git_diff", "project_root", "list_requirements", "get_requirement", "feature_read"]
 
+# How many write-then-test rounds `spec refactor` may spend before it
+# restores the code it started from. Every round is a model call plus a
+# full test run, so this is the command's whole cost ceiling.
+[refactor]
+attempts = 10
+
+# How many RED-to-GREEN rounds `spec deliver` gives one requirement
+# before it reports the requirement as fallen short and moves on. Each
+# round is a full `spec implement` with `[llm] retry` model attempts
+# inside it. `--attempts` wins for one run.
+[deliver]
+attempts = 3
+
 # The second model: [llm] above writes, this one answers the bounded
 # question the deterministic rules cannot. Pinned for the same reason,
 # and for one more - `measurable/v2` is calibrated against this model,
@@ -91,4 +122,11 @@ diff = ["git_diff", "project_root", "list_requirements", "get_requirement", "fea
 # tests/decision_live.rs.
 [decision]
 model = "nimble:latest"
+# The endpoint follows [llm] above and is left unset on purpose.
+# How long one judgment may take.
+timeout_seconds = 60
 mode = "enforce"
+# Answers less concentrated than this are reported "unsure" rather than
+# used. Ollama's confidence is distribution concentration, not
+# calibrated correctness, so treat it as a dead band and nothing more.
+min_confidence = 0.8

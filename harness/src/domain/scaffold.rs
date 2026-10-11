@@ -3,9 +3,10 @@
 //! harness configuration. Pure text; writing is the adapter's job.
 
 use crate::domain::config_report::{
-    DEFAULT_DECISION_MODE, DEFAULT_DECISION_TIMEOUT_SECONDS, DEFAULT_LLM_CACHE_TTL_SECONDS,
-    DEFAULT_LLM_ENDPOINT, DEFAULT_LLM_RETRY, DEFAULT_LLM_TIMEOUT_SECONDS,
-    DEFAULT_TOOLS_CACHE_TTL_SECONDS, DEFAULT_TOOLS_CALL_TIMEOUT_SECONDS, DEFAULT_TOOLS_CONFIRM,
+    DEFAULT_DECISION_MODE, DEFAULT_DECISION_TIMEOUT_SECONDS, DEFAULT_DELIVER_ATTEMPTS,
+    DEFAULT_LLM_CACHE_TTL_SECONDS, DEFAULT_LLM_ENDPOINT, DEFAULT_LLM_RETRY,
+    DEFAULT_LLM_TIMEOUT_SECONDS, DEFAULT_REFACTOR_ATTEMPTS, DEFAULT_TOOLS_CACHE_TTL_SECONDS,
+    DEFAULT_TOOLS_CALL_TIMEOUT_SECONDS, DEFAULT_TOOLS_CONFIRM,
     DEFAULT_TOOLS_DISCOVERY_TIMEOUT_SECONDS, DEFAULT_TOOLS_MAX_ROUNDS,
 };
 use crate::domain::decision::DEFAULT_MIN_CONFIDENCE;
@@ -117,6 +118,19 @@ endpoint = \"{endpoint}\"
 # [tools.disabled]
 # implement = [\"command_run\"]
 
+# How many write-then-test rounds `spec refactor` may spend before it
+# restores the code it started from. Every round is a model call plus a
+# full test run, so this is the command's whole cost ceiling.
+[refactor]
+# attempts = {refactor_attempts}
+
+# How many RED-to-GREEN rounds `spec deliver` gives one requirement
+# before it reports the requirement as fallen short and moves on. Each
+# round is a full `spec implement` with `[llm] retry` model attempts
+# inside it. `--attempts` wins for one run.
+[deliver]
+# attempts = {deliver_attempts}
+
 # A local decision model, used only to judge bounded questions about
 # evidence the deterministic rules cannot measure. It is a second,
 # separate model from [llm] above: that one writes, this one answers.
@@ -158,6 +172,8 @@ endpoint = \"{endpoint}\"
         discovery = DEFAULT_TOOLS_DISCOVERY_TIMEOUT_SECONDS,
         call = DEFAULT_TOOLS_CALL_TIMEOUT_SECONDS,
         tools_cache = DEFAULT_TOOLS_CACHE_TTL_SECONDS,
+        refactor_attempts = DEFAULT_REFACTOR_ATTEMPTS,
+        deliver_attempts = DEFAULT_DELIVER_ATTEMPTS,
         builtin = BUILTIN_ORIGIN,
         profiles = default_profiles_toml(),
     )

@@ -1,7 +1,13 @@
 # spec harness configuration.
 #
-# Keys left commented use the defaults shown. Uncomment to override.
-# [tools.profiles] is the tools each command offers the model.
+# Every budget, timeout, and tool list a command reads is written here
+# with the value in use, so what each command does is on the page: the
+# model attempts, tool rounds, and RED-to-GREEN rounds are read from
+# this file first and the compiled-in defaults only when a key is
+# absent. The keys left commented are the ones whose unset state means
+# something: `mcp_config` (search the usual places), `decision.model`
+# (whichever decision model is installed), `decision.endpoint` (follow
+# [llm]).
 
 [llm]
 # Persisted by `spec model use`. Flag `--model` wins for one run.
@@ -14,20 +20,20 @@ timeout_seconds = 900
 cache_ttl_seconds = 600
 # How many times to try a model call when the reply fails
 # validation; each retry includes the invalid reply. `--retry` wins.
-# retry = 3
+retry = 3
 
 [tools]
 # Tool-call rounds Agent::ask may take before it must return a reply.
 # `--max-rounds` wins for one run.
-# max_rounds = 12
+max_rounds = 12
 # Names that must be confirmed by the human before the call runs.
-# confirm = ["command_run"]
+confirm = ["command_run"]
 # How long connecting to an mcp.json server may take.
-# discovery_timeout_seconds = 10
+discovery_timeout_seconds = 10
 # How long one tool invocation may take.
-# call_timeout_seconds = 300
+call_timeout_seconds = 300
 # How long discovered mcp.json tool lists stay cached under .spec/cache/tools/.
-# cache_ttl_seconds = 86400
+cache_ttl_seconds = 86400
 # Optional path to an mcp.json (otherwise the usual candidates are tried).
 # mcp_config = "mcp.json"
 
@@ -73,12 +79,6 @@ ask = ["project_root", "list_requirements", "get_requirement", "validate_spec", 
 # spec diff
 diff = ["git_diff", "project_root", "list_requirements", "get_requirement", "feature_read"]
 
-# How many write-then-test rounds `spec refactor` may spend before it
-# restores the code it started from. Every round is a model call plus a
-# full test run, so this is the command's whole cost ceiling.
-[refactor]
-# attempts = 10
-
 # Extra tools attached on top of the default or profiles list.
 # [tools.enabled]
 # implement = ["playwright:browser_navigate"]
@@ -86,6 +86,19 @@ diff = ["git_diff", "project_root", "list_requirements", "get_requirement", "fea
 # Tools removed from the default or profiles list.
 # [tools.disabled]
 # implement = ["command_run"]
+
+# How many write-then-test rounds `spec refactor` may spend before it
+# restores the code it started from. Every round is a model call plus a
+# full test run, so this is the command's whole cost ceiling.
+[refactor]
+attempts = 10
+
+# How many RED-to-GREEN rounds `spec deliver` gives one requirement
+# before it reports the requirement as fallen short and moves on. Each
+# round is a full `spec implement` with `[llm] retry` model attempts
+# inside it. `--attempts` wins for one run.
+[deliver]
+attempts = 3
 
 # A local decision model, used only to judge bounded questions about
 # evidence the deterministic rules cannot measure. It is a second,
@@ -98,7 +111,7 @@ diff = ["git_diff", "project_root", "list_requirements", "get_requirement", "fea
 # Defaults to the [llm] endpoint above; set it only if the decision
 # model lives somewhere else.
 # endpoint = "http://localhost:11434"
-# timeout_seconds = 60
+timeout_seconds = 60
 # What a judgment is allowed to do:
 #   off      - do not ask
 #   advisory - report the answer beside the deterministic result and
@@ -113,4 +126,4 @@ mode = "enforce"
 # Answers less concentrated than this are reported "unsure" rather than
 # used. Ollama's confidence is distribution concentration, not
 # calibrated correctness, so treat it as a dead band and nothing more.
-# min_confidence = 0.8
+min_confidence = 0.8

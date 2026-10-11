@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **`spec deliver`'s per-requirement budget is a config key, and every
+  budget is written where it can be seen.** `--attempts` was the only
+  way to change how many RED-to-GREEN rounds a requirement got; with
+  no flag the number was 3 from the binary, where `[llm] retry`,
+  `[tools] max_rounds`, and `[refactor] attempts` were all read from
+  `.spec/config.toml` first. `[deliver] attempts` now joins them on the
+  same terms - flag for one run, then the file, then the default, with
+  zero or junk falling back rather than buying a budget of nothing -
+  and `spec config` reports `deliver.attempts` beside the rest. `spec
+  init` writes `[refactor]` and `[deliver]` into a new project's config
+  with their defaults shown, and both of this repository's config files
+  now carry every budget and timeout with the value in use, so a
+  reader asking "how many times does this retry" finds the answer in
+  the file rather than in the source.
 - **A command's `[tools.profiles]` list is read in addition to its
   defaults, not instead of them.** `spec init` writes every command's
   default tools into `.spec/config.toml` so what each one may call is
