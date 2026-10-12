@@ -229,14 +229,15 @@ Feature: Greenfield mode
       <empty>
       y
       y
+      y
       <empty>
       n
       """
     When the greenfield loop runs
     Then the greenfield run completes with phase "GREEN"
     And the developer was told a finding containing "Generation uses model scripted-model"
-    And the developer was told a finding containing "Splitting the description into requirements with scripted-model - working ..."
-    And the developer was told a finding containing "The description gave no complete requirement - drafting manually."
+    And the developer was told a finding containing "Splitting the request into requirements with scripted-model - working ..."
+    And the developer was told a finding containing "The request gave no complete requirement - drafting manually."
     And the developer was told a finding containing "Skipping criterion"
     And the working tree file "src/test/resources/features/comma-separated-numbers-are-summed.feature" contains "@REQ-001"
 
@@ -256,10 +257,7 @@ Feature: Greenfield mode
     And the developer will answer:
       """
       empty input means zero
-      <empty>
-      <empty>
-      <empty>
-      <empty>
+      a
       y
       y
       <empty>
@@ -267,8 +265,9 @@ Feature: Greenfield mode
       """
     When the greenfield loop runs
     Then the greenfield run completes with phase "GREEN"
-    And the developer was told a finding containing "The description holds 1 requirement(s):"
-    And the developer was asked "REQ-001 title [Empty string returns zero] (Enter keeps it):"
+    And the developer was told a finding containing "The request holds 1 requirement(s) and 0 question(s)."
+    And the developer was asked "Proposal 1 - [a]pprove, [r]eject, re[v]ise, or e[x]clude from scope [a/r/v/x]:"
+    And the developer was told a finding containing "REQ-001 accepted by you."
     And the working tree file "src/test/resources/features/empty-string-returns-zero.feature" contains "@REQ-001"
     And the working tree file "requirements/requirements.json" contains "implemented"
     And the developer was told a finding containing "Saving status - working ..."
@@ -290,12 +289,8 @@ Feature: Greenfield mode
     And the developer will answer:
       """
       calculator basics
-      <empty>
-      <empty>
-      <empty>
-      <empty>
-      <empty>
-      <empty>
+      a
+      a
       y
       y
       n
@@ -333,12 +328,8 @@ Feature: Greenfield mode
     And the developer will answer:
       """
       calculator basics
-      <empty>
-      <empty>
-      <empty>
-      <empty>
-      <empty>
-      <empty>
+      a
+      a
       y
       y
       n

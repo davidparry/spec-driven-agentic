@@ -244,6 +244,55 @@
         "Given a current session remembering module root \"kata\", when a new shell session starts, then the new session's memory names module root \"kata\""
       ],
       "featureFile": "tests/features/sessions.feature"
+    },
+    {
+      "id": "HARNESS-020",
+      "title": "A request is preserved as an ask and broken into requirements that point back at it",
+      "status": "implemented",
+      "story": "As a developer whose request becomes several requirements, I want the request kept word for word as an ask_requirement in requirements.json and every requirement derived from it linked both ways so that nothing of what I asked is lost in the breakdown and each requirement can be traced to it.",
+      "acceptanceCriteria": [
+        "Given a request \"sum numbers from a comma separated string, empty input means zero\" and a model splitting it into 2 requirements, when it is broken down without prompts, then the ask has type \"ask_requirement\", its request field is exactly \"sum numbers from a comma separated string, empty input means zero\", and it derives 2 requirements",
+        "Given an ask deriving \"REQ-002\" and \"REQ-003\", when each derived requirement is read, then its type is \"actionable_requirement\" and its parent is \"ASK-001\"",
+        "Given a request already broken down into 2 requirements, when the same request is broken down again, then the spec file has 4 requirements and its bytes equal the bytes before the second run",
+        "Given a request \"make the calculator nicer\" and no model, when it is broken down without prompts, then 0 requirements are derived and the ask carries 1 blocking question",
+        "Given a requirement \"REQ-001\" that was never part of an ask, when another request is broken down, then the row written for \"REQ-001\" has 0 of the keys type, request, parent, derived, decomposition, acceptance, proposals, questions"
+      ],
+      "featureFile": "tests/features/ask_decomposition.feature"
+    },
+    {
+      "id": "HARNESS-021",
+      "title": "Acceptance of a derived requirement is recorded by who gave it and follows its wording",
+      "status": "implemented",
+      "story": "As a developer deciding what gets built, I want every derived requirement to record whether the rules or I accepted it, to lose that acceptance when its meaning changes, and to be decidable by number without a wizard so that my vote is never substituted by the agent's judgment and a reworded requirement is never implemented on an acceptance it no longer has.",
+      "acceptanceCriteria": [
+        "Given a request broken down without prompts, when a proposal passes the rules, then its requirement carries an acceptance whose by is \"automatic\"",
+        "Given a request broken down without prompts, when a proposal has a criterion the rules refuse as unphrased, then that proposal's status is \"pending\" and 0 requirements are written for it",
+        "Given an ask with a proposal left pending by the rules, when a decision accepts it with by \"automatic\", then the decision is refused with \"cannot be accepted automatically\"",
+        "Given an ask with a proposal left pending by the rules, when a decision accepts it with by \"user\", then its requirement carries an acceptance whose by is \"user\"",
+        "Given a derived requirement accepted automatically, when its title is changed to \"Sums numbers separated by commas or newlines\", then its acceptance is removed and its ask's ready flag is false",
+        "Given a derived requirement accepted automatically, when its title is changed only in whitespace to \"Comma   separated numbers are summed\", then its acceptance still has by \"automatic\"",
+        "Given an interactive breakdown of 1 proposal, when the developer answers \"\" at the vote, then the developer is told \"An empty answer is not a vote.\" and the proposal's status is still \"pending\"",
+        "Given an interactive breakdown with 1 requirement accepted, when the developer answers \"n\" to the coverage question, then the ask's state is \"open\" and its readiness reason is \"the user has not confirmed the accepted requirements cover the request\"",
+        "Given an ask with 1 accepted requirement, when a decision confirms coverage with by \"automatic\", then the decision is refused with \"user's decision\""
+      ],
+      "featureFile": "tests/features/ask_decomposition.feature"
+    },
+    {
+      "id": "HARNESS-022",
+      "title": "An ask is ready for implementation only when every derived requirement is accepted and nothing is open",
+      "status": "implemented",
+      "story": "As a developer about to implement, I want an ask's readiness derived from its derived requirements, its open questions, and its proposals rather than declared so that no requirement is implemented while the breakdown it belongs to is still undecided.",
+      "acceptanceCriteria": [
+        "Given an ask whose 2 derived requirements are accepted, whose decomposition is complete, and which has 0 open blocking questions, when its readiness is read, then its ready flag is true",
+        "Given an ask with 1 accepted requirement and 1 blocking question unanswered, when its readiness is read, then its ready flag is false with the reason \"question 1 is blocking and unanswered\"",
+        "Given an ask with 1 accepted requirement and 1 blocking question, when the question is answered \"only the comma\", then its ready flag is true",
+        "Given an interactive breakdown of 2 proposals, when the developer approves proposal 1 and rejects proposal 2, then the ask derives 1 requirement and its ready flag is false with the reason \"proposal 2 \\\"Empty string returns zero\\\" was rejected and neither revised nor excluded\"",
+        "Given an interactive breakdown of 2 proposals, when the developer approves proposal 1 and excludes proposal 2, then the ask derives 1 requirement and its ready flag is true",
+        "Given a ready ask with 2 derived requirements, when one derived requirement is deleted, then the ask derives 1 requirement, its proposal's status is \"pending\", and its ready flag is false",
+        "Given an ask that derives \"REQ-002\", when the ask is deleted without cascade, then the deletion is refused with \"ASK-001 derives REQ-002\"",
+        "Given an ask that derives \"REQ-002\", when the ask is deleted with cascade, then the spec has 0 rows for \"ASK-001\" and 0 rows for \"REQ-002\""
+      ],
+      "featureFile": "tests/features/ask_decomposition.feature"
     }
   ]
 }

@@ -65,7 +65,7 @@ Feature: Stateless MCP tool calls from the shell
 
   Scenario: mcp tools lists 22 names over the wire
     When mcp tools are listed over the wire
-    Then 22 MCP tools are listed
+    Then 27 MCP tools are listed
     And the listed MCP tools include "project_root"
     And the listed MCP tools include "requirement_reword"
     And the listed MCP tools include "requirement_mark_implemented"

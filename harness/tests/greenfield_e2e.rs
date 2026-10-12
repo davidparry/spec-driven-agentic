@@ -48,7 +48,7 @@ use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use spec_harness::application::spec_mutation_service::{
-    ACCEPT_PROMPT, DESCRIBE_PROMPT, FIRST_REQUIREMENT_PROMPT, WRITE_REQUIREMENT,
+    COVERAGE_PROMPT, DESCRIBE_PROMPT, REVIEW_PROMPT, WRITE_REQUIREMENT,
 };
 use spec_harness::bootstrap::{LOOP_CLOSED, PROJECT_NAME_PROMPT, language_prompt};
 use spec_harness::greenfield::{
@@ -84,10 +84,16 @@ fn answer_for(prompt: &str) -> Option<&'static str> {
     if prompt.contains(DESCRIBE_PROMPT) {
         return Some(DESCRIPTION);
     }
-    if prompt.contains(ACCEPT_PROMPT) {
-        return Some("");
+    if prompt.contains(REVIEW_PROMPT) {
+        return Some("a"); // approve every proposal the model made
     }
-    if prompt.contains(FIRST_REQUIREMENT_PROMPT) {
+    if prompt.contains(COVERAGE_PROMPT) {
+        return Some("y"); // the user confirms the breakdown covers the request
+    }
+    if prompt.contains("(Enter leaves it open)") {
+        return Some(""); // a clarification question stays open; coverage decides
+    }
+    if prompt.contains("(added to the brief; Enter stops here)") {
         return Some("");
     }
     if prompt.contains("(Enter keeps it") {
@@ -704,11 +710,12 @@ mod driver_unit {
             (language_prompt(), "java"),
             (PROJECT_NAME_PROMPT.to_string(), PROJECT_NAME),
             (DESCRIBE_PROMPT.to_string(), DESCRIPTION),
-            (ACCEPT_PROMPT.to_string(), ""),
+            (format!("Proposal 1 {REVIEW_PROMPT} [a/r/v/x]:"), "a"),
             (
-                format!("{FIRST_REQUIREMENT_PROMPT} [1-2, Enter for 1]:"),
+                "Question 1 (blocking): Which delimiters count? (Enter leaves it open):".into(),
                 "",
             ),
+            (format!("{COVERAGE_PROMPT} ASK-001? [y/N]"), "y"),
             (
                 "REQ-001 title [Add two numbers] (Enter keeps it):".into(),
                 "",

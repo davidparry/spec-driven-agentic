@@ -184,7 +184,7 @@ fn versions_in(text: &str) -> Vec<String> {
 fn every_documented_tool_count_is_the_number_the_server_serves() {
     let served = tools_the_server_lists();
     assert_eq!(
-        served, 22,
+        served, 27,
         "the server's tool count moved. Every page that states it needs the new \
          number before this assertion is changed to match"
     );

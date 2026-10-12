@@ -169,13 +169,18 @@ pub fn default_profile(caller: Caller) -> &'static [&'static str] {
 }
 
 /// Tools that mutate the project (write a file, mark implemented).
-const MUTATING: [&str; 7] = [
+const MUTATING: [&str; 12] = [
     "scenario_add",
     "scenario_update",
     "scenario_delete",
     "feature_create",
     "requirement_reword",
     "requirement_mark_implemented",
+    "requirement_create",
+    "requirement_update",
+    "requirement_delete",
+    "requirement_ask",
+    "requirement_decide",
     "step_definition_create",
     // unit_test_create is also mutating; listed separately for the
     // "command_run is the only default exception" rule.
@@ -332,6 +337,11 @@ mod tests {
             "command_run",
             "requirement_reword",
             "requirement_mark_implemented",
+            "requirement_create",
+            "requirement_update",
+            "requirement_delete",
+            "requirement_ask",
+            "requirement_decide",
             "step_definitions_find",
             "step_definition_create",
             "unit_test_create",

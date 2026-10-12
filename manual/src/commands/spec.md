@@ -196,6 +196,152 @@ REQ-004 criterion 2 (leave blank to finish the criteria):
 - `-` drops a prior criterion.
 - New criteria can be appended after the priors.
 
+### spec draft "request" — an ask broken into requirements
+
+A request in plain words is **preserved as an ask** — a requirement
+of type `ask_requirement` under an `ASK-nnn` id that keeps the words
+verbatim in `request` — and broken into actionable requirements that
+point back at it (see [the requirements format](../spec-format.md#asks-and-the-requirements-derived-from-them)).
+The model splits the request when one is resolved; without a model
+only what the words enumerate (numbered or bulleted lines,
+semicolon-separated clauses) becomes a proposal, titled and waiting for
+wording. Nothing is ever invented.
+
+```bash
+spec draft "sum numbers from a comma separated string, empty input means zero"
+spec draft ASK-001                 # carry on with an ask already on record
+spec draft "..." --interactive     # you decide every proposal
+```
+
+Every proposal is reviewed by the rules first — phrasing, concreteness,
+duplicates against the spec, conflicts with its siblings, drift from
+the request. Who then accepts it depends on the mode, and **is
+recorded**:
+
+- **Default (no prompts).** Nothing is asked. A proposal the review
+  passes is written as a requirement with `acceptance.by =
+  "automatic"`; one it blocks stays `pending` on the ask with its
+  findings; questions the model raised are recorded unanswered. The
+  run ends by saying whether the ask is ready and, if not, every
+  reason why.
+- **`--interactive`.** Each proposal is put to you — `a`pprove,
+  `r`eject, re`v`ise, or e`x`clude from scope — then the open
+  questions, then whether the accepted requirements cover the whole
+  request. Approval writes the requirement with `acceptance.by =
+  "user"`; an empty answer is **not** a vote; a rejection or exclusion
+  is kept with your reason. The agent's judgment never stands in for
+  your vote.
+
+Running the same words again adds nothing already there: proposals are
+matched by wording and by title, questions by text, so the file is
+byte for byte unchanged.
+
+```text
+ASK-001 preserves the request: sum numbers from a comma separated string, empty input means zero
+The request holds 2 requirement(s) and 0 question(s).
+Proposal 1: Comma separated numbers are summed
+  story: As a user, I want comma sums so that totals come from one input.
+  criterion 1: Given the input "1,2", when add is called, then the result is 3
+Proposal 1 - [a]pprove, [r]eject, re[v]ise, or e[x]clude from scope [a/r/v/x]: a
+REQ-002 accepted by you.
+...
+Accepted so far:
+  REQ-002 Comma separated numbers are summed
+  REQ-003 Empty string returns zero
+Do the accepted requirements cover the whole request ASK-001? [y/N] y
+```
+
+The report names the ask, its mode, what was accepted, what is pending,
+rejected, or excluded, the open questions, and `ready`:
+
+```json
+{
+  "ask": "ASK-001",
+  "mode": "automatic",
+  "derived": ["REQ-002"],
+  "accepted": ["REQ-002"],
+  "pending": [2],
+  "ready": false,
+  "reasons": ["proposal 2 \"Empty string returns zero\" is still pending"],
+  "written": true,
+  "nextStep": "ASK-001 is not ready: ... Settle what is open with spec decide ASK-001 ..."
+}
+```
+
+**Readiness is derived, never declared.** An ask is ready for
+implementation when its decomposition is complete, at least one
+requirement is derived, every derived requirement names it as parent
+and carries an acceptance whose wording still matches the requirement
+(a user's acceptance in interactive mode), no blocking question is
+unanswered, no proposal is pending or rejected-without-revision, and —
+in interactive mode — you confirmed coverage. [`spec deliver
+ASK-001`](deliver.md) refuses an ask that is not ready and works the
+derived requirements of one that is; `spec deliver "words"` breaks the
+words down in the default mode first.
+
+### spec draft --parent — a requirement written under an ask
+
+```bash
+spec draft --parent ASK-001 --by user \
+  --title "Empty string returns zero" \
+  --story "As a user, I want empty input to be 0 so that no input is a safe default." \
+  --criterion 'Given an empty string "", when add is called, then the result is 0'
+spec draft --request-only "sum numbers from a comma separated string"   # the ask alone
+```
+
+The requirement joins the ask's proposals — taking over a pending
+title-only row the deterministic split left for it, if the title
+matches. `--by user` records your acceptance; `--by automatic` (the
+default) holds it to the same review as any proposal, and a child the
+rules block on is linked but left pending.
+
+### spec decide — decisions by number, no wizard
+
+```bash
+spec decide ASK-001 --accept 2 --by user
+spec decide ASK-001 --reject "2:empty input is an error in this kata"
+spec decide ASK-001 --exclude "3:out of scope for the first release"
+spec decide ASK-001 --answer "1=only the comma"
+spec decide ASK-001 --complete --confirm --by user
+spec decide ASK-001                              # report the ask as it stands
+```
+
+`--by automatic` (the default) may accept only proposals the review
+passes and may never confirm coverage: that is the user's decision, and
+an agent relaying one passes `--by user`. Rejecting or excluding a
+proposal that already stands for a requirement withdraws that
+requirement's acceptance.
+
+### spec reword on an ask or a derived requirement
+
+A derived requirement whose **meaning** changes (title, story, or a
+criterion — whitespace does not count) loses its acceptance, and its
+ask stops being ready until it is accepted again (`spec decide`). An
+ask's `--request` can be reworded; a change in meaning reopens its
+decomposition while the requirements already derived stand. An ask's
+own title, story, and criteria are derived from its children and
+cannot be set directly.
+
+```bash
+spec reword REQ-002 --title "Sums numbers separated by commas or newlines"
+spec reword ASK-001 --request "sum numbers from a comma or newline separated string"
+```
+
+### spec link, spec unlink, spec delete
+
+```bash
+spec link REQ-007 ASK-001 --by user   # move a requirement under an ask
+spec unlink REQ-007                   # take it out again
+spec delete REQ-003                   # its proposal on the ask goes pending again
+spec delete ASK-001 --cascade         # an ask with children needs --cascade
+```
+
+Every one of these is the same CRUD surface over MCP:
+`requirement_create`, `requirement_update`, `requirement_delete`,
+`requirement_ask`, and `requirement_decide` (see [mcp](mcp.md)).
+
+### spec draft with a model, no request
+
 With a resolved model, `spec draft` runs the same
 description-driven wizard as [greenfield](greenfield.md#the-description-driven-wizard),
 and findings are sent to the model first: the rewording prompts carry

@@ -7,9 +7,21 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
+use crate::domain::ask::{Acceptance, Decomposition, Proposal, Question};
+
 /// The file name of the root spec document. Every path in a
 /// [`SpecCatalog`] is relative to the directory this file lives in.
 pub const ROOT_SPEC_FILE: &str = "requirements.json";
+
+/// The `type` of a requirement that preserves an original request and
+/// links the requirements derived from it.
+pub const ASK_REQUIREMENT: &str = "ask_requirement";
+
+/// The `type` of a requirement that one scenario and one test can
+/// prove - the unit the loop has always worked on. A requirement with
+/// no `type` reads as this, so every spec written before asks existed
+/// keeps its meaning.
+pub const ACTIONABLE_REQUIREMENT: &str = "actionable_requirement";
 
 /// One requirement of the spec: the unit the whole workflow revolves
 /// around (draft -> validate -> refine -> scenario -> tests -> code).
@@ -46,11 +58,62 @@ pub struct Requirement {
         skip_serializing_if = "Vec::is_empty"
     )]
     pub production_files: Vec<String>,
+    /// [`ASK_REQUIREMENT`] or [`ACTIONABLE_REQUIREMENT`]. Absent on
+    /// every spec written before asks existed, and absent reads as
+    /// actionable, so those specs are unchanged in meaning and in bytes.
+    #[serde(rename = "type", default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    /// The original request, verbatim, on an ask. The title, story, and
+    /// criteria of an ask are derived; this is what was actually said.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request: Option<String>,
+    /// The ask this requirement was derived from, on an actionable
+    /// requirement that has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
+    /// The accepted requirements derived from this ask, in the order
+    /// they were accepted. Always the mirror of the children's `parent`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub derived: Vec<String>,
+    /// Where an ask's decomposition stands, including the readiness
+    /// that is recomputed from its children on every write.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decomposition: Option<Decomposition>,
+    /// Who accepted a derived requirement and the wording they accepted.
+    /// Cleared when the wording changes in meaning.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acceptance: Option<Acceptance>,
+    /// Every requirement proposed for an ask, accepted or not, so a
+    /// rejected or still-pending proposal is on record without being a
+    /// requirement.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub proposals: Vec<Proposal>,
+    /// Clarification questions the decomposition raised, with the
+    /// answers given so far. An unanswered blocking question keeps the
+    /// ask from being ready.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub questions: Vec<Question>,
 }
 
 impl Requirement {
     pub fn is_pending(&self) -> bool {
         self.status.eq_ignore_ascii_case("pending")
+    }
+
+    /// Does this requirement preserve an original request?
+    pub fn is_ask(&self) -> bool {
+        self.kind.as_deref() == Some(ASK_REQUIREMENT)
+    }
+
+    /// Is there work to deliver here? An ask is delivered through its
+    /// derived requirements and is never a row of work on its own.
+    pub fn awaits_delivery(&self) -> bool {
+        self.is_pending() && !self.is_ask()
+    }
+
+    /// The `type` as it reads, with absent meaning actionable.
+    pub fn kind(&self) -> &str {
+        self.kind.as_deref().unwrap_or(ACTIONABLE_REQUIREMENT)
     }
 }
 
@@ -590,6 +653,59 @@ mod tests {
             !render(&spec).unwrap().contains("productionFiles"),
             "an untouched spec gains nothing"
         );
+    }
+
+    /// Every spec on disk predates asks. Reading one must find nothing
+    /// to say, and writing it back must leave the bytes as they were:
+    /// no `type`, no `parent`, no empty `derived`.
+    #[test]
+    fn a_spec_without_asks_reads_as_actionable_and_renders_byte_for_byte() {
+        let json = "{\n  \"project\": \"Kata\",\n  \"requirements\": [\n    {\n      \
+                    \"id\": \"REQ-001\",\n      \"title\": \"T\",\n      \"status\": \
+                    \"pending\",\n      \"story\": \"S\",\n      \"acceptanceCriteria\": [\n        \
+                    \"Given a, when b, then c\"\n      ]\n    }\n  ]\n}\n";
+        let spec: Spec = serde_json::from_str(json).unwrap();
+        let requirement = &spec.requirements[0];
+        assert!(!requirement.is_ask());
+        assert_eq!(requirement.kind(), ACTIONABLE_REQUIREMENT);
+        assert!(requirement.kind.is_none());
+        assert_eq!(render(&spec).unwrap(), json);
+    }
+
+    /// An ask round-trips through the names the file uses, and reads back
+    /// equal - the record of a decision has to survive a reload.
+    #[test]
+    fn an_ask_round_trips_with_its_proposals_and_questions() {
+        use crate::domain::ask::{Mode, ProposalStatus, add_questions, new_ask, proposal_from};
+        let mut ask = new_ask("ASK-001".into(), "sum numbers", Mode::Interactive);
+        let child = Requirement {
+            id: "REQ-001".into(),
+            parent: Some("ASK-001".into()),
+            kind: Some(ACTIONABLE_REQUIREMENT.into()),
+            ..requirement("REQ-001")
+        };
+        ask.proposals
+            .push(proposal_from(&child, 1, ProposalStatus::Accepted));
+        add_questions(&mut ask, vec![("Which delimiter?".into(), true)]);
+        let spec = Spec {
+            project: "Kata".into(),
+            requirements: vec![ask, child],
+            ..Spec::default()
+        };
+        let written = render(&spec).unwrap();
+        for key in [
+            "\"type\": \"ask_requirement\"",
+            "\"request\"",
+            "\"decomposition\"",
+            "\"mode\": \"interactive\"",
+            "\"proposals\"",
+            "\"questions\"",
+            "\"parent\": \"ASK-001\"",
+            "\"type\": \"actionable_requirement\"",
+        ] {
+            assert!(written.contains(key), "{key} missing from\n{written}");
+        }
+        assert_eq!(serde_json::from_str::<Spec>(&written).unwrap(), spec);
     }
 
     /// Plural from the start: one requirement's code is not always one

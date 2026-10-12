@@ -70,7 +70,7 @@ and `pi -nbt` disables pi's own `bash`/`write`/`edit` so these tools are all
 the model gets. The bridge registers them as `mcp_<server>_<tool>`, so
 `run_tests` arrives as `mcp_spec_driven_server_run_tests`.
 
-Cursor sees **all 22 tools**, including the writing ones, and so does
+Cursor sees **all 27 tools**, including the writing ones, and so does
 `pi -nbt`. Harness commands that call a model attach a **narrower
 profile** (`spec tools profiles`) — 3–7 tools for a generating command,
 10 for the read-only `spec ask` — so a local model is never offered a
@@ -134,7 +134,12 @@ run isolated; see [the branch gate](../branch-gate.md).
 | `feature_list` / `feature_read` / `feature_create` | [`spec feature`](feature.md) |
 | `scenario_add` / `scenario_update` / `scenario_delete` | [`spec scenario`](scenario.md) |
 | `requirement_reword` | [`spec reword`](spec.md#spec-reword) (the repair path for `validate_spec` and `refine_requirement` findings; never hand-edit the spec file) |
-| `requirement_mark_implemented` | [`spec mark-implemented`](spec.md#spec-mark-implemented) |
+| `requirement_mark_implemented` | [`spec mark-implemented`](spec.md#spec-mark-implemented) (an ask only once every derived requirement is implemented) |
+| `requirement_create` | [`spec draft --title/--story/--criterion`](spec.md#spec-draft), with `parent` and `by` for [a requirement under an ask](spec.md#spec-draft---parent--a-requirement-written-under-an-ask), or `request` alone for `spec draft --request-only` |
+| `requirement_update` | [`spec reword` with flags](spec.md#spec-reword-on-an-ask-or-a-derived-requirement), `spec link` (`parent`, `by`), `spec unlink` (`unlink`) |
+| `requirement_delete` | [`spec delete`](spec.md#spec-link-spec-unlink-spec-delete) (`cascade` for an ask with children) |
+| `requirement_ask` | [`spec draft "request"`](spec.md#spec-draft-request--an-ask-broken-into-requirements) in the default mode, without a model: the words are preserved as an ask and only what they enumerate is proposed; nothing is invented |
+| `requirement_decide` | [`spec decide`](spec.md#spec-decide--decisions-by-number-no-wizard); `by` is `"automatic"` unless the agent is relaying a person's decision, and only `"user"` may confirm coverage |
 | `step_definitions_find` | [`spec steps missing`](steps.md#spec-steps-missing) |
 | `step_definition_create` | [`spec steps generate`](steps.md#spec-steps-generate) (template only) |
 | `unit_test_create` | [`spec unittest generate`](unittest.md) (template only; arg is `req_id`) |

@@ -1,4 +1,4 @@
-Feature: The smoke test plans and sweeps all 22 MCP tools
+Feature: The smoke test plans and sweeps all 27 MCP tools
   The Java smoke test is an independent conformance harness against spec mcp serve.
   ToolPlan is the data; ToolSweep is the driver; these scenarios are CLI-007
   through CLI-011 in executable form.
@@ -15,8 +15,8 @@ Feature: The smoke test plans and sweeps all 22 MCP tools
     Then the required arguments are "id"
 
   @CLI-009
-  Scenario: The plan names exactly 22 tools
-    Then the tool plan names exactly 22 tools
+  Scenario: The plan names exactly 27 tools
+    Then the tool plan names exactly 27 tools
     And the tool plan includes "project_root"
     And the tool plan includes "unit_test_create"
     And the tool plan includes "command_run"

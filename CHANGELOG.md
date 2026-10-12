@@ -2,6 +2,53 @@
 
 ## Unreleased
 
+- **A request is preserved as an ask and broken into requirements
+  that point back at it; acceptance is recorded by who gave it and
+  readiness is derived, never declared** (HARNESS-020, HARNESS-021,
+  HARNESS-022). `spec draft "<words>"` used to hand the words to the
+  model, write whatever came back as a batch, and forget the words.
+  Now the words are kept verbatim as an **ask** - a requirement like
+  any other in `requirements.json` (id `ASK-nnn`, title, story,
+  Given/When/Then criteria, status) with `type: "ask_requirement"` and
+  the request in `request` - and every requirement derived from it is
+  an `actionable_requirement` naming the ask as `parent`, listed back
+  in the ask's `derived`. Every proposal is reviewed by the rules
+  (phrasing, concreteness, duplicates against the spec, conflicts with
+  its siblings, drift from the request) and the clarification
+  questions the model raises are recorded apart from the proposals,
+  never invented into scope. By default nothing is asked: a proposal
+  the review passes is written with `acceptance.by = "automatic"`, one
+  it blocks stays pending with its findings, and the run says whether
+  the ask is ready and every reason it is not. With `--interactive`
+  each proposal is approved, rejected, revised, or excluded by you, the
+  blocking questions are asked, and you confirm coverage; approval
+  records `acceptance.by = "user"`, an empty answer is not a vote, and
+  the agent's judgment never stands in for yours. A derived
+  requirement whose meaning is reworded loses its acceptance
+  (whitespace does not count), its ask stops being ready, and running
+  the same request again adds nothing and rewrites no byte. An ask is
+  ready only when its decomposition is complete, every derived
+  requirement is linked and accepted under the mode's rule, no blocking
+  question is open, no proposal is pending or rejected without
+  revision, and - interactively - coverage is confirmed; `spec deliver`
+  refuses an ask that is not ready and works the derived requirements
+  of one that is. The tooling is the same CRUD over the file from
+  every side: `spec draft --parent ASK-nnn --by user|automatic` writes
+  a requirement under an ask, `spec draft --request-only` preserves an
+  ask alone, `spec decide` accepts, rejects, excludes, answers,
+  completes, and confirms by number (only `--by user` may confirm),
+  `spec reword` takes `--request`, `--parent`, `--unlink`, `spec link`,
+  `spec unlink`, and `spec delete [--cascade]` move and remove rows,
+  and over MCP the server grows from 22 to 27 tools:
+  `requirement_create`, `requirement_update`, `requirement_delete`,
+  `requirement_ask` (the model-free split: only what the words
+  enumerate is proposed, titled and waiting for wording), and
+  `requirement_decide`. `get_requirement` and `spec show` report an
+  ask's type, request, derived requirements, acceptance, readiness,
+  and open questions. Every new field is omitted when absent, so a
+  spec without asks is written back byte for byte as it was, and
+  `spec validate` checks the links both ways.
+
 - **A model that sends the same refused reply back is not asked a
   third time, and every re-ask is said as it happens.** A `spec
   deliver` on this crate sat at `Generating an implementation attempt -

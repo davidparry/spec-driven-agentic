@@ -28,7 +28,7 @@ use crate::bootstrap::{
 use crate::domain::language::Language;
 use crate::domain::layout::in_feature_root;
 use crate::domain::memory::ProjectStructure;
-use crate::domain::model::Spec;
+use crate::domain::model::{Requirement, Spec};
 use crate::domain::scaffold::slug;
 use crate::domain::steps::criterion_to_steps;
 use crate::domain::tdd::ImplementAttempt;
@@ -181,15 +181,22 @@ impl Greenfield {
         );
 
         // Gate 1 (inside draft): the human words the spec and approves it.
-        // With a model, drafting starts from a plain-words description the
-        // model splits into requirement proposals the wizard walks through.
+        // With a model, drafting starts from a plain-words description
+        // preserved as an ask, which the model splits into proposals the
+        // human approves, rejects, or revises one by one.
         let mutation = self.mutation_service();
-        let draft = match self.memory_llm() {
-            Some((model, llm)) => mutation.draft_assisted(prompter, &model, &llm),
-            None => mutation.draft(prompter),
-        }
-        .map_err(|e| e.to_string())?;
-        if !draft.written {
+        let first = match self.memory_llm() {
+            Some((model, llm)) => mutation
+                .draft_assisted(prompter, &model, &llm)
+                .map_err(|e| e.to_string())?
+                .first_accepted()
+                .map(str::to_string),
+            None => {
+                let draft = mutation.draft(prompter).map_err(|e| e.to_string())?;
+                draft.written.then_some(draft.id)
+            }
+        };
+        let Some(first) = first else {
             return Ok(GreenfieldReport {
                 requirement: None,
                 feature: None,
@@ -199,9 +206,9 @@ impl Greenfield {
                     "Nothing was written. Run spec greenfield again when the wording is ready."
                         .into(),
             });
-        }
-        prompter.tell(&format!("{} is in the spec.", draft.id));
-        let mut report = self.deliver(prompter, language, &draft.id)?;
+        };
+        prompter.tell(&format!("{first} is in the spec."));
+        let mut report = self.deliver(prompter, language, &first)?;
 
         // A closed loop offers every remaining pending requirement as a
         // numbered choice: pick one to refine and deliver, or n to stop.
@@ -471,7 +478,7 @@ impl Greenfield {
         Ok(spec
             .requirements
             .into_iter()
-            .filter(|r| r.status == "pending")
+            .filter(Requirement::awaits_delivery)
             .map(|r| (r.id, r.title))
             .collect())
     }

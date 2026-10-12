@@ -106,6 +106,7 @@ mod tests {
             ],
             feature_file: Some("features/newlines.feature".into()),
             production_files: vec!["src/main/java/StringCalculator.java".into()],
+            ..Default::default()
         }
     }
 

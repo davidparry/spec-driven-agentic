@@ -5,7 +5,10 @@
 
 use std::collections::HashMap;
 
-use crate::domain::model::{Requirement, Spec, SpecCatalog};
+use crate::domain::ask::readiness;
+use crate::domain::model::{
+    ACTIONABLE_REQUIREMENT, ASK_REQUIREMENT, Requirement, Spec, SpecCatalog,
+};
 use crate::domain::requirement_id::is_id_shape;
 use crate::ports::FeatureFiles;
 
@@ -87,6 +90,7 @@ impl<'a> SpecValidator<'a> {
         for requirement in &spec.requirements {
             self.validate_requirement(requirement, None, &mut seen_ids, &mut issues);
         }
+        validate_links(&spec.requirements, &mut issues);
         issues
     }
 
@@ -118,6 +122,7 @@ impl<'a> SpecValidator<'a> {
                 );
             }
         }
+        validate_links(&catalog.merged().requirements, &mut issues);
         issues
     }
 
@@ -168,6 +173,30 @@ impl<'a> SpecValidator<'a> {
         if !STATUSES.contains(&r.status.to_lowercase().as_str()) {
             issues.push(format!("{id}: status must be 'pending' or 'implemented'"));
         }
+        if let Some(kind) = r.kind.as_deref()
+            && kind != ASK_REQUIREMENT
+            && kind != ACTIONABLE_REQUIREMENT
+        {
+            issues.push(format!(
+                "{id}: type must be '{ASK_REQUIREMENT}' or '{ACTIONABLE_REQUIREMENT}'"
+            ));
+        }
+        if r.is_ask() {
+            if r.request.as_deref().is_none_or(is_blank) {
+                issues.push(format!("{id}: an ask must keep its original request text"));
+            }
+            if r.decomposition.is_none() {
+                issues.push(format!("{id}: an ask must record its decomposition"));
+            }
+            // An ask is implemented through its children, which carry the
+            // scenarios; it has no feature file of its own to check.
+            return;
+        }
+        if !r.derived.is_empty() || !r.proposals.is_empty() || !r.questions.is_empty() {
+            issues.push(format!(
+                "{id}: derived, proposals, and questions belong on an {ASK_REQUIREMENT}"
+            ));
+        }
         self.validate_feature_file(r, id, issues);
     }
 
@@ -202,6 +231,90 @@ impl<'a> SpecValidator<'a> {
 
 fn is_blank(value: &str) -> bool {
     value.trim().is_empty()
+}
+
+/// The rules that connect asks to the requirements derived from them,
+/// checked over the merged spec because a parent and its child may live
+/// in different catalog files: every link resolves, every link is
+/// mirrored, and the readiness on record is the readiness the children
+/// give.
+fn validate_links(requirements: &[Requirement], issues: &mut Vec<String>) {
+    let find = |id: &str| requirements.iter().find(|r| r.id == id);
+    let spec = Spec {
+        requirements: requirements.to_vec(),
+        ..Spec::default()
+    };
+    for r in requirements {
+        let id = &r.id;
+        if let Some(parent) = r.parent.as_deref() {
+            match find(parent) {
+                None => issues.push(format!("{id}: parent {parent} is not in the spec")),
+                Some(parent_requirement) if !parent_requirement.is_ask() => {
+                    issues.push(format!("{id}: parent {parent} is not an {ASK_REQUIREMENT}"))
+                }
+                Some(parent_requirement) if !parent_requirement.derived.contains(id) => issues
+                    .push(format!(
+                        "{id}: names {parent} as its parent but {parent} does not list it \
+                         under derived"
+                    )),
+                Some(_) => {}
+            }
+        }
+        if !r.is_ask() {
+            continue;
+        }
+        for child in &r.derived {
+            match find(child) {
+                None => issues.push(format!(
+                    "{id}: derived requirement {child} is not in the spec"
+                )),
+                Some(child_requirement) if child_requirement.parent.as_deref() != Some(id) => {
+                    issues.push(format!(
+                        "{id}: lists {child} under derived but {child} does not name {id} as \
+                         its parent"
+                    ))
+                }
+                Some(child_requirement) if child_requirement.is_ask() => issues.push(format!(
+                    "{id}: derived requirement {child} is an ask, and asks derive actionable \
+                     requirements only"
+                )),
+                Some(_) => {}
+            }
+        }
+        for proposal in &r.proposals {
+            if let Some(requirement) = proposal.requirement.as_deref()
+                && find(requirement).is_none()
+            {
+                issues.push(format!(
+                    "{id}: proposal {} names {requirement}, which is not in the spec",
+                    proposal.number
+                ));
+            }
+        }
+        if let Some(decomposition) = &r.decomposition {
+            let actual = readiness(r, &spec).ready;
+            if decomposition.ready != actual {
+                issues.push(format!(
+                    "{id}: ready is recorded as {} but its children say {actual} - run spec \
+                     decide {id} to settle it",
+                    decomposition.ready
+                ));
+            }
+        }
+        if !r.is_pending()
+            && let Some(pending) = r
+                .derived
+                .iter()
+                .filter_map(|child| find(child))
+                .find(|child| child.is_pending())
+        {
+            issues.push(format!(
+                "{id}: an implemented ask needs every derived requirement implemented, and \
+                 {} is pending",
+                pending.id
+            ));
+        }
+    }
 }
 
 #[cfg(test)]
@@ -257,6 +370,105 @@ mod tests {
         let issues =
             SpecValidator::new(&features).validate(&spec_with(vec![requirement("REQ-001")]));
         assert!(issues.is_empty(), "unexpected issues: {issues:?}");
+    }
+
+    /// An ask and its children, as a settled decomposition writes them.
+    fn ask_family() -> Vec<Requirement> {
+        use crate::domain::ask::{AcceptedBy, DecompositionState, Mode, new_ask, settle};
+        let mut child = requirement("REQ-001");
+        child.kind = Some(ACTIONABLE_REQUIREMENT.into());
+        child.parent = Some("ASK-001".into());
+        child.acceptance = Some(crate::domain::ask::Acceptance {
+            by: AcceptedBy::Automatic,
+            wording: crate::domain::ask::requirement_fingerprint(&child),
+        });
+        let mut ask = new_ask("ASK-001".into(), "sum numbers", Mode::Automatic);
+        ask.decomposition.as_mut().unwrap().state = DecompositionState::Complete;
+        settle(&mut ask, &spec_with(vec![child.clone()]));
+        vec![ask, child]
+    }
+
+    #[test]
+    fn an_ask_obeys_every_rule_a_requirement_does_and_its_links_are_checked() {
+        let features = features_with_file();
+        let validator = SpecValidator::new(&features);
+        let family = ask_family();
+        let issues = validator.validate(&spec_with(family.clone()));
+        assert!(issues.is_empty(), "unexpected issues: {issues:?}");
+
+        let mut blank = family.clone();
+        blank[0].title = " ".into();
+        blank[0].request = None;
+        blank[0].decomposition = None;
+        let issues = validator.validate(&spec_with(blank));
+        assert!(
+            issues.contains(&"ASK-001: title is missing".to_string()),
+            "{issues:?}"
+        );
+        assert!(
+            issues.iter().any(|i| i.contains("original request text")),
+            "{issues:?}"
+        );
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.contains("record its decomposition")),
+            "{issues:?}"
+        );
+
+        let mut typed = family.clone();
+        typed[1].kind = Some("story".into());
+        let issues = validator.validate(&spec_with(typed));
+        assert!(
+            issues.iter().any(|i| i.contains("REQ-001: type must be")),
+            "{issues:?}"
+        );
+
+        let mut orphan = family.clone();
+        orphan[1].parent = Some("ASK-009".into());
+        let issues = validator.validate(&spec_with(orphan));
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.contains("REQ-001: parent ASK-009 is not in the spec"))
+        );
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.contains("ASK-001: lists REQ-001 under derived but"))
+        );
+
+        let mut drifted = family.clone();
+        drifted[0].decomposition.as_mut().unwrap().ready = false;
+        let issues = validator.validate(&spec_with(drifted));
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.contains("ready is recorded as false but its children say true")),
+            "{issues:?}"
+        );
+
+        let mut early = family.clone();
+        early[0].status = "implemented".into();
+        let issues = validator.validate(&spec_with(early));
+        assert!(
+            issues.iter().any(|i| i.contains("REQ-001 is pending")),
+            "{issues:?}"
+        );
+        assert!(
+            !issues.iter().any(|i| i.contains("featureFile")),
+            "an ask has no feature file of its own: {issues:?}"
+        );
+
+        let mut misplaced = family;
+        misplaced[1].derived = vec!["REQ-002".into()];
+        let issues = validator.validate(&spec_with(misplaced));
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.contains("belong on an ask_requirement")),
+            "{issues:?}"
+        );
     }
 
     #[test]

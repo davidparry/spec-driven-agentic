@@ -32,8 +32,12 @@ use crate::application::command_service::CommandService;
 use crate::application::decision_service::apply_review;
 use crate::application::generation_service::{GenerationService, ResolvedLlm};
 use crate::application::inspect_service::InspectService;
-use crate::application::spec_mutation_service::SpecMutationService;
+use crate::application::spec_mutation_service::{
+    AskTarget, Decisions, NewRequirement, NextStep, RequirementUpdate, SpecMutationService,
+};
 use crate::application::tdd_service::{TddError, TddService};
+use crate::domain::ask::{AcceptedBy, Mode as AskMode};
+use crate::domain::requirement_id::is_id_shape;
 use crate::domain::tools::{ToolDefinition, ToolOrigin};
 use crate::ports::{FeatureCatalog as _, SpecRepository as _, TestFilter, TestRunner};
 use crate::wiring;
@@ -156,6 +160,206 @@ pub struct RequirementRewordParams {
     pub acceptance_criteria: Vec<String>,
 }
 
+#[derive(Deserialize, JsonSchema)]
+pub struct RequirementCreateParams {
+    /// Title of the requirement. Required unless `request` is given.
+    #[serde(default)]
+    #[schemars(schema_with = "nullable_string")]
+    pub title: Option<String>,
+    /// User story (As a ..., I want ..., so that ...). Required unless
+    /// `request` is given.
+    #[serde(default)]
+    #[schemars(schema_with = "nullable_string")]
+    pub story: Option<String>,
+    /// Acceptance criteria, each phrased Given/When/Then. Required
+    /// unless `request` is given; an ask's criteria are derived.
+    #[serde(default)]
+    pub acceptance_criteria: Vec<String>,
+    /// The user's request in their own words. Given, the entry is an
+    /// ask (type ask_requirement, id ASK-nnn) preserving these words;
+    /// break it down afterwards with requirement_ask.
+    #[serde(default)]
+    #[schemars(schema_with = "nullable_string")]
+    pub request: Option<String>,
+    /// The ask this requirement derives from (e.g. ASK-001). The new
+    /// requirement is linked back to it and joins its proposals.
+    #[serde(default)]
+    #[schemars(schema_with = "nullable_string")]
+    pub parent: Option<String>,
+    /// Who accepts a requirement created under `parent`: "user" only
+    /// when a person approved these exact words; "automatic" (the
+    /// default) lets the deterministic review decide, and a child it
+    /// blocks on is linked but left pending.
+    #[serde(default)]
+    #[schemars(schema_with = "nullable_string")]
+    pub by: Option<String>,
+    /// Catalog file to write into (project-relative); default: the root
+    /// requirements.json.
+    #[serde(default)]
+    #[schemars(schema_with = "nullable_string")]
+    pub file: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct RequirementUpdateParams {
+    /// The requirement id, e.g. REQ-003 or ASK-001
+    pub id: String,
+    /// New title; omit to keep the current one
+    #[serde(default)]
+    #[schemars(schema_with = "nullable_string")]
+    pub title: Option<String>,
+    /// New user story; omit to keep the current one
+    #[serde(default)]
+    #[schemars(schema_with = "nullable_string")]
+    pub story: Option<String>,
+    /// The full new set of acceptance criteria (replaces the list);
+    /// omit to keep it. Refused on an ask, whose criteria are derived.
+    #[serde(default)]
+    pub acceptance_criteria: Vec<String>,
+    /// New request text of an ask. A change in meaning reopens its
+    /// decomposition; the derived requirements and their acceptances
+    /// stand.
+    #[serde(default)]
+    #[schemars(schema_with = "nullable_string")]
+    pub request: Option<String>,
+    /// Move the requirement under this ask.
+    #[serde(default)]
+    #[schemars(schema_with = "nullable_string")]
+    pub parent: Option<String>,
+    /// Take the requirement out from under its ask.
+    #[serde(default)]
+    pub unlink: bool,
+    /// Who made a `parent` link: "user" records their acceptance of
+    /// the requirement under that ask; "automatic" (the default) lets
+    /// the review decide.
+    #[serde(default)]
+    #[schemars(schema_with = "nullable_string")]
+    pub by: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct RequirementDeleteParams {
+    /// The requirement id, e.g. REQ-003 or ASK-001
+    pub id: String,
+    /// Remove an ask together with every requirement derived from it.
+    /// Without it an ask that still derives requirements is refused.
+    #[serde(default)]
+    pub cascade: bool,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct RequirementAskParams {
+    /// The request in plain words, or the id of an ask (ASK-nnn) to
+    /// carry on with. The words are preserved verbatim as the ask.
+    pub request: String,
+    /// Catalog file a new ask is written into (project-relative);
+    /// default: the root requirements.json.
+    #[serde(default)]
+    #[schemars(schema_with = "nullable_string")]
+    pub file: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ProposalDecisionParams {
+    /// The proposal number on the ask
+    pub number: u32,
+    /// Why, kept as the record
+    #[serde(default)]
+    #[schemars(schema_with = "nullable_string")]
+    pub reason: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct QuestionAnswerParams {
+    /// The question number on the ask
+    pub number: u32,
+    /// The answer, in the user's words
+    pub answer: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct RequirementDecideParams {
+    /// The ask, e.g. ASK-001
+    pub id: String,
+    /// Proposal numbers to accept. With by="automatic" only proposals
+    /// the review passes are accepted; the rest are refused by name.
+    #[serde(default)]
+    pub accept: Vec<u32>,
+    /// Proposals to reject, each with an optional reason
+    #[serde(default)]
+    pub reject: Vec<ProposalDecisionParams>,
+    /// Proposals to exclude from scope, each with an optional reason
+    #[serde(default)]
+    pub exclude: Vec<ProposalDecisionParams>,
+    /// Answers to the ask's questions, by number
+    #[serde(default)]
+    pub answers: Vec<QuestionAnswerParams>,
+    /// Mark the decomposition complete (true) or reopen it (false)
+    #[serde(default)]
+    #[schemars(schema_with = "nullable_bool")]
+    pub complete: Option<bool>,
+    /// Record (true) or withdraw (false) the user's confirmation that
+    /// the accepted requirements cover the request. Only by="user" may
+    /// confirm: this is their decision, never the agent's.
+    #[serde(default)]
+    #[schemars(schema_with = "nullable_bool")]
+    pub confirmed: Option<bool>,
+    /// Whose decisions these are: "user" when relaying what a person
+    /// decided, "automatic" (the default) for the review's own authority.
+    #[serde(default)]
+    #[schemars(schema_with = "nullable_string")]
+    pub by: Option<String>,
+}
+
+/// "user" or "automatic", as the tools take it; the domain names
+/// anything else. An absent or blank value is no decision about it.
+fn accepted_by(by: Option<&str>) -> Result<Option<AcceptedBy>, String> {
+    by.map(str::trim)
+        .filter(|by| !by.is_empty())
+        .map(str::parse)
+        .transpose()
+}
+
+/// The service words its next step for the shell. Over MCP the agent
+/// has tools, not commands, so the same advice names the tools.
+fn tool_worded(next_step: &str) -> String {
+    next_step
+        .replace("spec decide", "requirement_decide")
+        .replace("spec reword", "requirement_reword")
+        .replace("spec unlink", "requirement_update with unlink=true and id")
+        .replace("spec draft --parent", "requirement_create with parent")
+        .replace("spec draft", "requirement_ask")
+        .replace("spec deliver", "deliver via the harness")
+        .replace("spec show", "get_requirement")
+        .replace("spec scenario add", "scenario_add")
+        .replace("spec validate", "validate_spec")
+        .replace("spec list", "list_requirements")
+        .replace("--interactive", "with the user in the loop")
+        .replace("--by user", "by=\"user\"")
+        .replace("--cascade", "cascade=true")
+        .replace("--title ...", "and the user's words")
+}
+
+/// The service's refusal, worded for the tools the agent has.
+fn tool_worded_error(error: impl std::fmt::Display) -> CallToolResult {
+    error_result(tool_worded(&error.to_string()))
+}
+
+/// A mutation's outcome as the agent should hear it: the report with
+/// its advice naming tools, or the refusal likewise.
+fn tool_reply<T: serde::Serialize + NextStep>(
+    outcome: Result<T, impl std::fmt::Display>,
+) -> CallToolResult {
+    match outcome {
+        Ok(mut report) => {
+            let worded = tool_worded(report.next_step_mut());
+            *report.next_step_mut() = worded;
+            json_result(&report)
+        }
+        Err(e) => tool_worded_error(e),
+    }
+}
+
 /// The MCP delivery of the workflow: seven frozen tools plus the
 /// additive typed tools, all backed by the same application services the
 /// harness commands use.
@@ -215,6 +419,10 @@ fn nullable_string_array(_: &mut schemars::SchemaGenerator) -> schemars::Schema 
 
 fn nullable_u64(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
     nullable(serde_json::json!({ "type": "integer", "minimum": 0 }))
+}
+
+fn nullable_bool(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    nullable(serde_json::json!({ "type": "boolean" }))
 }
 
 /// Logs a tool invocation and opens a span so the result events emitted
@@ -786,38 +994,18 @@ impl WorkflowServer {
             criteria = params.acceptance_criteria.len(),
             "tool arguments"
         );
-        Ok(
-            match self.mutation_service().reword_direct(
-                &params.id,
-                params.title,
-                params.story,
-                params.acceptance_criteria,
-            ) {
-                // The service words its next step for the harness. Over MCP the
-                // agent has tools, not a shell, so name the tools instead —
-                // the mirror of what `spec validate` does to
-                // `validate_spec`.
-                Ok(mut report) => {
-                    report.next_step = if report.findings.is_empty() {
-                        "Check it with validate_spec, then add its scenario with \
-                         scenario_add."
-                            .to_string()
-                    } else {
-                        format!(
-                            "Wrote {} with open wording findings. Call \
-                             requirement_reword again to address them.",
-                            report.id
-                        )
-                    };
-                    json_result(&report)
-                }
-                Err(e) => error_result(e),
-            },
-        )
+        Ok(tool_reply(self.mutation_service().reword_direct(
+            &params.id,
+            params.title,
+            params.story,
+            params.acceptance_criteria,
+        )))
     }
 
     #[tool(description = "Flip a requirement's status to implemented. Only \
-        allowed on GREEN when a scenario tagged with the requirement id exists.")]
+        allowed on GREEN when a scenario tagged with the requirement id exists. \
+        An ask (ASK-nnn) is implemented through its derived requirements: it is \
+        refused until it is ready and every one of them is implemented.")]
     async fn requirement_mark_implemented(
         &self,
         Parameters(params): Parameters<IdParam>,
@@ -829,6 +1017,185 @@ impl WorkflowServer {
             Ok(report) => json_result(&report),
             Err(e) => error_result(e),
         })
+    }
+
+    #[tool(
+        description = "Create one requirement in requirements.json without a wizard. \
+        With title, story, and acceptance_criteria it writes an actionable requirement \
+        under the next free id; add parent (ASK-nnn) to derive it from an ask, where it \
+        joins the ask's proposals - accepted when by=\"user\" relays a person's approval \
+        of these exact words, otherwise accepted only if the deterministic review passes \
+        it and left pending with its findings if not. With request alone it preserves \
+        the user's words as an ask (type ask_requirement) to break down with \
+        requirement_ask. Structural validate must pass; wording findings are reported \
+        in nextStep rather than blocking. Never hand-edit the requirements file."
+    )]
+    async fn requirement_create(
+        &self,
+        Parameters(params): Parameters<RequirementCreateParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let _writing = self.write_guard().await;
+        let _span = tool_call("requirement_create");
+        tracing::debug!(
+            title = ?params.title,
+            request = ?params.request,
+            parent = ?params.parent,
+            "tool arguments"
+        );
+        let by = match accepted_by(params.by.as_deref()) {
+            Ok(by) => by,
+            Err(message) => return Ok(error_result(message)),
+        };
+        let new = NewRequirement {
+            title: params.title.unwrap_or_default(),
+            story: params.story.unwrap_or_default(),
+            criteria: params.acceptance_criteria,
+            request: params.request,
+            parent: params.parent.clone(),
+            by: params
+                .parent
+                .as_ref()
+                .map(|_| by.unwrap_or(AcceptedBy::Automatic)),
+        };
+        Ok(tool_reply(
+            self.mutation_service()
+                .create_direct(new, params.file.as_deref()),
+        ))
+    }
+
+    #[tool(
+        description = "Update one requirement in place, keeping its id: title, story, \
+        acceptance_criteria, an ask's request, or its parent link (parent / unlink). \
+        A derived requirement whose meaning changes loses the acceptance it had and \
+        its ask stops being ready until it is accepted again with requirement_decide; \
+        whitespace-only edits keep it. A changed request reopens the ask's \
+        decomposition. Running the same update twice changes nothing. Never hand-edit \
+        the requirements file."
+    )]
+    async fn requirement_update(
+        &self,
+        Parameters(params): Parameters<RequirementUpdateParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let _writing = self.write_guard().await;
+        let _span = tool_call("requirement_update");
+        tracing::debug!(id = %params.id, "tool arguments");
+        let by = match accepted_by(params.by.as_deref()) {
+            Ok(by) => by,
+            Err(message) => return Ok(error_result(message)),
+        };
+        let update = RequirementUpdate {
+            title: params.title,
+            story: params.story,
+            criteria: params.acceptance_criteria,
+            request: params.request,
+            parent: params.parent,
+            unlink: params.unlink,
+            by,
+        };
+        Ok(tool_reply(
+            self.mutation_service().update_direct(&params.id, update),
+        ))
+    }
+
+    #[tool(
+        description = "Remove a requirement from requirements.json. A derived \
+        requirement's removal leaves its ask's proposal pending again, so the ask \
+        stops being ready until someone decides what stands for it. An ask that still \
+        derives requirements is refused unless cascade is true, which removes them \
+        with it. Destructive: confirm with the user before deleting anything they \
+        did not ask to delete."
+    )]
+    async fn requirement_delete(
+        &self,
+        Parameters(params): Parameters<RequirementDeleteParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let _writing = self.write_guard().await;
+        let _span = tool_call("requirement_delete");
+        tracing::debug!(id = %params.id, cascade = params.cascade, "tool arguments");
+        Ok(tool_reply(
+            self.mutation_service().delete(&params.id, params.cascade),
+        ))
+    }
+
+    #[tool(description = "Preserve a request in the user's own words as an ask \
+        (ASK-nnn, type ask_requirement) and break it into actionable requirements \
+        without a model: only what the words enumerate (numbered or bulleted lines, \
+        semicolon-separated clauses) becomes a proposal, each reviewed by the rules and \
+        accepted automatically when nothing blocks it; a request that enumerates \
+        nothing is preserved with a blocking question rather than guessed at. Give an \
+        existing ask id to re-run it. Nothing is invented: when the proposals need \
+        wording, write them with requirement_create (parent = the ask) from what the \
+        user actually said, then settle the ask with requirement_decide. The reply \
+        says whether the ask is ready for implementation and why not.")]
+    async fn requirement_ask(
+        &self,
+        Parameters(params): Parameters<RequirementAskParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let _writing = self.write_guard().await;
+        let _span = tool_call("requirement_ask");
+        tracing::debug!(request = %params.request, "tool arguments");
+        let target = if is_id_shape(params.request.trim()) {
+            AskTarget::Existing(params.request.trim().to_string())
+        } else {
+            AskTarget::Text(params.request)
+        };
+        let mut prompter = NullPrompter;
+        Ok(tool_reply(self.mutation_service().decompose(
+            &mut prompter,
+            None,
+            params.file.as_deref(),
+            target,
+            AskMode::Automatic,
+        )))
+    }
+
+    #[tool(
+        description = "Record decisions on an ask deterministically - no model, no \
+        wizard: accept, reject, or exclude proposals by number, answer its questions, \
+        mark the decomposition complete, or record the user's confirmation. Who decides \
+        matters and is stored: by=\"automatic\" (the default) may only accept proposals \
+        the review passes and may never confirm; by=\"user\" relays what a person \
+        actually decided - do not pass it on your own judgment. Accepting writes the \
+        proposal as a derived requirement; rejecting or excluding one that already \
+        stands for a requirement withdraws its acceptance. With nothing to decide the \
+        ask is reported as it stands. The reply says whether the ask is ready for \
+        implementation and lists what is still open."
+    )]
+    async fn requirement_decide(
+        &self,
+        Parameters(params): Parameters<RequirementDecideParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let _writing = self.write_guard().await;
+        let _span = tool_call("requirement_decide");
+        tracing::debug!(id = %params.id, "tool arguments");
+        let by = match accepted_by(params.by.as_deref()) {
+            Ok(by) => by,
+            Err(message) => return Ok(error_result(message)),
+        };
+        let decisions = Decisions {
+            accept: params.accept,
+            reject: params
+                .reject
+                .into_iter()
+                .map(|d| (d.number, d.reason))
+                .collect(),
+            exclude: params
+                .exclude
+                .into_iter()
+                .map(|d| (d.number, d.reason))
+                .collect(),
+            answers: params
+                .answers
+                .into_iter()
+                .map(|a| (a.number, a.answer))
+                .collect(),
+            complete: params.complete,
+            confirmed: params.confirmed,
+            by,
+        };
+        Ok(tool_reply(
+            self.mutation_service().decide(&params.id, decisions),
+        ))
     }
 
     #[tool(description = "List Gherkin steps that have no matching step definition.")]

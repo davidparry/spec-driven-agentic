@@ -21,10 +21,69 @@ pub struct ProposedRequirement {
     pub acceptance_criteria: Vec<String>,
 }
 
+/// A clarification the model asks instead of guessing: one element of
+/// the reply array shaped `{"question": "...", "blocking": true}`.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct ProposedQuestion {
+    pub question: String,
+    #[serde(default = "default_blocking")]
+    pub blocking: bool,
+}
+
+fn default_blocking() -> bool {
+    true
+}
+
+/// One element of the reply as the model may write it: a requirement,
+/// or a question it could not answer from the request.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(untagged)]
+enum ReplyElement {
+    Question(ProposedQuestion),
+    Requirement(ProposedRequirement),
+}
+
+/// What a decomposition reply held once read: the complete proposals
+/// and the questions, either of which may be empty but not both.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ProposalReply {
+    pub proposals: Vec<ProposedRequirement>,
+    pub questions: Vec<ProposedQuestion>,
+}
+
+/// What a re-split is briefed with beyond the request: the questions
+/// already answered, and the requirements already accepted so they are
+/// not proposed twice.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct ProposalContext {
+    pub answered: Vec<(String, String)>,
+    pub accepted: Vec<String>,
+    /// Whether the model may answer with questions instead of guessing.
+    pub questions_allowed: bool,
+}
+
 /// The strict instructions for turning a description into a JSON array
 /// of complete requirements, rendered from the `[proposal]` templates.
 pub fn proposal_prompt(description: &str) -> RenderedPrompt {
-    render("proposal", minijinja::context! { description })
+    proposal_prompt_with(description, &ProposalContext::default())
+}
+
+/// [`proposal_prompt`] with what an earlier round established.
+pub fn proposal_prompt_with(description: &str, context: &ProposalContext) -> RenderedPrompt {
+    let answered: Vec<minijinja::Value> = context
+        .answered
+        .iter()
+        .map(|(question, answer)| minijinja::context! { question, answer })
+        .collect();
+    render(
+        "proposal",
+        minijinja::context! {
+            description,
+            answered,
+            accepted => context.accepted,
+            questions_allowed => context.questions_allowed,
+        },
+    )
 }
 
 /// Parse the model's reply into qualified proposals. Incomplete
@@ -37,27 +96,51 @@ pub fn parse_proposals(reply: &str) -> Vec<ProposedRequirement> {
 /// Parse with a reason when the reply cannot be used, so a retry can
 /// tell the model what was wrong.
 pub fn parse_proposals_checked(reply: &str) -> Result<Vec<ProposedRequirement>, String> {
-    let body = strip_code_fences(reply);
-    let parsed =
-        decode_json_array(&body).or_else(|| decode_json_object(&body).map(|one| vec![one]));
-    let Some(proposals) = parsed else {
-        return Err(
-            "the reply was not a JSON array of requirements (title, story, acceptanceCriteria)"
-                .into(),
-        );
-    };
-    let complete: Vec<ProposedRequirement> = proposals
-        .into_iter()
-        .filter(is_complete)
-        .map(ProposedRequirement::normalized)
-        .collect();
-    if complete.is_empty() {
+    let parsed = parse_reply_checked(reply)?;
+    if parsed.proposals.is_empty() {
         return Err(
             "the JSON held no complete requirement (each needs a title, a story, and at least one Given/When/Then criterion)"
                 .into(),
         );
     }
-    Ok(complete)
+    Ok(parsed.proposals)
+}
+
+/// Parse a reply that may hold requirements, questions, or both. A
+/// reply with neither is unusable and says why.
+pub fn parse_reply_checked(reply: &str) -> Result<ProposalReply, String> {
+    let body = strip_code_fences(reply);
+    let parsed: Option<Vec<ReplyElement>> =
+        decode_json(&body, '[').or_else(|| decode_json(&body, '{').map(|one| vec![one]));
+    let Some(elements) = parsed else {
+        return Err(
+            "the reply was not a JSON array of requirements (title, story, acceptanceCriteria)"
+                .into(),
+        );
+    };
+    let mut parsed = ProposalReply::default();
+    for element in elements {
+        match element {
+            ReplyElement::Question(question) if !question.question.trim().is_empty() => {
+                parsed.questions.push(ProposedQuestion {
+                    question: escape_controls(question.question.trim()),
+                    blocking: question.blocking,
+                });
+            }
+            ReplyElement::Question(_) => {}
+            ReplyElement::Requirement(proposal) if is_complete(&proposal) => {
+                parsed.proposals.push(proposal.normalized());
+            }
+            ReplyElement::Requirement(_) => {}
+        }
+    }
+    if parsed.proposals.is_empty() && parsed.questions.is_empty() {
+        return Err(
+            "the JSON held no complete requirement (each needs a title, a story, and at least one Given/When/Then criterion)"
+                .into(),
+        );
+    }
+    Ok(parsed)
 }
 
 /// Why a batch of proposals is not worth writing yet, or `None` once
@@ -134,11 +217,6 @@ fn is_complete(proposal: &ProposedRequirement) -> bool {
             .acceptance_criteria
             .iter()
             .all(|criterion| !criterion.trim().is_empty())
-}
-
-/// The first JSON array in `body`.
-fn decode_json_array(body: &str) -> Option<Vec<ProposedRequirement>> {
-    decode_json(body, '[')
 }
 
 /// A bare object is treated as a one-element array - the same courtesy
@@ -373,6 +451,63 @@ mod tests {
             prompt
                 .system
                 .contains("rather than replying with an empty array")
+        );
+    }
+
+    /// A question is not a requirement: it is kept apart, and a reply of
+    /// questions alone is a usable reply rather than a failed one - the
+    /// model declined to guess, which is what it was told to do.
+    #[test]
+    fn questions_are_read_apart_from_requirements_and_may_stand_alone() {
+        let reply = r#"[
+            {"title": "Comma sums", "story": "As a user, I want sums so that totals arrive.",
+             "acceptanceCriteria": ["Given \"1,2\", when add is called, then the result is 3",
+                                    "Given \"\", when add is called, then the result is 0"]},
+            {"question": "Which delimiters count besides the comma?", "blocking": true},
+            {"question": " Is a trailing comma allowed? ", "blocking": false},
+            {"question": "   "}
+        ]"#;
+        let parsed = parse_reply_checked(reply).unwrap();
+        assert_eq!(parsed.proposals.len(), 1);
+        assert_eq!(parsed.questions.len(), 2);
+        assert_eq!(
+            parsed.questions[0].question,
+            "Which delimiters count besides the comma?"
+        );
+        assert!(parsed.questions[0].blocking);
+        assert_eq!(parsed.questions[1].question, "Is a trailing comma allowed?");
+        assert!(!parsed.questions[1].blocking);
+        // The requirement-only reading still refuses a reply with none.
+        assert_eq!(parse_proposals(reply).len(), 1);
+
+        let only_questions = r#"[{"question": "Which delimiter?"}]"#;
+        let parsed = parse_reply_checked(only_questions).unwrap();
+        assert!(parsed.proposals.is_empty());
+        assert!(parsed.questions[0].blocking, "blocking is the default");
+        assert!(parse_proposals_checked(only_questions).is_err());
+        assert!(parse_reply_checked("[]").is_err());
+    }
+
+    #[test]
+    fn a_re_split_is_briefed_with_the_answers_and_the_accepted_titles() {
+        let prompt = proposal_prompt_with(
+            "sum numbers",
+            &ProposalContext {
+                answered: vec![("Which delimiter?".into(), "comma and newline".into())],
+                accepted: vec!["Comma sums".into()],
+                questions_allowed: true,
+            },
+        );
+        assert!(prompt.user.contains("Which delimiter?"));
+        assert!(prompt.user.contains("comma and newline"));
+        assert!(prompt.user.contains("Already accepted"));
+        assert!(prompt.user.contains("- Comma sums"));
+        assert!(prompt.system.contains("\"question\""));
+        let first = proposal_prompt("sum numbers");
+        assert!(!first.user.contains("Already accepted"));
+        assert!(
+            !first.system.contains("\"question\""),
+            "questions are only offered when the caller can record them"
         );
     }
 

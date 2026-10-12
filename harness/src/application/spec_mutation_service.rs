@@ -3,7 +3,7 @@
 //! GREEN-gated `mark-implemented`. Every mutation writes the project's
 //! files directly; git is the review gate.
 
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 
 use serde::Serialize;
 
@@ -12,14 +12,20 @@ use crate::application::assets::{feature_tagged, load_catalog};
 use crate::application::decision_service::TaskJudge;
 use crate::application::spec_service::ServiceError;
 use crate::application::{DEFAULT_LLM_ATTEMPTS, LlmReplyError};
+use crate::domain::ask::{
+    ASK_PREFIX, AcceptedBy, Decomposition, DecompositionState, Mode, Proposal, ProposalStatus,
+    Question, Readiness, add_questions, auto_acceptable, fingerprint, invalidate, new_ask,
+    next_ask_id, proposal_from, reconcile, reopen, requirement_from, review_proposal, settle,
+    split_enumerated, story_from_request, title_from_request, wording_fingerprint,
+};
 use crate::domain::decision::{CRITERION_MEASURABLE, Verdict};
 use crate::domain::human::{Human, columns, counted, sections};
-use crate::domain::model::{Requirement, Spec, SpecCatalog, SpecFile};
+use crate::domain::model::{ACTIONABLE_REQUIREMENT, Requirement, Spec, SpecCatalog, SpecFile};
 use crate::domain::paths::confine;
 use crate::domain::prompts::RenderedPrompt;
 use crate::domain::proposal::{
-    ProposedRequirement, missing_edge_case, parse_proposals_checked, parse_rewording_checked,
-    proposal_prompt, rewording_prompt,
+    ProposalContext, ProposalReply, ProposedRequirement, missing_edge_case, parse_reply_checked,
+    parse_rewording_checked, proposal_prompt_with, rewording_prompt,
 };
 use crate::domain::refiner::{RequirementRefiner, finding_signature, suggestion_for};
 use crate::domain::requirement_id::next_id;
@@ -30,6 +36,18 @@ use crate::ports::{
     FeatureCatalog, FeatureFiles, LlmConversation, Prompter, SpecRepository, StateStore,
     ToolBroker, WorkTree,
 };
+
+mod asks;
+
+use asks::{AskEdit, CatalogEdit};
+pub use asks::{AskTarget, Decisions, DecomposeReport};
+
+/// A report that ends in advice. The shell words it for commands; a
+/// delivery that speaks another vocabulary (tools over MCP) rewords it
+/// through this rather than knowing each report's shape.
+pub trait NextStep {
+    fn next_step_mut(&mut self) -> &mut String;
+}
 
 /// A resolved model to call: name + conversation.
 type Model<'a> = (&'a str, &'a dyn LlmConversation);
@@ -100,17 +118,66 @@ const MAX_DRAFT_PASSES: u32 = 12;
 /// than a shared name here.
 pub const DESCRIBE_PROMPT: &str = "Describe what to build in plain words (one or several \
                                    requirements). Enter drafts manually instead:";
-pub const ACCEPT_PROMPT: &str = "Accept [Enter for all, or comma-separated numbers]:";
-/// The prefix of the ordering question; the row range is appended.
-pub const FIRST_REQUIREMENT_PROMPT: &str = "Which requirement first to review and refine?";
+/// The vote on one proposal; the proposal number precedes it and the
+/// letters follow.
+pub const REVIEW_PROMPT: &str = "- [a]pprove, [r]eject, re[v]ise, or e[x]clude from scope";
+/// The question that closes an interactive decomposition; the ask id
+/// follows it.
+pub const COVERAGE_PROMPT: &str = "Do the accepted requirements cover the whole request";
 /// The phrase both write confirmations carry, clean or with findings open.
 pub const WRITE_REQUIREMENT: &str = "Write this requirement";
+
+/// Rounds of splitting one interactive decomposition may take: the
+/// first, and one more for each time answers or a missing piece were
+/// added to the brief. A model that still has not covered the request
+/// after three is not going to, and the ask stays open on record.
+const MAX_SPLIT_ROUNDS: u32 = 3;
+
+/// Empty answers to one vote before the proposal is left pending. Enter
+/// is "keep the proposal" everywhere else in the wizard, and a run with
+/// nobody at the keyboard answers it to everything; a vote it would
+/// cast is exactly the agent judgment interactive mode exists to refuse.
+const MAX_EMPTY_VOTES: u32 = 3;
+
+/// The merged view takes the ask as it now stands.
+fn replace_requirement(spec: &mut Spec, requirement: &Requirement) {
+    match spec
+        .requirements
+        .iter_mut()
+        .find(|r| r.id == requirement.id)
+    {
+        Some(slot) => *slot = requirement.clone(),
+        None => spec.requirements.push(requirement.clone()),
+    }
+}
+
+/// `spec` as the write of `candidate` will leave it: the candidate in
+/// place and the asks it touches - itself, or the one it hangs under -
+/// settled against it. A review reads this rather than the catalog as
+/// it stands, so it never reports the derivation and readiness the
+/// write is about to bring up to date.
+fn as_written(spec: &Spec, candidate: &Requirement) -> Spec {
+    let mut view = spec.clone();
+    replace_requirement(&mut view, candidate);
+    let asks = candidate
+        .is_ask()
+        .then(|| candidate.id.clone())
+        .into_iter()
+        .chain(candidate.parent.clone());
+    for ask_id in asks {
+        let before = view.clone();
+        if let Some(ask) = view.requirements.iter_mut().find(|r| r.id == ask_id) {
+            settle(ask, &before);
+        }
+    }
+    view
+}
 
 /// How the wizard's question loop ended.
 enum Gathered {
     /// A requirement to stage, its title, and any wording findings left
     /// open.
-    Wording(Requirement, String, Vec<String>),
+    Wording(Box<Requirement>, String, Vec<String>),
     /// Two passes produced the same wording, so no further pass can
     /// change the verdict. Carries the title and the open findings.
     NotConverging(String, Vec<String>),
@@ -230,6 +297,72 @@ pub struct MarkReport {
     pub written: bool,
     #[serde(rename = "nextStep")]
     pub next_step: String,
+}
+
+/// A requirement created from flags rather than the wizard. With a
+/// `request` it is an ask that preserves those words; with a `parent`
+/// it is an actionable requirement derived from that ask, accepted on
+/// creation by whoever `by` says wrote it.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct NewRequirement {
+    pub title: String,
+    pub story: String,
+    pub criteria: Vec<String>,
+    pub request: Option<String>,
+    pub parent: Option<String>,
+    pub by: Option<AcceptedBy>,
+}
+
+/// The fields a direct update may change. Absent fields keep their
+/// value; `unlink` drops the parent link. A `parent` is a user's doing
+/// when `by` says so, and otherwise the link is recorded without an
+/// acceptance the user never gave.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct RequirementUpdate {
+    pub title: Option<String>,
+    pub story: Option<String>,
+    pub criteria: Vec<String>,
+    pub request: Option<String>,
+    pub parent: Option<String>,
+    pub unlink: bool,
+    pub by: Option<AcceptedBy>,
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+pub struct DeleteReport {
+    pub id: String,
+    /// Every requirement removed, the named one first.
+    pub removed: Vec<String>,
+    /// The ask whose readiness the removal changed, if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
+    pub written: bool,
+    #[serde(rename = "nextStep")]
+    pub next_step: String,
+}
+
+impl Human for DeleteReport {
+    fn human(&self) -> String {
+        format!("Removed {}. {}", self.removed.join(", "), self.next_step)
+    }
+}
+
+impl NextStep for DraftReport {
+    fn next_step_mut(&mut self) -> &mut String {
+        &mut self.next_step
+    }
+}
+
+impl NextStep for MarkReport {
+    fn next_step_mut(&mut self) -> &mut String {
+        &mut self.next_step
+    }
+}
+
+impl NextStep for DeleteReport {
+    fn next_step_mut(&mut self) -> &mut String {
+        &mut self.next_step
+    }
 }
 
 pub struct SpecMutationService<
@@ -365,20 +498,17 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: WorkTree, S: StateS
     }
 
     /// Draft with the model's help: the human describes what to build
-    /// in plain words, the model splits the description into complete
-    /// requirement proposals (title, story, criteria). The human
-    /// accepts all of them, or a comma-separated subset; accepted
-    /// proposals are stored in the spec as pending requirements under
-    /// sequential ids. The human then picks which stored one the
-    /// wizard walks through first, with every field pre-filled from
-    /// the proposal - Enter accepts, typing replaces. Any model
-    /// failure falls back to manual drafting.
+    /// in plain words and the description is preserved as an ask, which
+    /// the model splits into requirement proposals the human approves,
+    /// rejects, or revises one by one - see [`Self::decompose`] in
+    /// [`Mode::Interactive`]. An empty description falls back to the
+    /// manual wizard, as does a model that produces nothing usable.
     pub fn draft_assisted(
         &self,
         prompter: &mut dyn Prompter,
         model: &str,
         llm: &dyn LlmConversation,
-    ) -> Result<DraftReport, ServiceError> {
+    ) -> Result<DecomposeReport, ServiceError> {
         self.draft_assisted_in(prompter, model, llm, None)
     }
 
@@ -390,47 +520,15 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: WorkTree, S: StateS
         model: &str,
         llm: &dyn LlmConversation,
         file: Option<&str>,
-    ) -> Result<DraftReport, ServiceError> {
-        self.assisted_draft(prompter, model, llm, file, None)
-    }
-
-    /// [`Self::draft_assisted_in`] with the description already in hand,
-    /// for an orchestrator that was handed it as an argument instead of
-    /// asking the human for it. A blank description still falls back to
-    /// the manual wizard, exactly as pressing Enter at the prompt does.
-    pub fn draft_assisted_from(
-        &self,
-        prompter: &mut dyn Prompter,
-        model: &str,
-        llm: &dyn LlmConversation,
-        file: Option<&str>,
-        description: &str,
-    ) -> Result<DraftReport, ServiceError> {
-        self.assisted_draft(prompter, model, llm, file, Some(description))
-    }
-
-    /// The assisted draft itself. `given` carries a description supplied
-    /// by the caller; `None` asks the human for one. The catalog is read
-    /// before either, so an unusable spec is refused without a question
-    /// being put first.
-    fn assisted_draft(
-        &self,
-        prompter: &mut dyn Prompter,
-        model: &str,
-        llm: &dyn LlmConversation,
-        file: Option<&str>,
-        given: Option<&str>,
-    ) -> Result<DraftReport, ServiceError> {
-        let mut catalog = self.spec_catalog()?;
+    ) -> Result<DecomposeReport, ServiceError> {
+        // The catalog is read before the question, so an unusable spec
+        // is refused without a question being put first.
+        let catalog = self.spec_catalog()?;
         let target = self.target_file(&catalog, file)?;
-        let mut merged = catalog.merged();
-        let id = next_id(&catalog, &target);
-        let description = match given {
-            Some(text) => text.trim().to_string(),
-            None => self.ask(prompter, DESCRIBE_PROMPT)?,
-        };
-        if description.is_empty() {
-            return self.manual_draft(
+        let description = self.ask(prompter, DESCRIBE_PROMPT)?;
+        if description.trim().is_empty() {
+            let id = next_id(&catalog, &target);
+            let report = self.manual_draft(
                 prompter,
                 DraftTarget {
                     catalog,
@@ -438,241 +536,16 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: WorkTree, S: StateS
                 },
                 id,
                 Some((model, llm)),
-            );
-        }
-        let work = prompter.working(&format!(
-            "Splitting the description into requirements with {model} - working"
-        ));
-        let prompt = proposal_prompt(&description);
-        // Every rejection this check has made, so the last attempt it is
-        // allowed can stop insisting: one rejection too many and the whole
-        // split fails, which costs the author the draft. A happy-path draft
-        // is worth keeping - the findings round asks for the edge case that
-        // the retries could not win.
-        let rejections = std::cell::Cell::new(0u32);
-        let attempts = self.llm_attempts;
-        // The decision model gets one rejection and no more. It is the
-        // unreliable half of this check - see `with_judge` -
-        // so it nudges a draft once and then takes what it is given,
-        // leaving the remaining budget to the rule that is always
-        // right about what it finds.
-        let judged = std::cell::Cell::new(false);
-        // A draft handed back unchanged after the model was told what it
-        // lacked is the last word it has on the matter: the agent loop
-        // stops asking on a verbatim repeat, so refusing it here again
-        // would lose the draft to manual drafting instead of keeping
-        // it for the author to finish, as the final attempt does.
-        let last_refused = std::cell::RefCell::new(None::<String>);
-        let check = |reply: &str| {
-            let repeated = last_refused.borrow().as_deref() == Some(reply);
-            let outcome = parse_proposals_checked(reply).and_then(|proposals| {
-                // Deterministic first: it costs nothing, and a draft
-                // that is still missing its edge cases is not worth a
-                // model's opinion on wording yet.
-                let reason = missing_edge_case(&proposals).or_else(|| {
-                    // Asking on the last attempt buys a judgment the
-                    // loop has no round left to act on, at several
-                    // seconds a criterion.
-                    let spendable = rejections.get() + 1 < attempts && !judged.get();
-                    let judge = self.judge.as_deref().filter(|_| spendable)?;
-                    judged.set(true);
-                    unmeasurable_criteria(judge, &proposals)
-                });
-                match reason {
-                    Some(reason) if rejections.get() + 1 < attempts && !repeated => Err(reason),
-                    _ => Ok(proposals),
-                }
-            });
-            if outcome.is_err() {
-                rejections.set(rejections.get() + 1);
-                *last_refused.borrow_mut() = Some(reply.to_string());
-            }
-            outcome
-        };
-        let null = NullBroker;
-        let broker: &dyn ToolBroker = self.broker.as_deref().unwrap_or(&null);
-        let outcome = ask_llm(
-            LlmCall {
-                model,
-                llm,
-                tools: &self.tools,
-                broker,
-                config: AgentConfig::new(
-                    "proposal",
-                    self.llm_attempts,
-                    self.max_rounds,
-                    self.confirm.clone(),
-                ),
-            },
-            prompter,
-            &prompt,
-            check,
-            |prompter, attempt, of, reason| {
-                prompter.warn(&format!(
-                    "The model reply was invalid ({reason}) - asking again ({attempt} of {of})"
-                ));
-            },
-        );
-        drop(work);
-        let proposals = match outcome {
-            Ok(proposals) => proposals,
-            Err(LlmReplyError::Call(error)) => {
-                prompter.warn(&format!("The model call failed ({}).", error.0));
-                Vec::new()
-            }
-            Err(LlmReplyError::Invalid { reason }) => {
-                prompter.warn(&format!(
-                    "The model did not return a valid requirement list ({reason})."
-                ));
-                Vec::new()
-            }
-        };
-        if proposals.is_empty() {
-            prompter.warn("The description gave no complete requirement - drafting manually.");
-            return self.manual_draft(
-                prompter,
-                DraftTarget {
-                    catalog,
-                    file: target,
-                },
-                id,
-                Some((model, llm)),
-            );
-        }
-        if proposals.len() > 1 {
-            prompter.tell(
-                "Accept all these requirements to refine, or enter comma-separated \
-                 numbers of the ones to accept.",
-            );
-        }
-        prompter.tell(&format!(
-            "The description holds {} requirement(s):",
-            proposals.len()
-        ));
-        for (index, proposal) in proposals.iter().enumerate() {
-            prompter.tell(&format!("  {}. {}", index + 1, proposal.title));
-        }
-        let accepted = self.accept_proposals(prompter, &proposals)?;
-        let mut stored = Vec::with_capacity(accepted.len());
-        for ProposedRequirement {
-            title,
-            story,
-            acceptance_criteria,
-        } in accepted
-        {
-            let requirement = Requirement {
-                id: next_id(&catalog, &target),
-                title,
-                status: "pending".into(),
-                story,
-                acceptance_criteria,
-                feature_file: None,
-                production_files: Vec::new(),
-            };
-            merged.requirements.push(requirement.clone());
-            file_mut_or_err(&mut catalog, &target)?
-                .requirements
-                .push(requirement.clone());
-            stored.push(requirement);
-        }
-        let ids: Vec<String> = stored.iter().map(|r| r.id.clone()).collect();
-        self.write_file(
-            &catalog,
-            &target,
-            &format!("draft {} from the description", ids.join(", ")),
-        )?;
-        let written_path = self.project_path(&target);
-        prompter.tell(&format!(
-            "Accepted requirements were written to {written_path} as pending:"
-        ));
-        for requirement in &stored {
-            prompter.tell(&format!("  {} {}", requirement.id, requirement.title));
-        }
-        let chosen = self.pick_proposal(prompter, stored.len())?;
-        let proposal = stored.remove(chosen);
-        let chosen_id = proposal.id.clone();
-        prompter.tell(&format!(
-            "Walking through {chosen_id}. Each prompt shows the proposal - Enter \
-             accepts it, or type your own wording."
-        ));
-        let report = self.draft_loop(
-            prompter,
-            DraftTarget {
-                catalog,
-                file: target,
-            },
-            chosen_id,
-            Some(proposal),
-            Some((model, llm)),
-            true,
-        )?;
-        if report.written {
-            return Ok(report);
-        }
-        // Declining the reworded wording does not undo the rows the
-        // developer already accepted - they are on disk under the model's
-        // wording, so the report has to say so rather than claiming
-        // nothing was written.
-        Ok(DraftReport {
-            written: true,
-            next_step: format!(
-                "The reworded wording was declined, but {} already in \
-                 {written_path} under the model's wording. Read it with git diff, \
-                 or undo it with git restore.",
-                match ids.as_slice() {
-                    [one] => format!("{one} is"),
-                    many => format!("{} are", many.join(", ")),
-                }
-            ),
-            ..report
-        })
-    }
-
-    /// Which of the listed proposals to keep. Enter means all of them;
-    /// otherwise a comma-separated list of 1-based numbers. A single
-    /// proposal is accepted without asking.
-    fn accept_proposals(
-        &self,
-        prompter: &mut dyn Prompter,
-        proposals: &[ProposedRequirement],
-    ) -> Result<Vec<ProposedRequirement>, ServiceError> {
-        if proposals.len() == 1 {
-            return Ok(proposals.to_vec());
-        }
-        loop {
-            let answer = self.ask(prompter, ACCEPT_PROMPT)?;
-            match parse_accept_selection(&answer, proposals.len()) {
-                Ok(indices) => {
-                    return Ok(indices.into_iter().map(|i| proposals[i].clone()).collect());
-                }
-                Err(warning) => prompter.warn(&warning),
-            }
-        }
-    }
-
-    /// Which stored requirement to review first. Enter means the first;
-    /// anything else must be a number from the accepted list.
-    fn pick_proposal(
-        &self,
-        prompter: &mut dyn Prompter,
-        count: usize,
-    ) -> Result<usize, ServiceError> {
-        if count == 1 {
-            return Ok(0);
-        }
-        loop {
-            let answer = self.ask(
-                prompter,
-                &format!("{FIRST_REQUIREMENT_PROMPT} [1-{count}, Enter for 1]:"),
             )?;
-            if answer.is_empty() {
-                return Ok(0);
-            }
-            match answer.parse::<usize>() {
-                Ok(pick) if (1..=count).contains(&pick) => return Ok(pick - 1),
-                _ => prompter.warn(&format!("Pick a number between 1 and {count}.")),
-            }
+            return Ok(DecomposeReport::from_draft(report));
         }
+        self.decompose(
+            prompter,
+            Some((model, llm)),
+            file,
+            AskTarget::Text(description),
+            Mode::Interactive,
+        )
     }
 
     fn manual_draft(
@@ -722,11 +595,7 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: WorkTree, S: StateS
             .iter()
             .find(|r| r.id == id)
             .cloned()
-            .ok_or_else(|| {
-                ServiceError(format!(
-                    "No requirement with id '{id}'. Call spec list to see valid ids."
-                ))
-            })?;
+            .ok_or_else(|| unknown_id(id))?;
         let target = source_of_or_err(&catalog, id)?;
         prompter.tell(&format!(
             "Rewording {id}. You word the spec; validate and refine findings drive \
@@ -768,20 +637,76 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: WorkTree, S: StateS
         // Claimed across the read too: `next_id` is derived from what
         // the catalog already holds, so two of these running at once
         // would hand out the same id and one would overwrite the other.
+        self.create_direct(
+            NewRequirement {
+                title: title.to_string(),
+                story: story.to_string(),
+                criteria,
+                ..Default::default()
+            },
+            file,
+        )
+    }
+
+    /// Create one requirement from flags: an actionable one, an ask
+    /// preserving a `request`, or a child of the `parent` ask. Structural
+    /// validate must pass; refine findings are reported in `nextStep`
+    /// rather than blocking. A child is accepted on creation by whoever
+    /// `by` names - the user who typed it, or the automatic review -
+    /// and its ask's readiness is settled in the same write.
+    pub fn create_direct(
+        &self,
+        new: NewRequirement,
+        file: Option<&str>,
+    ) -> Result<DraftReport, ServiceError> {
+        // Claimed across the read too: `next_id` is derived from what
+        // the catalog already holds, so two of these running at once
+        // would hand out the same id and one would overwrite the other.
         let _claim = self.store.claim()?;
-        let mut catalog = self.spec_catalog()?;
+        let catalog = self.spec_catalog()?;
         let target = self.target_file(&catalog, file)?;
-        let id = next_id(&catalog, &target);
-        let candidate = Requirement {
-            id: id.clone(),
-            title: title.to_string(),
-            status: "pending".into(),
-            story: story.to_string(),
-            acceptance_criteria: criteria,
-            feature_file: None,
-            production_files: Vec::new(),
+        if new.request.is_some() && new.parent.is_some() {
+            return Err(ServiceError(
+                "An ask preserves a request and derives requirements; it does not have a \
+                 parent of its own. Give --request or --parent, not both."
+                    .into(),
+            ));
+        }
+        let candidate = match new.request.as_deref().map(str::trim) {
+            Some(request) if !request.is_empty() => {
+                if !new.criteria.is_empty() {
+                    return Err(ServiceError(ask_criteria_are_derived("the new ask")));
+                }
+                let mut ask = new_ask(
+                    next_ask_id(&catalog.merged().requirements),
+                    request,
+                    Mode::Automatic,
+                );
+                if !new.title.trim().is_empty() {
+                    ask.title = new.title.clone();
+                }
+                if !new.story.trim().is_empty() {
+                    ask.story = new.story.clone();
+                }
+                ask
+            }
+            Some(_) => {
+                return Err(ServiceError(
+                    "An ask needs the request it preserves - give --request the words.".into(),
+                ));
+            }
+            None => Requirement {
+                id: next_id(&catalog, &target),
+                title: new.title.clone(),
+                status: "pending".into(),
+                story: new.story.clone(),
+                acceptance_criteria: new.criteria.clone(),
+                kind: new.parent.as_ref().map(|_| ACTIONABLE_REQUIREMENT.into()),
+                parent: new.parent.clone(),
+                ..Default::default()
+            },
         };
-        self.stage_direct(&mut catalog, &target, candidate, false)
+        self.stage_direct(catalog, &target, candidate, false, None, new.by)
     }
 
     /// Non-interactive reword of an existing requirement from flags.
@@ -792,79 +717,206 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: WorkTree, S: StateS
         story: Option<String>,
         criteria: Vec<String>,
     ) -> Result<DraftReport, ServiceError> {
+        self.update_direct(
+            id,
+            RequirementUpdate {
+                title,
+                story,
+                criteria,
+                ..Default::default()
+            },
+        )
+    }
+
+    /// Update one requirement from flags, keeping its id. Wording that
+    /// changes in meaning on an accepted child withdraws the acceptance
+    /// and its ask's readiness with it; a changed `request` reopens the
+    /// ask's decomposition; a changed `parent` moves the child between
+    /// asks, and both are settled. Running the same update again
+    /// changes nothing.
+    pub fn update_direct(
+        &self,
+        id: &str,
+        update: RequirementUpdate,
+    ) -> Result<DraftReport, ServiceError> {
         let _claim = self.store.claim()?;
-        let mut catalog = self.spec_catalog()?;
+        let catalog = self.spec_catalog()?;
         let mut candidate = catalog
             .merged()
             .requirements
             .iter()
             .find(|r| r.id == id)
             .cloned()
-            .ok_or_else(|| {
-                ServiceError(format!(
-                    "No requirement with id '{id}'. Call spec list to see valid ids."
-                ))
-            })?;
-        if let Some(title) = title {
+            .ok_or_else(|| unknown_id(id))?;
+        let former_parent = candidate.parent.clone();
+        if let Some(request) = update.request.as_deref() {
+            if !candidate.is_ask() {
+                return Err(ServiceError(format!(
+                    "{id} is an actionable requirement and keeps no request; only an ask \
+                     does. Reword it with --title, --story, or --criterion instead."
+                )));
+            }
+            if request.trim().is_empty() {
+                return Err(ServiceError(format!(
+                    "{id} must keep its request text - give --request the new words."
+                )));
+            }
+            // The ask's title and story were read off its request, so a
+            // new request rewrites them unless the update words them.
+            if reopen(&mut candidate, request) {
+                if update.title.is_none() {
+                    candidate.title = title_from_request(request.trim());
+                }
+                if update.story.is_none() {
+                    candidate.story = story_from_request(request.trim());
+                }
+            }
+        }
+        if let Some(title) = update.title {
             candidate.title = title;
         }
-        if let Some(story) = story {
+        if let Some(story) = update.story {
             candidate.story = story;
         }
-        if !criteria.is_empty() {
-            candidate.acceptance_criteria = criteria;
+        if !update.criteria.is_empty() {
+            if candidate.is_ask() {
+                return Err(ServiceError(ask_criteria_are_derived(id)));
+            }
+            candidate.acceptance_criteria = update.criteria;
+        }
+        if update.unlink && update.parent.is_some() {
+            return Err(ServiceError("Give --parent or --unlink, not both.".into()));
+        }
+        if update.unlink {
+            candidate.parent = None;
+        }
+        if let Some(parent) = update.parent {
+            if candidate.is_ask() {
+                return Err(ServiceError(format!(
+                    "{id} is an ask, and asks derive requirements rather than hang under one."
+                )));
+            }
+            candidate.parent = Some(parent);
+            candidate.kind = Some(ACTIONABLE_REQUIREMENT.into());
         }
         let target = source_of_or_err(&catalog, id)?;
-        self.stage_direct(&mut catalog, &target, candidate, true)
+        // A link the user made is their acceptance of the child under
+        // that ask; a link made for them is recorded without one.
+        let by = (candidate.parent != former_parent)
+            .then_some(update.by.unwrap_or(AcceptedBy::Automatic));
+        self.stage_direct(
+            catalog,
+            &target,
+            candidate,
+            true,
+            former_parent.as_deref(),
+            by,
+        )
     }
 
+    /// Remove a requirement. An ask with derived requirements is
+    /// refused unless `cascade` takes its children with it; a child's
+    /// removal leaves its ask's proposal pending again - the ask stops
+    /// being ready until someone decides what stands for it now.
+    pub fn delete(&self, id: &str, cascade: bool) -> Result<DeleteReport, ServiceError> {
+        let _claim = self.store.claim()?;
+        let mut edit = CatalogEdit::new(self.spec_catalog()?);
+        let requirement = edit.require(id)?;
+        let mut removed = vec![id.to_string()];
+        if requirement.is_ask() {
+            let children: Vec<String> = edit
+                .merged()
+                .requirements
+                .iter()
+                .filter(|r| r.parent.as_deref() == Some(id))
+                .map(|r| r.id.clone())
+                .collect();
+            if !children.is_empty() && !cascade {
+                return Err(ServiceError(format!(
+                    "{id} derives {}. Delete them first, unlink them with spec unlink \
+                     <id>, or pass --cascade to remove them with the ask.",
+                    children.join(", ")
+                )));
+            }
+            removed.extend(children);
+        }
+        for gone in &removed {
+            edit.remove(gone)?;
+        }
+        let parent = requirement
+            .parent
+            .as_deref()
+            .filter(|ask_id| edit.get(ask_id).is_some())
+            .map(str::to_string);
+        if let Some(ask_id) = &parent {
+            let mut ask = AskEdit::open(&mut edit, ask_id)?;
+            if let Some(number) = ask.proposal_standing_for(id) {
+                ask.detach(number, ProposalStatus::Pending, format!("{id} was deleted"))?;
+            }
+            ask.settle()?;
+        }
+        self.write_files(
+            edit.catalog(),
+            edit.touched(),
+            &format!("delete {}", removed.join(", ")),
+        )?;
+        let next_step = match &parent {
+            Some(ask) => format!(
+                "{ask} is no longer ready: the proposal {id} stood for is pending again. \
+                 Decide on it with spec decide {ask}."
+            ),
+            None if requirement.feature_file.is_some() => format!(
+                "Scenarios tagged @{id} still exist in {}; remove or retag them.",
+                requirement.feature_file.as_deref().unwrap_or_default()
+            ),
+            None => "Run spec validate to confirm the catalog still holds together.".into(),
+        };
+        Ok(DeleteReport {
+            id: id.to_string(),
+            removed,
+            parent,
+            written: true,
+            next_step,
+        })
+    }
+
+    /// Put `candidate` into `target` (replacing its row or appending it)
+    /// once structural validate passes, settle the asks it touches, and
+    /// write every file that changed. `former_parent` is the ask the
+    /// candidate hung under before this write; `by` names who accepts
+    /// a child newly placed under its ask, and `None` records no
+    /// acceptance.
     fn stage_direct(
         &self,
-        catalog: &mut SpecCatalog,
+        catalog: SpecCatalog,
         target: &str,
         candidate: Requirement,
         replace: bool,
+        former_parent: Option<&str>,
+        by: Option<AcceptedBy>,
     ) -> Result<DraftReport, ServiceError> {
         let id = candidate.id.clone();
         let title = candidate.title.clone();
         let merged = catalog.merged();
-        let findings = self.findings_for(&merged, &candidate).all();
-        let structural: Vec<String> = findings
-            .iter()
-            .filter(|issue| {
-                issue.contains("must be phrased")
-                    || issue.contains("title is missing")
-                    || issue.contains("user story is missing")
-                    || issue.contains("at least one acceptance criterion")
-                    || issue.contains("id must look like")
-                    || issue.contains("duplicate id")
-            })
-            .cloned()
-            .collect();
-        if !structural.is_empty() {
-            return Err(ServiceError(structural.join(" ")));
+        let findings = self.findings_for(&merged, &candidate);
+        if !findings.structural.is_empty() {
+            return Err(ServiceError(findings.structural.join(" ")));
         }
         let warning = duplicate_warning(&merged, &candidate);
-        let doc = file_mut_or_err(catalog, target)?;
-        if replace {
-            if let Some(slot) = doc.requirements.iter_mut().find(|r| r.id == id) {
-                *slot = candidate;
-            }
-            self.write_file(catalog, target, &format!("reword {id}"))?;
+        let is_ask = candidate.is_ask();
+        let note = self.commit(catalog, target, candidate, replace, former_parent, by)?;
+        let mut next_step = if !findings.advisory.is_empty() {
+            format!("Wrote {id} with refine findings. Run spec reword {id} to address them.")
+        } else if is_ask {
+            format!(
+                "Break {id} into requirements with spec draft {id}, or record decisions on it \
+                 with spec decide {id}."
+            )
         } else {
-            doc.requirements.push(candidate);
-            self.write_file(catalog, target, &format!("draft {id}: {title}"))?;
-        }
-        let mut next_step = format!("Add the @{id} scenario with spec scenario add.");
-        let refine: Vec<String> = findings
-            .into_iter()
-            .filter(|issue| {
-                !issue.contains("must be phrased") && !issue.contains("title is missing")
-            })
-            .collect();
-        if !refine.is_empty() {
-            next_step =
-                format!("Wrote {id} with refine findings. Run spec reword {id} to address them.");
+            format!("Add the @{id} scenario with spec scenario add.")
+        };
+        if let Some(note) = note {
+            next_step = format!("{note} {next_step}");
         }
         if let Some(warning) = warning {
             next_step = format!("{warning} {next_step}");
@@ -873,9 +925,47 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: WorkTree, S: StateS
             id,
             title,
             written: true,
-            findings: refine,
+            findings: findings.advisory,
             next_step,
         })
+    }
+
+    /// The one way a requirement lands in the catalog: put into `file`
+    /// (replacing its row or appending it), the asks it touches settled -
+    /// its own derivation if it is an ask, otherwise the ask it hangs
+    /// under, which it joins, leaves, or is re-judged by - and every
+    /// file that changed written. Returns a note the human should hear.
+    fn commit(
+        &self,
+        catalog: SpecCatalog,
+        file: &str,
+        requirement: Requirement,
+        replace: bool,
+        former_parent: Option<&str>,
+        by: Option<AcceptedBy>,
+    ) -> Result<Option<String>, ServiceError> {
+        let id = requirement.id.clone();
+        let title = requirement.title.clone();
+        let is_ask = requirement.is_ask();
+        let mut edit = CatalogEdit::new(catalog);
+        if replace {
+            edit.put(requirement)?;
+        } else {
+            edit.insert(file, requirement)?;
+        }
+        let note = if is_ask {
+            edit.settle_ask(&id)?;
+            None
+        } else {
+            self.sync_parent(&mut edit, &id, former_parent, by)?
+        };
+        let summary = if replace {
+            format!("reword {id}")
+        } else {
+            format!("draft {id}: {title}")
+        };
+        self.write_files(edit.catalog(), edit.touched(), &summary)?;
+        Ok(note)
     }
 
     /// Point a requirement at the feature file that was actually written.
@@ -883,11 +973,10 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: WorkTree, S: StateS
     pub fn set_feature(&self, id: &str, path: &str) -> Result<SetFeatureReport, ServiceError> {
         let _claim = self.store.claim()?;
         let mut catalog = self.spec_catalog()?;
-        let target = catalog.source_of(id).map(str::to_string).ok_or_else(|| {
-            ServiceError(format!(
-                "No requirement with id '{id}'. Call spec list to see valid ids."
-            ))
-        })?;
+        let target = catalog
+            .source_of(id)
+            .map(str::to_string)
+            .ok_or_else(|| unknown_id(id))?;
         let requirement = requirement_mut_or_err(&mut catalog, &target, id)?;
         if requirement.feature_file.as_deref() == Some(path) {
             return Ok(SetFeatureReport {
@@ -967,11 +1056,10 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: WorkTree, S: StateS
             .collect::<Result<Vec<_>, _>>()?;
         let _claim = self.store.claim()?;
         let mut catalog = self.spec_catalog()?;
-        let target = catalog.source_of(id).map(str::to_string).ok_or_else(|| {
-            ServiceError(format!(
-                "No requirement with id '{id}'. Call spec list to see valid ids."
-            ))
-        })?;
+        let target = catalog
+            .source_of(id)
+            .map(str::to_string)
+            .ok_or_else(|| unknown_id(id))?;
         let requirement = requirement_mut_or_err(&mut catalog, &target, id)?;
         let files = distinct(next(&requirement.production_files, &offered));
         if files == requirement.production_files {
@@ -1111,7 +1199,7 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: WorkTree, S: StateS
         mut llm: ModelAid,
         replace: bool,
     ) -> Result<DraftReport, ServiceError> {
-        let DraftTarget { mut catalog, file } = target;
+        let DraftTarget { catalog, file } = target;
         let merged = catalog.merged();
         // Every rejected wording and its findings, oldest first: the
         // model's rewording brief carries them so it never circles back
@@ -1162,15 +1250,15 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: WorkTree, S: StateS
                     status: "pending".into(),
                     story,
                     acceptance_criteria: criteria,
-                    feature_file: prior.as_ref().and_then(|p| p.feature_file.clone()),
-                    production_files: prior
-                        .as_ref()
-                        .map(|p| p.production_files.clone())
-                        .unwrap_or_default(),
+                    // Everything that is not wording - the files it is
+                    // bound to, its kind, its parent, its acceptance -
+                    // travels with the prior; the write decides what a
+                    // changed wording does to the acceptance.
+                    ..prior.clone().unwrap_or_default()
                 };
                 let findings = self.findings_for(&merged, &candidate);
                 if findings.is_empty() {
-                    break Gathered::Wording(candidate, title, Vec::new());
+                    break Gathered::Wording(Box::new(candidate), title, Vec::new());
                 }
                 let listed = findings.all();
                 prompter.tell("Findings to address:");
@@ -1203,7 +1291,7 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: WorkTree, S: StateS
                     )?;
                     match choice {
                         StalledChoice::Accept => {
-                            break Gathered::Wording(candidate, title, findings.advisory);
+                            break Gathered::Wording(Box::new(candidate), title, findings.advisory);
                         }
                         StalledChoice::Manual => {
                             llm = None;
@@ -1233,7 +1321,7 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: WorkTree, S: StateS
         })();
         let (requirement, title, unresolved) = match gathered {
             Ok(Gathered::Wording(requirement, title, unresolved)) => {
-                (requirement, title, unresolved)
+                (*requirement, title, unresolved)
             }
             // Rewording is going nowhere. Nothing is written on a wording
             // the review rejected, and the findings go back with it so
@@ -1261,17 +1349,20 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: WorkTree, S: StateS
         if !self.confirm(prompter, &question)? {
             return Ok(nothing_written(id, title, replace, unresolved));
         }
-        let doc = file_mut_or_err(&mut catalog, &file)?;
-        if replace {
-            if let Some(slot) = doc.requirements.iter_mut().find(|r| r.id == id) {
-                *slot = requirement;
-            }
-            self.write_file(&catalog, &file, &format!("reword {id}"))?;
-        } else {
-            doc.requirements.push(requirement);
-            self.write_file(&catalog, &file, &format!("draft {id}: {title}"))?;
-        }
-        let next_step = if unresolved.is_empty() {
+        // The wizard never moves a child between asks, so the parent
+        // it had is the parent it has; a child first worded here is
+        // the user's own acceptance, a reword is judged by its meaning.
+        let former_parent = requirement.parent.clone();
+        let by = (!replace).then_some(AcceptedBy::User);
+        let note = self.commit(
+            catalog,
+            &file,
+            requirement,
+            replace,
+            former_parent.as_deref(),
+            by,
+        )?;
+        let mut next_step = if unresolved.is_empty() {
             format!("Add the @{id} scenario with spec scenario add.")
         } else {
             format!(
@@ -1280,6 +1371,9 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: WorkTree, S: StateS
                 unresolved.len()
             )
         };
+        if let Some(note) = note {
+            next_step = format!("{note} {next_step}");
+        }
         Ok(DraftReport {
             id: id.clone(),
             title,
@@ -1477,6 +1571,42 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: WorkTree, S: StateS
                 "No requirement with id '{id}'. Call list_requirements to see valid ids."
             ))
         })?;
+        let merged = catalog.merged();
+        let requirement = requirement_mut_or_err(&mut catalog, &target, id)?;
+        if requirement.is_ask() {
+            // An ask is implemented through its derived requirements,
+            // which carry the scenarios; it is done when every one of
+            // them is, and not before.
+            let readiness = crate::domain::ask::readiness(requirement, &merged);
+            if !readiness.ready {
+                return Err(ServiceError(format!(
+                    "{id} is not ready for implementation ({}), so it cannot be implemented.",
+                    readiness.reasons.join("; ")
+                )));
+            }
+            if let Some(pending) = requirement
+                .derived
+                .iter()
+                .filter_map(|child| merged.requirements.iter().find(|r| &r.id == child))
+                .find(|child| child.is_pending())
+            {
+                return Err(ServiceError(format!(
+                    "{id} is implemented when every derived requirement is, and {} is still \
+                     pending. Deliver it first (spec deliver {}).",
+                    pending.id, pending.id
+                )));
+            }
+            requirement.status = "implemented".into();
+            self.write_file(&catalog, &target, &format!("mark {id} implemented"))?;
+            return Ok(MarkReport {
+                id: id.to_string(),
+                status: "implemented".into(),
+                written: true,
+                next_step: format!(
+                    "Run validate - it checks every requirement derived from {id} is implemented."
+                ),
+            });
+        }
         let feature = feature_tagged(&self.catalog, &format!("@{id}"))?.ok_or_else(|| {
             ServiceError(format!(
                 "No scenario is tagged @{id} - implemented requirements need an \
@@ -1588,16 +1718,7 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: WorkTree, S: StateS
     }
 
     fn findings_for(&self, spec: &Spec, candidate: &Requirement) -> Findings {
-        let mut with_candidate = spec.clone();
-        if let Some(existing) = with_candidate
-            .requirements
-            .iter_mut()
-            .find(|r| r.id == candidate.id)
-        {
-            *existing = candidate.clone();
-        } else {
-            with_candidate.requirements.push(candidate.clone());
-        }
+        let with_candidate = as_written(spec, candidate);
         let prefix = format!("{}:", candidate.id);
         Findings {
             structural: SpecValidator::new(&self.catalog)
@@ -1607,6 +1728,20 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: WorkTree, S: StateS
                 .collect(),
             advisory: RequirementRefiner.review(candidate),
         }
+    }
+
+    /// Stage every catalog document a mutation touched, in catalog
+    /// path order.
+    fn write_files(
+        &self,
+        catalog: &SpecCatalog,
+        files: &BTreeSet<String>,
+        summary: &str,
+    ) -> Result<(), ServiceError> {
+        for file in files {
+            self.write_file(catalog, file, summary)?;
+        }
+        Ok(())
     }
 
     /// Stage one catalog document at its project-relative path — the
@@ -1639,7 +1774,9 @@ impl<R: SpecRepository, G: FeatureCatalog + FeatureFiles, C: WorkTree, S: StateS
         prior: Option<&str>,
     ) -> Result<String, ServiceError> {
         match prior {
-            None => self.ask(prompter, &format!("{id} {label}:")),
+            // Nothing worded yet is a first pass, however the wizard
+            // was reached: there is nothing for Enter to keep.
+            None | Some("") => self.ask(prompter, &format!("{id} {label}:")),
             Some(prior) => {
                 let answer = self.ask(
                     prompter,
@@ -1785,46 +1922,8 @@ fn reworded_from(candidate: &Requirement, proposal: ProposedRequirement) -> Requ
         status: candidate.status.clone(),
         story: proposal.story,
         acceptance_criteria: proposal.acceptance_criteria,
-        feature_file: candidate.feature_file.clone(),
-        production_files: candidate.production_files.clone(),
+        ..candidate.clone()
     }
-}
-
-/// Enter (or whitespace) keeps every listed proposal. Otherwise a
-/// comma-separated list of 1-based numbers from the list; duplicates
-/// are dropped and the surviving indices stay in list order.
-fn parse_accept_selection(answer: &str, count: usize) -> Result<Vec<usize>, String> {
-    let trimmed = answer.trim();
-    if trimmed.is_empty() {
-        return Ok((0..count).collect());
-    }
-    let mut picks = Vec::new();
-    for part in trimmed.split(',') {
-        let part = part.trim();
-        if part.is_empty() {
-            continue;
-        }
-        match part.parse::<usize>() {
-            Ok(n) if (1..=count).contains(&n) => {
-                let idx = n - 1;
-                if !picks.contains(&idx) {
-                    picks.push(idx);
-                }
-            }
-            _ => {
-                return Err(format!(
-                    "Pick numbers between 1 and {count}, separated by commas."
-                ));
-            }
-        }
-    }
-    if picks.is_empty() {
-        return Err(format!(
-            "Pick numbers between 1 and {count}, separated by commas."
-        ));
-    }
-    picks.sort_unstable();
-    Ok(picks)
 }
 
 /// A catalog inconsistency: a path or id the caller already resolved
@@ -1832,6 +1931,13 @@ fn parse_accept_selection(answer: &str, count: usize) -> Result<Vec<usize>, Stri
 /// catalog and what it was built from disagree — a half-written spec
 /// file, an include tree that changed underfoot. It is a state the
 /// developer can inspect, so it is reported rather than panicked on.
+/// The refusal every lookup by id shares.
+fn unknown_id(id: &str) -> ServiceError {
+    ServiceError(format!(
+        "No requirement with id '{id}'. Call spec list to see valid ids."
+    ))
+}
+
 fn inconsistent_file(target: &str) -> ServiceError {
     ServiceError(format!(
         "The spec catalog is inconsistent: '{target}' is not one of its files. \
@@ -1921,6 +2027,17 @@ fn distinct(paths: Vec<String>) -> Vec<String> {
 }
 
 /// A list of paths as a sentence reads it.
+/// Whether a validator finding gates the write. The structural rules -
+/// shape, presence, identity, and the links between an ask and its
+/// requirements - make a spec unusable when broken; everything else is
+/// wording the author may accept as-is.
+fn ask_criteria_are_derived(what: &str) -> String {
+    format!(
+        "The acceptance criteria of {what} are derived from its accepted requirements and \
+         cannot be set directly. Accept, revise, or add derived requirements instead."
+    )
+}
+
 fn naming(paths: &[String]) -> String {
     paths.join(", ")
 }
@@ -1967,6 +2084,7 @@ fn duplicate_warning(spec: &Spec, candidate: &Requirement) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::ask::{Mode as AskMode, requirement_fingerprint};
     use crate::domain::decision::Mode;
     use crate::domain::tdd::TddSnapshot;
     use crate::ports::{LlmConversation, PromptError, SpecError};
@@ -2059,17 +2177,30 @@ mod tests {
         FixedStateStore::holding(TddSnapshot::at(TddPhase::Green))
     }
 
-    /// The spec repository and the work tree are one tree, as they are
-    /// on disk: what a mutation writes is what the next read sees.
-    fn service(
-        spec: Result<Spec, SpecError>,
-        state: FixedStateStore,
-    ) -> SpecMutationService<
+    type TestService = SpecMutationService<
         SharedSpecRepository,
         InMemoryFeatureCatalog,
         SharedTree,
         FixedStateStore,
-    > {
+    >;
+
+    /// The root document as the service left it on the tree.
+    fn written_spec(service: &TestService) -> Spec {
+        serde_json::from_str(&service.store.get(SPEC_PATH).unwrap()).unwrap()
+    }
+
+    /// One requirement as written, by id.
+    fn written(service: &TestService, id: &str) -> Requirement {
+        written_spec(service)
+            .requirements
+            .into_iter()
+            .find(|r| r.id == id)
+            .unwrap_or_else(|| panic!("{id} was not written"))
+    }
+
+    /// The spec repository and the work tree are one tree, as they are
+    /// on disk: what a mutation writes is what the next read sees.
+    fn service(spec: Result<Spec, SpecError>, state: FixedStateStore) -> TestService {
         let tree = SharedTree::default();
         let repository = match spec {
             Ok(spec) => {
@@ -2323,7 +2454,10 @@ mod tests {
             .draft_assisted(&mut prompter, "test-model", &llm)
             .unwrap();
         assert!(report.written, "report: {report:?}");
-        assert_eq!(report.title, "Comma separated numbers are summed");
+        assert_eq!(
+            written(&service, "REQ-008").title,
+            "Comma separated numbers are summed"
+        );
         let told = |line: &str| {
             assert!(
                 prompter.transcript.iter().any(|l| l == line),
@@ -2633,11 +2767,11 @@ mod tests {
             "report: {report:?}\n{:#?}",
             prompter.transcript
         );
-        assert_eq!(report.findings.len(), 1, "{:?}", report.findings);
+        assert_eq!(report.reasons.len(), 1, "{:?}", report.reasons);
         assert!(
-            report.findings[0].contains("covers more than one action"),
+            report.reasons[0].contains("covers more than one action"),
             "{:?}",
-            report.findings
+            report.reasons
         );
         let stall_prompts: Vec<&String> = prompter
             .transcript
@@ -2710,6 +2844,7 @@ mod tests {
             EDGE_CRITERION,
             "",
             "y",
+            "y",
         ]);
         let report = service
             .draft_assisted(&mut prompter, "test-model", &llm)
@@ -2738,6 +2873,7 @@ mod tests {
             EDGE_CRITERION,
             "",
             "y",
+            "y",
         ]);
         let report = service
             .draft_assisted(&mut prompter, "test-model", &llm)
@@ -2747,7 +2883,7 @@ mod tests {
             prompter
                 .transcript
                 .iter()
-                .any(|l| l.contains("The description gave no complete requirement")),
+                .any(|l| l.contains("The request gave no complete requirement")),
             "transcript: {:#?}",
             prompter.transcript
         );
@@ -2759,6 +2895,18 @@ mod tests {
             "invalid replies must be retried: {:#?}",
             prompter.transcript
         );
+        // The request is preserved as an ask, and the hand-worded
+        // requirement is the user's own acceptance under it.
+        let ask = written(&service, "ASK-001");
+        assert_eq!(ask.request.as_deref(), Some("sum numbers from a string"));
+        assert_eq!(ask.derived, vec!["REQ-008".to_string()]);
+        let child = written(&service, "REQ-008");
+        assert_eq!(child.parent.as_deref(), Some("ASK-001"));
+        assert_eq!(
+            child.acceptance.as_ref().map(|a| a.by),
+            Some(AcceptedBy::User)
+        );
+        assert!(report.ready, "report: {report:?}");
     }
 
     #[test]
@@ -2775,6 +2923,7 @@ mod tests {
             CLEAN_CRITERION,
             EDGE_CRITERION,
             "",
+            "y",
             "y",
         ]);
         service
@@ -2843,9 +2992,9 @@ mod tests {
             replies: vec![HAPPY_ONLY.into(), with_edge.into()],
             calls: std::cell::Cell::new(0),
         };
-        // Enter through the whole wizard: every criterion the author sees
-        // arrived from the model.
-        let mut prompter = ScriptedPrompter::answering(&["sum numbers", "", "", "", "", "", "y"]);
+        // Approve the one proposal, confirm the coverage: every
+        // criterion the author sees arrived from the model.
+        let mut prompter = ScriptedPrompter::answering(&["sum numbers", "a", "y"]);
         let report = service
             .draft_assisted(&mut prompter, "test-model", &llm)
             .unwrap();
@@ -2859,18 +3008,17 @@ mod tests {
             prompter.transcript
         );
         // The payoff: nothing for the wording review to find, so the
-        // author walks the draft once instead of twice.
+        // proposal is put to the user without that finding against it.
         assert!(
             !prompter
                 .transcript
                 .iter()
-                .any(|l| l == "Findings to address:"),
+                .any(|l| l.starts_with("  finding:") && l.contains("only happy paths")),
             "transcript: {:#?}",
             prompter.transcript
         );
-        let written: Spec = serde_json::from_str(&service.store.get(SPEC_PATH).unwrap()).unwrap();
         assert_eq!(
-            written.requirements.last().unwrap().acceptance_criteria,
+            written(&service, "REQ-008").acceptance_criteria,
             vec![CLEAN_CRITERION.to_string(), EDGE_CRITERION.to_string()]
         );
     }
@@ -2894,7 +3042,7 @@ mod tests {
             replies: vec![vague.into(), clean.into()],
             calls: std::cell::Cell::new(0),
         };
-        let mut prompter = ScriptedPrompter::answering(&["sum numbers", "", "", "", "", "", "y"]);
+        let mut prompter = ScriptedPrompter::answering(&["sum numbers", "a", "y"]);
         let report = service
             .draft_assisted(&mut prompter, "test-model", &llm)
             .unwrap();
@@ -2910,9 +3058,8 @@ mod tests {
         // Both criteria are named. A reason listing one of two leaves
         // the model to guess about the other.
         assert_eq!(judge.asked().len(), 2);
-        let written: Spec = serde_json::from_str(&service.store.get(SPEC_PATH).unwrap()).unwrap();
         assert_eq!(
-            written.requirements.last().unwrap().acceptance_criteria,
+            written(&service, "REQ-008").acceptance_criteria,
             vec![CLEAN_CRITERION.to_string(), EDGE_CRITERION.to_string()]
         );
     }
@@ -2929,7 +3076,7 @@ mod tests {
             replies: vec![WITH_EDGE.into()],
             calls: std::cell::Cell::new(0),
         };
-        let mut prompter = ScriptedPrompter::answering(&["sum numbers", "", "", "", "", "", "y"]);
+        let mut prompter = ScriptedPrompter::answering(&["sum numbers", "a", "y"]);
         let report = service
             .draft_assisted(&mut prompter, "test-model", &llm)
             .unwrap();
@@ -2956,7 +3103,7 @@ mod tests {
             replies: vec![WITH_EDGE.into()],
             calls: std::cell::Cell::new(0),
         };
-        let mut prompter = ScriptedPrompter::answering(&["sum numbers", "", "", "", "", "", "y"]);
+        let mut prompter = ScriptedPrompter::answering(&["sum numbers", "a", "y"]);
         let report = service
             .draft_assisted(&mut prompter, "test-model", &llm)
             .unwrap();
@@ -2979,7 +3126,7 @@ mod tests {
             replies: vec![HAPPY_ONLY.into(), WITH_EDGE.into()],
             calls: std::cell::Cell::new(0),
         };
-        let mut prompter = ScriptedPrompter::answering(&["sum numbers", "", "", "", "", "", "y"]);
+        let mut prompter = ScriptedPrompter::answering(&["sum numbers", "a", "y"]);
         let report = service
             .draft_assisted(&mut prompter, "test-model", &llm)
             .unwrap();
@@ -3001,7 +3148,7 @@ mod tests {
             replies: vec![WITH_EDGE.into()],
             calls: std::cell::Cell::new(0),
         };
-        let mut prompter = ScriptedPrompter::answering(&["sum numbers", "", "", "", "", "", "y"]);
+        let mut prompter = ScriptedPrompter::answering(&["sum numbers", "a", "y"]);
         let report = service
             .draft_assisted(&mut prompter, "test-model", &llm)
             .unwrap();
@@ -3050,14 +3197,26 @@ mod tests {
             ],
             calls: std::cell::Cell::new(0),
         };
-        // The author supplies the edge case the retries could not win.
-        let mut prompter =
-            ScriptedPrompter::answering(&["sum numbers", "", "", "", EDGE_CRITERION, "", "y"]);
+        // The author revises the proposal, supplying the edge case the
+        // retries could not win, then approves the revised wording.
+        let mut prompter = ScriptedPrompter::answering(&[
+            "sum numbers",
+            "v",
+            "",
+            "",
+            "",
+            EDGE_CRITERION,
+            "",
+            "a",
+            "y",
+        ]);
         let report = service
             .draft_assisted(&mut prompter, "test-model", &llm)
             .unwrap();
         assert!(report.written, "report: {report:?}");
-        assert_eq!(report.title, "Comma separated numbers are summed");
+        let child = written(&service, "REQ-008");
+        assert_eq!(child.title, "Comma separated numbers are summed");
+        assert_eq!(child.acceptance_criteria.len(), 2, "{child:?}");
         assert_eq!(
             llm.calls.get(),
             3,
@@ -3067,8 +3226,17 @@ mod tests {
             !prompter
                 .transcript
                 .iter()
-                .any(|l| l.contains("The description gave no complete requirement")),
+                .any(|l| l.contains("The request gave no complete requirement")),
             "the draft must survive an unwinnable retry: {:#?}",
+            prompter.transcript
+        );
+        // The finding was shown with the proposal before the vote.
+        assert!(
+            prompter
+                .transcript
+                .iter()
+                .any(|l| l.starts_with("  finding:") && l.contains("only happy paths")),
+            "transcript: {:#?}",
             prompter.transcript
         );
     }
@@ -3085,13 +3253,25 @@ mod tests {
             replies: vec![HAPPY_ONLY.into()],
             calls: std::cell::Cell::new(0),
         };
-        let mut prompter =
-            ScriptedPrompter::answering(&["sum numbers", "", "", "", EDGE_CRITERION, "", "y"]);
+        let mut prompter = ScriptedPrompter::answering(&[
+            "sum numbers",
+            "v",
+            "",
+            "",
+            "",
+            EDGE_CRITERION,
+            "",
+            "a",
+            "y",
+        ]);
         let report = service
             .draft_assisted(&mut prompter, "test-model", &llm)
             .unwrap();
         assert!(report.written, "report: {report:?}");
-        assert_eq!(report.title, "Comma separated numbers are summed");
+        assert_eq!(
+            written(&service, "REQ-008").title,
+            "Comma separated numbers are summed"
+        );
         assert_eq!(llm.calls.get(), 2, "the repeat is the model's last word");
         assert!(
             prompter
@@ -3105,75 +3285,82 @@ mod tests {
             !prompter
                 .transcript
                 .iter()
-                .any(|l| l.contains("The description gave no complete requirement")),
+                .any(|l| l.contains("The request gave no complete requirement")),
             "the draft must survive the repeat: {:#?}",
             prompter.transcript
         );
     }
 
     #[test]
-    fn a_single_proposal_seeds_the_wizard_without_a_selection_question() {
+    fn a_single_proposal_is_voted_on_and_written_under_the_ask() {
         let single = r#"[{"title": "Empty string returns zero",
             "story": "As a user, I want empty input to be 0 so that no input is a safe default.",
             "acceptanceCriteria": ["Given an empty string \"\", when add is called, then the result is 0"]}]"#;
         let service = service(Ok(spec()), green());
         let llm = FakeLlm(Ok(single.into()));
-        let mut prompter =
-            ScriptedPrompter::answering(&["empty input means zero", "", "", "", "", "y"]);
+        let mut prompter = ScriptedPrompter::answering(&["empty input means zero", "a", "y"]);
         let report = service
             .draft_assisted(&mut prompter, "test-model", &llm)
             .unwrap();
         assert!(report.written, "report: {report:?}");
-        assert_eq!(report.title, "Empty string returns zero");
-        assert!(
-            !prompter
-                .transcript
-                .iter()
-                .any(|l| l.contains("Which requirement first?")),
-            "transcript: {:#?}",
-            prompter.transcript
-        );
-        assert!(
-            !prompter
-                .transcript
-                .iter()
-                .any(|l| l.contains("Accept [Enter for all")),
-            "transcript: {:#?}",
-            prompter.transcript
-        );
-        assert!(
-            prompter
-                .transcript
-                .iter()
-                .any(|l| l == "REQ-008 title [Empty string returns zero] (Enter keeps it):"),
-            "transcript: {:#?}",
-            prompter.transcript
+        assert_eq!(report.ask, "ASK-001");
+        assert_eq!(report.mode, AskMode::Interactive);
+        assert_eq!(report.accepted, vec!["REQ-008".to_string()]);
+        assert!(report.ready, "report: {report:?}");
+        let told = |line: &str| {
+            assert!(
+                prompter.transcript.iter().any(|l| l == line),
+                "missing {line:?} in transcript: {:#?}",
+                prompter.transcript
+            );
+        };
+        told("ASK-001 preserves the request: empty input means zero");
+        told("The request holds 1 requirement(s) and 0 question(s).");
+        told("Proposal 1: Empty string returns zero");
+        told("REQ-008 accepted by you.");
+        told(&format!("{COVERAGE_PROMPT} ASK-001?"));
+        // The ask is a requirement like any other, with the normal
+        // fields, and the child points back at it.
+        let ask = written(&service, "ASK-001");
+        assert_eq!(ask.kind(), crate::domain::model::ASK_REQUIREMENT);
+        assert_eq!(ask.request.as_deref(), Some("empty input means zero"));
+        assert_eq!(ask.title, "Empty input means zero");
+        assert!(ask.story.starts_with("As a requester"), "{}", ask.story);
+        assert_eq!(ask.derived, vec!["REQ-008".to_string()]);
+        assert_eq!(ask.acceptance_criteria.len(), 2);
+        assert!(ask.acceptance_criteria[0].contains("REQ-008"));
+        let decomposition = ask.decomposition.unwrap();
+        assert_eq!(decomposition.state, DecompositionState::Complete);
+        assert!(decomposition.confirmed);
+        assert!(decomposition.ready);
+        let child = written(&service, "REQ-008");
+        assert_eq!(child.kind(), ACTIONABLE_REQUIREMENT);
+        assert_eq!(child.parent.as_deref(), Some("ASK-001"));
+        assert_eq!(child.title, "Empty string returns zero");
+        let acceptance = child.acceptance.clone().unwrap();
+        assert_eq!(acceptance.by, AcceptedBy::User);
+        assert_eq!(acceptance.wording, requirement_fingerprint(&child));
+        assert_eq!(
+            service.store.summaries(),
+            vec!["decompose ASK-001 into REQ-008".to_string()]
         );
     }
 
     #[test]
-    fn the_pick_selects_the_first_to_work_and_every_accepted_proposal_is_stored() {
+    fn every_proposal_is_put_to_the_user_in_turn() {
         let service = service(Ok(spec()), green());
         let llm = FakeLlm(Ok(PROPOSALS.into()));
-        let mut prompter = ScriptedPrompter::answering(&[
-            "sum numbers, empty means zero",
-            "",
-            "2",
-            "",
-            "",
-            "",
-            "",
-            "y",
-        ]);
+        let mut prompter =
+            ScriptedPrompter::answering(&["sum numbers, empty means zero", "a", "a", "y"]);
         let report = service
             .draft_assisted(&mut prompter, "test-model", &llm)
             .unwrap();
         assert!(report.written, "report: {report:?}");
-        // Accept-all stores both; the pick decides which stored
-        // requirement the wizard walks through first - here the
-        // second, stored as REQ-009.
-        assert_eq!(report.id, "REQ-009");
-        assert_eq!(report.title, "Empty string returns zero");
+        assert_eq!(
+            report.accepted,
+            vec!["REQ-008".to_string(), "REQ-009".to_string()]
+        );
+        assert!(report.ready, "report: {report:?}");
         let told = |fragment: &str| {
             assert!(
                 prompter.transcript.iter().any(|l| l.contains(fragment)),
@@ -3181,158 +3368,200 @@ mod tests {
                 prompter.transcript
             );
         };
-        told(
-            "Accept all these requirements to refine, or enter comma-separated \
-             numbers of the ones to accept.",
-        );
-        told("The description holds 2 requirement(s):");
-        told("1. Comma separated numbers are summed");
-        told("2. Empty string returns zero");
-        told("Accepted requirements were written to requirements/requirements.json as pending");
-        told("REQ-008 Comma separated numbers are summed");
-        told("REQ-009 Empty string returns zero");
-        told("Which requirement first to review and refine?");
-        // Both accepted proposals sit in the spec on disk.
-        let written: Spec = serde_json::from_str(&service.store.get(SPEC_PATH).unwrap()).unwrap();
-        assert_eq!(written.requirements.len(), 4);
-        assert_eq!(written.requirements[2].id, "REQ-008");
+        told("The request holds 2 requirement(s) and 0 question(s).");
+        told("Proposal 1: Comma separated numbers are summed");
+        told("Proposal 2: Empty string returns zero");
+        told(&format!("Proposal 1 {REVIEW_PROMPT} [a/r/v/x]:"));
+        told("REQ-008 accepted by you.");
+        told("REQ-009 accepted by you.");
+        told("  REQ-008 Comma separated numbers are summed");
+        told("  REQ-009 Empty string returns zero");
+        // Both accepted proposals sit in the spec on disk, after the ask.
+        let written = written_spec(&service);
+        assert_eq!(written.requirements.len(), 5);
+        assert_eq!(written.requirements[2].id, "ASK-001");
+        assert_eq!(written.requirements[3].id, "REQ-008");
         assert_eq!(
-            written.requirements[2].title,
+            written.requirements[3].title,
             "Comma separated numbers are summed"
         );
-        assert_eq!(written.requirements[2].status, "pending");
-        assert_eq!(written.requirements[3].id, "REQ-009");
-        assert_eq!(written.requirements[3].title, "Empty string returns zero");
         assert_eq!(written.requirements[3].status, "pending");
+        assert_eq!(written.requirements[4].id, "REQ-009");
+        assert_eq!(written.requirements[4].title, "Empty string returns zero");
         assert_eq!(
             service.store.summaries()[0],
-            "draft REQ-008, REQ-009 from the description"
+            "decompose ASK-001 into REQ-008, REQ-009"
         );
     }
 
     #[test]
-    fn a_comma_separated_accept_stores_only_those_proposals() {
+    fn a_rejected_proposal_is_recorded_with_its_reason_and_not_written() {
         let service = service(Ok(spec()), green());
         let llm = FakeLlm(Ok(PROPOSALS.into()));
         let mut prompter = ScriptedPrompter::answering(&[
             "sum numbers, empty means zero",
-            "2",
-            "",
-            "",
-            "",
-            "",
+            "r",
+            "sums are already covered by REQ-001",
+            "a",
             "y",
         ]);
         let report = service
             .draft_assisted(&mut prompter, "test-model", &llm)
             .unwrap();
         assert!(report.written, "report: {report:?}");
-        assert_eq!(report.id, "REQ-008");
-        assert_eq!(report.title, "Empty string returns zero");
+        assert_eq!(report.accepted, vec!["REQ-008".to_string()]);
+        assert_eq!(report.rejected, vec![1]);
+        // A rejection is not a decision about scope: until it is revised
+        // or excluded the ask is not ready, and the reason says so.
+        assert!(!report.ready, "report: {report:?}");
         assert!(
-            !prompter
-                .transcript
-                .iter()
-                .any(|l| l.contains("Which requirement first?")),
-            "a single accepted proposal skips the which-first question: {:#?}",
-            prompter.transcript
+            report.reasons.iter().any(|r| r.contains("proposal 1")),
+            "reasons: {:?}",
+            report.reasons
         );
-        let written: Spec = serde_json::from_str(&service.store.get(SPEC_PATH).unwrap()).unwrap();
-        assert_eq!(written.requirements.len(), 3);
-        assert_eq!(written.requirements[2].id, "REQ-008");
-        assert_eq!(written.requirements[2].title, "Empty string returns zero");
+        let written = written_spec(&service);
+        assert_eq!(written.requirements.len(), 4);
+        assert_eq!(written.requirements[3].id, "REQ-008");
+        assert_eq!(written.requirements[3].title, "Empty string returns zero");
+        let ask = written.requirements[2].clone();
+        assert_eq!(ask.proposals[0].status, ProposalStatus::Rejected);
         assert_eq!(
-            service.store.summaries()[0],
-            "draft REQ-008 from the description"
+            ask.proposals[0].reason.as_deref(),
+            Some("sums are already covered by REQ-001")
         );
+        assert_eq!(ask.proposals[0].requirement, None);
     }
 
     #[test]
-    fn an_invalid_accept_reasks_until_a_selection_arrives() {
+    fn an_excluded_proposal_does_not_hold_the_ask_back() {
         let service = service(Ok(spec()), green());
         let llm = FakeLlm(Ok(PROPOSALS.into()));
         let mut prompter = ScriptedPrompter::answering(&[
             "sum numbers, empty means zero",
-            "9",
-            "all",
-            "1,2",
-            "2",
-            "",
-            "",
-            "",
-            "",
+            "x",
+            "not this release",
+            "a",
             "y",
         ]);
         let report = service
             .draft_assisted(&mut prompter, "test-model", &llm)
             .unwrap();
-        assert!(report.written, "report: {report:?}");
-        assert_eq!(report.title, "Empty string returns zero");
+        assert_eq!(report.excluded, vec![1]);
+        assert_eq!(report.accepted, vec!["REQ-008".to_string()]);
+        assert!(report.ready, "report: {report:?}");
+    }
+
+    #[test]
+    fn an_empty_answer_is_not_a_vote() {
+        let service = service(Ok(spec()), green());
+        let llm = FakeLlm(Ok(PROPOSALS.into()));
+        // Three empty answers leave proposal 1 pending; proposal 2 is
+        // approved; the coverage is confirmed anyway.
+        let mut prompter =
+            ScriptedPrompter::answering(&["sum numbers, empty means zero", "", "", "", "a", "y"]);
+        let report = service
+            .draft_assisted(&mut prompter, "test-model", &llm)
+            .unwrap();
+        assert_eq!(report.pending, vec![1]);
+        assert_eq!(report.accepted, vec!["REQ-008".to_string()]);
+        assert!(!report.ready, "report: {report:?}");
+        assert!(
+            report.reasons.iter().any(|r| r.contains("proposal 1")),
+            "reasons: {:?}",
+            report.reasons
+        );
         assert_eq!(
             prompter
                 .transcript
                 .iter()
-                .filter(|l| l.as_str() == "Pick numbers between 1 and 2, separated by commas.")
+                .filter(|l| l.starts_with("An empty answer is not a vote."))
                 .count(),
             2,
+            "transcript: {:#?}",
+            prompter.transcript
+        );
+        assert!(
+            prompter
+                .transcript
+                .iter()
+                .any(|l| l == "No answer for proposal 1 - it stays pending, undecided."),
+            "transcript: {:#?}",
+            prompter.transcript
+        );
+        // Nothing was written for the undecided proposal.
+        assert!(
+            !written_spec(&service)
+                .requirements
+                .iter()
+                .any(|r| r.title == "Comma separated numbers are summed"),
+        );
+    }
+
+    #[test]
+    fn an_unknown_answer_is_asked_again() {
+        let service = service(Ok(spec()), green());
+        let llm = FakeLlm(Ok(PROPOSALS.into()));
+        let mut prompter =
+            ScriptedPrompter::answering(&["sum numbers, empty means zero", "maybe", "a", "a", "y"]);
+        let report = service
+            .draft_assisted(&mut prompter, "test-model", &llm)
+            .unwrap();
+        assert!(report.ready, "report: {report:?}");
+        assert_eq!(
+            prompter
+                .transcript
+                .iter()
+                .filter(|l| l.as_str() == "Answer a, r, v, or x.")
+                .count(),
+            1,
             "transcript: {:#?}",
             prompter.transcript
         );
     }
 
     #[test]
-    fn an_invalid_pick_reasks_until_a_number_from_the_list_arrives() {
+    fn an_unconfirmed_coverage_leaves_the_ask_open() {
         let service = service(Ok(spec()), green());
         let llm = FakeLlm(Ok(PROPOSALS.into()));
-        let mut prompter = ScriptedPrompter::answering(&[
-            "sum numbers, empty means zero",
-            "",
-            "9",
-            "first",
-            "2",
-            "",
-            "",
-            "",
-            "",
-            "y",
-        ]);
+        // Approve both, decline the coverage, and say nothing is missing.
+        let mut prompter =
+            ScriptedPrompter::answering(&["sum numbers, empty means zero", "a", "a", "n", ""]);
         let report = service
             .draft_assisted(&mut prompter, "test-model", &llm)
             .unwrap();
-        assert!(report.written, "report: {report:?}");
-        assert_eq!(report.title, "Empty string returns zero");
-        assert_eq!(
-            prompter
-                .transcript
-                .iter()
-                .filter(|l| l.as_str() == "Pick a number between 1 and 2.")
-                .count(),
-            2,
-            "transcript: {:#?}",
-            prompter.transcript
+        assert!(!report.ready, "report: {report:?}");
+        assert!(
+            report.reasons.iter().any(|r| r.contains("not confirmed")),
+            "reasons: {:?}",
+            report.reasons
         );
+        let decomposition = written(&service, "ASK-001").decomposition.unwrap();
+        assert_eq!(decomposition.state, DecompositionState::Open);
+        assert!(!decomposition.confirmed);
     }
 
     #[test]
-    fn an_empty_pick_means_the_first_accepted_proposal() {
+    fn running_the_same_request_again_adds_nothing() {
         let service = service(Ok(spec()), green());
         let llm = FakeLlm(Ok(PROPOSALS.into()));
-        let mut prompter = ScriptedPrompter::answering(&[
-            "sum numbers, empty means zero",
-            "",
-            "",
-            "",
-            "",
-            "",
-            EDGE_CRITERION,
-            "",
-            "y",
-        ]);
-        let report = service
+        let mut prompter =
+            ScriptedPrompter::answering(&["sum numbers, empty means zero", "a", "a", "y"]);
+        service
             .draft_assisted(&mut prompter, "test-model", &llm)
             .unwrap();
-        assert!(report.written, "report: {report:?}");
-        assert_eq!(report.title, "Comma separated numbers are summed");
+        let before = written_spec(&service);
+        // The same words again: the ask is found by its fingerprint, the
+        // same proposals are already decided, and only the coverage is
+        // asked about.
+        let mut again = ScriptedPrompter::answering(&["sum numbers, empty means zero", "y"]);
+        let report = service
+            .draft_assisted(&mut again, "test-model", &llm)
+            .unwrap();
+        assert_eq!(report.ask, "ASK-001");
+        assert!(report.ready, "report: {report:?}");
+        let after = written_spec(&service);
+        assert_eq!(after.requirements.len(), before.requirements.len());
+        assert_eq!(after, before);
     }
 
     #[test]
@@ -3347,7 +3576,7 @@ mod tests {
     }
 
     #[test]
-    fn an_accept_prompt_error_propagates() {
+    fn a_vote_prompt_error_propagates() {
         let service = service(Ok(spec()), green());
         let llm = FakeLlm(Ok(PROPOSALS.into()));
         let mut prompter = ScriptedPrompter::answering(&["sum numbers, empty means zero"]);
@@ -3357,33 +3586,815 @@ mod tests {
         assert!(error.0.contains("script exhausted"), "error: {error:?}");
     }
 
+    /// A pipe that ends mid-review is not a vote on what is left: what
+    /// was decided is written, the rest stays pending.
     #[test]
-    fn a_pick_prompt_error_propagates() {
+    fn answers_that_run_out_like_a_pipe_keep_what_was_decided() {
         let service = service(Ok(spec()), green());
         let llm = FakeLlm(Ok(PROPOSALS.into()));
-        let mut prompter = ScriptedPrompter::answering(&["sum numbers, empty means zero", ""]);
-        let error = service
+        let mut prompter = ScriptedPrompter::piping(&["sum numbers, empty means zero", "a"]);
+        let report = service
             .draft_assisted(&mut prompter, "test-model", &llm)
+            .unwrap();
+        assert!(report.written, "report: {report:?}");
+        assert_eq!(report.accepted, vec!["REQ-008".to_string()]);
+        assert_eq!(report.pending, vec![2]);
+        assert!(!report.ready, "report: {report:?}");
+        assert!(
+            prompter
+                .transcript
+                .iter()
+                .any(|l| l.starts_with("The answers ran out before the review finished")),
+            "transcript: {:#?}",
+            prompter.transcript
+        );
+        assert_eq!(
+            written(&service, "ASK-001").derived,
+            vec!["REQ-008".to_string()]
+        );
+    }
+
+    /// The automatic run asks nothing: the rules accept what they can,
+    /// and what they cannot stays pending with its findings on record.
+    #[test]
+    fn an_automatic_decomposition_asks_nothing_and_records_what_it_could_not_decide() {
+        let service = service(Ok(spec()), green());
+        let llm = FakeLlm(Ok(PROPOSALS.into()));
+        let mut prompter = ScriptedPrompter::answering(&[]);
+        let report = service
+            .decompose(
+                &mut prompter,
+                Some(("test-model", &llm)),
+                None,
+                AskTarget::Text("sum numbers, empty means zero".into()),
+                AskMode::Automatic,
+            )
+            .unwrap();
+        assert!(report.written, "report: {report:?}");
+        assert_eq!(report.mode, AskMode::Automatic);
+        // Proposal 2 shares its criterion with REQ-001, which the rules
+        // block on, so it stays pending; proposal 1 only earns the
+        // advisory happy-paths finding and is accepted on their
+        // authority with the finding on record.
+        assert_eq!(report.pending, vec![2]);
+        assert_eq!(report.accepted, vec!["REQ-008".to_string()]);
+        assert!(!report.ready, "report: {report:?}");
+        assert!(
+            !prompter
+                .transcript
+                .iter()
+                .any(|l| l.ends_with(':') || l.ends_with('?')),
+            "nothing may be asked: {:#?}",
+            prompter.transcript
+        );
+        let ask = written(&service, "ASK-001");
+        assert_eq!(ask.decomposition.as_ref().unwrap().mode, AskMode::Automatic);
+        assert_eq!(
+            ask.decomposition.as_ref().unwrap().state,
+            DecompositionState::Complete
+        );
+        assert!(
+            ask.proposals[0]
+                .findings
+                .iter()
+                .any(|f| f.contains("only happy paths")),
+            "{:?}",
+            ask.proposals[0].findings
+        );
+        assert!(
+            ask.proposals[1]
+                .findings
+                .iter()
+                .any(|f| f.contains("duplicates REQ-001")),
+            "{:?}",
+            ask.proposals[1].findings
+        );
+        let child = written(&service, "REQ-008");
+        assert_eq!(child.title, "Comma separated numbers are summed");
+        assert_eq!(
+            child.acceptance.as_ref().map(|a| a.by),
+            Some(AcceptedBy::Automatic)
+        );
+    }
+
+    /// Without a model the automatic run reads only what the request
+    /// enumerates, and a request that enumerates nothing is left as a
+    /// blocking question rather than a guess.
+    #[test]
+    fn an_automatic_decomposition_without_a_model_does_not_invent_requirements() {
+        let service = service(Ok(spec()), green());
+        let mut prompter = ScriptedPrompter::answering(&[]);
+        let report = service
+            .decompose(
+                &mut prompter,
+                None,
+                None,
+                AskTarget::Text("make the calculator sum numbers".into()),
+                AskMode::Automatic,
+            )
+            .unwrap();
+        assert!(report.written, "report: {report:?}");
+        assert!(report.derived.is_empty(), "report: {report:?}");
+        assert!(!report.ready, "report: {report:?}");
+        assert_eq!(report.open_questions.len(), 1);
+        assert!(report.open_questions[0].blocking);
+        assert!(
+            report.open_questions[0]
+                .text
+                .contains("No model is resolved"),
+            "{}",
+            report.open_questions[0].text
+        );
+        assert_eq!(written_spec(&service).requirements.len(), 3);
+    }
+
+    /// Questions the model raises are recorded on the ask, and a blocking
+    /// one keeps it from being ready until it is answered.
+    #[test]
+    fn a_blocking_question_from_the_model_keeps_the_ask_open() {
+        let with_question = r#"[
+            {"title": "Newlines separate numbers too",
+             "story": "As a user, I want newlines to separate numbers so that pasted lists add up.",
+             "acceptanceCriteria": ["Given the input \"1\\n2,3\", when add is called, then the result is 6",
+                                    "Given the input \"1,\\n\", when add is called, then the input is rejected as invalid"]},
+            {"question": "Which delimiters are allowed besides the comma?", "blocking": true}
+        ]"#;
+        let service = service(Ok(spec()), green());
+        let llm = FakeLlm(Ok(with_question.into()));
+        let mut prompter = ScriptedPrompter::answering(&[]);
+        let report = service
+            .decompose(
+                &mut prompter,
+                Some(("test-model", &llm)),
+                None,
+                AskTarget::Text("sum numbers with any delimiter".into()),
+                AskMode::Automatic,
+            )
+            .unwrap();
+        assert_eq!(report.accepted, vec!["REQ-008".to_string()]);
+        assert_eq!(report.open_questions.len(), 1);
+        assert!(!report.ready, "report: {report:?}");
+        assert!(
+            report
+                .reasons
+                .iter()
+                .any(|r| r.contains("question 1") && r.contains("blocking")),
+            "reasons: {:?}",
+            report.reasons
+        );
+        // Answering it through decide settles the ask without a model.
+        let settled = service
+            .decide(
+                "ASK-001",
+                Decisions {
+                    answers: vec![(1, "commas and newlines".into())],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(settled.ready, "report: {settled:?}");
+        assert_eq!(
+            written(&service, "ASK-001").questions[0].answer.as_deref(),
+            Some("commas and newlines")
+        );
+    }
+
+    /// The deterministic surface: decisions by number, with the rules
+    /// holding the automatic kind to what they would accept themselves.
+    #[test]
+    fn decide_records_votes_by_number_and_holds_automatic_acceptance_to_the_rules() {
+        let service = service(Ok(spec()), green());
+        let llm = FakeLlm(Ok(PROPOSALS.into()));
+        let mut prompter = ScriptedPrompter::answering(&[]);
+        service
+            .decompose(
+                &mut prompter,
+                Some(("test-model", &llm)),
+                None,
+                AskTarget::Text("sum numbers, empty means zero".into()),
+                AskMode::Automatic,
+            )
+            .unwrap();
+        // Proposal 2 duplicates REQ-001's criterion, so the rules will
+        // not accept it.
+        let refused = service
+            .decide(
+                "ASK-001",
+                Decisions {
+                    accept: vec![2],
+                    ..Default::default()
+                },
+            )
             .unwrap_err();
-        assert!(error.0.contains("script exhausted"), "error: {error:?}");
+        assert!(
+            refused.0.contains("does not pass the review"),
+            "{refused:?}"
+        );
+        assert!(refused.0.contains("duplicates REQ-001"), "{refused:?}");
+        assert!(refused.0.contains("--by user"), "{refused:?}");
+        // The user may, and their vote is recorded as theirs.
+        let report = service
+            .decide(
+                "ASK-001",
+                Decisions {
+                    accept: vec![2],
+                    by: Some(AcceptedBy::User),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            report.accepted,
+            vec!["REQ-008".to_string(), "REQ-009".to_string()]
+        );
+        let child = written(&service, "REQ-009");
+        assert_eq!(child.title, "Empty string returns zero");
+        assert_eq!(
+            child.acceptance.as_ref().map(|a| a.by),
+            Some(AcceptedBy::User)
+        );
+        // One vote does not turn an automatic review into the user's:
+        // the mode stands, and the ask is ready on automatic terms.
+        assert_eq!(report.mode, AskMode::Automatic);
+        assert!(report.ready, "report: {report:?}");
+        // A user's vote on top of an automatic acceptance is recorded as
+        // theirs; the automatic kind on top of theirs changes nothing.
+        let report = service
+            .decide(
+                "ASK-001",
+                Decisions {
+                    accept: vec![1],
+                    by: Some(AcceptedBy::User),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(report.ready, "report: {report:?}");
+        assert_eq!(
+            written(&service, "REQ-008").acceptance.map(|a| a.by),
+            Some(AcceptedBy::User)
+        );
+        let before = written_spec(&service);
+        service
+            .decide(
+                "ASK-001",
+                Decisions {
+                    accept: vec![1, 2],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(written_spec(&service), before);
     }
 
     #[test]
-    fn parse_accept_selection_keeps_every_index_on_enter() {
-        assert_eq!(parse_accept_selection("", 5), Ok(vec![0, 1, 2, 3, 4]));
-        assert_eq!(parse_accept_selection("  ", 2), Ok(vec![0, 1]));
+    fn decide_refuses_an_automatic_confirmation() {
+        let service = service(Ok(spec()), green());
+        let mut prompter = ScriptedPrompter::answering(&[]);
+        service
+            .decompose(
+                &mut prompter,
+                None,
+                None,
+                AskTarget::Text("1. sum numbers; 2. empty means zero".into()),
+                AskMode::Automatic,
+            )
+            .unwrap();
+        let error = service
+            .decide(
+                "ASK-001",
+                Decisions {
+                    confirmed: Some(true),
+                    ..Default::default()
+                },
+            )
+            .unwrap_err();
+        assert!(error.0.contains("user's decision"), "{error:?}");
     }
 
     #[test]
-    fn parse_accept_selection_dedupes_and_orders_comma_separated_picks() {
-        assert_eq!(parse_accept_selection("5, 1, 1, 3", 5), Ok(vec![0, 2, 4]));
+    fn decide_rejects_and_excludes_with_reasons_and_withdraws_an_acceptance() {
+        let service = service(Ok(spec()), green());
+        let llm = FakeLlm(Ok(PROPOSALS.into()));
+        let mut prompter = ScriptedPrompter::answering(&[]);
+        service
+            .decompose(
+                &mut prompter,
+                Some(("test-model", &llm)),
+                None,
+                AskTarget::Text("sum numbers, empty means zero".into()),
+                AskMode::Automatic,
+            )
+            .unwrap();
+        // Proposal 1 was accepted automatically as REQ-008; rejecting it
+        // withdraws that acceptance. Proposal 2 is excluded from scope.
+        let report = service
+            .decide(
+                "ASK-001",
+                Decisions {
+                    reject: vec![(1, Some("sums are REQ-001's".into()))],
+                    exclude: vec![(2, None)],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(report.rejected, vec![1]);
+        assert_eq!(report.excluded, vec![2]);
+        assert!(report.accepted.is_empty(), "report: {report:?}");
+        assert!(!report.ready, "report: {report:?}");
+        let child = written(&service, "REQ-008");
+        assert_eq!(child.acceptance, None);
+        assert_eq!(child.parent.as_deref(), Some("ASK-001"));
+        let ask = written(&service, "ASK-001");
+        assert_eq!(
+            ask.proposals[0].reason.as_deref(),
+            Some("sums are REQ-001's")
+        );
+        assert_eq!(ask.proposals[0].requirement.as_deref(), Some("REQ-008"));
+        assert_eq!(ask.proposals[1].reason, None);
     }
 
     #[test]
-    fn parse_accept_selection_rejects_out_of_range_and_empty_lists() {
-        assert!(parse_accept_selection("9", 5).is_err());
-        assert!(parse_accept_selection("all", 5).is_err());
-        assert!(parse_accept_selection(",", 5).is_err());
+    fn decide_names_unknown_proposals_questions_and_non_asks() {
+        let service = service(Ok(spec()), green());
+        let mut prompter = ScriptedPrompter::answering(&[]);
+        service
+            .decompose(
+                &mut prompter,
+                None,
+                None,
+                AskTarget::Text("1. sum numbers; 2. empty means zero".into()),
+                AskMode::Automatic,
+            )
+            .unwrap();
+        let error = service
+            .decide(
+                "ASK-001",
+                Decisions {
+                    accept: vec![9],
+                    by: Some(AcceptedBy::User),
+                    ..Default::default()
+                },
+            )
+            .unwrap_err();
+        assert_eq!(error.0, "ASK-001 has no proposal 9.");
+        let error = service
+            .decide(
+                "ASK-001",
+                Decisions {
+                    answers: vec![(4, "yes".into())],
+                    ..Default::default()
+                },
+            )
+            .unwrap_err();
+        assert_eq!(error.0, "ASK-001 has no question 4.");
+        let error = service.decide("REQ-001", Decisions::default()).unwrap_err();
+        assert!(error.0.contains("not an ask"), "{error:?}");
+        let error = service.decide("ASK-009", Decisions::default()).unwrap_err();
+        assert!(error.0.contains("No requirement with id"), "{error:?}");
+    }
+
+    /// Reading an ask through decide with nothing to decide reports it
+    /// and writes nothing.
+    #[test]
+    fn decide_with_no_decisions_reports_without_writing() {
+        let service = service(Ok(spec()), green());
+        let mut prompter = ScriptedPrompter::answering(&[]);
+        service
+            .decompose(
+                &mut prompter,
+                None,
+                None,
+                AskTarget::Text("1. sum numbers; 2. empty means zero".into()),
+                AskMode::Automatic,
+            )
+            .unwrap();
+        let writes = service.store.summaries().len();
+        let report = service.decide("ASK-001", Decisions::default()).unwrap();
+        assert!(!report.written);
+        assert_eq!(report.pending, vec![1, 2]);
+        assert_eq!(service.store.summaries().len(), writes);
+    }
+
+    /// The parent and its children persist together, and come back the
+    /// same: ids are stable, links are mirrored, and nothing about an
+    /// existing requirement changed.
+    #[test]
+    fn an_ask_and_its_children_round_trip_through_the_file() {
+        let service = service(Ok(spec()), green());
+        let llm = FakeLlm(Ok(PROPOSALS.into()));
+        let mut prompter =
+            ScriptedPrompter::answering(&["sum numbers, empty means zero", "a", "a", "y"]);
+        service
+            .draft_assisted(&mut prompter, "test-model", &llm)
+            .unwrap();
+        let written = written_spec(&service);
+        let ids: Vec<&str> = written.requirements.iter().map(|r| r.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec!["REQ-001", "REQ-007", "ASK-001", "REQ-008", "REQ-009"]
+        );
+        assert_eq!(written.requirements[0], requirement("REQ-001"));
+        assert_eq!(written.requirements[1], requirement("REQ-007"));
+        let ask = &written.requirements[2];
+        for child in &written.requirements[3..] {
+            assert_eq!(child.parent.as_deref(), Some("ASK-001"));
+            assert!(ask.derived.contains(&child.id));
+            assert!(
+                ask.proposals
+                    .iter()
+                    .any(|p| p.requirement.as_deref() == Some(child.id.as_str())
+                        && p.status == ProposalStatus::Accepted)
+            );
+        }
+        let catalog = calculator_catalog();
+        let validator = SpecValidator::new(&catalog);
+        assert_eq!(validator.validate(&written), Vec::<String>::new());
+        // The next ask gets the next id.
+        assert_eq!(next_ask_id(&written.requirements), "ASK-002");
+    }
+
+    #[test]
+    fn a_child_reworded_in_meaning_loses_its_acceptance_and_its_ask_its_readiness() {
+        let service = service(Ok(spec()), green());
+        let llm = FakeLlm(Ok(PROPOSALS.into()));
+        let mut prompter =
+            ScriptedPrompter::answering(&["sum numbers, empty means zero", "a", "a", "y"]);
+        let report = service
+            .draft_assisted(&mut prompter, "test-model", &llm)
+            .unwrap();
+        assert!(report.ready, "report: {report:?}");
+        // Whitespace is not meaning: the acceptance stands.
+        let same = service
+            .reword_direct(
+                "REQ-009",
+                Some("Empty  string returns zero".into()),
+                None,
+                Vec::new(),
+            )
+            .unwrap();
+        assert!(!same.next_step.contains("withdrawn"), "{}", same.next_step);
+        assert!(written(&service, "REQ-009").acceptance.is_some());
+        assert!(written(&service, "ASK-001").decomposition.unwrap().ready);
+        // A new criterion is.
+        let changed = service
+            .reword_direct(
+                "REQ-009",
+                None,
+                None,
+                vec![
+                    EDGE_CRITERION.into(),
+                    "Given the input \" \", when add is called, then the result is 0".into(),
+                ],
+            )
+            .unwrap();
+        assert!(
+            changed
+                .next_step
+                .contains("REQ-009 was reworded since it was accepted"),
+            "{}",
+            changed.next_step
+        );
+        let child = written(&service, "REQ-009");
+        assert_eq!(child.acceptance, None);
+        let ask = written(&service, "ASK-001");
+        assert!(!ask.decomposition.as_ref().unwrap().ready);
+        let proposal = ask
+            .proposals
+            .iter()
+            .find(|p| p.requirement.as_deref() == Some("REQ-009"))
+            .unwrap();
+        assert_eq!(proposal.status, ProposalStatus::Pending);
+        assert_eq!(proposal.acceptance_criteria.len(), 2);
+        // Accepting it again, by the user, restores the readiness.
+        let again = service
+            .decide(
+                "ASK-001",
+                Decisions {
+                    accept: vec![proposal.number],
+                    by: Some(AcceptedBy::User),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(again.ready, "report: {again:?}");
+    }
+
+    #[test]
+    fn a_child_created_under_an_ask_joins_its_proposals_and_a_deleted_one_reopens_it() {
+        let service = service(Ok(spec()), green());
+        let mut prompter = ScriptedPrompter::answering(&[]);
+        let ask = service
+            .create_direct(
+                NewRequirement {
+                    request: Some("sum numbers and treat empty input as zero".into()),
+                    ..Default::default()
+                },
+                None,
+            )
+            .unwrap();
+        assert_eq!(ask.id, "ASK-001");
+        assert!(
+            ask.next_step.contains("spec draft ASK-001"),
+            "{}",
+            ask.next_step
+        );
+        let child = service
+            .create_direct(
+                NewRequirement {
+                    title: "Empty string returns zero".into(),
+                    story:
+                        "As a user, I want empty input to be 0 so that no input is a safe default."
+                            .into(),
+                    criteria: vec![EDGE_CRITERION.into(), CLEAN_CRITERION.into()],
+                    parent: Some("ASK-001".into()),
+                    by: Some(AcceptedBy::User),
+                    ..Default::default()
+                },
+                None,
+            )
+            .unwrap();
+        assert_eq!(child.id, "REQ-008");
+        let ask = written(&service, "ASK-001");
+        assert_eq!(ask.derived, vec!["REQ-008".to_string()]);
+        assert_eq!(ask.proposals.len(), 1);
+        assert_eq!(ask.proposals[0].status, ProposalStatus::Accepted);
+        assert_eq!(ask.proposals[0].requirement.as_deref(), Some("REQ-008"));
+        assert_eq!(
+            written(&service, "REQ-008").acceptance.map(|a| a.by),
+            Some(AcceptedBy::User)
+        );
+        // The user completes and confirms it; then it is ready.
+        let report = service
+            .decide(
+                "ASK-001",
+                Decisions {
+                    confirmed: Some(true),
+                    by: Some(AcceptedBy::User),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(report.ready, "report: {report:?}");
+        // Deleting the child leaves the proposal pending and the ask open.
+        let deleted = service.delete("REQ-008", false).unwrap();
+        assert_eq!(deleted.removed, vec!["REQ-008".to_string()]);
+        assert_eq!(deleted.parent.as_deref(), Some("ASK-001"));
+        let ask = written(&service, "ASK-001");
+        assert!(ask.derived.is_empty());
+        assert_eq!(ask.proposals[0].status, ProposalStatus::Pending);
+        assert_eq!(ask.proposals[0].requirement, None);
+        assert!(!ask.decomposition.unwrap().ready);
+        let _ = &mut prompter;
+    }
+
+    #[test]
+    fn deleting_an_ask_with_children_needs_cascade() {
+        let service = service(Ok(spec()), green());
+        let llm = FakeLlm(Ok(PROPOSALS.into()));
+        let mut prompter =
+            ScriptedPrompter::answering(&["sum numbers, empty means zero", "a", "a", "y"]);
+        service
+            .draft_assisted(&mut prompter, "test-model", &llm)
+            .unwrap();
+        let refused = service.delete("ASK-001", false).unwrap_err();
+        assert!(refused.0.contains("REQ-008, REQ-009"), "{refused:?}");
+        assert!(refused.0.contains("--cascade"), "{refused:?}");
+        let report = service.delete("ASK-001", true).unwrap();
+        assert_eq!(
+            report.removed,
+            vec![
+                "ASK-001".to_string(),
+                "REQ-008".to_string(),
+                "REQ-009".to_string()
+            ]
+        );
+        assert_eq!(written_spec(&service).requirements.len(), 2);
+    }
+
+    #[test]
+    fn linking_and_unlinking_move_a_requirement_between_asks() {
+        let service = service(Ok(spec()), green());
+        service
+            .create_direct(
+                NewRequirement {
+                    request: Some("calculator basics".into()),
+                    ..Default::default()
+                },
+                None,
+            )
+            .unwrap();
+        // REQ-007 predates the ask; linking it is the user's doing.
+        let linked = service
+            .update_direct(
+                "REQ-007",
+                RequirementUpdate {
+                    parent: Some("ASK-001".into()),
+                    by: Some(AcceptedBy::User),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(linked.written);
+        let ask = written(&service, "ASK-001");
+        assert_eq!(ask.derived, vec!["REQ-007".to_string()]);
+        assert_eq!(ask.proposals[0].requirement.as_deref(), Some("REQ-007"));
+        assert_eq!(
+            written(&service, "REQ-007").parent.as_deref(),
+            Some("ASK-001")
+        );
+        // Linking it again changes nothing.
+        let before = written_spec(&service);
+        service
+            .update_direct(
+                "REQ-007",
+                RequirementUpdate {
+                    parent: Some("ASK-001".into()),
+                    by: Some(AcceptedBy::User),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(written_spec(&service), before);
+        // Unlinking takes it back out and excludes the proposal.
+        service
+            .update_direct(
+                "REQ-007",
+                RequirementUpdate {
+                    unlink: true,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let ask = written(&service, "ASK-001");
+        assert!(ask.derived.is_empty());
+        assert_eq!(ask.proposals[0].status, ProposalStatus::Excluded);
+        assert_eq!(ask.proposals[0].requirement, None);
+        let child = written(&service, "REQ-007");
+        assert_eq!(child.parent, None);
+        assert_eq!(child.acceptance, None);
+        // Linking it back takes the same proposal row again rather than
+        // adding a second one for the same wording.
+        service
+            .update_direct(
+                "REQ-007",
+                RequirementUpdate {
+                    parent: Some("ASK-001".into()),
+                    by: Some(AcceptedBy::User),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let ask = written(&service, "ASK-001");
+        assert_eq!(ask.proposals.len(), 1);
+        assert_eq!(ask.proposals[0].status, ProposalStatus::Accepted);
+        assert_eq!(ask.proposals[0].requirement.as_deref(), Some("REQ-007"));
+        assert_eq!(ask.proposals[0].reason, None);
+        service
+            .update_direct(
+                "REQ-007",
+                RequirementUpdate {
+                    unlink: true,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        // A parent that is not an ask is refused before anything is written.
+        let error = service
+            .update_direct(
+                "REQ-007",
+                RequirementUpdate {
+                    parent: Some("REQ-001".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap_err();
+        assert!(error.0.contains("is not an ask_requirement"), "{error:?}");
+        let error = service
+            .update_direct(
+                "REQ-007",
+                RequirementUpdate {
+                    parent: Some("ASK-404".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap_err();
+        assert!(error.0.contains("is not in the spec"), "{error:?}");
+    }
+
+    #[test]
+    fn rewording_the_request_reopens_the_ask_and_keeps_the_children() {
+        let service = service(Ok(spec()), green());
+        let llm = FakeLlm(Ok(PROPOSALS.into()));
+        let mut prompter =
+            ScriptedPrompter::answering(&["sum numbers, empty means zero", "a", "a", "y"]);
+        service
+            .draft_assisted(&mut prompter, "test-model", &llm)
+            .unwrap();
+        let report = service
+            .update_direct(
+                "ASK-001",
+                RequirementUpdate {
+                    request: Some("sum numbers, empty means zero, and ignore blanks".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(report.written);
+        let ask = written(&service, "ASK-001");
+        assert_eq!(
+            ask.request.as_deref(),
+            Some("sum numbers, empty means zero, and ignore blanks")
+        );
+        assert_eq!(
+            ask.title,
+            "Sum numbers, empty means zero, and ignore blanks"
+        );
+        let decomposition = ask.decomposition.as_ref().unwrap();
+        assert_eq!(decomposition.state, DecompositionState::Open);
+        assert!(!decomposition.confirmed);
+        assert!(!decomposition.ready);
+        assert_eq!(
+            decomposition.fingerprint,
+            fingerprint(ask.request.as_deref().unwrap())
+        );
+        // The children and their acceptances stand.
+        assert_eq!(
+            ask.derived,
+            vec!["REQ-008".to_string(), "REQ-009".to_string()]
+        );
+        assert!(written(&service, "REQ-008").acceptance.is_some());
+        // Criteria are derived, so setting them is refused.
+        let error = service
+            .reword_direct("ASK-001", None, None, vec![CLEAN_CRITERION.into()])
+            .unwrap_err();
+        assert!(
+            error.0.contains("derived from its accepted requirements"),
+            "{error:?}"
+        );
+        // And a request on an actionable requirement is refused.
+        let error = service
+            .update_direct(
+                "REQ-001",
+                RequirementUpdate {
+                    request: Some("words".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap_err();
+        assert!(error.0.contains("keeps no request"), "{error:?}");
+    }
+
+    #[test]
+    fn an_ask_is_implemented_only_through_its_children() {
+        let service = service(Ok(spec()), green());
+        service
+            .create_direct(
+                NewRequirement {
+                    request: Some("calculator basics".into()),
+                    ..Default::default()
+                },
+                None,
+            )
+            .unwrap();
+        let error = service.mark_implemented("ASK-001").unwrap_err();
+        assert!(error.0.contains("not ready"), "{error:?}");
+        // REQ-001 has a tagged scenario and is pending; link it, confirm,
+        // and the ask still waits for the child.
+        service
+            .update_direct(
+                "REQ-001",
+                RequirementUpdate {
+                    parent: Some("ASK-001".into()),
+                    by: Some(AcceptedBy::User),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        service
+            .decide(
+                "ASK-001",
+                Decisions {
+                    confirmed: Some(true),
+                    by: Some(AcceptedBy::User),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let error = service.mark_implemented("ASK-001").unwrap_err();
+        assert!(error.0.contains("REQ-001 is still pending"), "{error:?}");
+        service.mark_implemented("REQ-001").unwrap();
+        let report = service.mark_implemented("ASK-001").unwrap();
+        assert_eq!(report.status, "implemented");
+        let ask = written(&service, "ASK-001");
+        assert_eq!(ask.status, "implemented");
+        assert_eq!(ask.feature_file, None);
+        let catalog = calculator_catalog();
+        let validator = SpecValidator::new(&catalog);
+        assert_eq!(
+            validator.validate(&written_spec(&service)),
+            Vec::<String>::new()
+        );
     }
 
     #[test]

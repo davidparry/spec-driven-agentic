@@ -99,8 +99,8 @@ Feature: Deliver mode
     When the delivery runs for "empty input means zero"
     Then the delivery completes
     And the delivery planned "REQ-001"
-    And the developer was told a finding containing "The description holds 1 requirement(s):"
-    And the developer was told a finding containing "REQ-001 title [Empty string returns zero] (Enter keeps it): kept"
+    And the developer was told a finding containing "The request holds 1 requirement(s) and 0 question(s)."
+    And the developer was told a finding containing "REQ-001 committed to the spec under ASK-001."
     And the working tree file "src/test/resources/features/empty-string-returns-zero.feature" contains "@REQ-001"
     And the working tree file "requirements/requirements.json" contains "implemented"
 
@@ -122,7 +122,7 @@ Feature: Deliver mode
     Then the delivery completes
     And the delivery planned "REQ-001, REQ-002"
     And the delivery delivered "REQ-001, REQ-002"
-    And the developer was told a finding containing "REQ-001, REQ-002 committed to the spec."
+    And the developer was told a finding containing "REQ-001, REQ-002 committed to the spec under ASK-001."
 
   Scenario: Every gate is approved rather than asked about
     Given a Java project marker
@@ -153,7 +153,7 @@ Feature: Deliver mode
     When the delivery runs for "empty input means zero"
     Then the delivery completes
     And the delivery delivered "REQ-001"
-    And the developer was told a finding containing "Write this requirement? yes (spec deliver never stops to ask)"
+    And the developer was told a finding containing "ASK-001 (automatic mode): ready"
     And the working tree file "requirements/requirements.json" contains "Empty string returns zero"
 
   Scenario: An empty directory is refused rather than asked which language to scaffold

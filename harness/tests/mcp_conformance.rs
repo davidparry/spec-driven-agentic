@@ -172,6 +172,11 @@ async fn the_server_identifies_as_the_workshop_server_and_lists_all_tools() {
         "command_run",
         "requirement_reword",
         "requirement_mark_implemented",
+        "requirement_create",
+        "requirement_update",
+        "requirement_delete",
+        "requirement_ask",
+        "requirement_decide",
         "step_definitions_find",
         "step_definition_create",
         "unit_test_create",
@@ -182,7 +187,7 @@ async fn the_server_identifies_as_the_workshop_server_and_lists_all_tools() {
             "additive tool {additive} missing: {names:?}"
         );
     }
-    assert_eq!(tools.len(), 22, "tools: {names:?}");
+    assert_eq!(tools.len(), 27, "tools: {names:?}");
 
     let root_body = call_json(&client, "project_root", json!({})).await;
     let expected_root = std::path::absolute(dir.path()).unwrap();

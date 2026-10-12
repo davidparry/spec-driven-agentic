@@ -6,7 +6,7 @@ use serde::Serialize;
 
 use crate::application::assets::load_spec;
 use crate::domain::human::{Human, bullets, columns, counted, sections, titled};
-use crate::domain::model::Requirement;
+use crate::domain::model::{Requirement, Spec};
 use crate::domain::refiner::RequirementRefiner;
 use crate::domain::spec_validator::{SpecValidator, is_structural_issue, structural_repair};
 use crate::ports::{FeatureFiles, SpecRepository};
@@ -208,6 +208,34 @@ pub struct EnrichedRequirement {
     pub production_location: String,
     #[serde(rename = "workflowHint")]
     pub workflow_hint: String,
+    /// `ask_requirement` or `actionable_requirement`; absent for a
+    /// requirement that predates the distinction, which is actionable.
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    /// The ask's original request, verbatim.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request: Option<String>,
+    /// The ask this requirement derives from.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
+    /// The requirements derived from this ask.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub derived: Vec<String>,
+    /// Who accepted this requirement under its ask, if anyone yet.
+    #[serde(rename = "acceptedBy", skip_serializing_if = "Option::is_none")]
+    pub accepted_by: Option<String>,
+    /// Whether the ask is ready for implementation, derived from its
+    /// children as it is read.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ready: Option<bool>,
+    /// What keeps the ask from being ready.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub reasons: Vec<String>,
+    /// Pending proposal numbers and open question numbers on the ask.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub pending: Vec<u32>,
+    #[serde(rename = "openQuestions", skip_serializing_if = "Vec::is_empty")]
+    pub open_questions: Vec<String>,
 }
 
 impl Human for EnrichedRequirement {
@@ -229,13 +257,47 @@ impl Human for EnrichedRequirement {
         if let Some(feature) = &self.feature_location {
             locations.insert(0, vec!["Feature".to_string(), feature.clone()]);
         }
-        sections(&[
-            format!("{}: {}\nStatus: {}", self.id, self.title, self.status),
-            self.story.clone(),
-            titled("Acceptance criteria", &criteria.join("\n")),
-            columns(&locations),
-            self.workflow_hint.clone(),
-        ])
+        let mut heading = format!("{}: {}\nStatus: {}", self.id, self.title, self.status);
+        if let Some(kind) = &self.kind {
+            heading.push_str(&format!("\nType: {kind}"));
+        }
+        if let Some(parent) = &self.parent {
+            heading.push_str(&format!("\nDerived from: {parent}"));
+            if let Some(by) = &self.accepted_by {
+                heading.push_str(&format!(" (accepted: {by})"));
+            } else {
+                heading.push_str(" (not accepted)");
+            }
+        }
+        let mut parts = vec![heading, self.story.clone()];
+        if let Some(request) = &self.request {
+            parts.push(titled("Request", request));
+        }
+        parts.push(titled("Acceptance criteria", &criteria.join("\n")));
+        if let Some(ready) = self.ready {
+            let mut lines = vec![format!(
+                "Derived: {}",
+                if self.derived.is_empty() {
+                    "none yet".to_string()
+                } else {
+                    self.derived.join(", ")
+                }
+            )];
+            lines.push(format!(
+                "Ready for implementation: {}",
+                if ready { "yes" } else { "no" }
+            ));
+            for reason in &self.reasons {
+                lines.push(format!("  - {reason}"));
+            }
+            for question in &self.open_questions {
+                lines.push(format!("  ? {question}"));
+            }
+            parts.push(lines.join("\n"));
+        }
+        parts.push(columns(&locations));
+        parts.push(self.workflow_hint.clone());
+        sections(&parts)
     }
 }
 
@@ -327,9 +389,9 @@ impl<R: SpecRepository, F: FeatureFiles> SpecService<R, F> {
     pub fn get_requirement(&self, id: &str) -> Result<EnrichedRequirement, ServiceError> {
         let spec = self.repository.load()?;
         spec.requirements
-            .into_iter()
+            .iter()
             .find(|r| r.id == id)
-            .map(|r| self.enrich(r))
+            .map(|r| self.enrich(r.clone(), &spec))
             .ok_or_else(|| {
                 ServiceError(format!(
                     "No requirement with id '{id}'. Call list_requirements to see valid ids."
@@ -407,12 +469,44 @@ impl<R: SpecRepository, F: FeatureFiles> SpecService<R, F> {
         })
     }
 
-    fn enrich(&self, r: Requirement) -> EnrichedRequirement {
-        let workflow_hint = format!(
-            "Write the Gherkin scenario for this requirement in the feature file first \
-             (tag it @{id}), reuse or add step definitions, then run_tests to see RED.",
-            id = r.id
-        );
+    fn enrich(&self, r: Requirement, spec: &Spec) -> EnrichedRequirement {
+        let (workflow_hint, ready, reasons) = if r.is_ask() {
+            let readiness = crate::domain::ask::readiness(&r, spec);
+            let hint = if readiness.ready {
+                format!(
+                    "This ask is ready: deliver its derived requirements ({}) one by one, \
+                     each through its own scenario, then mark the ask implemented.",
+                    r.derived.join(", ")
+                )
+            } else {
+                format!(
+                    "This ask is not ready for implementation. Settle what is open with \
+                     requirement_decide {id} (or spec decide {id}), or review it with spec \
+                     draft {id} --interactive - do not implement its derived requirements yet.",
+                    id = r.id
+                )
+            };
+            (hint, Some(readiness.ready), readiness.reasons)
+        } else {
+            let hint = format!(
+                "Write the Gherkin scenario for this requirement in the feature file first \
+                 (tag it @{id}), reuse or add step definitions, then run_tests to see RED.",
+                id = r.id
+            );
+            (hint, None, Vec::new())
+        };
+        let pending = r
+            .proposals
+            .iter()
+            .filter(|p| p.status == crate::domain::ask::ProposalStatus::Pending)
+            .map(|p| p.number)
+            .collect();
+        let open_questions = r
+            .questions
+            .iter()
+            .filter(|q| q.answer.is_none())
+            .map(|q| format!("{}: {}", q.number, q.text))
+            .collect();
         EnrichedRequirement {
             id: r.id,
             title: r.title,
@@ -424,6 +518,15 @@ impl<R: SpecRepository, F: FeatureFiles> SpecService<R, F> {
             test_location: self.layout.test_location.clone(),
             production_location: self.layout.production_location.clone(),
             workflow_hint,
+            kind: r.kind,
+            request: r.request,
+            parent: r.parent,
+            derived: r.derived,
+            accepted_by: r.acceptance.map(|a| a.by.as_str().to_string()),
+            ready,
+            reasons,
+            pending,
+            open_questions,
         }
     }
 }
@@ -953,7 +1056,73 @@ mod tests {
             test_location: "tests".into(),
             production_location: "src".into(),
             workflow_hint: "Write the scenario first.".into(),
+            kind: None,
+            request: None,
+            parent: None,
+            derived: Vec::new(),
+            accepted_by: None,
+            ready: None,
+            reasons: Vec::new(),
+            pending: Vec::new(),
+            open_questions: Vec::new(),
         }
+    }
+
+    /// The frozen `get_requirement` shape: a requirement with no ask
+    /// fields serializes exactly as it did before asks existed.
+    #[test]
+    fn a_plain_requirement_serializes_without_any_ask_field() {
+        let json = serde_json::to_string(&enriched(None)).unwrap();
+        for key in [
+            "type",
+            "request",
+            "parent",
+            "derived",
+            "acceptedBy",
+            "ready",
+            "reasons",
+            "pending",
+            "openQuestions",
+        ] {
+            assert!(
+                !json.contains(&format!("\"{key}\":")),
+                "{key} leaked into {json}"
+            );
+        }
+    }
+
+    /// An ask is shown with what it preserves and whether its children
+    /// have made it ready, so the reader never has to derive that.
+    #[test]
+    fn an_ask_is_shown_with_its_request_links_and_readiness() {
+        let ask = crate::domain::ask::new_ask(
+            "ASK-001".into(),
+            "sum numbers",
+            crate::domain::ask::Mode::Automatic,
+        );
+        let spec = Spec {
+            project: "Kata".into(),
+            requirements: vec![ask],
+            ..Spec::default()
+        };
+        let service = SpecService::new(InMemorySpec(Ok(spec)), NoFeatures::default(), layout());
+        let shown = service.get_requirement("ASK-001").unwrap();
+        assert_eq!(shown.kind.as_deref(), Some("ask_requirement"));
+        assert_eq!(shown.request.as_deref(), Some("sum numbers"));
+        assert_eq!(shown.ready, Some(false));
+        assert!(!shown.reasons.is_empty());
+        assert!(
+            shown.workflow_hint.contains("not ready"),
+            "{}",
+            shown.workflow_hint
+        );
+        let rendered = shown.human();
+        assert!(rendered.contains("Type: ask_requirement"), "{rendered}");
+        assert!(rendered.contains("Request\nsum numbers"), "{rendered}");
+        assert!(
+            rendered.contains("Ready for implementation: no"),
+            "{rendered}"
+        );
     }
 
     #[test]

@@ -43,13 +43,16 @@ use spec_harness::application::model_service::{
     DecisionReadiness, ModelResolution, ModelService, ModelSource, SessionDecision, SessionModel,
 };
 use spec_harness::application::refactor_service::RefactorService;
-use spec_harness::application::spec_mutation_service::SpecMutationService;
+use spec_harness::application::spec_mutation_service::{
+    AskTarget, Decisions, NewRequirement, RequirementUpdate, SpecMutationService,
+};
 use spec_harness::application::status_service::StatusService;
 use spec_harness::application::tdd_service::TddError;
 use spec_harness::application::tool_call_service::ToolCallService;
 use spec_harness::application::tool_service::ToolService;
 use spec_harness::bootstrap::{prompt_language, refresh_project_memory, settle_project_memory};
 use spec_harness::deliver::{Deliver, DeliverOptions, parse_target};
+use spec_harness::domain::ask::{AcceptedBy, Mode as AskMode};
 use spec_harness::domain::config_report::{ConfigSource, LLM_MODEL_KEY};
 use spec_harness::domain::decision::{DECISION_PLANE_HELP, Transition};
 use spec_harness::domain::human::{Human, counted};
@@ -57,6 +60,7 @@ use spec_harness::domain::language::Language;
 use spec_harness::domain::layout::outside_feature_root;
 use spec_harness::domain::mcp_registry::ServerSpec;
 use spec_harness::domain::prompts::ask_prompt;
+use spec_harness::domain::requirement_id::is_id_shape;
 use spec_harness::domain::spec_validator::{is_structural_issue, structural_repair};
 use spec_harness::domain::tdd::ImplementAttempt;
 use spec_harness::domain::tool_profile::{Caller, resolve};
@@ -88,6 +92,25 @@ fn refine_help() -> String {
          Set `mode = \"off\"` under `[decision]` to keep the model configured \
          for `spec judge` while this command stops asking."
     )
+}
+
+/// `spec draft --help`.
+fn draft_help() -> String {
+    "Draft requirements.\n\n\
+     spec draft \"<what to build>\"   preserves the words as an ask (ASK-nnn, type \
+     ask_requirement) and breaks them into actionable requirements, each linked back \
+     to the ask. Without --interactive nothing is asked: proposals the review passes \
+     are accepted on its authority, the rest stay pending with their findings, and \
+     the questions raised are recorded unanswered. With --interactive every proposal \
+     is put to you - approve, reject, revise, or exclude - and you confirm the \
+     accepted requirements cover the request. Running the same words again adds \
+     nothing already there; naming the ask (spec draft ASK-001) carries on with it.\n\n\
+     spec draft --title ... --story ... --criterion ...   writes one requirement \
+     directly; add --parent ASK-nnn to derive it from an ask.\n\n\
+     spec draft --request-only \"<words>\"   preserves an ask without breaking it \
+     down.\n\n\
+     spec draft   with no arguments opens the wizard."
+        .to_string()
 }
 
 /// `spec judge criterion --help`.
@@ -250,6 +273,24 @@ enum Command {
     },
 }
 
+/// Who a decision belongs to, as the command line says it.
+#[derive(Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+enum By {
+    /// The review's own authority: it accepts only what the rules pass
+    Automatic,
+    /// A person said so
+    User,
+}
+
+impl From<By> for AcceptedBy {
+    fn from(by: By) -> Self {
+        match by {
+            By::Automatic => AcceptedBy::Automatic,
+            By::User => AcceptedBy::User,
+        }
+    }
+}
+
 #[derive(Subcommand)]
 enum SpecCommand {
     /// List every requirement with id, title, and status (list_requirements)
@@ -265,20 +306,101 @@ enum SpecCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Draft a requirement. Flags skip the interactive wizard.
+    /// Draft requirements: a request in plain words (or an ASK id to
+    /// continue) is preserved as an ask and broken into requirements;
+    /// --title/--story/--criterion write one directly; no arguments
+    /// opens the wizard.
+    #[command(long_about = draft_help())]
     Draft {
+        /// What to build, in plain words - or the id of an ask to carry on
+        /// with (e.g. ASK-001)
+        request: Option<String>,
+        /// Put every proposal to you to approve, reject, revise, or
+        /// exclude, and ask the open questions. Without it nothing is
+        /// asked: the rules accept what they can and record the rest.
+        #[arg(long)]
+        interactive: bool,
+        /// Title of one requirement written directly (with --story and
+        /// --criterion, no wizard)
         #[arg(long)]
         title: Option<String>,
+        /// Its user story: As a ..., I want ..., so that ...
         #[arg(long)]
         story: Option<String>,
         /// Repeatable Given/When/Then acceptance criterion
         #[arg(long)]
         criterion: Vec<String>,
+        /// Preserve these words as an ask without breaking them down
+        #[arg(long, conflicts_with_all = ["request", "title", "story", "criterion", "parent"])]
+        request_only: Option<String>,
+        /// The ask a directly written requirement derives from
+        #[arg(long)]
+        parent: Option<String>,
+        /// Who accepts a requirement written under --parent: `user` when
+        /// a person approved these words, `automatic` (the default) to
+        /// let the review decide
+        #[arg(long, value_enum, default_value_t = By::Automatic)]
+        by: By,
         /// Draft into this included spec file instead of the root
         /// catalog (e.g. requirements/core/math.json)
         #[arg(long)]
         file: Option<String>,
     },
+    /// Record decisions on an ask without a wizard or a model: accept,
+    /// reject, or exclude proposals by number, answer questions, and
+    /// mark the decomposition complete or confirmed
+    Decide {
+        /// The ask, e.g. ASK-001
+        ask_id: String,
+        /// Accept proposal N (repeatable)
+        #[arg(long, value_name = "N")]
+        accept: Vec<u32>,
+        /// Reject proposal N, optionally with a reason: N or N:reason
+        #[arg(long, value_name = "N[:REASON]")]
+        reject: Vec<String>,
+        /// Exclude proposal N from scope, optionally with a reason
+        #[arg(long, value_name = "N[:REASON]")]
+        exclude: Vec<String>,
+        /// Answer question N: N=answer
+        #[arg(long, value_name = "N=ANSWER")]
+        answer: Vec<String>,
+        /// Mark the decomposition complete
+        #[arg(long, conflicts_with = "reopen")]
+        complete: bool,
+        /// Reopen the decomposition
+        #[arg(long)]
+        reopen: bool,
+        /// Record that the user confirmed the accepted requirements
+        /// cover the request (needs --by user)
+        #[arg(long, conflicts_with = "unconfirm")]
+        confirm: bool,
+        /// Withdraw that confirmation
+        #[arg(long)]
+        unconfirm: bool,
+        /// Whose decisions these are. `automatic` may only accept what
+        /// the review would accept on its own and may not confirm.
+        #[arg(long, value_enum, default_value_t = By::Automatic)]
+        by: By,
+    },
+    /// Remove a requirement from the catalog
+    Delete {
+        req_id: String,
+        /// Remove an ask together with the requirements derived from it
+        #[arg(long)]
+        cascade: bool,
+    },
+    /// Link a requirement to the ask it derives from
+    Link {
+        /// The requirement, e.g. REQ-004
+        req_id: String,
+        /// The ask, e.g. ASK-001
+        ask_id: String,
+        /// Whose link this is: `user` records their acceptance
+        #[arg(long, value_enum, default_value_t = By::Automatic)]
+        by: By,
+    },
+    /// Take a requirement out from under its ask
+    Unlink { req_id: String },
     /// Validate the requirements spec on disk (validate_spec)
     Validate {
         /// Print the raw JSON reply instead of the readable summary
@@ -294,15 +416,33 @@ enum SpecCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Reword an existing requirement. Flags skip the wizard.
+    /// Reword an existing requirement. Flags skip the wizard. A child
+    /// whose meaning changes loses its acceptance; an ask whose
+    /// --request changes reopens its decomposition.
     Reword {
         req_id: String,
+        /// New title; omit to keep the current one
         #[arg(long)]
         title: Option<String>,
+        /// New user story; omit to keep the current one
         #[arg(long)]
         story: Option<String>,
+        /// The full new set of criteria, repeated; omit to keep them.
+        /// Refused on an ask, whose criteria are derived
         #[arg(long)]
         criterion: Vec<String>,
+        /// The new request text of an ask
+        #[arg(long)]
+        request: Option<String>,
+        /// Move the requirement under this ask
+        #[arg(long, conflicts_with = "unlink")]
+        parent: Option<String>,
+        /// Take the requirement out from under its ask
+        #[arg(long)]
+        unlink: bool,
+        /// Whose link --parent records: `user` records their acceptance
+        #[arg(long, value_enum, default_value_t = By::Automatic)]
+        by: By,
     },
     /// Point a requirement at a feature file (for extracted specs)
     SetFeature {
@@ -1756,35 +1896,181 @@ fn run_spec(
             Ok(())
         }
         SpecCommand::Draft {
+            request,
+            interactive,
             title,
             story,
             criterion,
+            request_only,
+            parent,
+            by,
             file,
         } => {
             let mutations = mutation_service(root, attempts);
             let file = file.as_deref();
+            if let Some(words) = request_only {
+                let report = mutations.create_direct(
+                    NewRequirement {
+                        request: Some(words.clone()),
+                        ..Default::default()
+                    },
+                    file,
+                )?;
+                return print_json(&report);
+            }
             if title.is_some() || story.is_some() || !criterion.is_empty() {
+                if request.is_some() {
+                    anyhow::bail!(
+                        "spec draft takes either a request in plain words to break down or \
+                         --title/--story/--criterion to write one requirement, not both."
+                    );
+                }
                 if let Some(complaint) =
                     missing_draft_flags(title.is_some(), story.is_some(), !criterion.is_empty())
                 {
                     anyhow::bail!(complaint);
                 }
-                let (title, story) = (
-                    title.as_deref().expect("checked above"),
-                    story.as_deref().expect("checked above"),
-                );
-                let report = mutations.draft_direct_in(title, story, criterion.clone(), file)?;
+                let report = mutations.create_direct(
+                    NewRequirement {
+                        title: title.clone().expect("checked above"),
+                        story: story.clone().expect("checked above"),
+                        criteria: criterion.clone(),
+                        parent: parent.clone(),
+                        by: parent.as_ref().map(|_| (*by).into()),
+                        ..Default::default()
+                    },
+                    file,
+                )?;
                 return print_json(&report);
             }
-            let mut prompter = interactive_prompter(Prompts::Wizard);
-            let report = match resolved_chat(root, model) {
+            if parent.is_some() {
+                anyhow::bail!(
+                    "--parent goes with --title, --story, and --criterion: it names the ask a \
+                     directly written requirement derives from."
+                );
+            }
+            // The automatic breakdown asks nothing, so it gets the
+            // prompter that never stops to ask - the same one `spec
+            // deliver` runs with - and the terminal still hears the
+            // narration.
+            let mut prompter = if request.is_some() && !*interactive {
+                deliver_prompter()
+            } else {
+                interactive_prompter(Prompts::Wizard)
+            };
+            let chat = resolved_chat(root, model);
+            let Some(request) = request else {
+                // The wizard: with a model it asks for the words and
+                // breaks them down with you; without one you word the
+                // requirement yourself.
+                let report = match &chat {
+                    Some((name, chat)) => {
+                        let mutations = mutation_with_tools(
+                            root,
+                            attempts,
+                            Caller::SpecDraft,
+                            tools,
+                            max_rounds,
+                        );
+                        mutations.draft_assisted_in(prompter.as_mut(), name, chat, file)?
+                    }
+                    None => {
+                        let report = mutations.draft_in(prompter.as_mut(), file)?;
+                        return print_json(&report);
+                    }
+                };
+                return print_json(&report);
+            };
+            let target = if is_id_shape(request) {
+                AskTarget::Existing(request.clone())
+            } else {
+                AskTarget::Text(request.clone())
+            };
+            let mode = if *interactive {
+                AskMode::Interactive
+            } else {
+                AskMode::Automatic
+            };
+            let report = match &chat {
                 Some((name, chat)) => {
                     let mutations =
                         mutation_with_tools(root, attempts, Caller::SpecDraft, tools, max_rounds);
-                    mutations.draft_assisted_in(prompter.as_mut(), &name, &chat, file)
+                    mutations.decompose(
+                        prompter.as_mut(),
+                        Some((name.as_str(), chat)),
+                        file,
+                        target,
+                        mode,
+                    )?
                 }
-                None => mutations.draft_in(prompter.as_mut(), file),
-            }?;
+                None => mutations.decompose(prompter.as_mut(), None, file, target, mode)?,
+            };
+            print_json(&report)
+        }
+        SpecCommand::Decide {
+            ask_id,
+            accept,
+            reject,
+            exclude,
+            answer,
+            complete,
+            reopen,
+            confirm,
+            unconfirm,
+            by,
+        } => {
+            let decisions = Decisions {
+                accept: accept.clone(),
+                reject: reject
+                    .iter()
+                    .map(|entry| numbered_reason(entry, "--reject"))
+                    .collect::<anyhow::Result<_>>()?,
+                exclude: exclude
+                    .iter()
+                    .map(|entry| numbered_reason(entry, "--exclude"))
+                    .collect::<anyhow::Result<_>>()?,
+                answers: answer
+                    .iter()
+                    .map(|entry| numbered_answer(entry))
+                    .collect::<anyhow::Result<_>>()?,
+                complete: match (complete, reopen) {
+                    (true, _) => Some(true),
+                    (_, true) => Some(false),
+                    _ => None,
+                },
+                confirmed: match (confirm, unconfirm) {
+                    (true, _) => Some(true),
+                    (_, true) => Some(false),
+                    _ => None,
+                },
+                by: Some((*by).into()),
+            };
+            let report = mutation_service(root, attempts).decide(ask_id, decisions)?;
+            print_json(&report)
+        }
+        SpecCommand::Delete { req_id, cascade } => {
+            let report = mutation_service(root, attempts).delete(req_id, *cascade)?;
+            print_json(&report)
+        }
+        SpecCommand::Link { req_id, ask_id, by } => {
+            let report = mutation_service(root, attempts).update_direct(
+                req_id,
+                RequirementUpdate {
+                    parent: Some(ask_id.clone()),
+                    by: Some((*by).into()),
+                    ..Default::default()
+                },
+            )?;
+            print_json(&report)
+        }
+        SpecCommand::Unlink { req_id } => {
+            let report = mutation_service(root, attempts).update_direct(
+                req_id,
+                RequirementUpdate {
+                    unlink: true,
+                    ..Default::default()
+                },
+            )?;
             print_json(&report)
         }
         SpecCommand::Reword {
@@ -1792,14 +2078,30 @@ fn run_spec(
             title,
             story,
             criterion,
+            request,
+            parent,
+            unlink,
+            by,
         } => {
             let mutations = mutation_service(root, attempts);
-            if title.is_some() || story.is_some() || !criterion.is_empty() {
-                let report = mutations.reword_direct(
+            if title.is_some()
+                || story.is_some()
+                || !criterion.is_empty()
+                || request.is_some()
+                || parent.is_some()
+                || *unlink
+            {
+                let report = mutations.update_direct(
                     req_id,
-                    title.clone(),
-                    story.clone(),
-                    criterion.clone(),
+                    RequirementUpdate {
+                        title: title.clone(),
+                        story: story.clone(),
+                        criteria: criterion.clone(),
+                        request: request.clone(),
+                        parent: parent.clone(),
+                        unlink: *unlink,
+                        by: Some((*by).into()),
+                    },
                 )?;
                 return print_json(&report);
             }
@@ -2470,6 +2772,33 @@ fn wants_json(flag: bool, stdout_is_terminal: bool) -> bool {
 /// so `--title X` on its own was answered with "spec draft --story
 /// requires --title and --criterion" - naming a flag the user had not
 /// typed and demanding one they had.
+/// `N` or `N:reason`, as `--reject` and `--exclude` take it.
+fn numbered_reason(entry: &str, flag: &str) -> anyhow::Result<(u32, Option<String>)> {
+    let (number, reason) = match entry.split_once(':') {
+        Some((number, reason)) => (number, Some(reason.trim().to_string())),
+        None => (entry, None),
+    };
+    let number = number.trim().parse::<u32>().map_err(|_| {
+        anyhow::anyhow!(
+            "{flag} takes a proposal number, optionally followed by :reason - got {entry:?}."
+        )
+    })?;
+    Ok((number, reason.filter(|r| !r.is_empty())))
+}
+
+/// `N=answer`, as `--answer` takes it.
+fn numbered_answer(entry: &str) -> anyhow::Result<(u32, String)> {
+    let Some((number, answer)) = entry.split_once('=') else {
+        anyhow::bail!(
+            "--answer takes N=answer, the question number and its answer - got {entry:?}."
+        );
+    };
+    let number = number.trim().parse::<u32>().map_err(|_| {
+        anyhow::anyhow!("--answer takes N=answer with N the question number - got {entry:?}.")
+    })?;
+    Ok((number, answer.trim().to_string()))
+}
+
 fn missing_draft_flags(title: bool, story: bool, criterion: bool) -> Option<String> {
     let named = |present: bool, flag: &'static str| present.then_some(flag);
     let supplied: Vec<&str> = [

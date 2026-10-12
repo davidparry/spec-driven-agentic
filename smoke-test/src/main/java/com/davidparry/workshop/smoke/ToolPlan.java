@@ -6,7 +6,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
- * The complete catalog the Java smoke test is willing to call. A 23rd tool
+ * The complete catalog the Java smoke test is willing to call. A 28th tool
  * on the server fails the build until it is planned here.
  */
 public final class ToolPlan {
@@ -58,6 +58,18 @@ public final class ToolPlan {
                     "id", "REQ-001",
                     "title", "Adds two numbers from the sweep")),
             gated("requirement_mark_implemented", Map.of("id", "REQ-001")),
+            writes("requirement_create", Map.of(
+                    "title", "Multiplies two numbers from the sweep",
+                    "story", "As a user, I want to multiply two numbers, so that I get their product",
+                    "acceptance_criteria", List.of(
+                            "Given two numbers, When I multiply them, Then the result is their product"))),
+            writes("requirement_update", Map.of(
+                    "id", "REQ-001",
+                    "title", "Adds two numbers from the sweep")),
+            writes("requirement_ask", Map.of(
+                    "request", "1. divide two numbers; 2. refuse division by zero")),
+            writes("requirement_decide", Map.of("id", "ASK-001")),
+            writes("requirement_delete", Map.of("id", "ASK-001", "cascade", true)),
             read("step_definitions_find"),
             writes("step_definition_create", Map.of()),
             writes("unit_test_create", Map.of("req_id", "REQ-001")),

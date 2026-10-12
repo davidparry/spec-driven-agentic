@@ -38,12 +38,23 @@ Rules:
 - Do not invent capabilities the <description> does not mention; a broad phrase, however, names its conventional parts - unpack e.g. "the basic functions of a calculator" into add, subtract, multiply, and divide.
 - A non-empty <description> always holds at least one requirement: derive the most obvious atomic requirements from its plain meaning rather than replying with an empty array.
 - list_requirements, get_requirement, validate_spec, and refine_requirement inspect the catalog already on disk. They do not review the proposal you are writing; the harness validates your JSON after you answer. Use them as examples of siblings, never as a critique of this draft.
-'''
+{% if questions_allowed %}- When the <description> leaves something you would have to guess to write a requirement - which inputs count, what a failure returns, which of two readings is meant - do not guess: add an element {"question": "<the one thing you need answered>", "blocking": true} to the array instead of the requirement that depended on it. Keep every question separate from the requirements; a question is never a requirement, and a requirement never contains one. Set "blocking": false only for a question whose answer would not change any requirement.
+{% endif %}{% if accepted %}- The requirements under <accepted> are already in the spec for this description. Do not propose them again, in these or other words; propose only what the description still needs.
+{% endif %}'''
 user = '''
 <description>
 {{ description }}
 </description>
-'''
+{% if answered %}
+Answers already given to earlier questions - treat each answer as part of the description:
+{% for item in answered %}- Q: {{ item.question }}
+  A: {{ item.answer }}
+{% endfor %}{% endif %}{% if accepted %}
+<accepted>
+Already accepted for this description:
+{% for title in accepted %}- {{ title }}
+{% endfor %}</accepted>
+{% endif %}'''
 
 # The refine loop: reword one draft requirement from a single validate +
 # refine finding. Context: title, story, criteria, finding, hint (optional),

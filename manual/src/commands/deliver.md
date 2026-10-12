@@ -36,8 +36,9 @@ the command tells them apart by looking at what you typed:
 | You type | It means |
 | --- | --- |
 | `spec deliver REQ-003` | That one requirement, already in the catalog. |
-| `spec deliver "empty input means zero"` | Plain words: split into requirements first, then deliver each. |
-| `spec deliver` | Every pending requirement, in catalog order. |
+| `spec deliver ASK-001` | An ask: its derived requirements that are still pending, once the ask is [ready](spec.md#spec-draft-request--an-ask-broken-into-requirements). One that is not ready is refused with every reason. |
+| `spec deliver "empty input means zero"` | Plain words: preserved as an ask and broken into requirements in the default mode (no prompts), then each derived requirement is delivered. |
+| `spec deliver` | Every pending requirement, in catalog order. Asks are not planned themselves; their derived requirements are. |
 
 An argument that **names a requirement in the catalog** is that
 requirement, matched case-insensitively — so `req-3` and `harness-018`
@@ -72,9 +73,14 @@ use plain words: spec deliver "a custom delimiter on the first line".
 The example id in that message is taken from the catalog too, so a
 project numbering `HARNESS` is told `Ids look like HARNESS-001`.
 
-A description needs a model to break it down. Without one the run hands
-the work back rather than walking you through wording it — that is what
-[`spec draft`](spec.md) and [`spec greenfield`](greenfield.md) are for.
+A description needs a model to break it down. Without one the words are
+still preserved as an ask, but nothing is invented for it: the run hands
+the work back with the ask's reasons rather than walking you through
+wording it — that is what [`spec draft`](spec.md) and
+[`spec greenfield`](greenfield.md) are for. The same refusal names the
+reasons when the breakdown leaves a proposal pending, a blocking question
+open, or nothing accepted: a run never plans a requirement the breakdown
+did not accept.
 
 ## What one requirement goes through
 
@@ -217,15 +223,19 @@ A run either completes or tells you why it could not. It does neither
 halfway through a question, because an orchestrator that waits at a
 prompt is not running.
 
-So every proposal is accepted and every gate approved. That is not a
-separate unattended dialect: every wizard prompt in this harness already
-treats <kbd>Enter</kbd> as "accept what is in front of you", and this is
-that path. Each one is echoed, so the transcript shows what was decided
-for you and which wording landed:
+So every gate is approved, and a description is broken down in the
+default mode of [`spec draft`](spec.md#spec-draft-request--an-ask-broken-into-requirements):
+proposals the deterministic review passes are accepted on its authority
+and recorded as accepted `automatic`ally, the rest stay pending on the
+ask - the run never guesses on your behalf. Each decision is echoed, so
+the transcript shows what was decided for you and which wording landed:
 
 ```text
-REQ-001 title [Empty string returns zero] (Enter keeps it): kept (spec deliver never stops to ask)
-The wording reads clean. Write this requirement? yes (spec deliver never stops to ask)
+ASK-001 preserves the request: empty input means zero
+The request holds 1 requirement(s) and 0 question(s).
+ASK-001 (automatic mode): ready
+  1 accepted, 0 pending, 0 rejected, 0 excluded, 0 open question(s)
+REQ-001 committed to the spec under ASK-001.
 ```
 
 The generated unit test is still printed before it runs — the assertions
@@ -241,6 +251,7 @@ up front, with the reason and the command that settles it:
 | Scaffold a project (no build markers) | Run [`spec init --language`](init.md), or [`spec greenfield`](greenfield.md) to be walked through it |
 | Work from an empty catalog with nothing described | Describe it: `spec deliver "<what to build>"`, or [`spec greenfield`](greenfield.md) |
 | Break a description down with no model | Point one at the project with [`spec model use`](model.md), or word it with [`spec draft`](spec.md) |
+| Plan an ask that is not ready | Settle it with [`spec decide`](spec.md#spec-decide--decisions-by-number-no-wizard), or review it with `spec draft ASK-001 --interactive` |
 | Guess what `req7` meant | Ids look like `REQ-003` — [`spec list`](spec.md) shows them |
 
 Each of these exits nonzero without touching the spec, so nothing is

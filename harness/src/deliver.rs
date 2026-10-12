@@ -46,12 +46,13 @@ use crate::application::generation_service::{GenerationService, ResolvedLlm};
 use crate::application::implement_service::{ImplementService, ImplementTarget};
 use crate::application::refactor_service::RefactorService;
 use crate::application::scenario_service::ScenarioService;
-use crate::application::spec_mutation_service::SpecMutationService;
+use crate::application::spec_mutation_service::{AskTarget, SpecMutationService};
 use crate::application::tdd_service::{TddError, TddService, TestReport};
 use crate::bootstrap::{
     LOOP_CLOSED, attempt_work, ensure_project, ensure_spec, has_readable_spec, project_detected,
     refresh_project_memory, run_and_narrate,
 };
+use crate::domain::ask::Mode;
 use crate::domain::attribution::foreign_failures;
 use crate::domain::decision::Judgment;
 use crate::domain::generation::brief_failure;
@@ -467,13 +468,40 @@ impl Deliver {
         match target {
             Target::Requirement(id) => {
                 let spec = self.spec()?;
-                if !spec.requirements.iter().any(|r| &r.id == id) {
+                let Some(requirement) = spec.requirements.iter().find(|r| &r.id == id) else {
                     return Err(format!(
                         "No requirement with id {id}. Run spec list to see valid ids, or \
                          describe a new one with spec deliver \"<what to build>\"."
                     ));
+                };
+                if !requirement.is_ask() {
+                    return Ok(vec![id.clone()]);
                 }
-                Ok(vec![id.clone()])
+                // An ask is delivered through its derived requirements,
+                // and only once it is ready: what is still open there is
+                // a human's to settle, not this run's to guess.
+                let readiness = crate::domain::ask::readiness(requirement, &spec);
+                if !readiness.ready {
+                    return Err(format!(
+                        "{id} is not ready for implementation: {}. Settle it with spec \
+                         decide {id} or spec draft {id} --interactive, then run spec \
+                         deliver {id}.",
+                        readiness.reasons.join("; ")
+                    ));
+                }
+                let pending = self.pending()?;
+                let planned: Vec<String> = requirement
+                    .derived
+                    .iter()
+                    .filter(|child| pending.contains(child))
+                    .cloned()
+                    .collect();
+                if planned.is_empty() {
+                    return Err(format!(
+                        "Every requirement derived from {id} is already implemented."
+                    ));
+                }
+                Ok(planned)
             }
             Target::Description(description) => self.draft_plan(prompter, description),
             Target::Backlog => {
@@ -495,9 +523,11 @@ impl Deliver {
         }
     }
 
-    /// Break plain words into requirements and plan the ones that were
-    /// accepted. `spec draft`'s own validate/refine loop runs inside
-    /// this call, so it is made once and its looping is trusted.
+    /// Preserve plain words as an ask, break it into requirements
+    /// without asking anyone, and plan the accepted ones - but only
+    /// once the ask is ready. A run that may not ask cannot settle an
+    /// open question or a pending proposal, so an ask that is not ready
+    /// is handed back with its reasons rather than half-delivered.
     fn draft_plan(
         &self,
         prompter: &mut dyn Prompter,
@@ -513,27 +543,38 @@ impl Deliver {
                  the requirement yourself with spec draft and then run spec deliver."
             ));
         };
-        let before = self.pending()?;
         let mutation = self.mutation_service();
         let file = self.options.file.as_deref();
-        let draft = mutation
-            .draft_assisted_from(prompter, &model, llm.as_ref(), file, description)
+        let report = mutation
+            .decompose(
+                prompter,
+                Some((&model, llm.as_ref())),
+                file,
+                AskTarget::Text(description.to_string()),
+                Mode::Automatic,
+            )
             .map_err(|e| e.to_string())?;
-        // The plan is what actually reached the catalog, read back rather
-        // than taken from the draft's own report: every pending id it
-        // added, so a description that held three requirements plans all
-        // three, and one that produced none says so instead of planning
-        // an id that is not there to work.
-        let after = self.pending()?;
-        let planned: Vec<String> = after
+        if !report.ready {
+            return Err(nothing_to_plan(description, &report.ask, &report.reasons));
+        }
+        // The plan is what the ask actually links, read back from the
+        // catalog rather than trusted from the report: every derived
+        // requirement still pending.
+        let pending = self.pending()?;
+        let planned: Vec<String> = report
+            .derived
             .iter()
-            .filter(|id| !before.contains(id))
+            .filter(|id| pending.contains(id))
             .cloned()
             .collect();
         if planned.is_empty() {
-            return Err(nothing_to_plan(description, &draft.findings));
+            return Err(nothing_to_plan(description, &report.ask, &report.reasons));
         }
-        prompter.tell(&format!("{} committed to the spec.", planned.join(", ")));
+        prompter.tell(&format!(
+            "{} committed to the spec under {}.",
+            planned.join(", "),
+            report.ask
+        ));
         Ok(planned)
     }
 
@@ -1341,14 +1382,14 @@ impl Deliver {
         )
     }
 
-    /// The pending requirement ids of the committed spec, in catalog
-    /// order.
+    /// Every requirement of the committed spec still awaiting delivery,
+    /// in catalog order.
     fn pending(&self) -> Result<Vec<String>, String> {
         Ok(self
             .spec()?
             .requirements
             .into_iter()
-            .filter(|r| r.status == "pending")
+            .filter(Requirement::awaits_delivery)
             .map(|r| r.id)
             .collect())
     }
@@ -1566,20 +1607,19 @@ fn invalid_mark(req_id: &str, issues: &[String]) -> String {
     )
 }
 
-/// A breakdown that put nothing in the catalog. Whatever the wording
-/// review was still objecting to goes back with it, because that is the
-/// only thing that says what to fix.
-fn nothing_to_plan(description: &str, findings: &[String]) -> String {
-    let because = match findings.is_empty() {
+/// A breakdown whose ask is not ready to implement. The ask is on
+/// record with everything that was decided, and the reasons say what
+/// a human has to settle, because that is the only thing that says what
+/// to fix.
+fn nothing_to_plan(description: &str, ask: &str, reasons: &[String]) -> String {
+    let because = match reasons.is_empty() {
         true => String::new(),
-        false => format!(
-            " The wording review still objects: {}.",
-            findings.join("; ")
-        ),
+        false => format!(" Still open: {}.", reasons.join("; ")),
     };
     format!(
-        "Breaking \"{description}\" down added no requirement to the catalog, so there is \
-         nothing to deliver.{because} Word it yourself with spec draft, then run spec deliver."
+        "Breaking \"{description}\" down left {ask} not ready for implementation, so there \
+         is nothing to deliver yet.{because} Settle it with spec decide {ask} or spec draft \
+         {ask} --interactive, then run spec deliver {ask}."
     )
 }
 
@@ -2732,33 +2772,54 @@ mod tests {
         assert!(error.contains("dependency resolution failed"), "{error}");
     }
 
-    /// Whatever the wording review was still objecting to is the only
-    /// thing that says what to fix, so it goes back with the refusal.
+    /// Whatever kept the ask from being ready is the only thing that
+    /// says what to fix, so it goes back with the refusal, and so does
+    /// the ask id the decisions are recorded under.
     #[test]
-    fn a_refused_breakdown_carries_the_findings_that_refused_it() {
-        let with = nothing_to_plan("adding", &["criteria: only happy paths".into()]);
+    fn a_refused_breakdown_carries_the_reasons_that_refused_it() {
+        let with = nothing_to_plan(
+            "adding",
+            "ASK-001",
+            &["question 1 is blocking and unanswered: Which delimiter?".into()],
+        );
         assert!(
-            with.contains("still objects: criteria: only happy paths."),
+            with.contains("Still open: question 1 is blocking and unanswered: Which delimiter?."),
             "{with}"
         );
-        let without = nothing_to_plan("adding", &[]);
-        assert!(!without.contains("still objects"), "{without}");
-        assert!(without.contains("spec draft"), "{without}");
+        assert!(with.contains("spec decide ASK-001"), "{with}");
+        let without = nothing_to_plan("adding", "ASK-001", &[]);
+        assert!(!without.contains("Still open"), "{without}");
+        assert!(
+            without.contains("spec draft ASK-001 --interactive"),
+            "{without}"
+        );
     }
 
     /// A breakdown that adds nothing leaves no plan to work, and the run
     /// says that rather than planning an id the catalog does not hold.
+    /// The ask itself is on record, with the open question that says why.
     #[test]
     fn a_breakdown_that_adds_no_requirement_is_refused_as_a_plan() {
-        let error = empty_catalog_orchestrator(model(Ok("[]")))
+        let orchestrator = empty_catalog_orchestrator(model(Ok("[]")));
+        let error = orchestrator
             .draft_plan(&mut nobody(), "adding")
             .unwrap_err();
-        assert!(error.contains("added no requirement"), "{error}");
-        assert!(error.contains("spec draft"), "{error}");
+        assert!(error.contains("ASK-001 not ready"), "{error}");
+        assert!(error.contains("no usable split"), "{error}");
+        assert!(
+            error.contains("spec draft ASK-001 --interactive"),
+            "{error}"
+        );
+        let spec = orchestrator.spec().unwrap();
+        assert_eq!(spec.requirements.len(), 1);
+        assert_eq!(spec.requirements[0].id, "ASK-001");
+        assert_eq!(spec.requirements[0].request.as_deref(), Some("adding"));
     }
 
-    /// The plan is every id the breakdown added, read back from the
-    /// catalog, so a description holding two requirements plans both.
+    /// The plan is every requirement the breakdown derived and the
+    /// rules accepted, read back from the catalog, so a description
+    /// holding two requirements plans both - under the ask that
+    /// preserves it.
     #[test]
     fn the_plan_is_every_requirement_the_breakdown_added() {
         let planned = empty_catalog_orchestrator(model(Ok(
@@ -2768,6 +2829,64 @@ mod tests {
         .draft_plan(&mut nobody(), "adding")
         .unwrap();
         assert_eq!(planned, vec!["REQ-001", "REQ-002"]);
+    }
+
+    /// A run that may not ask cannot accept a proposal the rules
+    /// refused, so a breakdown with one left pending is handed back
+    /// whole rather than half-delivered.
+    #[test]
+    fn a_breakdown_the_rules_could_not_settle_is_handed_back_with_its_reasons() {
+        // The second proposal's criterion is not phrased Given/When/Then,
+        // which the validator refuses, so the rules cannot accept it.
+        let orchestrator = empty_catalog_orchestrator(model(Ok(
+            r#"[{"title": "Adds two numbers", "story": "As a user, I want to add so that totals are right.", "acceptanceCriteria": ["Given an empty string, when add is called, then the result is 0"]},
+                {"title": "Rejects blanks", "story": "As a user, I want blanks rejected so that mistakes surface.", "acceptanceCriteria": ["A blank string makes add raise an error"]}]"#,
+        )));
+        let error = orchestrator
+            .draft_plan(&mut nobody(), "adding")
+            .unwrap_err();
+        assert!(error.contains("ASK-001 not ready"), "{error}");
+        assert!(error.contains("proposal 2"), "{error}");
+        assert!(error.contains("spec decide ASK-001"), "{error}");
+        // The accepted half is on record under the ask all the same.
+        let spec = orchestrator.spec().unwrap();
+        let ask = spec
+            .requirements
+            .iter()
+            .find(|r| r.id == "ASK-001")
+            .unwrap();
+        assert_eq!(ask.derived, vec!["REQ-001".to_string()]);
+    }
+
+    /// Delivering an ask by id works its derived requirements, and only
+    /// once the ask is ready.
+    #[test]
+    fn an_ask_is_delivered_through_its_derived_requirements() {
+        let orchestrator = empty_catalog_orchestrator(model(Ok(
+            r#"[{"title": "Adds two numbers", "story": "As a user, I want to add so that totals are right.", "acceptanceCriteria": ["Given an empty string, when add is called, then the result is 0"]},
+                {"title": "Rejects blanks", "story": "As a user, I want blanks rejected so that mistakes surface.", "acceptanceCriteria": ["Given a blank string, when add is called, then an error is raised"]}]"#,
+        )));
+        orchestrator.draft_plan(&mut nobody(), "adding").unwrap();
+        let planned = orchestrator
+            .plan(&mut nobody(), &Target::Requirement("ASK-001".into()))
+            .unwrap();
+        assert_eq!(planned, vec!["REQ-001", "REQ-002"]);
+        // Reopen it behind the record: the plan is refused with the reason.
+        let mutation = orchestrator.mutation_service();
+        mutation
+            .update_direct(
+                "ASK-001",
+                crate::application::spec_mutation_service::RequirementUpdate {
+                    request: Some("adding and subtracting".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let error = orchestrator
+            .plan(&mut nobody(), &Target::Requirement("ASK-001".into()))
+            .unwrap_err();
+        assert!(error.contains("ASK-001 is not ready"), "{error}");
+        assert!(error.contains("spec decide ASK-001"), "{error}");
     }
 
     /// The prompter the CLI actually wires, for the one step that puts

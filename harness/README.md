@@ -7,7 +7,7 @@
 
 One native binary for the whole spec-driven loop (spec → Gherkin → RED →
 GREEN → REFACTOR) **and** the workshop MCP server: `spec mcp serve` exposes
-22 tools (wire identity `spec-driven-server` / `1.0.0`, title
+27 tools (wire identity `spec-driven-server` / `1.0.0`, title
 `Spec Driven`, website
 https://davidparry.github.io/spec-driven-agentic/). Frozen seven-tool
 reply shapes stay; the source of truth is `tests/mcp_conformance.rs` plus
@@ -70,7 +70,7 @@ development with BDD and TDD. The class lives in
 [../talks/WORKSHOP.md](../talks/WORKSHOP.md); students follow
 [../student-follow-docs/student-follow-along.md](../student-follow-docs/student-follow-along.md).
 The class walks students through the loop in Cursor against **this binary**
-(`spec mcp serve`, 22 tools). To finish the same kata from the terminal
+(`spec mcp serve`, 27 tools). To finish the same kata from the terminal
 with scoped profiles (Wi-Fi off), follow
 [../student-follow-docs/harness-path.md](../student-follow-docs/harness-path.md).
 
@@ -89,7 +89,7 @@ Stated as facts about what each tool does and does not do:
   knows exactly one workflow and can therefore enforce it — per-command
   tool profiles, confined direct writes, phase gates. **This is not an
   either/or.** Point pi at `spec mcp serve` (`pi -nbt`) and it drives the
-  same 22 tools; the server is the constant, the runner is the opinion.
+  same 27 tools; the server is the constant, the runner is the opinion.
 - **GitHub Spec Kit** — a phase workflow (specify, plan, tasks,
   implement) for AI agents over markdown specs. Its specs are prose for
   agents to interpret, not executable Gherkin; it has no test-state
@@ -116,7 +116,7 @@ contract, and a local-only LLM — in one native binary. That combination
 is why this exists.
 
 The embedded server is deliberately not exclusive to the runner: any MCP
-host can call those 22 tools, and the workshop expects you to try at least
+host can call those 27 tools, and the workshop expects you to try at least
 two. See [../student-follow-docs/pi-path.md](../student-follow-docs/pi-path.md)
 for the general-agent side of the comparison.
 
@@ -180,9 +180,9 @@ architecture and full test coverage throughout:
   model is briefed with the whole process document (states, commands,
   loop, invariants) plus the full project state, and names the next
   command in plain words.
-- `spec mcp serve` — the workshop MCP stdio server: 22 tools (frozen seven
+- `spec mcp serve` — the workshop MCP stdio server: 27 tools (frozen seven
   plus authoring/inspect). Conformance-tested over real JSON-RPC.
-  Cursor sees all 21; harness LLM commands attach a scoped profile.
+  Cursor sees all 27; harness LLM commands attach a scoped profile.
 - `spec mcp tools | call` — list or invoke one tool over a throwaway
   session (loopback or `--stdio`).
 - `spec tools list | profiles | show | enable | disable | refresh | servers`
@@ -953,8 +953,8 @@ test-first:
    (`list_requirements`, `get_requirement`, `validate_spec`,
    `refine_requirement`, `run_tests`, `get_tdd_state`, `start_refactor`)
    must keep their reply shapes. The source of truth is
-   `tests/mcp_conformance.rs` plus smoke-test `ToolPlan` (exactly 22
-   names; a 23rd tool fails that Java build). Backup Inspector:
+   `tests/mcp_conformance.rs` plus smoke-test `ToolPlan` (exactly 27
+   names; a 28th tool fails that Java build). Backup Inspector:
    `npx @modelcontextprotocol/inspector spec mcp serve --root $PWD`.
 4. **Never expose escape hatches.** No `write_file`, `run_shell`,
    `install_dependency`, or arbitrary-path tools. Mutations go through

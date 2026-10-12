@@ -58,6 +58,80 @@ requirements.json  →  spec / MCP tools  →  .feature + tests  →  Cucumber/J
 | `acceptanceCriteria` | at least one | Each criterion must be phrased Given/When/Then. This is the load-bearing field: agents translate these lines into the Gherkin scenarios and unit tests you then implement. |
 | `featureFile` | when implemented | Repo-root-relative path to the feature file carrying the scenario. Optional while `pending`; once `implemented`, validation requires the file to exist *and* to contain a scenario tagged `@<id>`. `spec mark-implemented` records it automatically. |
 | `productionFiles` | no | Where this requirement's production code lives, as an array — one requirement's code is not always one file. Declared with [`spec set-production`](commands/spec.md#spec-set-production) and added to by a delivery recording what it wrote. When absent, `spec implement` infers a conventional path from `project` instead. |
+| `type` | no | `actionable_requirement` (the default when absent) or `ask_requirement` — see below. A requirement written before the field existed is read, and written back, without it. |
+
+## Asks and the requirements derived from them
+
+A request in the user's own words is kept in the same `requirements`
+array as an **ask**: a requirement like any other — id, title, story,
+Given/When/Then criteria, status — with `type: "ask_requirement"`, an
+`ASK-nnn` id, and the words themselves in `request`. The requirements
+derived from it are ordinary `actionable_requirement` entries that name
+it as `parent`; the ask lists them in `derived`. Both directions are
+checked by `spec validate`. Every field below is omitted when it does
+not apply, so a spec without asks is byte for byte what it was.
+
+| Field | On | What it does |
+|---|---|---|
+| `request` | ask | The request verbatim. Rewording it in meaning (`spec reword ASK-001 --request …`) reopens the decomposition; the derived requirements stand. |
+| `derived` | ask | Ids of the requirements derived from it, in the order they were accepted. |
+| `decomposition` | ask | `mode` (`automatic` or `interactive`), `state` (`open` or `complete`), `confirmed` (the user said the accepted requirements cover the request — interactive only), `fingerprint` of the request the proposals were made from, and `ready` — derived, see below. |
+| `proposals` | ask | Every proposed requirement with a `number`, its wording, a `fingerprint` of that wording, `status` (`pending`, `accepted`, `rejected`, `excluded`), the `requirement` it became once accepted, the `reason` given with a rejection or exclusion, and the review `findings`. |
+| `questions` | ask | Clarifications the breakdown raised, each with a `number`, `text`, whether it is `blocking`, and the `answer` once given. Separate from the proposals: a question is never a requirement. |
+| `parent` | derived | The ask this requirement derives from. |
+| `acceptance` | derived | `by` — `automatic` (the deterministic review passed it) or `user` (a person approved these exact words) — and `wording`, the fingerprint of the title, story, and criteria that were accepted. A requirement whose wording no longer matches is **not accepted**: `spec reword` clears the field when the meaning changes and keeps it when only whitespace does. |
+
+An ask's own title, story, and criteria are derived from its children
+(one criterion per accepted requirement plus the refusal of anything
+still pending) so the ask passes the same validation and wording review
+as every other row; they cannot be set directly.
+
+**Readiness** (`decomposition.ready`, recomputed on every write and
+reported by `spec show`, `spec draft`, `spec decide`, and
+`get_requirement`) is true only when the decomposition is `complete`,
+`derived` is non-empty, every derived requirement exists, names the ask
+as `parent`, and carries an `acceptance` whose `wording` matches its
+current wording (and whose `by` is `user` in interactive mode), no
+blocking question is unanswered, no proposal is `pending` or `rejected`
+without having been revised or excluded, and — in interactive mode —
+`confirmed` is true. `spec deliver` works an ask through its derived
+requirements and refuses one that is not ready; `spec mark-implemented`
+flips an ask only once every derived requirement is implemented.
+
+```json
+{
+  "id": "ASK-001",
+  "type": "ask_requirement",
+  "title": "Sum numbers from a comma separated string, empty input means zero",
+  "status": "pending",
+  "story": "As a requester, I want ...",
+  "acceptanceCriteria": ["Given REQ-002 ... is accepted, ..."],
+  "request": "sum numbers from a comma separated string, empty input means zero",
+  "derived": ["REQ-002"],
+  "decomposition": { "mode": "automatic", "state": "complete", "confirmed": false, "fingerprint": "…", "ready": false },
+  "proposals": [
+    { "number": 1, "title": "Comma separated numbers are summed", "story": "…", "acceptanceCriteria": ["…"], "fingerprint": "…", "status": "accepted", "requirement": "REQ-002" },
+    { "number": 2, "title": "Empty string returns zero", "story": "…", "acceptanceCriteria": ["…"], "fingerprint": "…", "status": "pending", "findings": ["…"] }
+  ],
+  "questions": []
+}
+```
+
+```json
+{
+  "id": "REQ-002",
+  "type": "actionable_requirement",
+  "title": "Comma separated numbers are summed",
+  "status": "pending",
+  "story": "…",
+  "acceptanceCriteria": ["…"],
+  "parent": "ASK-001",
+  "acceptance": { "by": "automatic", "wording": "…" }
+}
+```
+
+How these are written and decided is in
+[`spec draft`, `spec decide`, `spec link`, and `spec delete`](commands/spec.md#spec-draft-request--an-ask-broken-into-requirements).
 
 ## The catalog: splitting the spec across files
 

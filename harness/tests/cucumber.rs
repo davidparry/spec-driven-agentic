@@ -52,7 +52,8 @@ use spec_harness::application::model_service::{
 use spec_harness::application::scenario_service::ScenarioService;
 use spec_harness::application::session_service::SessionService;
 use spec_harness::application::spec_mutation_service::{
-    DraftReport, IncludeReport, ListedRequirement, SpecMutationService,
+    AskTarget, Decisions, DecomposeReport, DraftReport, IncludeReport, ListedRequirement,
+    NewRequirement, RequirementUpdate, SpecMutationService,
 };
 use spec_harness::application::spec_service::{
     EnrichedRequirement, ProjectLayout, RefinementReport, RequirementSummary, SpecService,
@@ -68,6 +69,7 @@ use spec_harness::bootstrap::refresh_project_memory;
 use spec_harness::branch::{Branched, offer_branch};
 use spec_harness::deliver::{Deliver, DeliverOptions, DeliverReport, Target, parse_target};
 use spec_harness::domain::CACHE_DIR;
+use spec_harness::domain::ask::{AcceptedBy, Mode as AskMode};
 use spec_harness::domain::decision::{
     DEFAULT_MIN_CONFIDENCE, Judgment, Mode, Policies, Policy, Verdict,
 };
@@ -134,6 +136,12 @@ struct SpecWorld {
     feature_doc: Option<FeatureDoc>,
     feature_error: Option<FeatureError>,
     draft_report: Option<DraftReport>,
+    /// The last ask decomposition or decision, however it was reached.
+    ask_report: Option<DecomposeReport>,
+    /// Whether the last unattended run put a question to anyone.
+    unattended_asked: Vec<String>,
+    /// A spec file snapshot a later step compares against.
+    remembered_spec: Option<String>,
     include_report: Option<IncludeReport>,
     listed_requirements: Option<Vec<ListedRequirement>>,
     mutation_error: Option<String>,
@@ -1309,7 +1317,8 @@ fn requirement_drafted_assisted(world: &mut SpecWorld) {
     };
     let llm = world.scripted_llm();
     let service = world.real_mutation_service();
-    world.draft_report = Some(
+    world.draft_report = None;
+    world.ask_report = Some(
         service
             .draft_assisted(&mut prompter, "scripted-model", &llm)
             .unwrap(),
@@ -1317,11 +1326,497 @@ fn requirement_drafted_assisted(world: &mut SpecWorld) {
     world.prompt_transcript = prompter.transcript;
 }
 
+// ---- ask decomposition steps -----------------------------------------------
+
+/// The prompter of an unattended run: narration is kept, and a question
+/// is recorded as the failure it would be in CI rather than answered.
+struct UnattendedPrompter {
+    transcript: Vec<String>,
+    asked: Vec<String>,
+}
+
+impl Prompter for UnattendedPrompter {
+    fn tell(&mut self, message: &str) {
+        self.transcript.push(message.to_string());
+    }
+    fn ask(&mut self, question: &str) -> Result<String, PromptError> {
+        self.asked.push(question.to_string());
+        Err(PromptError("an unattended run must not ask".into()))
+    }
+    fn confirm(&mut self, question: &str) -> Result<bool, PromptError> {
+        self.asked.push(question.to_string());
+        Err(PromptError("an unattended run must not ask".into()))
+    }
+}
+
+impl SpecWorld {
+    /// Break `target` down with nothing asked, with the scripted model
+    /// when a scenario gave one and the rules alone otherwise.
+    fn decompose_unattended(&mut self, target: AskTarget) {
+        let mut prompter = UnattendedPrompter {
+            transcript: Vec::new(),
+            asked: Vec::new(),
+        };
+        let llm = if self.llm_reply.is_some() {
+            Some(self.scripted_llm())
+        } else {
+            None
+        };
+        let aid = llm
+            .as_ref()
+            .map(|llm| ("scripted-model", llm as &dyn LlmConversation));
+        let service = self.real_mutation_service();
+        let outcome = service.decompose(&mut prompter, aid, None, target, AskMode::Automatic);
+        self.prompt_transcript = prompter.transcript;
+        self.unattended_asked = prompter.asked;
+        match outcome {
+            Ok(report) => self.ask_report = Some(report),
+            Err(error) => self.mutation_error = Some(error.0),
+        }
+    }
+
+    fn decide(&mut self, ask: &str, decisions: Decisions) {
+        match self.real_mutation_service().decide(ask, decisions) {
+            Ok(report) => self.ask_report = Some(report),
+            Err(error) => self.mutation_error = Some(error.0),
+        }
+    }
+
+    fn update_requirement(&mut self, id: &str, update: RequirementUpdate) {
+        let parent = self.parent_of(id);
+        match self.real_mutation_service().update_direct(id, update) {
+            Ok(_) => self.refresh_ask_report(parent),
+            Err(error) => self.mutation_error = Some(error.0),
+        }
+    }
+
+    /// The ask `id` is under, or `id` itself when it is the ask.
+    fn parent_of(&mut self, id: &str) -> Option<String> {
+        let requirement = self.written_requirement(id);
+        if requirement.is_ask() {
+            Some(requirement.id)
+        } else {
+            requirement.parent
+        }
+    }
+
+    /// Re-read an ask as it stands after a change made around it, so the
+    /// assertions read the current record rather than a stale report.
+    fn refresh_ask_report(&mut self, ask: Option<String>) {
+        if let Some(ask) = ask
+            && self.written_spec().requirements.iter().any(|r| r.id == ask)
+        {
+            self.decide(&ask, Decisions::default());
+        }
+    }
+
+    fn ask_report(&self) -> &DecomposeReport {
+        self.ask_report.as_ref().expect("an ask report")
+    }
+
+    fn written_requirement(&mut self, id: &str) -> Requirement {
+        self.written_spec()
+            .requirements
+            .into_iter()
+            .find(|r| r.id == id)
+            .unwrap_or_else(|| panic!("no written requirement {id}"))
+    }
+}
+
+fn by_of(who: &str) -> AcceptedBy {
+    match who {
+        "the user" => AcceptedBy::User,
+        "automatically" | "the review" => AcceptedBy::Automatic,
+        other => panic!("who is {other}?"),
+    }
+}
+
+fn ids_of(list: &str) -> Vec<String> {
+    list.split(',')
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+#[given(regex = r#"^the request "(.+)" is broken down without prompts$"#)]
+#[when(regex = r#"^the request "(.+)" is broken down without prompts$"#)]
+fn request_broken_down_unattended(world: &mut SpecWorld, request: String) {
+    world.decompose_unattended(AskTarget::Text(request));
+}
+
+#[when(regex = r#"^the ask "([^"]+)" is run again without prompts$"#)]
+fn ask_run_again_unattended(world: &mut SpecWorld, ask: String) {
+    world.decompose_unattended(AskTarget::Existing(ask));
+}
+
+#[when(regex = r#"^decisions on "([^"]+)" accept proposals? "([^"]+)" by (the user|the review)$"#)]
+fn decisions_accept(world: &mut SpecWorld, ask: String, numbers: String, who: String) {
+    let accept = ids_of(&numbers)
+        .iter()
+        .map(|n| n.parse().unwrap())
+        .collect();
+    world.decide(
+        &ask,
+        Decisions {
+            accept,
+            by: Some(by_of(&who)),
+            ..Default::default()
+        },
+    );
+}
+
+#[when(regex = r#"^decisions on "([^"]+)" reject proposal (\d+) because "(.+)"$"#)]
+fn decisions_reject(world: &mut SpecWorld, ask: String, number: u32, reason: String) {
+    world.decide(
+        &ask,
+        Decisions {
+            reject: vec![(number, Some(reason))],
+            by: Some(AcceptedBy::User),
+            ..Default::default()
+        },
+    );
+}
+
+#[when(regex = r#"^decisions on "([^"]+)" exclude proposal (\d+) because "(.+)"$"#)]
+fn decisions_exclude(world: &mut SpecWorld, ask: String, number: u32, reason: String) {
+    world.decide(
+        &ask,
+        Decisions {
+            exclude: vec![(number, Some(reason))],
+            by: Some(AcceptedBy::User),
+            ..Default::default()
+        },
+    );
+}
+
+#[when(regex = r#"^decisions on "([^"]+)" answer question (\d+) with "(.+)"$"#)]
+fn decisions_answer(world: &mut SpecWorld, ask: String, number: u32, answer: String) {
+    world.decide(
+        &ask,
+        Decisions {
+            answers: vec![(number, answer)],
+            by: Some(AcceptedBy::User),
+            ..Default::default()
+        },
+    );
+}
+
+#[when(regex = r#"^decisions on "([^"]+)" confirm coverage (automatically|by the user)$"#)]
+fn decisions_confirm(world: &mut SpecWorld, ask: String, who: String) {
+    let by = if who == "by the user" {
+        AcceptedBy::User
+    } else {
+        AcceptedBy::Automatic
+    };
+    world.decide(
+        &ask,
+        Decisions {
+            complete: Some(true),
+            confirmed: Some(true),
+            by: Some(by),
+            ..Default::default()
+        },
+    );
+}
+
+#[when(regex = r#"^requirement "([^"]+)" is retitled "(.+)"$"#)]
+fn requirement_retitled(world: &mut SpecWorld, id: String, title: String) {
+    world.update_requirement(
+        &id,
+        RequirementUpdate {
+            title: Some(title),
+            ..Default::default()
+        },
+    );
+}
+
+#[when(regex = r#"^the request of "([^"]+)" is reworded to "(.+)"$"#)]
+fn request_reworded(world: &mut SpecWorld, id: String, request: String) {
+    world.update_requirement(
+        &id,
+        RequirementUpdate {
+            request: Some(request),
+            ..Default::default()
+        },
+    );
+}
+
+#[when(regex = r#"^requirement "([^"]+)" is unlinked from its ask$"#)]
+fn requirement_unlinked(world: &mut SpecWorld, id: String) {
+    world.update_requirement(
+        &id,
+        RequirementUpdate {
+            unlink: true,
+            ..Default::default()
+        },
+    );
+}
+
+#[when(
+    regex = r#"^a requirement titled "([^"]+)" is created under "([^"]+)" by (the user|the review) with:$"#
+)]
+fn requirement_created_under(
+    world: &mut SpecWorld,
+    title: String,
+    parent: String,
+    who: String,
+    step: &Step,
+) {
+    let mut lines = docstring_lines(step);
+    let story = lines.remove(0);
+    let new = NewRequirement {
+        title,
+        story,
+        criteria: lines,
+        request: None,
+        parent: Some(parent),
+        by: Some(by_of(&who)),
+    };
+    let parent = new.parent.clone();
+    match world.real_mutation_service().create_direct(new, None) {
+        Ok(report) => {
+            world.draft_report = Some(report);
+            world.refresh_ask_report(parent);
+        }
+        Err(error) => world.mutation_error = Some(error.0),
+    }
+}
+
+#[when(regex = r#"^requirement "([^"]+)" is deleted( with cascade)?$"#)]
+fn requirement_deleted(world: &mut SpecWorld, id: String, cascade: String) {
+    let parent = world.parent_of(&id);
+    match world
+        .real_mutation_service()
+        .delete(&id, !cascade.is_empty())
+    {
+        Ok(_) => world.refresh_ask_report(parent),
+        Err(error) => world.mutation_error = Some(error.0),
+    }
+}
+
+#[given("the written spec is remembered")]
+#[when("the written spec is remembered")]
+fn written_spec_remembered(world: &mut SpecWorld) {
+    world.remembered_spec = world.work_tree().read(SPEC_PATH).unwrap();
+}
+
+#[then("the written spec is byte for byte what was remembered")]
+fn written_spec_as_remembered(world: &mut SpecWorld) {
+    let before = world.remembered_spec.clone().expect("a remembered spec");
+    assert_eq!(world.work_tree().read(SPEC_PATH).unwrap(), Some(before));
+}
+
+#[then("nobody was asked anything")]
+fn nobody_was_asked(world: &mut SpecWorld) {
+    assert!(
+        world.unattended_asked.is_empty(),
+        "asked: {:#?}",
+        world.unattended_asked
+    );
+    assert!(world.mutation_error.is_none(), "{:?}", world.mutation_error);
+}
+
+#[given(regex = r#"^the ask "([^"]+)" is (ready|not ready)$"#)]
+#[then(regex = r#"^the ask "([^"]+)" is (ready|not ready)$"#)]
+fn ask_readiness(world: &mut SpecWorld, id: String, state: String) {
+    let report = world.ask_report().clone();
+    assert_eq!(report.ask, id, "report: {report:?}");
+    assert_eq!(report.ready, state == "ready", "report: {report:?}");
+    // The report says what the file says.
+    let ask = world.written_requirement(&id);
+    let spec = world.written_spec();
+    let readiness = spec_harness::domain::ask::readiness(&ask, &spec);
+    assert_eq!(readiness.ready, state == "ready", "{readiness:?}");
+    assert_eq!(
+        ask.decomposition.as_ref().map(|d| d.ready),
+        Some(state == "ready")
+    );
+}
+
+#[then(regex = r#"^an ask reason contains "(.+)"$"#)]
+fn ask_reason_contains(world: &mut SpecWorld, fragment: String) {
+    let report = world.ask_report();
+    assert!(
+        report.reasons.iter().any(|r| r.contains(&fragment)),
+        "report: {report:?}"
+    );
+}
+
+#[then(regex = r#"^the ask reports proposals? "([^"]*)" as (pending|rejected|excluded)$"#)]
+fn ask_reports_proposals(world: &mut SpecWorld, numbers: String, status: String) {
+    let report = world.ask_report();
+    let expected: Vec<u32> = ids_of(&numbers)
+        .iter()
+        .map(|n| n.parse().unwrap())
+        .collect();
+    let actual = match status.as_str() {
+        "pending" => &report.pending,
+        "rejected" => &report.rejected,
+        _ => &report.excluded,
+    };
+    assert_eq!(actual, &expected, "report: {report:?}");
+}
+
+#[then(regex = r#"^the ask reports "([^"]*)" accepted$"#)]
+fn ask_reports_accepted(world: &mut SpecWorld, ids: String) {
+    let report = world.ask_report();
+    assert_eq!(report.accepted, ids_of(&ids), "report: {report:?}");
+}
+
+#[then(regex = r#"^the ask "([^"]+)" preserves the request "(.+)"$"#)]
+fn ask_preserves_request(world: &mut SpecWorld, id: String, request: String) {
+    let ask = world.written_requirement(&id);
+    assert_eq!(ask.kind(), spec_harness::domain::model::ASK_REQUIREMENT);
+    assert_eq!(ask.request.as_deref(), Some(request.as_str()));
+    assert!(!ask.title.is_empty() && !ask.story.is_empty(), "{ask:?}");
+    assert!(!ask.acceptance_criteria.is_empty(), "{ask:?}");
+    assert_eq!(ask.status, "pending");
+}
+
+#[then(regex = r#"^the ask "([^"]+)" derives "([^"]*)"$"#)]
+fn ask_derives(world: &mut SpecWorld, id: String, ids: String) {
+    let ask = world.written_requirement(&id);
+    assert_eq!(ask.derived, ids_of(&ids), "{ask:?}");
+    for child in ask.derived {
+        let child = world.written_requirement(&child);
+        assert_eq!(child.parent.as_deref(), Some(id.as_str()), "{child:?}");
+        assert_eq!(
+            child.kind(),
+            spec_harness::domain::model::ACTIONABLE_REQUIREMENT
+        );
+    }
+}
+
+#[then(regex = r#"^"([^"]+)" is accepted under "([^"]+)" (by the user|automatically)$"#)]
+fn accepted_under(world: &mut SpecWorld, id: String, parent: String, who: String) {
+    let child = world.written_requirement(&id);
+    assert_eq!(child.parent.as_deref(), Some(parent.as_str()), "{child:?}");
+    let acceptance = child.acceptance.clone().expect("an acceptance");
+    let expected = if who == "by the user" {
+        AcceptedBy::User
+    } else {
+        AcceptedBy::Automatic
+    };
+    assert_eq!(acceptance.by, expected, "{child:?}");
+    assert_eq!(
+        acceptance.wording,
+        spec_harness::domain::ask::requirement_fingerprint(&child)
+    );
+}
+
+#[then(regex = r#"^"([^"]+)" is not accepted$"#)]
+fn not_accepted(world: &mut SpecWorld, id: String) {
+    let child = world.written_requirement(&id);
+    assert!(child.acceptance.is_none(), "{child:?}");
+}
+
+#[then(regex = r#"^"([^"]+)" stands on its own$"#)]
+fn stands_alone(world: &mut SpecWorld, id: String) {
+    let requirement = world.written_requirement(&id);
+    assert!(requirement.parent.is_none(), "{requirement:?}");
+    assert!(requirement.acceptance.is_none(), "{requirement:?}");
+}
+
+#[then(regex = r#"^the ask "([^"]+)" has an open (blocking )?question containing "(.+)"$"#)]
+fn ask_has_open_question(world: &mut SpecWorld, id: String, blocking: String, text: String) {
+    let ask = world.written_requirement(&id);
+    let question = ask
+        .questions
+        .iter()
+        .find(|q| q.text.contains(&text))
+        .unwrap_or_else(|| panic!("no question {text:?} in {:#?}", ask.questions));
+    assert!(question.answer.is_none(), "{question:?}");
+    assert_eq!(question.blocking, !blocking.is_empty(), "{question:?}");
+    let report = world.ask_report();
+    assert!(
+        report.open_questions.iter().any(|q| q.text.contains(&text)),
+        "report: {report:?}"
+    );
+}
+
+#[then(regex = r#"^the ask "([^"]+)" has no open question$"#)]
+fn ask_has_no_open_question(world: &mut SpecWorld, id: String) {
+    let ask = world.written_requirement(&id);
+    assert!(
+        ask.questions.iter().all(|q| q.answer.is_some()),
+        "{:#?}",
+        ask.questions
+    );
+}
+
+#[then(regex = r#"^the ask "([^"]+)" is (open|complete)( and confirmed)?$"#)]
+fn ask_state(world: &mut SpecWorld, id: String, state: String, confirmed: String) {
+    use spec_harness::domain::ask::DecompositionState;
+    let ask = world.written_requirement(&id);
+    let decomposition = ask.decomposition.clone().expect("a decomposition");
+    let expected = if state == "open" {
+        DecompositionState::Open
+    } else {
+        DecompositionState::Complete
+    };
+    assert_eq!(decomposition.state, expected, "{decomposition:?}");
+    assert_eq!(
+        decomposition.confirmed,
+        !confirmed.is_empty(),
+        "{decomposition:?}"
+    );
+}
+
+#[then(regex = r#"^the written requirement "([^"]+)" carries no ask field$"#)]
+fn written_requirement_plain(world: &mut SpecWorld, id: String) {
+    let text = world
+        .work_tree()
+        .read(SPEC_PATH)
+        .unwrap()
+        .expect("a spec file");
+    let document: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let row = document["requirements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["id"] == id)
+        .unwrap_or_else(|| panic!("{id} not in {text}"));
+    for key in [
+        "type",
+        "request",
+        "parent",
+        "derived",
+        "decomposition",
+        "acceptance",
+        "proposals",
+        "questions",
+    ] {
+        assert!(row.get(key).is_none(), "{id} carries {key}: {row}");
+    }
+}
+
+#[then("the written spec validates clean")]
+fn written_spec_validates_clean(world: &mut SpecWorld) {
+    let root = world.project_root();
+    let layout = spec_harness::workspace::detect_project_layout(&root);
+    let report = spec_harness::wiring::spec_service(&root, layout).validate_spec();
+    assert!(report.valid, "issues: {:#?}", report.issues);
+}
+
+#[then(regex = r#"^the written requirement "([^"]+)" is absent$"#)]
+fn written_requirement_absent(world: &mut SpecWorld, id: String) {
+    assert!(
+        world.written_spec().requirements.iter().all(|r| r.id != id),
+        "{id} is still there"
+    );
+}
+
 #[then(regex = r#"^the draft is written as "([^"]+)"$"#)]
 fn draft_written_as(world: &mut SpecWorld, id: String) {
-    let report = world.draft_report.as_ref().expect("a draft report");
+    if let Some(report) = world.draft_report.as_ref() {
+        assert!(report.written, "report: {report:?}");
+        assert_eq!(report.id, id);
+        return;
+    }
+    let report = world.ask_report();
     assert!(report.written, "report: {report:?}");
-    assert_eq!(report.id, id);
+    assert!(report.accepted.contains(&id), "report: {report:?}");
 }
 
 #[then("the draft is not written")]
@@ -1363,8 +1858,11 @@ fn reported_draft_finding_contains(world: &mut SpecWorld, fragment: String) {
 
 #[then(regex = r#"^the draft next step contains "(.+)"$"#)]
 fn draft_next_step_contains(world: &mut SpecWorld, fragment: String) {
-    let report = world.draft_report.as_ref().expect("a draft report");
-    assert!(report.next_step.contains(&fragment), "report: {report:?}");
+    let next_step = match world.draft_report.as_ref() {
+        Some(report) => report.next_step.clone(),
+        None => world.ask_report().next_step.clone(),
+    };
+    assert!(next_step.contains(&fragment), "next step: {next_step}");
 }
 
 #[then(regex = r"^the written spec has (\d+) requirements?$")]
@@ -4040,6 +4538,11 @@ fn no_default_profile_offers_a_writer(world: &mut SpecWorld) {
         "feature_create",
         "requirement_reword",
         "requirement_mark_implemented",
+        "requirement_create",
+        "requirement_update",
+        "requirement_delete",
+        "requirement_ask",
+        "requirement_decide",
         "step_definition_create",
         "unit_test_create",
     ];

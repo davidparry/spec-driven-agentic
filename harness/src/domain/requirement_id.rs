@@ -22,7 +22,7 @@ pub const DEFAULT_PREFIX: &str = "REQ";
 
 /// The narrowest id the padding ever produces, so a fresh catalog
 /// starts at `REQ-001` rather than `REQ-1`.
-const MIN_WIDTH: usize = 3;
+pub(crate) const MIN_WIDTH: usize = 3;
 
 /// Does `text` read as a requirement id? Case-sensitive: ids are
 /// uppercase, and the validator reports a lowercase one as malformed.
@@ -46,13 +46,16 @@ pub fn split_id(id: &str) -> Option<(&str, &str)> {
 /// ancestors up the include tree, then anything else in the catalog in
 /// catalog order, then [`DEFAULT_PREFIX`]. Each step takes the first
 /// requirement it finds rather than the most common one, so the answer
-/// does not move when a file grows.
+/// does not move when a file grows. Asks carry their own prefix and
+/// are not read: a catalog whose first entry is an ask still numbers
+/// its requirements `REQ-001`.
 pub fn prefix_for(catalog: &SpecCatalog, target_file: &str) -> String {
     let from = |path: &str| {
         catalog.file(path).and_then(|file| {
             file.spec
                 .requirements
                 .iter()
+                .filter(|r| !r.is_ask())
                 .find_map(|r| split_id(&r.id).map(|(prefix, _)| prefix.to_string()))
         })
     };
@@ -73,6 +76,7 @@ pub fn prefix_for(catalog: &SpecCatalog, target_file: &str) -> String {
             file.spec
                 .requirements
                 .iter()
+                .filter(|r| !r.is_ask())
                 .find_map(|r| split_id(&r.id).map(|(prefix, _)| prefix.to_string()))
         })
         .unwrap_or_else(|| DEFAULT_PREFIX.to_string())
@@ -146,6 +150,32 @@ mod tests {
     fn an_id_that_is_not_shaped_like_one_does_not_count() {
         let catalog = SpecCatalog::single_root(spec(&["req-1", "NOT AN ID", "REQ-002"]));
         assert_eq!(next_id(&catalog, "requirements.json"), "REQ-003");
+    }
+
+    #[test]
+    fn an_ask_does_not_set_the_prefix_of_the_requirements_under_it() {
+        let ask = crate::domain::ask::new_ask(
+            "ASK-001".into(),
+            "sum numbers",
+            crate::domain::ask::Mode::Automatic,
+        );
+        let catalog = SpecCatalog::single_root(Spec {
+            requirements: vec![ask],
+            ..Spec::default()
+        });
+        assert_eq!(next_id(&catalog, "requirements.json"), "REQ-001");
+        let catalog = SpecCatalog::single_root(Spec {
+            requirements: vec![
+                crate::domain::ask::new_ask(
+                    "ASK-001".into(),
+                    "sum numbers",
+                    crate::domain::ask::Mode::Automatic,
+                ),
+                requirement("HARNESS-003"),
+            ],
+            ..Spec::default()
+        });
+        assert_eq!(next_id(&catalog, "requirements.json"), "HARNESS-004");
     }
 
     #[test]

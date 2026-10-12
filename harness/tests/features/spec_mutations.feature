@@ -66,6 +66,7 @@ Feature: Spec mutations
     And the developer was asked "REQ-002 criterion 3 (leave blank to finish the criteria):"
     And the written spec has 2 requirements
 
+  @HARNESS-022
   Scenario: A described feature is split into proposals the wizard walks through
     Given the model will reply:
       """
@@ -79,32 +80,32 @@ Feature: Spec mutations
     And the developer will answer:
       """
       sum numbers from a comma separated string, empty input means zero
-      <empty>
-      2
-      <empty>
-      <empty>
-      <empty>
-      <empty>
+      a
+      a
       y
       """
     When a requirement is drafted with the model's help
     Then the draft is written as "REQ-003"
-    And the developer was told a finding containing "Accept all these requirements to refine, or enter comma-separated numbers of the ones to accept."
-    And the developer was told a finding containing "The description holds 2 requirement(s):"
-    And the developer was told a finding containing "2. Empty string returns zero"
-    And the developer was asked "Accept [Enter for all, or comma-separated numbers]:"
-    And the developer was told a finding containing "Accepted requirements were written to requirements/requirements.json as pending"
-    And the developer was told a finding containing "REQ-002 Comma separated numbers are summed"
-    And the developer was told a finding containing "REQ-003 Empty string returns zero"
-    And the developer was asked "Which requirement first to review and refine? [1-2, Enter for 1]:"
-    And the developer was asked "REQ-003 title [Empty string returns zero] (Enter keeps it):"
-    And the developer was asked "REQ-003 criterion 1 [Given an empty string "", when add is called, then the result is 0] (Enter keeps it, '-' drops it):"
-    And the written spec has 3 requirements
+    And the developer was told a finding containing "ASK-001 preserves the request: sum numbers from a comma separated string, empty input means zero"
+    And the developer was told a finding containing "The request holds 2 requirement(s) and 0 question(s)."
+    And the developer was told a finding containing "Proposal 1: Comma separated numbers are summed"
+    And the developer was asked "Proposal 1 - [a]pprove, [r]eject, re[v]ise, or e[x]clude from scope [a/r/v/x]:"
+    And the developer was told a finding containing "REQ-002 accepted by you."
+    And the developer was told a finding containing "Proposal 2: Empty string returns zero"
+    And the developer was told a finding containing "REQ-003 accepted by you."
+    And the developer was asked "Do the accepted requirements cover the whole request ASK-001?"
+    And the ask "ASK-001" preserves the request "sum numbers from a comma separated string, empty input means zero"
+    And the ask "ASK-001" derives "REQ-002, REQ-003"
+    And "REQ-002" is accepted under "ASK-001" by the user
+    And the ask "ASK-001" is complete and confirmed
+    And the ask "ASK-001" is ready
+    And the written spec has 4 requirements
 
-  # The assisted wizard writes the accepted batch up front so the developer
-  # can see it. Declining the rewording after that does not take the batch
-  # back, so the report says where it landed instead of claiming nothing did.
-  Scenario: Declining the reworded wording leaves the accepted batch on disk
+  # A rejection is a decision of record, not a deletion: the proposal
+  # stays on the ask with its reason, nothing is written for it, and the
+  # ask is not ready while a proposal stands rejected without a revision.
+  @HARNESS-022
+  Scenario: Rejecting a proposal keeps it on record and holds the ask back
     Given the model will reply:
       """
       [{"title": "Comma separated numbers are summed",
@@ -117,18 +118,17 @@ Feature: Spec mutations
     And the developer will answer:
       """
       sum numbers from a comma separated string, empty input means zero
-      <empty>
-      2
-      <empty>
-      <empty>
-      <empty>
-      <empty>
-      n
+      a
+      r
+      empty input is an error in this kata
+      y
       """
     When a requirement is drafted with the model's help
     Then the written spec has 3 requirements
-    And the draft next step contains "already in requirements/requirements.json under the model's wording"
-    And the draft next step contains "undo it with git restore"
+    And the ask "ASK-001" derives "REQ-002"
+    And the ask reports proposal "2" as rejected
+    And the ask "ASK-001" is not ready
+    And an ask reason contains "proposal 2 "Empty string returns zero" was rejected"
 
   Scenario: An unusable model reply falls back to manual drafting
     Given the model will reply:
@@ -144,12 +144,15 @@ Feature: Spec mutations
       Given an empty string "", when add is called, then the result is 0
       <empty>
       y
+      y
       """
     When a requirement is drafted with the model's help
     Then the draft is written as "REQ-002"
     And the developer was told a finding containing "asking again (2 of 3)"
-    And the developer was told a finding containing "The description gave no complete requirement - drafting manually."
+    And the developer was told a finding containing "The request gave no complete requirement - drafting manually."
     And the developer was asked "REQ-002 title:"
+    And the ask "ASK-001" preserves the request "sum numbers from a comma separated string"
+    And "REQ-002" is accepted under "ASK-001" by the user
 
   Scenario: Findings send the draft to the model whose rewording seeds the prompts
     Given the model will reply:
