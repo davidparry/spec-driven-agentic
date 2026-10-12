@@ -6552,3 +6552,48 @@ fn the_new_sessions_state_log_holds(world: &mut SpecWorld, count: usize) {
     let snapshot = FsStateStore::new(world.project_root()).load().unwrap();
     assert_eq!(snapshot.entries.len(), count, "{:?}", snapshot.entries);
 }
+
+#[given(expr = "a valid command name {string}")]
+fn given_a_valid_command_name(_world: &mut SpecWorld, arg0: String) {
+    todo!("implement step: a valid command name \"build\"");
+}
+
+#[when(expr = "the explain command is called with the argument {string}")]
+fn when_the_explain_command_is_called_with_the_argument(_world: &mut SpecWorld, arg0: String) {
+    todo!("implement step: the explain command is called with the argument \"build\"");
+}
+
+#[then(expr = "the output is a description of the {string} command.")]
+fn then_the_output_is_a_description_of_the_command(_world: &mut SpecWorld, arg0: String) {
+    todo!("implement step: the output is a description of the \"build\" command.");
+}
+
+#[given(expr = "an invalid command name {string}")]
+fn given_an_invalid_command_name(_world: &mut SpecWorld, arg0: String) {
+    todo!("implement step: an invalid command name \"xyz\"");
+}
+
+#[then(expr = "an error message {string} is returned.")]
+fn then_an_error_message_is_returned(_world: &mut SpecWorld, arg0: String) {
+    todo!("implement step: an error message \"Command not found\" is returned.");
+}
+
+#[given(expr = "an empty string {string}")]
+fn given_an_empty_string(_world: &mut SpecWorld, arg0: String) {
+    todo!("implement step: an empty string \"\"");
+}
+
+#[given(expr = "the command name {string}")]
+fn given_the_command_name(_world: &mut SpecWorld, arg0: String) {
+    todo!("implement step: the command name \"test\"");
+}
+
+#[then(expr = "the output contains the word {string}.")]
+fn then_the_output_contains_the_word(_world: &mut SpecWorld, arg0: String) {
+    todo!("implement step: the output contains the word \"run tests\".");
+}
+
+#[given(expr = "a command name with leading whitespace {string}")]
+fn given_a_command_name_with_leading_whitespace(_world: &mut SpecWorld, arg0: String) {
+    todo!("implement step: a command name with leading whitespace \" build\"");
+}

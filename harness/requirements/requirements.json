@@ -293,6 +293,32 @@
         "Given an ask that derives \"REQ-002\", when the ask is deleted with cascade, then the spec has 0 rows for \"ASK-001\" and 0 rows for \"REQ-002\""
       ],
       "featureFile": "tests/features/ask_decomposition.feature"
+    },
+    {
+      "id": "ASK-001",
+      "title": "Explain one spec command by name - what it does",
+      "status": "pending",
+      "type": "ask",
+      "request": "explain one spec command by name - what it does",
+      "children": [
+        "HARNESS-023"
+      ]
+    },
+    {
+      "id": "HARNESS-023",
+      "title": "Explain spec command by name",
+      "status": "pending",
+      "story": "As a developer, I want to explain a specific spec command by name so that I understand its functionality.",
+      "acceptanceCriteria": [
+        "Given a valid command name \"build\", when the explain command is called with the argument \"build\", then the output is a description of the \"build\" command.",
+        "Given an invalid command name \"xyz\", when the explain command is called with the argument \"xyz\", then an error message \"Command not found\" is returned.",
+        "Given an empty string \"\", when the explain command is called with the argument \"\", then an error message \"Command name cannot be empty\" is returned.",
+        "Given the command name \"test\", when the explain command is called with the argument \"test\", then the output contains the word \"run tests\".",
+        "Given a command name with leading whitespace \" build\", when the explain command is called with the argument \" build\", then the output is a description of the \"build\" command."
+      ],
+      "featureFile": "tests/features/explain-spec-command-by-name.feature",
+      "type": "req",
+      "parent": "ASK-001"
     }
   ]
 }
