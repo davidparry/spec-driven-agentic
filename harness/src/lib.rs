@@ -27,6 +27,7 @@ pub mod bootstrap;
 pub mod branch;
 pub mod deliver;
 pub mod domain;
+pub mod explain_specific_command_by_name;
 pub mod greenfield;
 pub mod mcp;
 pub mod ports;

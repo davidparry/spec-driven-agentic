@@ -293,6 +293,99 @@
         "Given an ask that derives \"REQ-002\", when the ask is deleted with cascade, then the spec has 0 rows for \"ASK-001\" and 0 rows for \"REQ-002\""
       ],
       "featureFile": "tests/features/ask_decomposition.feature"
+    },
+    {
+      "id": "ASK-001",
+      "title": "Explain one spec command by name - what it does, its options, and the",
+      "status": "pending",
+      "story": "As a requester, I want \"explain one spec command by name - what it does, its options, and the tools it may call - discovered from the binary's own command tree, and list every command when none is named\" so that every requirement derived from it is delivered.",
+      "acceptanceCriteria": [
+        "Given the ask ASK-001, when HARNESS-023 \"Explain specific command by name\" is implemented, then the derived requirement HARNESS-023 has the status \"implemented\"",
+        "Given the ask ASK-001, when HARNESS-024 \"List all commands when no name is specified\" is implemented, then the derived requirement HARNESS-024 has the status \"implemented\"",
+        "Given the ask ASK-001 with a derived requirement still pending, when spec mark-implemented ASK-001 runs, then it is refused with \"is still pending\""
+      ],
+      "type": "ask_requirement",
+      "request": "explain one spec command by name - what it does, its options, and the tools it may call - discovered from the binary's own command tree, and list every command when none is named",
+      "derived": [
+        "HARNESS-023",
+        "HARNESS-024"
+      ],
+      "decomposition": {
+        "mode": "automatic",
+        "state": "complete",
+        "confirmed": false,
+        "fingerprint": "ae6d0ab0519cad92",
+        "ready": true
+      },
+      "proposals": [
+        {
+          "number": 1,
+          "title": "Explain specific command by name",
+          "story": "As a CLI user, I want to retrieve the documentation for a named command so that I can learn its description, options, and tool dependencies.",
+          "acceptanceCriteria": [
+            "Given a valid command name \"run\" exists in the command tree, when the explain command is called with \"run\", then the output displays the command's description, its options, and the list of tools it calls",
+            "Given the command name \"unknown-cmd\" does not exist in the command tree, when the explain command is called with \"unknown-cmd\", then an error message \"Unknown command\" is returned"
+          ],
+          "fingerprint": "3c0e6e356a1093b4",
+          "status": "accepted",
+          "requirement": "HARNESS-023",
+          "findings": [
+            "criterion \"Given a valid command name \"run\" exists in the command tree, when the explain command is called with \"run\", then the output displays the command's description, its options, and the list of tools it calls\": the outcome is not concrete - state the exact expected value after 'then'"
+          ]
+        },
+        {
+          "number": 2,
+          "title": "List all commands when no name is specified",
+          "story": "As a CLI user, I want to see a full list of available commands so that I can discover all capabilities without guessing command names.",
+          "acceptanceCriteria": [
+            "Given no command name is provided, when the explain command is called, then the output lists every available command name from the command tree",
+            "Given the command tree is empty, when the explain command is called with no name, then the output is an empty list"
+          ],
+          "fingerprint": "2055d880ad0c0013",
+          "status": "accepted",
+          "requirement": "HARNESS-024",
+          "findings": [
+            "criterion \"Given no command name is provided, when the explain command is called, then the output lists every available command name from the command tree\": the outcome is not concrete - state the exact expected value after 'then'"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "HARNESS-023",
+      "title": "Explain specific command by name",
+      "status": "implemented",
+      "story": "As a CLI user, I want to retrieve the documentation for a named command so that I can learn its description, options, and tool dependencies.",
+      "acceptanceCriteria": [
+        "Given a valid command name \"run\" exists in the command tree, when the explain command is called with \"run\", then the output displays the command's description, its options, and the list of tools it calls",
+        "Given the command name \"unknown-cmd\" does not exist in the command tree, when the explain command is called with \"unknown-cmd\", then an error message \"Unknown command\" is returned"
+      ],
+      "featureFile": "tests/features/explain-specific-command-by-name.feature",
+      "productionFiles": [
+        "src/explain_specific_command_by_name.rs"
+      ],
+      "type": "actionable_requirement",
+      "parent": "ASK-001",
+      "acceptance": {
+        "by": "automatic",
+        "wording": "3c0e6e356a1093b4"
+      }
+    },
+    {
+      "id": "HARNESS-024",
+      "title": "List all commands when no name is specified",
+      "status": "pending",
+      "story": "As a CLI user, I want to see a full list of available commands so that I can discover all capabilities without guessing command names.",
+      "acceptanceCriteria": [
+        "Given no command name is provided, when the explain command is called, then the output lists every available command name from the command tree",
+        "Given the command tree is empty, when the explain command is called with no name, then the output is an empty list"
+      ],
+      "featureFile": "tests/features/list-all-commands-when-no-name-is-specified.feature",
+      "type": "actionable_requirement",
+      "parent": "ASK-001",
+      "acceptance": {
+        "by": "automatic",
+        "wording": "2055d880ad0c0013"
+      }
     }
   ]
 }

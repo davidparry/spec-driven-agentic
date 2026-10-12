@@ -125,7 +125,7 @@ blank title prompt:
 Paste this as the answer:
 
 ```
-for one requirement, report each acceptance criterion as proven or unproven; report all criteria proven when none are left unproven; count a scenario as proof only when it is tagged with that requirement id; treat a scenario whose step is undefined as proving nothing; and raise an error when the requirement id is absent from the spec
+explain one spec command by name - what it does, its options, and the tools it may call - discovered from the binary's own command tree, and list every command when none is named
 ```
 
 One sentence, but a sentence that names five behaviors. That is

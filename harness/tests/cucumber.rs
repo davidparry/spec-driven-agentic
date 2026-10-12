@@ -267,6 +267,8 @@ struct SpecWorld {
     recorded_session: Option<SessionId>,
     requested_session: Option<String>,
     session_start: Option<Result<SessionStart, SessionError>>,
+    command_tree: Option<spec_harness::explain_specific_command_by_name::CommandTree>,
+    explain_result: Option<Result<String, spec_harness::explain_specific_command_by_name::CommandExplainError>>,
 }
 
 // ---- fakes implementing the ports ----------------------------------------
@@ -6551,4 +6553,94 @@ fn the_new_sessions_memory_names_module_root(world: &mut SpecWorld, module_root:
 fn the_new_sessions_state_log_holds(world: &mut SpecWorld, count: usize) {
     let snapshot = FsStateStore::new(world.project_root()).load().unwrap();
     assert_eq!(snapshot.entries.len(), count, "{:?}", snapshot.entries);
+}
+
+#[given(expr = "a valid command name {string} exists in the command tree")]
+fn given_a_valid_command_name_exists_in_the_command_tree(world: &mut SpecWorld, arg0: String) {
+    use spec_harness::explain_specific_command_by_name::{CommandEntry, CommandTree};
+    let mut tree = CommandTree::new();
+    tree.register(CommandEntry {
+        name: arg0,
+        description: "Run the test suite".into(),
+        options: vec!["--config".into(), "--verbose".into()],
+        tools: vec!["cargo".into(), "java".into()],
+    });
+    world.command_tree = Some(tree);
+}
+
+#[when(expr = "the explain command is called with {string}")]
+fn when_the_explain_command_is_called_with(world: &mut SpecWorld, arg0: String) {
+    let tree = world
+        .command_tree
+        .as_ref()
+        .expect("a command tree was prepared");
+    world.explain_result = Some(tree.explain(&arg0));
+}
+
+#[then(expr = "the output displays the command's description, its options, and the list of tools it calls")]
+fn then_the_output_displays_the_command_s_description_its_options_and_the_list_of_tools_it_calls(
+    world: &mut SpecWorld,
+) {
+    let result = world
+        .explain_result
+        .as_ref()
+        .expect("the explain command was called");
+    let output = result
+        .as_ref()
+        .expect("explain should have succeeded");
+    assert!(output.contains("Run the test suite"), "description missing");
+    assert!(output.contains("--config"), "option --config missing");
+    assert!(output.contains("--verbose"), "option --verbose missing");
+    assert!(output.contains("cargo"), "tool cargo missing");
+    assert!(output.contains("java"), "tool java missing");
+}
+
+#[given(expr = "the command name {string} does not exist in the command tree")]
+fn given_the_command_name_does_not_exist_in_the_command_tree(
+    world: &mut SpecWorld,
+    _arg0: String,
+) {
+    world.command_tree = Some(spec_harness::explain_specific_command_by_name::CommandTree::new());
+}
+
+#[then(expr = "an error message {string} is returned")]
+fn then_an_error_message_is_returned(world: &mut SpecWorld, arg0: String) {
+    let result = world
+        .explain_result
+        .as_ref()
+        .expect("the explain command was called");
+    let err = result
+        .as_ref()
+        .expect_err("explain should have failed");
+    assert_eq!(err.to_string(), arg0);
+}
+
+#[given(expr = "no command name is provided")]
+fn no_command_name_is_provided(_world: &mut SpecWorld) {
+    todo!("implement step: no command name is provided");
+}
+
+#[when(expr = "the explain command is called")]
+fn the_explain_command_is_called(_world: &mut SpecWorld) {
+    todo!("implement step: the explain command is called");
+}
+
+#[then(expr = "the output lists every available command name from the command tree")]
+fn output_lists_every_available_command_name(_world: &mut SpecWorld) {
+    todo!("implement step: the output lists every available command name from the command tree");
+}
+
+#[given(expr = "the command tree is empty")]
+fn command_tree_is_empty(_world: &mut SpecWorld) {
+    todo!("implement step: the command tree is empty");
+}
+
+#[when(expr = "the explain command is called with no name")]
+fn explain_command_called_with_no_name(_world: &mut SpecWorld) {
+    todo!("implement step: the explain command is called with no name");
+}
+
+#[then(expr = "the output is an empty list")]
+fn output_is_empty_list(_world: &mut SpecWorld) {
+    todo!("implement step: the output is an empty list");
 }
