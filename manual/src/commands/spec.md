@@ -1,0 +1,668 @@
+# The requirements spec
+
+The spec at `requirements/requirements.json` is the project's source of
+truth. These commands read it, gate it, and mutate it (writing the file
+itself — see [direct writes](../direct-writes.md)). The root file is a
+[catalog](../spec-format.md#the-catalog-splitting-the-spec-across-files):
+it may include child spec files, and every command here operates on the
+merged view of the whole tree.
+
+```text
+spec list             spec refine <REQ_ID>
+spec show <REQ_ID>    spec reword <REQ_ID>
+spec draft            spec set-feature <REQ_ID> --file <FILE>
+spec validate         spec set-production <REQ_ID> --file <FILE>
+                      spec mark-implemented <REQ_ID>
+                      spec include add <PATH>
+```
+
+MCP tool equivalents: `list_requirements`, `get_requirement`,
+`validate_spec`, `refine_requirement`, `requirement_reword`,
+`requirement_mark_implemented`.
+
+`spec list`, `spec show`, `spec validate`, and `spec refine` print a
+readable summary on a terminal and the JSON below in a pipe. Each
+takes `--json` to print the JSON on a terminal too. See
+[output](../global-flags.md#output-readable-on-a-terminal-json-everywhere-else).
+
+---
+
+## spec list
+
+List every requirement with its id, title, status, and the spec file
+it lives in — requirements from included files merge into one backlog.
+
+```bash
+spec list
+```
+
+```json
+[
+  { "id": "REQ-001", "title": "Empty string returns zero", "status": "implemented",
+    "file": "requirements/requirements.json" },
+  { "id": "REQ-002", "title": "A single number is returned as-is", "status": "pending",
+    "file": "requirements/requirements.json" },
+  { "id": "REQ-003", "title": "Two numbers separated by a comma are summed", "status": "pending",
+    "file": "requirements/core/arithmetic.json" }
+]
+```
+
+Use it to pick the next `pending` requirement to work on.
+
+---
+
+## spec show
+
+Show one requirement, enriched with file locations and a workflow
+hint.
+
+```text
+Usage: spec show [OPTIONS] <REQ_ID>
+```
+
+```bash
+spec show REQ-003
+```
+
+```json
+{
+  "id": "REQ-003",
+  "title": "Two numbers separated by a comma are summed",
+  "status": "pending",
+  "story": "As a user, I want comma-separated numbers to be summed so that I can add multiple values at once.",
+  "acceptanceCriteria": [
+    "Given \"1,2\", when add is called, then the result is 3",
+    "Given \"10,20\", when add is called, then the result is 30"
+  ],
+  "featureLocation": "features/string_calculator.feature",
+  "stepDefinitions": "features/step_definitions/calculator_steps.js",
+  "testLocation": "test/calculator.test.js",
+  "productionLocation": "src/calculator.js",
+  "workflowHint": "Write the Gherkin scenario for this requirement in the feature file first (tag it @REQ-003), reuse or add step definitions, then run tests to see RED."
+}
+```
+
+An unknown id fails with exit status 1:
+
+```text
+Error: no requirement with id REQ-999
+```
+
+---
+
+## spec draft
+
+Interactively draft a requirement. Human input drives the spec — the
+harness never invents requirements. The draft is validated and
+quality-gated in a loop until it is clean, then written.
+
+```bash
+spec draft
+```
+
+Non-interactive (no TTY). Repeat `--criterion` for each Given/When/Then
+line. The next free id is allocated; the draft is written.
+
+```bash
+spec draft \
+  --title "Newlines as delimiters" \
+  --story "As a calculator user, I want newlines to separate numbers in addition to commas so that multi-line input just works." \
+  --criterion 'Given the input "1\n2,3", when add is called, then the result is 6' \
+  --criterion 'Given an empty string "", when add is called, then the result is 0'
+```
+
+`--title`, `--story`, and at least one `--criterion` must be given
+together. Structural validate must pass; refine findings are reported
+in `nextStep` (`spec reword <id>` to address them). A title or
+criterion that collides with an existing requirement warns but still
+stages.
+
+To draft into a particular spec file, name it with `--file` (it must
+already be part of the catalog — see
+[`spec include`](#spec-include)):
+
+```bash
+spec draft --file requirements/core/arithmetic.json
+```
+
+When `--file` is omitted, the draft lands in the catalog document whose
+directory **covers the working directory**, deepest match first, falling
+back to the root `requirements.json`. Running in `core/` with
+`requirements/core/arithmetic.json` in the catalog drafts there; running
+in `src/domain`, which no included file covers, drafts into the root.
+
+### How the id is chosen
+
+Ids are **derived from the catalog**, never assumed. The prefix is the
+one the requirements already in the target file use; if that file is
+empty, the prefix of its nearest ancestor in the include tree, then the
+catalog root, and only then `REQ`. The number is the highest existing
+number *for that prefix* across the whole merged catalog, plus one — so
+two included files can never allocate the same id. Zero-padding matches
+the widest numeric part already in use, with a minimum of three digits.
+
+| The catalog's ids | Next drafted id |
+| --- | --- |
+| `REQ-001` … `REQ-006` | `REQ-007` |
+| `HARNESS-001` … `HARNESS-019` | `HARNESS-020` |
+| `REQ-0007` | `REQ-0008` |
+| none at all | `REQ-001` |
+
+The consequence worth knowing: one binary serves every spec with no
+per-project configuration, and nothing has to be told how a project
+numbers its work. Agents should **read** the next id rather than guess
+it — [`spec status`](status.md) reports it as `nextId`, and the same
+value reaches MCP callers through `list_requirements`.
+
+The prompts, first pass (interactive wizard, flags omitted):
+
+```text
+REQ-004 title:
+REQ-004 story:
+Acceptance criteria (Given/When/Then). A blank criterion ends the list:
+REQ-004 criterion 1 (leave blank to finish the criteria):
+REQ-004 criterion 2 (leave blank to finish the criteria):
+```
+
+- The id is allocated automatically (next free `REQ-nnn`).
+- A **blank criterion ends the list** — enter at least one first.
+- On a color console the bracketed suggestion — the text
+  <kbd>Enter</kbd> will use — renders green; the
+  `(As a ..., I want ..., so that ...)` story shape renders in the
+  banner's muted REFACTOR yellow, because it is the form the answer
+  must take rather than a value to accept; the destructive
+  `'-' drops it` hint on criterion prompts, model failures, and other
+  dead ends render red; the animated dots on `working ...` lines
+  render light yellow.
+- On a real terminal answers are edited on a `> ` line with full line
+  editing — arrow keys move the cursor anywhere in the typed text,
+  Home/End jump, and the up arrow recalls this session's answers.
+
+If validation or refinement finds problems, each finding prints with a
+concrete suggestion, and the rewording pass shows your prior answers:
+
+```text
+REQ-004: acceptance criterion 1 must be phrased Given/When/Then
+  try: rephrase as: Given <starting state>, when <action>, then <exact result>
+
+REQ-004 title [Newlines act as delimiters] (Enter keeps it):
+REQ-004 story [As a user, I want newlines to work like commas so that input can be multi-line.] (Enter keeps it):
+REQ-004 criterion 1 [it should handle newlines] (Enter keeps it, '-' drops it):
+Given "1\n2", when add is called, then the result is 3
+REQ-004 criterion 2 (leave blank to finish the criteria):
+```
+
+- <kbd>Enter</kbd> keeps the prior answer.
+- `-` drops a prior criterion.
+- New criteria can be appended after the priors.
+
+### spec draft "request" — an ask broken into requirements
+
+A request in plain words is **preserved as an ask** — a requirement
+of type `ask_requirement` under an `ASK-nnn` id that keeps the words
+verbatim in `request` — and broken into actionable requirements that
+point back at it (see [the requirements format](../spec-format.md#asks-and-the-requirements-derived-from-them)).
+The model splits the request when one is resolved; without a model
+only what the words enumerate (numbered or bulleted lines,
+semicolon-separated clauses) becomes a proposal, titled and waiting for
+wording. Nothing is ever invented.
+
+```bash
+spec draft "sum numbers from a comma separated string, empty input means zero"
+spec draft ASK-001                 # carry on with an ask already on record
+spec draft "..." --interactive     # you decide every proposal
+```
+
+Every proposal is reviewed by the rules first — phrasing, concreteness,
+duplicates against the spec, conflicts with its siblings, drift from
+the request. Who then accepts it depends on the mode, and **is
+recorded**:
+
+- **Default (no prompts).** Nothing is asked. A proposal the review
+  passes is written as a requirement with `acceptance.by =
+  "automatic"`; one it blocks stays `pending` on the ask with its
+  findings; questions the model raised are recorded unanswered. The
+  run ends by saying whether the ask is ready and, if not, every
+  reason why.
+- **`--interactive`.** Each proposal is put to you — `a`pprove,
+  `r`eject, re`v`ise, or e`x`clude from scope — then the open
+  questions, then whether the accepted requirements cover the whole
+  request. Approval writes the requirement with `acceptance.by =
+  "user"`; an empty answer is **not** a vote; a rejection or exclusion
+  is kept with your reason. The agent's judgment never stands in for
+  your vote.
+
+Running the same words again adds nothing already there: proposals are
+matched by wording and by title, questions by text, so the file is
+byte for byte unchanged.
+
+```text
+ASK-001 preserves the request: sum numbers from a comma separated string, empty input means zero
+The request holds 2 requirement(s) and 0 question(s).
+Proposal 1: Comma separated numbers are summed
+  story: As a user, I want comma sums so that totals come from one input.
+  criterion 1: Given the input "1,2", when add is called, then the result is 3
+Proposal 1 - [a]pprove, [r]eject, re[v]ise, or e[x]clude from scope [a/r/v/x]: a
+REQ-002 accepted by you.
+...
+Accepted so far:
+  REQ-002 Comma separated numbers are summed
+  REQ-003 Empty string returns zero
+Do the accepted requirements cover the whole request ASK-001? [y/N] y
+```
+
+The report names the ask, its mode, what was accepted, what is pending,
+rejected, or excluded, the open questions, and `ready`:
+
+```json
+{
+  "ask": "ASK-001",
+  "mode": "automatic",
+  "derived": ["REQ-002"],
+  "accepted": ["REQ-002"],
+  "pending": [2],
+  "ready": false,
+  "reasons": ["proposal 2 \"Empty string returns zero\" is still pending"],
+  "written": true,
+  "nextStep": "ASK-001 is not ready: ... Settle what is open with spec decide ASK-001 ..."
+}
+```
+
+**Readiness is derived, never declared.** An ask is ready for
+implementation when its decomposition is complete, at least one
+requirement is derived, every derived requirement names it as parent
+and carries an acceptance whose wording still matches the requirement
+(a user's acceptance in interactive mode), no blocking question is
+unanswered, no proposal is pending or rejected-without-revision, and —
+in interactive mode — you confirmed coverage. [`spec deliver
+ASK-001`](deliver.md) refuses an ask that is not ready and works the
+derived requirements of one that is; `spec deliver "words"` breaks the
+words down in the default mode first.
+
+### spec draft --parent — a requirement written under an ask
+
+```bash
+spec draft --parent ASK-001 --by user \
+  --title "Empty string returns zero" \
+  --story "As a user, I want empty input to be 0 so that no input is a safe default." \
+  --criterion 'Given an empty string "", when add is called, then the result is 0'
+spec draft --request-only "sum numbers from a comma separated string"   # the ask alone
+```
+
+The requirement joins the ask's proposals — taking over a pending
+title-only row the deterministic split left for it, if the title
+matches. `--by user` records your acceptance; `--by automatic` (the
+default) holds it to the same review as any proposal, and a child the
+rules block on is linked but left pending.
+
+### spec decide — decisions by number, no wizard
+
+```bash
+spec decide ASK-001 --accept 2 --by user
+spec decide ASK-001 --reject "2:empty input is an error in this kata"
+spec decide ASK-001 --exclude "3:out of scope for the first release"
+spec decide ASK-001 --answer "1=only the comma"
+spec decide ASK-001 --complete --confirm --by user
+spec decide ASK-001                              # report the ask as it stands
+```
+
+`--by automatic` (the default) may accept only proposals the review
+passes and may never confirm coverage: that is the user's decision, and
+an agent relaying one passes `--by user`. Rejecting or excluding a
+proposal that already stands for a requirement withdraws that
+requirement's acceptance.
+
+### spec reword on an ask or a derived requirement
+
+A derived requirement whose **meaning** changes (title, story, or a
+criterion — whitespace does not count) loses its acceptance, and its
+ask stops being ready until it is accepted again (`spec decide`). An
+ask's `--request` can be reworded; a change in meaning reopens its
+decomposition while the requirements already derived stand. An ask's
+own title, story, and criteria are derived from its children and
+cannot be set directly.
+
+```bash
+spec reword REQ-002 --title "Sums numbers separated by commas or newlines"
+spec reword ASK-001 --request "sum numbers from a comma or newline separated string"
+```
+
+### spec link, spec unlink, spec delete
+
+```bash
+spec link REQ-007 ASK-001 --by user   # move a requirement under an ask
+spec unlink REQ-007                   # take it out again
+spec delete REQ-003                   # its proposal on the ask goes pending again
+spec delete ASK-001 --cascade         # an ask with children needs --cascade
+```
+
+Every one of these is the same CRUD surface over MCP:
+`requirement_create`, `requirement_update`, `requirement_delete`,
+`requirement_ask`, and `requirement_decide` (see [mcp](mcp.md)).
+
+### spec draft with a model, no request
+
+With a resolved model, `spec draft` runs the same
+description-driven wizard as [greenfield](greenfield.md#the-description-driven-wizard),
+and findings are sent to the model first: the rewording prompts carry
+its corrected proposal instead of your raw prior answers, so
+<kbd>Enter</kbd> accepts each fix (for the happy-paths finding, that
+includes the edge-case criterion it added):
+
+```text
+Findings to address:
+  - criteria: only happy paths - add at least one edge case (empty, invalid, or error input)
+    try: add an edge case, e.g. Given an empty string "", when add is called, then the result is 0
+Asking qwen3.8-flash-next:125b-mlx to address finding 1 of 1 - working ...
+The model reworded the draft. Each prompt shows its proposal - Enter accepts it, or type your own wording.
+REQ-004 title [Newlines act as delimiters] (Enter keeps it):
+REQ-004 criterion 2 [Given an empty string "", when add is called, then the result is 0] (Enter keeps it, '-' drops it):
+```
+
+Each finding is its own model call: call 1 addresses finding 1 on your
+draft, call 2 addresses finding 2 on the draft call 1 produced, and so
+on — the fixes accumulate one finding at a time instead of asking for
+everything at once. An unusable reply skips that finding (it stays
+yours to fix at the prompts); a model error ends the chain and keeps
+whatever fixes already landed.
+
+If the review rejects a wording again, the next model call also
+recounts every earlier wording of the draft and the findings each one
+produced, so the model never proposes a wording the review already
+rejected.
+
+On a terminal the `working ...` lines animate — the trailing dots grow
+`.` `..` `...` in light yellow and start over — while the model call
+is in flight.
+
+If the model is unreachable or its rewording is unusable, the prompts
+fall back to your prior answers exactly as without a model. Nothing is
+accepted silently either way — every field still passes through your
+hands, and validate + refine rerun on whatever you accept.
+
+When the draft is clean it is written:
+
+```json
+{
+  "id": "REQ-004",
+  "title": "Newlines act as delimiters",
+  "written": true,
+  "nextStep": "Add the @REQ-004 scenario with spec scenario add."
+}
+```
+
+---
+
+## spec validate
+
+Validate the whole spec on disk: JSON shape, required fields, unique
+ids, status values, and Given/When/Then phrasing of every criterion.
+The full include tree is validated as one catalog: missing included
+files, include cycles, and duplicate ids across files are each one
+actionable issue (a cross-file duplicate names the file that declared
+the id first). Only the root document needs a `project` name, and the
+merged tree must hold at least one requirement.
+
+```bash
+spec validate
+```
+
+Valid spec:
+
+```json
+{
+  "valid": true,
+  "issues": [],
+  "nextStep": "Pick a pending requirement with 'spec list' and write its scenario."
+}
+```
+
+Invalid spec (the command still exits 0 — the *report* carries the
+verdict):
+
+```json
+{
+  "valid": false,
+  "issues": [
+    "REQ-005: acceptance criterion 1 must be phrased Given/When/Then ('the calculator should handle newlines quickly')"
+  ],
+  "nextStep": "Fix the issues in requirements/requirements.json, then validate again."
+}
+```
+
+---
+
+## spec refine
+
+Review one requirement's wording for quality: vague words, missing
+actor or benefit in the story, compound criteria, non-concrete
+outcomes, happy-path-only criteria.
+
+```text
+Usage: spec refine [OPTIONS] <REQ_ID>
+```
+
+```bash
+spec refine REQ-004
+```
+
+```json
+{
+  "id": "REQ-004",
+  "clean": false,
+  "findings": [
+    "acceptance criterion 1 is ambiguous: 'quickly' is not testable",
+    "the story is missing the why (no 'so that ...')"
+  ],
+  "nextStep": "Reword the flagged parts, then refine again until there are no findings."
+}
+```
+
+Refine until `"clean": true`, then have the developer approve the
+wording — that approval is the first human gate of the workflow.
+
+The review is a fixed set of rules: the same wording always produces the
+same findings, and no model is involved. That is also its limit. One
+rule asks whether the outcome clause looks concrete — a number, a quoted
+literal, a named error — which any number anywhere satisfies. So "then
+code quality is improved by at least 20%" earns no finding, despite
+nobody having measured code quality.
+
+Closing that gap is what the [decision model](judge.md) is for, so with
+one configured the reply carries `judgments` as well — a local model's
+opinion on whether each criterion is measurable, with the probability it
+gave. In the default `enforce` mode a verdict against a criterion
+appends its line to `findings`, makes `clean` false, and exits nonzero,
+so the loop above iterates on it exactly as it does on a deterministic
+finding:
+
+```json
+{
+  "id": "REQ-004",
+  "clean": false,
+  "findings": [
+    "...",
+    "judgment (measurable/v2): criterion \"...\": the outcome may not be measurable - nimble:latest says probability of true 0.014"
+  ],
+  "judgments": [ { "verdict": "FAILS", "answer": { "type": "noul", "noul": 0.014 } } ],
+  "judgmentAdvisories": ["judgment (measurable/v2): criterion \"...\": the outcome may not be measurable - nimble:latest says probability of true 0.014"],
+  "judgmentAction": "REWORK"
+}
+```
+
+The judgment lines are prefixed so you can always tell which rules found
+what, and the deterministic findings keep their place above them — a
+judgment adds to that list, it never edits or drops an entry. Under
+`mode = "advisory"` nothing is merged and `clean` stays deterministic.
+Those keys are absent entirely until a decision model can answer.
+
+The question is `measurable/v2`: could a test check this criterion with
+one unambiguous result? The probability is read against a decision band
+of **0.80** — at or above reads `HOLDS`, at or below `0.20` reads
+`FAILS`, and anything between is `INCONCLUSIVE`, which also gates, with
+a finding asking you to reword the clause after `then`. That band is a
+dead zone, not an accuracy score. The **measured accuracy**, against the
+32-criterion labelled set in `tests/decision_live.rs`, is 0 misses, 1
+false alarm and 3 left unsure. Both numbers, why they are different in
+kind, and what enforcing them costs are in
+[`spec judge`](judge.md#how-well-does-it-work).
+
+To keep a decision model configured for `spec judge` while this command
+stops asking, set `mode = "off"` under `[decision]`.
+
+---
+
+## spec reword
+
+Reword an existing backlog item in place. Interactive wizard is the
+same refine → reword loop as draft. Flags skip the wizard:
+
+```bash
+spec reword REQ-007
+spec reword REQ-007 \
+  --title "Newlines as delimiters" \
+  --story "As a calculator user, I want newlines to separate numbers in addition to commas so that multi-line input just works." \
+  --criterion 'Given the input "1\n2,3", when add is called, then the result is 6' \
+  --criterion 'Given an empty string "", when add is called, then the result is 0'
+```
+
+Over MCP this is `requirement_reword` (arguments `id`, `title`, `story`,
+`acceptance_criteria`). It is how an agent repairs whatever `validate_spec`
+or `refine_requirement` reported: the spec file's JSON escaping and
+indentation differ from what the read tools return, so a hand-written
+string replacement against `requirements.json` will not match.
+
+---
+
+## spec set-feature
+
+Point a requirement at the feature file that was actually written.
+Used when a copied spec still names `kata/…` paths that do not exist
+on an extracted project. `spec scenario add` already updates
+`featureFile` when it is missing or stale.
+
+```bash
+spec set-feature REQ-003 --file src/test/resources/features/string_calculator.feature
+```
+
+---
+
+## spec set-production
+
+Declare where a requirement's production code lives. Without it,
+`spec implement` infers a conventional path from the project name —
+right for a kata, wrong for anything with a package layout of its own,
+and wrong every time for a requirement whose code is more than one
+file.
+
+```text
+Usage: spec set-production [OPTIONS] <REQ_ID> --file <FILE>
+```
+
+Repeat `--file` for each file; the list replaces whatever was declared
+before, so naming one file after naming two means the second is no
+longer part of this requirement.
+
+```bash
+spec set-production REQ-003 \
+  --file src/main/java/com/example/StringCalculator.java \
+  --file src/main/java/com/example/DelimiterParser.java
+```
+
+A delivery records what it actually wrote here too, adding to the list
+rather than replacing it — so the second attempt at a requirement is
+briefed with the files the first one touched instead of guessing again.
+Paths are project-relative; one that could reach outside the project
+root is refused by either route.
+
+---
+
+## spec mark-implemented
+
+Flip a requirement's status to `implemented` and record its
+`featureFile` — the feature carrying the `@REQ-...` tag — in the same
+edit, so the spec passes validation.
+
+```text
+Usage: spec mark-implemented [OPTIONS] <REQ_ID>
+```
+
+```bash
+spec mark-implemented REQ-003
+spec validate
+```
+
+```json
+{
+  "id": "REQ-003",
+  "status": "implemented",
+  "written": true,
+  "nextStep": "Run validate - it checks the @REQ-003 scenario exists."
+}
+```
+
+The command is gated twice:
+
+- **GREEN only** — it refuses unless the last recorded run passed.
+  Do this only when the scenario and tests for the requirement are
+  GREEN; it is the last move of the per-requirement rhythm.
+- **Tagged scenario only** — it refuses when no feature file carries
+  a scenario tagged `@<REQ_ID>`; add one with `spec scenario add`
+  first.
+
+Re-running it on an already-implemented requirement is safe: on GREEN
+it backfills a missing `featureFile`, which is exactly the repair for
+a spec that fails validation with
+`implemented requirements must name their featureFile`.
+
+Like every mutation, the flip is written back to the spec file the
+requirement actually lives in — a requirement declared in an included
+file stages that file, never the root.
+
+---
+
+## spec include
+
+Manage the catalog's included spec files
+([format reference](../spec-format.md#the-catalog-splitting-the-spec-across-files)).
+
+```text
+Usage: spec include add [OPTIONS] <PATH>
+
+Options:
+  --from <FILE>  The catalog document declaring the include (default: the root requirements.json)
+```
+
+`add` stages two things: the include entry on the parent document,
+and — when the included file does not exist anywhere yet — an empty
+spec skeleton (`{ "requirements": [] }`) for it.
+
+```bash
+spec include add requirements/core/arithmetic.json
+```
+
+```json
+{
+  "file": "requirements/core/arithmetic.json",
+  "parent": "requirements/requirements.json",
+  "created": true,
+  "written": true,
+  "nextStep": "Draft into it with spec draft --file."
+}
+```
+
+Nest deeper by including from a child instead of the root; the entry
+is written relative to that parent's directory:
+
+```bash
+spec include add requirements/core/edge-cases.json \
+  --from requirements/core/arithmetic.json
+```
+
+Including a file that is already part of the catalog is a safe no-op.
+Includes must be `.json` files inside the spec directory.
+
+## See also
+
+- [The requirements format](../spec-format.md) — every field of the spec, and the include catalog.
+- [The workflow](../workflow.md) — where each subcommand fits.

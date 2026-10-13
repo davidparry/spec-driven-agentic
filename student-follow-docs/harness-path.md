@@ -1,0 +1,493 @@
+# Finish the String Calculator workshop with `spec`
+
+The 60-minute hour in [student-follow-along.md](student-follow-along.md)
+uses Cursor against **the same** `spec mcp serve` (every tool it exposes,
+including the ones that write). The [pi path](pi-path.md) points a free, local, general-purpose
+agent at that same server. This page is the same end state — every
+requirement `implemented`, including Exercise 1’s **REQ-007** — driven with
+`spec` commands instead.
+
+The difference is not the tools and not the language. All three paths call
+one MCP server. The difference is who supplies the workflow: with Cursor or
+pi you do, through prompting and skills; `spec` is a **spec-specific runner**
+where the sequence, the tool profile for each step, and the phase gates are
+already encoded. Narrower on purpose.
+
+This page is the reference: terse command recipes plus the design notes
+behind them. Its follow-along companion,
+[spec-binary-follow-along.md](spec-binary-follow-along.md), runs the same
+commands one at a time with the expected reply after each, the two human
+checkpoints marked, the interactive `spec reword` wizard written out
+prompt by prompt, and realistic timings for the model-backed commands.
+Start there if this is your first run; come back here for the why.
+
+Do **not** work on `trunk`. `scripts/check-workshop-start.sh` must keep
+passing there.
+
+## Install
+
+From the repository root, after a Rust toolchain is on your PATH:
+
+```bash
+cargo install --path harness
+spec --version
+```
+
+Requires `spec` **0.7.20 or newer** — check with `spec --version`. The
+generation behavior this page describes, where the polish pass sees only
+the newly generated members, arrived during 0.5.x development, but the
+floor is 0.7.20 because this page reads and writes `.spec/config.toml`:
+the `.spec/` directory replaced the flat `.spec.toml` in 0.6.0, and
+0.7.20 is the version everything here was checked against. The ones
+that change what you do, rather than what you read:
+
+- `spec validate` **exits nonzero when `valid` is false.** It used to
+  report the failure and exit 0, so a CI gate scripted on it passed on an
+  invalid spec.
+- `spec scenario add` **preserves trailing content.** It used to delete
+  everything after the last scenario — this kata's own closing comment
+  block disappeared on the first add.
+- **Every command writes the real file.** There is no staging area and
+  nothing to commit: `spec scenario add` puts the scenario in the feature
+  file, `spec reword` puts the wording in the spec, and `git diff` is how
+  you read either. `spec greenfield` and `spec deliver` offer a branch
+  before they start so the whole run stays throwable.
+- `spec model use` **edits one key** instead of re-rendering `.spec/config.toml`,
+  which used to destroy every comment in it on the first command of
+  Step 1.
+- **Prompts are visible while a spinner runs.** `spec implement`'s
+  `command_run` confirmation used to be redrawn over indefinitely, so the
+  command looked hung when it was waiting on you.
+
+A local [Ollama](https://ollama.com) model is optional. It is only
+required for `spec implement`. Without one, implement
+`StringCalculator.java` by hand after the tests go RED. The model this
+talk and workshop run against is `qwen3.8-flash-next:125b-mlx`. Pin it with
+`spec model use` rather than relying on discovery — with nothing configured
+`spec` borrows whichever model Ollama lists first, which is usually not this
+one, and the run proceeds without complaint.
+
+```bash
+# the local model this workshop and talk run against
+ollama pull qwen3.8-flash-next:125b-mlx
+spec model use qwen3.8-flash-next:125b-mlx
+```
+
+## Same server, narrower tools
+
+```bash
+spec tools profiles
+# spec-draft          4  get_requirement, list_requirements, refine_requirement, validate_spec
+# spec-reword         3  get_requirement, refine_requirement, validate_spec
+# scenario-generate   3  feature_read, get_requirement, step_definitions_find
+# steps-generate      4  feature_list, feature_read, project_inspect, step_definitions_find
+# unittest-generate   4  feature_read, get_requirement, project_inspect, step_definitions_find
+# implement-advice    3  feature_list, get_tdd_state, validate_spec
+# refactor            5  … project_inspect, get_tdd_state — it reads, the loop runs the suite
+# implement           6  … run_tests, command_run
+# status              5  … get_tdd_state, validate_spec
+# ask                10  the read-only set
+
+spec mcp call get_tdd_state          # bytes the model would read, no tokens
+spec mcp tools                       # the 21 built-ins
+```
+
+Cursor would have seen all 21. A generating command offers 3–6; the read-only
+`ask` offers 10. No default profile contains a tool that writes a file. The
+only mutation a harness-side model may request is `command_run` on the
+`implement` profile, and that call still asks you to confirm (piped/CI stdin
+declines; it never hangs).
+
+`validate_spec` / `refine_requirement` during `spec draft` inspect the
+**disk** catalog. They do **not** critique the in-flight proposal. The gate
+is still `parse_proposals_checked`.
+
+`spec test` / `run_tests` during `spec implement` see the **working tree** —
+which is where the attempt just wrote, so the bar measures the model's
+actual code.
+
+## Files this loop must reuse
+
+Do not invent parallel classes. Generation and implement write into the
+kata files this repository already has:
+
+| Role | Path |
+| --- | --- |
+| Feature | `kata/src/test/resources/features/string_calculator.feature` |
+| Steps | `kata/src/test/java/com/davidparry/workshop/kata/StringCalculatorSteps.java` |
+| Unit tests | `kata/src/test/java/com/davidparry/workshop/kata/StringCalculatorTest.java` |
+| Production | `kata/src/main/java/com/davidparry/workshop/kata/StringCalculator.java` |
+
+The harness's own files are not in that table. They live under `.spec/`
+in the project root: `config.toml` (tracked; `spec model use` writes the
+model here), `state.json` (the TDD phase), `memory.json` (the discovered
+layout), `history`, `cache/`, `log/`, and the `.lock` that serializes
+concurrent writes.
+
+Nothing in that table is configured. The harness discovers it: this
+repository holds two buildable Maven projects (`kata/`, which stands alone
+with no parent, and `smoke-test/`, the one module the root `pom.xml`
+aggregates), and the feature file your requirements name is the tiebreak
+that picks `kata`. Everything else — test root, production root, features
+directory, the package generated code declares, and the `pom.xml` `spec test`
+runs — follows from that one answer. `spec show` and `.spec/memory.json`
+report it, and `spec inspect` re-scans.
+
+When a tree is genuinely ambiguous (several modules, and the spec names
+features in none of them) the interactive shell asks **once**: the model
+proposes one of the discovered module roots, you confirm, and the answer is
+recorded in `.spec/memory.json`. No model, or a declined prompt, leaves the
+scan's own pick in place and says which one it used.
+
+Existing steps already bind `Given a string calculator`, `When I add {string}`,
+`Then the result is {int}`, and `Then an IllegalArgumentException is thrown
+with a message containing {string}`. Prefer those four wordings and
+`spec steps generate` stays a no-op.
+
+Any other wording is a real gap, and `spec steps generate` closes it: it
+adds the missing definitions to the discovered `StringCalculatorSteps.java`,
+keeping its package and class and skipping any pattern the file already
+declares, so Cucumber never sees a duplicate expression. The polish pass
+is scoped to the new definitions: the model is handed those members alone,
+never the file they are spliced into, so it cannot rename a field or an
+existing step method, and everything outside the insertion point is
+carried over byte for byte. A reply that returns a whole file, alters a
+generated step expression, or drops a definition is refused and the
+deterministic members are written instead (`"source": "template"`). The
+assembled file is then re-checked: no pattern the file already declared
+goes missing, and the package and class survive, so a passing scenario
+cannot be unbound. Read it with `git diff` and fill in the
+`PendingException` bodies.
+
+`spec unittest generate` is scoped the same way when the test class
+already exists — only the new `@Test` methods reach the model.
+
+Scoping protects the file's **content**, not always its indentation: a
+generated method occasionally arrives at column 0, which absorbs the
+class's closing brace into it. Braces balance and it compiles, so every
+gate passes; it is cosmetic, and it is intermittent. Two of five
+requirements in the measured run came back that way.
+
+On the template path, member names derived from two criteria that differ
+only in punctuation collide, and the later ones take a `_2` / `_3`
+suffix. The LLM path invents semantic names and does not. A `_2` in
+generated members is a reliable tell for `"source": "template"`.
+
+`spec scenario add` appends and does not rewrite: new scenarios are
+inserted **after the last scenario and before any trailing block**, so
+the feature file's header, its `As a / I want / So that` narrative, and
+its closing comments all survive. Every spec document a command writes
+ends in a trailing newline, so `\ No newline at end of file` in a diff
+means an older build.
+
+Every authoring command **writes the file** — including the interactive
+`spec draft` wizard, with or without a model. Declining that wizard's
+last prompt is the one way to end with nothing written; everything else
+is on disk when the command answers, and `git diff` is the review.
+`spec test` runs Maven on the same working tree, so the bar always
+measures what you just read. `spec mark-implemented` is allowed only on
+GREEN. `spec implement` may offer `command_run`; confirm before it
+spawns. Optional: `spec ask "which pending requirement next?"` (read-only
+profile).
+
+Refusals are worded for the phase you are in, not for RED: `spec refactor`
+answers "No tests have been run yet — run them to find out where you are."
+at START and "A refactor is already in progress — run the tests to close
+it." during a refactor, rather than the red-bar sentence at every phase.
+`spec state` reports where you are without touching anything, and leads
+with `phase` rather than its `instructions` blob.
+
+Every `nextStep` the shell prints names commands, not MCP tools: the
+services word their advice for the agent path and the CLI rewrites
+`start_refactor` into `spec refactor` at the one place it prints a reply.
+Tool output you asked for explicitly with `spec mcp call` is passed
+through verbatim and still speaks in tool names.
+
+`spec implement REQ-00N` also warns when the code it wrote looks like it
+satisfies another requirement that is still `pending` — the drift this
+workflow exists to prevent. It is a literal check (same quoted inputs, same
+expected number), so it warns and never blocks: read the diff and decide.
+It can also legitimately report `"written": false`, when the model hands
+back every file unchanged: the warning names the production file and the
+`nextStep` sends you round again or to your editor.
+
+**On a pipe, only the wizards can lose work.** `spec draft` and
+`spec reword` end on a confirmation, so an exhausted pipe declines it and
+writes nothing; every other prompting command writes either way. Running
+out of input is now distinct from pressing Enter — a short pipe stops
+immediately, explains itself once on stderr
+(`input is not readable - end of input (the pipe ran out): ...`), and
+returns the same declined report and exit 0 that a typed `N` would. It
+used to read the end of a pipe as a blank line, which is how the wording
+review's `[r]eword again, [m]anual, [a]ccept` prompt looped forever.
+Ctrl+D at a terminal wizard lands in the same place, rather than exiting
+1 with an error.
+
+## Step 1 — Branch and baseline
+
+```bash
+git checkout -b workshop trunk
+spec validate                 # valid; featureFile paths exist in this repo
+spec list                     # REQ-001/002 implemented; REQ-003..006 pending; no REQ-007
+spec test                          # GREEN: 2 JUnit + 3 Cucumber
+```
+
+If you already have harness fixes on another branch, cut `workshop` from
+that branch instead of `trunk` so `spec test` understands this repo.
+
+## Step 2 — Exercise 1: draft REQ-007 (status stays `pending`)
+
+```bash
+spec draft \
+  --title "Custom delimiter declared on the first line" \
+  --story "As a calculator user, I want to declare a custom delimiter on the first line so that I can separate numbers with a character of my choosing." \
+  --criterion 'Given the input "//+\n1+2", when add is called, then the result is 3' \
+  --criterion 'Given an empty delimiter declaration "//\n1+2", when add is called, then an IllegalArgumentException is thrown'
+git diff requirements/        # your checkpoint: read what landed
+spec refine REQ-007           # grades the wording now in the file
+# if findings: spec reword REQ-007, then refine again
+spec list                     # REQ-007 pending
+```
+
+Nothing in REQ-001..006 specifies a custom delimiter, so this draft earns
+no duplicate warning. (Reuse an existing title or criterion verbatim and
+`spec draft` warns you.) Do **not** mark REQ-007 implemented yet.
+
+`spec refine` grades the wording as it stands in the file, so the
+reword/refine loop converges on what the next command will actually
+read. With a [decision model](#optional-the-decision-model) configured
+it also carries `judgments`; `findings` and `clean` stay deterministic.
+`spec validate` is the other half of the pair: structure rather than
+wording, over the whole catalog.
+
+Supply `--title` without `--story` and `--criterion` and the error names
+what you typed rather than what you left out:
+`spec draft with --title also needs --story and --criterion. Give all
+three, or none of them to be asked question by question.`
+
+## Recipe used for every pending requirement
+
+Two lines in this block are not busywork. `spec steps missing` is the
+free pre-check that tells you whether `spec steps generate` has anything
+to do, and the two `git diff` calls are the human checkpoints the whole
+workflow exists for: the first reads the Gherkin and tests before they
+become the RED bar, the second reads the production diff before it
+becomes GREEN. Run them in that order and nothing goes unreviewed.
+
+```text
+spec show REQ-00N
+spec scenario add --feature kata/src/test/resources/features/string_calculator.feature \
+  --req REQ-00N --name "<scenario>" \
+  --step 'Given a string calculator' \
+  --step 'When I add "<input>"' \
+  --step 'Then the result is <n>'
+# second criterion: another scenario add with the same --req
+spec steps missing                 # empty? good. otherwise: spec steps generate
+spec unittest generate REQ-00N     # appends StringCalculatorTest, does not create Req00NTest
+git diff                           # your checkpoint: read the Gherkin and tests
+spec test                          # expect RED
+spec implement REQ-00N             # or edit StringCalculator.java by hand
+git diff                           # your checkpoint: read the production diff
+spec test                          # GREEN
+spec refactor --note "<what>" --req REQ-00N    # optional, GREEN only
+git diff && spec test                          # read it, then record the run
+spec mark-implemented REQ-00N
+spec list
+```
+
+## Step 3 — Exercise 2: take REQ-003 to `implemented`
+
+```bash
+spec show REQ-003
+spec scenario add --feature kata/src/test/resources/features/string_calculator.feature \
+  --req REQ-003 --name "Two numbers separated by a comma are summed" \
+  --step 'Given a string calculator' \
+  --step 'When I add "1,2"' \
+  --step 'Then the result is 3'
+spec scenario add --feature kata/src/test/resources/features/string_calculator.feature \
+  --req REQ-003 --name "Two larger numbers separated by a comma are summed" \
+  --step 'Given a string calculator' \
+  --step 'When I add "10,20"' \
+  --step 'Then the result is 30'
+spec steps missing                 # [] — all four wordings are already bound
+spec unittest generate REQ-003
+git diff                           # checkpoint 1: the Gherkin and tests
+spec test                          # RED: 9 tests, 4 failures
+spec implement REQ-003             # or edit StringCalculator.java by hand
+git diff                           # checkpoint 2: the production diff
+spec test                          # GREEN: 9 tests, 0 failures
+spec mark-implemented REQ-003
+```
+
+`spec implement` ends by offering to run the tests for you. Decline it
+the first time through — that prompt skips exactly the checkpoint this
+exercise is for.
+
+## Step 4 — Check your work
+
+```bash
+scripts/verify-workshop-run.sh check
+```
+
+All seven checks pass as soon as Step 3 is done — four grade Exercise 1
+and three grade Exercise 2 — so this is where the workshop ends. It is
+safe to run from this path: it asks whether each of REQ-003's acceptance
+criteria reaches a scenario tagged `@REQ-003` and an assertion in a
+`@Test` that names the requirement, so the names `spec scenario add` and
+`spec unittest generate` produce are fine. Watch the scenario count — one
+scenario per criterion, and REQ-003 has two.
+
+Run it before the stretch below, which deliberately adds a pending
+REQ-008 and so moves you off that bar.
+
+## Step 5 — Homework: REQ-004, REQ-005, REQ-006, then REQ-007
+
+Your score is already in; none of this is graded. Repeat the recipe on
+your own time. Suggested scenarios (reuse existing steps):
+
+| Id | Scenario name | When I add | Then |
+| --- | --- | --- | --- |
+| REQ-004 | Any amount of numbers is summed | `"1,2,3,4,5"` | result is 15 |
+| REQ-004 | All zeros sum to zero | `"0,0,0"` | result is 0 |
+| REQ-005 | Newlines work as delimiters alongside commas | `"1\n2,3"` | result is 6 |
+| REQ-005 | Newlines alone delimit numbers | `"4\n5\n6"` | result is 15 |
+| REQ-006 | A negative number is rejected | `"1,-2"` | `Then an IllegalArgumentException is thrown with a message containing "negatives not allowed"` |
+| REQ-006 | Every negative number is listed in the error | `"-1,-2"` | two further `Then`/`And` steps containing `"-1"` and `"-2"` |
+| REQ-007 | A custom delimiter declared on the first line is used | `"//+\n1+2"` | result is 3 |
+| REQ-007 | An empty delimiter declaration is rejected | `"//\n1+2"` | `Then an IllegalArgumentException is thrown` — the one wording with no step definition; `spec steps generate` adds it to `StringCalculatorSteps.java` |
+
+No earlier requirement overlaps REQ-007 — it is the behavior you drafted in
+Step 2, so both of its scenarios are new.
+
+Gherkin cannot put a real newline inside `"…"`. Write `\n` in the
+`When I add` string; `StringCalculatorSteps` unescapes it.
+
+`+` is a regex metacharacter, so `"1+2".split("+")` throws
+`PatternSyntaxException`. Take the RED bar first, then `Pattern.quote` the
+delimiter.
+
+### The final bar
+
+```bash
+spec list
+# every id REQ-001 .. REQ-007 status: implemented
+spec validate                      # "valid": true, exit 0
+spec test                          # GREEN: 25 tests, 0 failures
+```
+
+That is the harness success bar: **every requirement status is
+`implemented`**.
+
+### Stretch: split the spec into a catalog
+
+`requirements/requirements.json` is the root of a spec catalog: it can
+hold requirements of its own plus an `includes` list of child spec
+files (which can include further files, N levels deep). Every command
+above works on the merged view, `spec list` names the file each
+requirement lives in, and mutations write back to that file:
+
+```bash
+spec include add requirements/newlines.json   # writes the include + an empty file
+spec draft --file requirements/newlines.json  # drafts REQ-008 into the child file
+spec refine REQ-008                           # read the findings
+# if findings: spec reword REQ-008, then refine again
+spec list                                     # one merged backlog, per-file provenance
+spec validate                                 # validates the whole tree as one catalog
+```
+
+Do not skip the refine. A one-criterion happy-path draft earns
+`criteria: only happy paths - add at least one edge case (empty, invalid,
+or error input)`, and REQ-008 is the easiest place in the workshop to
+leave that open: `verify-workshop-run.sh` does not grade REQ-008, so
+nothing downstream catches it. The wizard form above puts the finding to
+you before it writes. The flag form
+(`spec draft --file ... --title ... --story ... --criterion ...`) cannot
+ask, so it writes regardless and carries the finding back in a `findings`
+array with a `nextStep` of `Wrote REQ-008 with refine findings. Run spec
+reword REQ-008 to address them.` Either way, reword it before you move
+on.
+
+REQ-008 is left `pending` on purpose — it is the next kata, not part of
+the success bar above. The format reference lives in the manual:
+[The requirements format](../manual/src/spec-format.md).
+
+Both catalog-structure failures have their own guidance, and it is the
+one place the tool tells you to edit a spec file by hand. A duplicate id
+answers `no tool can delete a requirement, so open the spec file the
+issue names and remove the duplicate requirement object, or give it an id
+nothing else uses`; a file reached twice answers `no tool can remove an
+include, so open the parent spec file the issue names and delete the
+repeated entry from its "includes" array`. Both close with `the rule
+against hand-editing covers wording, not catalog structure`. Neither is
+reachable with `spec reword`, which is what the advice used to name.
+
+## Optional: the decision model
+
+A second, separate local model that writes nothing and answers one
+bounded question with a typed value and a probability. Needs Ollama
+0.35+ (`/v1/systemone`), and `spec` 0.7.20 or newer — the decision
+plane is in no earlier release, so `spec judge` does not answer on one.
+Off until configured; nothing above depends on it.
+
+```bash
+ollama pull nimble
+spec judge models             # only what Ollama reports as decision-capable
+spec judge use nimble:latest  # writes [decision] model, never llm.model
+spec judge current            # model, endpoint, timeout, mode, threshold
+spec judge criterion REQ-007            # every criterion, human-readable
+spec judge criterion REQ-007 --json     # the same record as an object
+spec judge criterion --text "<wording>" # judge wording with no requirement
+spec --decision-model nimble:latest judge criterion REQ-007   # one run only
+```
+
+The one question asked is `measurable/v2`: *can this acceptance
+criterion be checked by a test with a single unambiguous result?* It
+reaches wording the rule set cannot. The rules ask whether the clause
+after `then` looks concrete — a number, a quoted literal, a named error
+— so `then code quality is improved by at least 20%` earns no finding,
+while nobody measured code quality.
+
+`[decision]` in `.spec/config.toml`, all optional:
+
+```toml
+[decision]
+model = "nimble:latest"
+endpoint = "http://localhost:11434"   # defaults to the [llm] endpoint
+timeout_seconds = 60
+mode = "enforce"                      # off | advisory | enforce
+min_confidence = 0.8
+```
+
+What a judgment may do, in full: refuse a wording review. It can never
+approve one, change a test result, change a requirement's status,
+bypass the branch gate, waive the human wording gate, or edit a
+deterministic finding. `enforce` is the default — a failing or unsure
+answer appends its own labelled line to `findings`, makes `clean`
+false, and exits nonzero, so the loop iterates on it exactly as it does
+on a deterministic finding. That is the point of having it: the
+question is aimed at wording the regex rules cannot reach, so a
+judgment that cannot refuse leaves the gap unenforced. `advisory`
+reports without gating. A request that failed leaves `judgmentNote`
+saying no judgment was taken, and is never read as approval.
+
+`min_confidence` is a dead band: at or above reads `HOLDS`, at or below
+`1 - threshold` reads `FAILS`, between is `INCONCLUSIVE` and used for
+nothing. Ollama's own `confidence` figure measures how concentrated the
+answer distribution is, which its docs are explicit is *not* calibrated
+correctness.
+
+The labeled evaluation behind the shipped threshold is
+`harness/tests/decision_live.rs` —
+`cargo test --test decision_live -- --ignored --nocapture` prints every
+answer, a confusion matrix, and a threshold sweep against your own
+model.
+
+## Reset
+
+Same as the follow-along:
+
+```bash
+git checkout -- kata requirements
+```
+
+or throw the branch away. Do not merge kata completion to `trunk`.

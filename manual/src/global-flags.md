@@ -1,0 +1,239 @@
+# Global flags
+
+These flags are accepted by `spec` itself and by every command. Place
+them anywhere on the command line.
+
+## `--root <ROOT>`
+
+The project root — the directory where `requirements/requirements.json`
+(the root of the [spec catalog](spec-format.md)) lives, and where the
+harness keeps its own files under `.spec/` (see
+[Where spec keeps its files](getting-started.md#where-spec-keeps-its-files)).
+`.spec/config.toml` is the tracked configuration. The root is the base
+for every relative path the harness reads or writes.
+A concrete path wins. An empty `--root`, or an unexpanded `${...}`
+template, is ignored. `SPEC_PROJECT_DIR` is used when it names a real
+path. MCP clients that cannot see argv can call `project_root` to read
+the resolved directory as an absolute path.
+
+```bash
+spec --root ~/code/calculator list
+spec list --root ~/code/calculator   # same thing
+```
+
+### Discovery: what happens when you say nothing
+
+Omit `--root` and `spec` walks **up** from the working directory to the
+nearest ancestor that looks like a project — one holding
+`requirements/requirements.json`, or failing that a `.spec/` directory.
+The first match wins, so a project nested inside another is found before
+its parent. If no ancestor qualifies, the process stays in the directory
+it was launched in, exactly as before.
+
+```bash
+cd ~/code/calculator/src/domain
+spec list        # finds ~/code/calculator — no flag needed
+```
+
+This is why a repository holding more than one spec needs no `--root` on
+every line: standing in the module is how you select its catalog. If
+ids come back with a prefix you did not expect, you are standing in a
+different project than you meant to — `spec config` reports the root it
+resolved and where that came from.
+
+Precedence is unchanged by discovery: an explicit `--root` wins, then
+`SPEC_PROJECT_DIR`, then the discovered ancestor, then the working
+directory.
+
+In the [interactive shell](interactive-shell.md), commands inherit the
+shell's `--root` unless a line supplies its own.
+
+## `--model <MODEL>`
+
+Override the LLM model for this invocation only. This wins over the
+configured model and over discovery, and is never written to
+configuration:
+
+```bash
+spec --model qwen3.8-flash-next:125b-mlx steps generate
+spec --model llama3:8b greenfield   # another model; mileage will vary
+```
+
+Model resolution order (see [spec model](commands/model.md) for the
+full story):
+
+1. `--model` flag — this invocation only.
+2. `model` in `.spec/config.toml` — the persisted project choice.
+3. Discovery — the first installed Ollama model that can do generative
+   work, session-only.
+
+## `--decision-model <MODEL>`
+
+Override the [decision model](commands/judge.md) for this invocation
+only. Separate from `--model`, because the two roles are two different
+models: one writes, the other answers bounded questions about evidence.
+
+```bash
+spec --decision-model nimble:latest judge criterion REQ-003
+```
+
+Resolution order:
+
+1. `--decision-model` flag — this invocation only.
+2. `model` under `[decision]` in `.spec/config.toml`, written by
+   `spec judge use`.
+3. Nothing. With no decision model named, no judgment is asked for and
+   every command behaves as it did before the decision plane existed.
+
+The flag names a model; it does not change `decision.mode`. Passing it
+to a project configured as `advisory` does not start enforcing
+anything — and passing it to one that left the mode at its default does
+mean the judgment gates, because that default is `enforce`.
+
+## `--debug`
+
+Verbose diagnostic logging: the full prompts sent to the model and its
+responses, cache hits and misses, resolved configuration, MCP tool
+calls, and test-runner activity. Without the flag only high-level
+lifecycle events (info and above) are logged.
+
+Diagnostics are written to daily-rolling files under the directory of
+the [session](interactive-shell.md#sessions) the run belongs to,
+`.spec/log/<session-guid>/spec.log.YYYY-MM-DD` (gitignored; safe to
+delete at any time) — stdout and stderr are never touched, so JSON
+output, the MCP stdio protocol, and user-facing messages stay clean
+either way. A one-shot command on a project that has never opened a
+session writes to `.spec/log/` itself. Log writes go through an
+in-memory queue drained by a worker thread, so logging never blocks
+the command. If the log directory cannot be created, diagnostics fall
+back to stderr.
+
+```bash
+spec --debug implement REQ-003             # full prompts and replies in the log
+# watch the current session's diagnostics live
+tail -f .spec/log/$(jq -r .currentSession .spec/state.json)/spec.log.$(date +%F)
+```
+
+The `RUST_LOG` environment variable overrides both the default and
+`--debug` with per-module directives, e.g.
+`RUST_LOG=spec_harness::adapters=trace spec test`.
+
+## `--retry <N>`
+
+How many times to try a model call when the reply fails validation
+(not a JSON array of requirements, not a complete rewording object,
+not a usable file update, empty advice, and so on). Default is **3**.
+Each retry keeps the original prompt and appends the invalid reply
+plus the reason, so the model can correct itself. Transport failures
+(Ollama unreachable) are not retried.
+
+```bash
+spec --retry 5 greenfield
+spec draft --retry 1   # one attempt, then the usual fallback
+```
+
+`--retry` wins over `retry` under `[llm]` in `.spec/config.toml`. A missing
+or zero config value uses the default of 3. In the interactive shell,
+commands inherit the shell's `--retry` unless a line supplies its own.
+
+## `--tools <NAMES>`
+
+Replace this command's tool profile for one run with a comma-separated
+list of catalog names (`validate_spec`, `playwright:browser_navigate`,
+`builtin:run_tests`). Default profiles live in code and in
+`.spec/config.toml`; see [`spec tools`](commands/tools.md). [`spec config`](commands/config.md)
+prints the resolved keys and their source.
+
+```bash
+spec --tools list_requirements,get_requirement status
+```
+
+## `--max-rounds <N>`
+
+Override `[tools] max_rounds` for one run: how many tool-call rounds
+`Agent::ask` may take before it must return a parsed reply.
+
+## `--no-branch`
+
+Skip [the branch gate](branch-gate.md). `spec greenfield` and
+`spec deliver` normally stop once, before they write anything, to offer
+the run a branch of its own; with this flag they ask nothing and start
+immediately.
+
+Git is not consulted at all, which is the point of the flag rather than
+a side effect of it. A project deliberately kept outside version
+control should not be asked about a branch, and a CI job that already
+made its own should not pay for the probe or risk a question nothing is
+there to answer.
+
+```bash
+spec --no-branch deliver "sum comma-separated numbers"
+```
+
+Every other command ignores the flag, because no other command asks.
+
+## `--session <GUID>`
+
+Resume the [session](interactive-shell.md#sessions) with this id - one
+from the list the shell prints at start - and make it the current one,
+so the invocations after it follow it without the flag. TDD state and
+project memory are kept per session; without the flag, bare `spec`
+begins a new session once the current one has recorded work (and
+continues it until then), and every one-shot command continues the
+current one.
+
+```bash
+spec --session ffca332f-4258-4c98-a8a7-ce1c180c03e3          # resume it in the shell
+spec --session ffca332f-4258-4c98-a8a7-ce1c180c03e3 state    # read its phase, one shot
+```
+
+Text that is not a GUID, or a GUID the project has no record of, is
+refused before anything is written, naming the sessions that are on
+record.
+
+## `-V`, `--version`
+
+Prints the version compiled into the binary (from `Cargo.toml` at
+build time).
+
+## `-h`, `--help`
+
+Every command and subcommand answers `--help` with its synopsis,
+arguments, and flags.
+
+## Output: readable on a terminal, JSON everywhere else
+
+Some commands answer two audiences, so they print for whichever one
+is actually reading:
+
+| Where the output goes | What is printed |
+| --- | --- |
+| A terminal | A readable summary |
+| A pipe, a file, a CI step, an agent | The JSON reply |
+
+The commands that do this are [`spec list`](commands/spec.md#spec-list),
+[`spec show`](commands/spec.md#spec-show),
+[`spec validate`](commands/spec.md#spec-validate),
+[`spec refine`](commands/spec.md#spec-refine),
+[`spec status`](commands/status.md), [`spec state`](commands/state.md),
+[`spec test`](commands/test.md), and
+[`spec refactor`](commands/refactor.md). Each one takes `--json` to
+print the JSON on a terminal too.
+
+Two things follow. Nothing that parses `spec` output has to change:
+`spec validate | jq`, a CI gate, and an agent reading a reply are all
+pipes, and a pipe gets exactly the JSON it always got. And the JSON
+examples throughout this manual are what a pipe sees — on a terminal
+the same reply is laid out for reading.
+
+`--json` is not a global flag. `spec config`, `spec ask`, `spec diff`,
+`spec judge`, `spec mcp`, and `spec tools` have their own `--json`
+with meanings described on their own pages.
+
+## Exit status
+
+- `0` — success (including replies whose JSON reports e.g. an invalid
+  spec: the *command* succeeded).
+- `1` — the command itself failed or refused: unknown requirement id,
+  missing runtime (`runtime_missing`), unreachable Ollama for a
+  model-required operation, unparseable arguments, and similar.

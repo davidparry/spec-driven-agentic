@@ -1,0 +1,24 @@
+[book]
+title = "spec Harness Manual"
+authors = ["David Parry"]
+language = "en"
+src = "src"
+description = "The complete, searchable reference for the spec harness: every command, subcommand, and flag, with in-depth examples."
+
+[build]
+# The built book is committed so GitHub Pages serves it at /manual/.
+build-dir = "../docs/manual"
+
+[output.html]
+default-theme = "ayu"
+preferred-dark-theme = "ayu"
+git-repository-url = "https://github.com/davidparry/spec-driven-agentic"
+edit-url-template = "https://github.com/davidparry/spec-driven-agentic/edit/trunk/manual/{path}"
+site-url = "/spec-driven-agentic/manual/"
+
+[output.html.search]
+enable = true
+limit-results = 30
+boost-title = 2
+use-boolean-and = true
+expand = true

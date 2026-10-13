@@ -1,0 +1,477 @@
+//! Cargo test runner: runs `cargo test` and parses the `test result:`
+//! summary lines from its output.
+
+use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
+
+use regex::Regex;
+
+use super::{build_failure, run_command_merged, tail};
+use crate::domain::model::TestRunSummary;
+use crate::ports::{RunnerError, RuntimeProbe, TestFilter, TestRunner};
+
+static RESULT_LINE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"test result: \w+\. (\d+) passed; (\d+) failed; (\d+) ignored")
+        .expect("valid regex")
+});
+static FAILED_TEST: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^test (\S+) \.\.\. FAILED$").expect("valid regex"));
+/// The line cargo prints before each target's tests: `Running
+/// tests/harness_020_test.rs (target/debug/deps/...)`, `Running
+/// unittests src/lib.rs (...)`, `Doc-tests spec_harness`.
+static RUNNING_TARGET: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^\s*Running (?:unittests )?(\S+)").expect("valid regex"));
+static SCENARIO_LINE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(\d+) scenarios? \(([^)]*)\)").expect("valid regex"));
+static FAILED_SCENARIO: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?m)^\s*✘\s+(.+?)\s*$").expect("valid regex"));
+
+pub struct CargoRunner<R: RuntimeProbe> {
+    root: PathBuf,
+    probe: R,
+    command: Vec<String>,
+}
+
+impl<R: RuntimeProbe> CargoRunner<R> {
+    pub fn new(root: PathBuf, probe: R) -> Self {
+        Self {
+            root,
+            probe,
+            // Without --no-fail-fast cargo stops at the first target
+            // that fails, so a red cucumber suite hides every unit test
+            // behind it and the bar reports on a run that never
+            // finished. A TDD loop needs the whole picture every time.
+            command: vec!["cargo".into(), "test".into(), "--no-fail-fast".into()],
+        }
+    }
+
+    /// Visible for tests: run an arbitrary command in place of cargo.
+    pub fn with_command(mut self, command: Vec<String>) -> Self {
+        self.command = command;
+        self
+    }
+}
+
+impl<R: RuntimeProbe> TestRunner for CargoRunner<R> {
+    fn run(&self, filter: &TestFilter) -> Result<TestRunSummary, RunnerError> {
+        if self.probe.version("cargo").is_none() {
+            return Err(RunnerError::RuntimeMissing {
+                runtime: "cargo".into(),
+                hint: "Install the Rust toolchain from https://rustup.rs, then rerun.".into(),
+            });
+        }
+        let mut command = self.command.clone();
+        if let Some(target) = filter
+            .feature
+            .as_deref()
+            .and_then(|feature| test_target(&self.root, feature))
+        {
+            command.push("--test".into());
+            command.push(target);
+        }
+        if let Some(scenario) = &filter.scenario {
+            command.push(scenario.clone());
+        }
+        let outcome = run_command_merged(&command, &self.root)?;
+        let combined = outcome.combined();
+        // A cucumber-rs target is declared `harness = false`, so it
+        // prints its own scenario tally instead of libtest's `test
+        // result:` line. A crate can hold both kinds at once, so both
+        // shapes are read and added together — reading only one reports
+        // a green bar while the other half of the suite is red.
+        let summary = merge(
+            parse_cargo_output(&combined),
+            parse_cucumber_rs_output(&combined),
+        );
+        match summary {
+            // Cargo failed, yet nothing it printed accounts for it: a
+            // target that panicked before reporting, or output this
+            // cannot read. Surfacing it as an error keeps the phase off
+            // GREEN instead of certifying a run nobody verified.
+            Some(summary) if !outcome.success && summary.failures == 0 && summary.errors == 0 => {
+                let mut summary = summary;
+                summary.errors += 1;
+                summary
+                    .failure_details
+                    .push(format!("cargo test failed:\n{}", tail(&combined, 30)));
+                Ok(summary)
+            }
+            Some(summary) => Ok(summary),
+            None if !outcome.success => Ok(build_failure(&combined)),
+            None => Err(RunnerError::Failed(format!(
+                "cargo test produced no test summary:\n{}",
+                tail(&combined, 30)
+            ))),
+        }
+    }
+}
+
+/// The integration-test target that owns a feature file.
+///
+/// Bare `cargo test` builds and runs every target in the package, which
+/// on a crate of any size buries one requirement's bar under the whole
+/// suite. A feature filter narrows the run to `tests/<stem>.rs` when the
+/// project keeps a runner per feature, otherwise to the conventional
+/// `tests/cucumber.rs` that `spec init` scaffolds.
+///
+/// `None` leaves the run unscoped on purpose: naming a `--test` target
+/// that does not exist makes cargo exit before running anything, and a
+/// slow green bar beats a confusing red one.
+fn test_target(root: &Path, feature: &str) -> Option<String> {
+    let stem = Path::new(feature).file_stem()?.to_str()?;
+    [stem, "cucumber"]
+        .into_iter()
+        .find(|candidate| root.join("tests").join(format!("{candidate}.rs")).is_file())
+        .map(str::to_string)
+}
+
+/// Sum every `test result:` line; `None` when there is none (the build
+/// never reached the test phase).
+pub fn parse_cargo_output(output: &str) -> Option<TestRunSummary> {
+    let mut found = false;
+    let mut summary = TestRunSummary::default();
+    for captures in RESULT_LINE.captures_iter(output) {
+        found = true;
+        let passed: u32 = captures[1].parse().expect("digits only");
+        let failed: u32 = captures[2].parse().expect("digits only");
+        let ignored: u32 = captures[3].parse().expect("digits only");
+        summary.tests += passed + failed;
+        summary.failures += failed;
+        summary.skipped += ignored;
+    }
+    if !found {
+        return None;
+    }
+    // A test in an integration target is named by the target too:
+    // `harness_020_test::test_empty_list`. Libtest prints the bare
+    // function name, and a model-written test is named however the
+    // model liked - observed: `test_criterion_verification_status`,
+    // for a requirement called HARNESS-020. Named bare, nothing about
+    // that failure says whose it is, and the attribution pass read the
+    // requirement's own unit test as a foreign red bar and stopped the
+    // delivery before an attempt was made. The file is the one thing
+    // in the failure that is reliably the requirement's.
+    let mut target: Option<String> = None;
+    for line in output.lines() {
+        if let Some(captures) = RUNNING_TARGET.captures(line) {
+            let path = Path::new(&captures[1]);
+            target = path
+                .starts_with("tests")
+                .then(|| {
+                    path.file_stem()
+                        .and_then(|s| s.to_str())
+                        .map(str::to_string)
+                })
+                .flatten();
+            continue;
+        }
+        if line.starts_with("Doc-tests") || line.trim_start().starts_with("Doc-tests") {
+            target = None;
+            continue;
+        }
+        if let Some(captures) = FAILED_TEST.captures(line) {
+            let name = match &target {
+                Some(stem) => format!("{stem}::{}", &captures[1]),
+                None => captures[1].to_string(),
+            };
+            summary.failure_details.push(format!("{name}: FAILED"));
+        }
+    }
+    Some(summary)
+}
+
+/// Add two summaries of the same run, each covering the targets the
+/// other cannot read. `None` only when neither reported anything.
+fn merge(a: Option<TestRunSummary>, b: Option<TestRunSummary>) -> Option<TestRunSummary> {
+    match (a, b) {
+        (Some(mut a), Some(b)) => {
+            a.tests += b.tests;
+            a.failures += b.failures;
+            a.errors += b.errors;
+            a.skipped += b.skipped;
+            a.failure_details.extend(b.failure_details);
+            Some(a)
+        }
+        (a, b) => a.or(b),
+    }
+}
+
+/// Read a cucumber-rs tally: `12 scenarios (10 passed, 2 failed)`, with
+/// the scenario as the unit of behavior — the same choice the
+/// cucumber-js runner makes, so a phase means the same thing in both.
+/// `None` when the output holds no such line.
+pub fn parse_cucumber_rs_output(output: &str) -> Option<TestRunSummary> {
+    let captures = SCENARIO_LINE.captures_iter(output).last()?;
+    let mut summary = TestRunSummary {
+        tests: captures[1].parse().expect("digits only"),
+        ..TestRunSummary::default()
+    };
+    for part in captures[2].split(',') {
+        let mut words = part.split_whitespace();
+        let (Some(count), Some(outcome)) = (words.next(), words.next()) else {
+            continue;
+        };
+        let count: u32 = count.parse().unwrap_or(0);
+        match outcome {
+            "failed" => summary.failures += count,
+            "skipped" => summary.skipped += count,
+            // A step cucumber could not match is not a failing
+            // assertion; it is a suite that never ran what it claims.
+            "parsing" | "undefined" => summary.errors += count,
+            _ => {}
+        }
+    }
+    for captures in FAILED_SCENARIO.captures_iter(output) {
+        summary
+            .failure_details
+            .push(format!("{}: FAILED", captures[1].trim()));
+    }
+    Some(summary)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::FakeRuntimeProbe;
+
+    const PASSING: &str = "running 3 tests\n...\ntest result: ok. 3 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out\n";
+    const FAILING: &str = "running 2 tests\ntest domain::adds ... FAILED\ntest result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out\n";
+
+    #[test]
+    fn passing_output_sums_the_result_lines() {
+        let summary = parse_cargo_output(PASSING).unwrap();
+        assert_eq!(summary.tests, 3);
+        assert_eq!(summary.failures, 0);
+        assert_eq!(summary.skipped, 1);
+    }
+
+    #[test]
+    fn a_cucumber_rs_tally_is_read_when_there_is_no_libtest_line() {
+        // The bug this closes: scoping a run to one feature lands on the
+        // `harness = false` cucumber target, whose output has no `test
+        // result:` line, and a passing suite came back as a hard error.
+        let output = "[Summary]\n262 scenarios (262 passed)\n1509 steps (1509 passed)\n";
+        assert!(parse_cargo_output(output).is_none());
+        let summary = parse_cucumber_rs_output(output).unwrap();
+        assert_eq!((summary.tests, summary.failures), (262, 0));
+    }
+
+    #[test]
+    fn a_failing_cucumber_run_reports_its_failed_scenarios() {
+        let output = "   ✘  Then a parsed failure detail contains \"--test tdd_state\"\n\
+                      262 scenarios (260 passed, 2 failed)\n";
+        let summary = parse_cucumber_rs_output(output).unwrap();
+        assert_eq!((summary.tests, summary.failures), (262, 2));
+        assert_eq!(
+            summary.failure_details,
+            vec!["Then a parsed failure detail contains \"--test tdd_state\": FAILED"]
+        );
+    }
+
+    #[test]
+    fn an_output_with_no_tally_at_all_is_none() {
+        assert!(parse_cucumber_rs_output("error: could not compile").is_none());
+    }
+
+    #[test]
+    fn libtest_and_cucumber_targets_in_one_run_are_added_together() {
+        // The bug this closes: a crate holding both kinds reported only
+        // the libtest half, so a red cucumber suite still read GREEN.
+        let output = format!("{PASSING}\n12 scenarios (10 passed, 2 failed)\n");
+        let summary = merge(
+            parse_cargo_output(&output),
+            parse_cucumber_rs_output(&output),
+        )
+        .unwrap();
+        assert_eq!((summary.tests, summary.failures), (15, 2));
+    }
+
+    #[test]
+    fn a_failing_run_that_reported_no_failure_is_an_error_not_a_green_bar() {
+        // A target that panics before printing its tally leaves a
+        // summary that accounts for none of the failure; the bar must
+        // not come back clean just because the output looked clean.
+        let runner = CargoRunner::new(PathBuf::from("."), FakeRuntimeProbe::with(&["cargo"]))
+            .with_command(vec![
+                "sh".into(),
+                "-c".into(),
+                format!("printf '%s' '{PASSING}'; exit 101"),
+            ]);
+        let summary = runner.run(&TestFilter::default()).unwrap();
+        assert_eq!((summary.tests, summary.failures), (3, 0));
+        assert_eq!(summary.errors, 1);
+    }
+
+    #[test]
+    fn multiple_test_binaries_are_summed() {
+        let output = format!("{PASSING}{FAILING}");
+        let summary = parse_cargo_output(&output).unwrap();
+        assert_eq!(summary.tests, 5);
+        assert_eq!(summary.failures, 1);
+        assert_eq!(summary.failure_details, vec!["domain::adds: FAILED"]);
+    }
+
+    /// A failing test in an integration target is named by its file,
+    /// so a model-named test still says whose it is. Unit tests keep
+    /// their module path. (Doc-test names hold spaces and are not read
+    /// as failures, as before.)
+    #[test]
+    fn integration_target_failures_carry_their_file_name() {
+        let output = "     Running unittests src/lib.rs (target/debug/deps/spec_harness-1)\n\
+                      running 1 tests\n\
+                      test domain::adds ... FAILED\n\
+                      test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out\n\
+                      \x20    Running tests/harness_020_test.rs (target/debug/deps/harness_020_test-2)\n\
+                      running 2 tests\n\
+                      test test_empty_acceptance_criteria_list ... FAILED\n\
+                      test test_criterion_verification_status_reporting ... FAILED\n\
+                      test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out\n\
+                      \x20  Doc-tests spec_harness\n\
+                      running 1 tests\n\
+                      test src/lib.rs - add (line 3) ... FAILED\n\
+                      test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out\n";
+        let summary = parse_cargo_output(output).unwrap();
+        assert_eq!(
+            summary.failure_details,
+            vec![
+                "domain::adds: FAILED",
+                "harness_020_test::test_empty_acceptance_criteria_list: FAILED",
+                "harness_020_test::test_criterion_verification_status_reporting: FAILED",
+            ]
+        );
+    }
+
+    /// Cargo announces the target on stderr and libtest reports the
+    /// test on stdout. Observed live: captured separately, every
+    /// `Running` line came after every failure and the requirement's
+    /// own unit test was reported bare - and read as a foreign failure.
+    #[test]
+    fn the_target_announced_on_stderr_still_names_the_failure_on_stdout() {
+        let dir = tempfile::tempdir().unwrap();
+        let summary = runner(
+            dir.path(),
+            "echo '     Running tests/harness_020_test.rs (target/debug/deps/x)' >&2; \
+             echo 'test reports_status ... FAILED'; \
+             echo 'test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured'; \
+             exit 101",
+        )
+        .run(&TestFilter::default())
+        .unwrap();
+        assert_eq!(
+            summary.failure_details,
+            vec!["harness_020_test::reports_status: FAILED"]
+        );
+    }
+
+    #[test]
+    fn output_without_a_result_line_is_none() {
+        assert_eq!(parse_cargo_output("error[E0308]: mismatched types"), None);
+    }
+
+    fn runner(dir: &std::path::Path, script: &str) -> CargoRunner<FakeRuntimeProbe> {
+        CargoRunner::new(dir.to_path_buf(), FakeRuntimeProbe::with(&["cargo"])).with_command(vec![
+            "sh".into(),
+            "-c".into(),
+            script.into(),
+        ])
+    }
+
+    #[test]
+    fn a_run_parses_the_summary_lines() {
+        let dir = tempfile::tempdir().unwrap();
+        let summary = runner(
+            dir.path(),
+            "echo 'test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured'",
+        )
+        .run(&TestFilter::default())
+        .unwrap();
+        assert_eq!(summary.tests, 4);
+    }
+
+    #[test]
+    fn a_scenario_filter_is_passed_through() {
+        let dir = tempfile::tempdir().unwrap();
+        let filter = TestFilter {
+            feature: None,
+            scenario: Some("adds".into()),
+        };
+        let summary = runner(
+            dir.path(),
+            "echo 'test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured'",
+        )
+        .run(&filter)
+        .unwrap();
+        assert_eq!(summary.tests, 1);
+    }
+
+    fn tests_dir_holding(dir: &std::path::Path, files: &[&str]) {
+        let tests = dir.join("tests");
+        std::fs::create_dir_all(&tests).unwrap();
+        for file in files {
+            std::fs::write(tests.join(file), "").unwrap();
+        }
+    }
+
+    #[test]
+    fn a_feature_scopes_to_the_test_target_that_shares_its_name() {
+        let dir = tempfile::tempdir().unwrap();
+        tests_dir_holding(dir.path(), &["tool_coverage.rs", "cucumber.rs"]);
+        assert_eq!(
+            test_target(dir.path(), "tests/features/tool_coverage.feature"),
+            Some("tool_coverage".into())
+        );
+    }
+
+    #[test]
+    fn a_feature_without_its_own_target_falls_back_to_the_cucumber_runner() {
+        let dir = tempfile::tempdir().unwrap();
+        tests_dir_holding(dir.path(), &["cucumber.rs"]);
+        assert_eq!(
+            test_target(dir.path(), "tests/features/tdd_state.feature"),
+            Some("cucumber".into())
+        );
+    }
+
+    /// Scoping to a target cargo does not have would fail the run
+    /// outright, so an unrecognized feature leaves the suite unscoped.
+    #[test]
+    fn a_feature_matching_no_target_leaves_the_run_unscoped() {
+        let dir = tempfile::tempdir().unwrap();
+        tests_dir_holding(dir.path(), &["other.rs"]);
+        assert_eq!(test_target(dir.path(), "features/calc.feature"), None);
+    }
+
+    #[test]
+    fn a_compile_error_is_one_error_with_the_tail() {
+        let dir = tempfile::tempdir().unwrap();
+        let summary = runner(dir.path(), "echo 'error[E0308]'; exit 101")
+            .run(&TestFilter::default())
+            .unwrap();
+        assert_eq!(summary.errors, 1);
+        assert!(summary.failure_details[0].contains("error[E0308]"));
+    }
+
+    #[test]
+    fn a_successful_run_without_a_summary_is_a_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let error = runner(dir.path(), "echo nothing")
+            .run(&TestFilter::default())
+            .unwrap_err();
+        assert!(
+            matches!(&error, RunnerError::Failed(m) if m.starts_with("cargo test produced no test summary:"))
+        );
+    }
+
+    #[test]
+    fn a_missing_cargo_runtime_is_refused_with_a_hint() {
+        let dir = tempfile::tempdir().unwrap();
+        let runner = CargoRunner::new(dir.path().to_path_buf(), FakeRuntimeProbe::default());
+        assert_eq!(
+            runner.run(&TestFilter::default()).unwrap_err(),
+            RunnerError::RuntimeMissing {
+                runtime: "cargo".into(),
+                hint: "Install the Rust toolchain from https://rustup.rs, then rerun.".into(),
+            }
+        );
+    }
+}

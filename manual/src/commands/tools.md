@@ -1,0 +1,107 @@
+# spec tools
+
+Inspect and attach the tools a model call may use. Built-in tools are
+listed offline from `spec mcp serve`. External MCP servers from
+`mcp.json` are discovered on demand and must be attached **per command**
+with `--for` — never globally.
+
+```text
+Usage: spec tools [OPTIONS] <COMMAND>
+
+Commands:
+  list      Catalog (optionally `--for` one caller, `--offline`, `--refresh`)
+  profiles  Every caller and its resolved set
+  show      One tool's description and schema
+  enable    Attach a tool to a caller (`--for` required)
+  disable   Remove a tool from a caller (`--for` required)
+  refresh   Rediscover external servers and rewrite `.spec/cache/tools/`
+  servers   Registered mcp.json servers and parse problems
+```
+
+```bash
+spec tools profiles
+# spec-draft          4  get_requirement, list_requirements, refine_requirement, validate_spec
+# spec-reword         3  get_requirement, refine_requirement, validate_spec
+# steps-generate      4  feature_list, feature_read, project_inspect, step_definitions_find
+# unittest-generate   4  feature_read, get_requirement, project_inspect, step_definitions_find
+# implement-advice    3  feature_list, get_tdd_state, validate_spec
+# implement           6  get_requirement, feature_read, …, run_tests, command_run
+# status              5  project_root, list_requirements, …, get_tdd_state, validate_spec
+# ask                10  the read-only set: everything above that only reads
+
+spec tools list --for status          # exactly those five
+spec tools list --offline             # built-ins only; never connects
+spec tools enable self__validate_spec --for status
+spec tools servers
+```
+
+A command that generates or implements is handed **3–6** tools — the ones
+its current step can legitimately use, and nothing else. Only the read-only
+`ask` gets 10. Compare that with the **21** a general host such as Cursor or
+`pi -nbt` sees: same server, same tools, different amount of rope.
+
+`--for` accepts: `spec-draft`, `spec-reword`, `steps-generate`,
+`unittest-generate`, `implement-advice`, `implement`, `status`, `ask`.
+Omitting it lists those names and exits nonzero.
+
+No default profile contains a tool that writes a file. The only mutation
+a harness-side model may request is `command_run` on the `implement`
+profile, and that call still asks the human to confirm.
+
+External tools are namespaced `server__tool`. A name in config that is
+not in the catalog is a warning, not a hard failure.
+
+## `.spec/config.toml` per-command mapping
+
+Built-in defaults live in code and are also written into
+`[tools.profiles]` by `spec init` so you can see what each command
+offers the model. A command reads its list from the file first and
+then its defaults: the two are **merged**, so a tool named in both is
+offered once, a tool named only in the file is added, and a default
+left out of the file is still offered. The written table is a copy of
+the defaults to read and extend, not a replacement for them - a list
+that named one tool used to take the other four away. Omitted callers
+keep the code defaults. `[tools.enabled]` adds names;
+`[tools.disabled]` removes them, and is the one way to take a default
+away for every run. `spec tools enable` / `disable` write those last
+two tables. `--tools a,b` on a command sets the whole list for that
+one run, defaults and config set aside.
+
+After you add a server to `mcp.json`, run `spec tools refresh` and put
+the tool on the command that should use it, either in its profile or
+under `[tools.enabled]`; the two read the same:
+
+```toml
+[tools.profiles]
+implement = ["get_requirement", "feature_read", "step_definitions_find", "get_tdd_state", "run_tests", "command_run", "playwright:browser_navigate"]
+
+[tools.enabled]
+status = ["playwright:browser_navigate"]
+```
+
+`spec tools profiles` prints each command's resolved set and marks a
+tool the config added with `(config)`, so the shipped set stays
+recognisable:
+
+```text
+status	6	project_root, list_requirements, get_requirement, get_tdd_state, validate_spec, playwright__browser_navigate (config)
+```
+
+### Name collisions
+
+Built-in tools keep their catalog names (`validate_spec`). Tools from
+`mcp.json` are catalogued as `server__tool` so they never overwrite a
+built-in. When both exist, the **bare** name is the built-in. Pin the
+origin when you need to be explicit:
+
+| Written in `.spec/config.toml` | Resolves to |
+| --- | --- |
+| `validate_spec` | built-in |
+| `builtin:validate_spec` | built-in, even if an MCP tool shares the short name |
+| `self:validate_spec` | mcp.json server `self` |
+| `self__validate_spec` | same MCP tool (catalog name) |
+
+`builtin` is reserved for the harness's own tools. `spec init` writes
+`.spec/config.toml` with every key and a live `[tools.profiles]` list for each
+caller. [`spec config`](config.md) prints the resolved set and whether
+each value is a default or came from the file.

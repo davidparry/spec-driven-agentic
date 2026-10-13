@@ -1,0 +1,488 @@
+//! `spec status`: the workflow query aggregating the TDD phase and
+//! every requirement's asset gaps into the one next step that moves
+//! the project toward all requirements implemented. The report itself
+//! is deterministic reading; when a model is resolved, `advice`
+//! additionally briefs it with the workflow process and the full state
+//! so it names the next command.
+
+use serde::Serialize;
+
+use crate::application::LlmReplyError;
+use crate::application::assets::{asset_survey, load_spec};
+use crate::application::generation_service::ResolvedLlm;
+use crate::application::spec_service::ServiceError;
+use crate::domain::generation::strip_code_fences;
+use crate::domain::human::{Human, bullets, columns, sections, titled};
+use crate::domain::language::Language;
+use crate::domain::memory::ProjectStructure;
+use crate::domain::model::{ROOT_SPEC_FILE, SpecCatalog};
+use crate::domain::requirement_id::next_id;
+use crate::domain::workflow::next_step_prompt;
+use crate::ports::{
+    FeatureCatalog, LlmConversation, Prompter, SourceFiles, SpecRepository, ToolBroker,
+};
+
+/// One requirement's position on the road to implemented: its status
+/// and the asset gaps still open (empty once only the GREEN-gated
+/// mark-implemented remains).
+#[derive(Debug, Serialize, PartialEq, Eq)]
+pub struct RequirementStatus {
+    pub id: String,
+    pub title: String,
+    pub status: String,
+    pub findings: Vec<String>,
+}
+
+/// Reply of `spec status`: the TDD phase, every requirement's
+/// position, and the one next step that moves the project toward all
+/// requirements implemented.
+#[derive(Debug, Serialize, PartialEq, Eq)]
+pub struct StatusReport {
+    pub phase: String,
+    pub requirements: Vec<RequirementStatus>,
+    /// The id the next drafted requirement will carry, read off the
+    /// catalog's own numbering.
+    ///
+    /// Here so an agent reads the shape rather than guessing it: ids are
+    /// `REQ-003` in the kata and `HARNESS-015` in this crate's own spec,
+    /// and a model that assumed one would name the other wrong.
+    #[serde(rename = "nextId")]
+    pub next_id: String,
+    #[serde(rename = "nextStep")]
+    pub next_step: String,
+}
+
+impl Human for StatusReport {
+    fn human(&self) -> String {
+        let rows: Vec<Vec<String>> = self
+            .requirements
+            .iter()
+            .map(|requirement| {
+                vec![
+                    requirement.id.clone(),
+                    requirement.status.clone(),
+                    requirement.title.clone(),
+                ]
+            })
+            .collect();
+        // Findings hang under the requirement they belong to rather
+        // than in a list of their own, so a reader never has to match
+        // a finding back to an id.
+        let findings: Vec<String> = self
+            .requirements
+            .iter()
+            .filter(|requirement| !requirement.findings.is_empty())
+            .map(|requirement| {
+                titled(
+                    &format!("{}:", requirement.id),
+                    &bullets(&requirement.findings),
+                )
+            })
+            .collect();
+        let header = columns(&[
+            vec!["Phase".to_string(), self.phase.clone()],
+            vec!["Next id".to_string(), self.next_id.clone()],
+        ]);
+        sections(&[header, columns(&rows), findings.join("\n\n")])
+    }
+
+    fn next_step(&self) -> Option<&str> {
+        Some(&self.next_step)
+    }
+}
+
+pub struct StatusService<F, S, R, L, B = crate::application::agent_service::NullBroker>
+where
+    F: FeatureCatalog,
+    S: SourceFiles,
+    R: SpecRepository,
+    L: LlmConversation,
+    B: ToolBroker,
+{
+    features: F,
+    sources: S,
+    spec: R,
+    language: Language,
+    layout: ProjectStructure,
+    llm: Option<ResolvedLlm<L, B>>,
+}
+
+impl<F, S, R, L, B> StatusService<F, S, R, L, B>
+where
+    F: FeatureCatalog,
+    S: SourceFiles,
+    R: SpecRepository,
+    L: LlmConversation,
+    B: ToolBroker,
+{
+    pub fn new(
+        features: F,
+        sources: S,
+        spec: R,
+        language: Language,
+        layout: ProjectStructure,
+        llm: Option<ResolvedLlm<L, B>>,
+    ) -> Self {
+        Self {
+            features,
+            sources,
+            spec,
+            language,
+            layout,
+            llm,
+        }
+    }
+
+    /// Whether a model is resolved; callers narrate the advice call only
+    /// when one will actually happen.
+    pub fn has_model(&self) -> bool {
+        self.llm.is_some()
+    }
+
+    /// Where the project stands on the road to every requirement being
+    /// implemented, and the one next step that moves it forward. The
+    /// priority order mirrors the loop itself: the requirement in
+    /// flight (assets complete) is tested or marked; then the earliest
+    /// asset gap; and when nothing is left, the next draft.
+    pub fn status(&self, phase: &str) -> Result<StatusReport, ServiceError> {
+        let spec = load_spec(&self.spec)?;
+        let mut requirements = Vec::new();
+        let mut in_flight: Option<String> = None;
+        let mut first_gap: Option<String> = None;
+        for requirement in &spec.requirements {
+            let mut findings = Vec::new();
+            if requirement.status != "implemented" {
+                let (_, gaps) = asset_survey(
+                    &self.features,
+                    &self.sources,
+                    self.language,
+                    requirement,
+                    &spec.project,
+                    &self.layout,
+                    None,
+                )?;
+                findings = gaps;
+                if findings.is_empty() {
+                    in_flight.get_or_insert_with(|| requirement.id.clone());
+                } else if first_gap.is_none() {
+                    first_gap = Some(findings[0].clone());
+                }
+            }
+            requirements.push(RequirementStatus {
+                id: requirement.id.clone(),
+                title: requirement.title.clone(),
+                status: requirement.status.clone(),
+                findings,
+            });
+        }
+        let next_step = if let Some(id) = in_flight {
+            if phase == "GREEN" {
+                format!(
+                    "The bar is GREEN - close the loop: spec mark-implemented \
+                     {id}, then spec validate."
+                )
+            } else {
+                format!(
+                    "{id} has every asset in place and the bar is {phase} - run \
+                     spec test; on RED let the model try with spec implement {id}."
+                )
+            }
+        } else if let Some(gap) = first_gap {
+            gap
+        } else {
+            "Every requirement is implemented. Draft the next one with spec draft.".to_string()
+        };
+        Ok(StatusReport {
+            phase: phase.to_string(),
+            requirements,
+            next_id: next_id(&SpecCatalog::single_root(spec), ROOT_SPEC_FILE),
+            next_step,
+        })
+    }
+
+    /// Ask the model for the next step: the workflow process document
+    /// plus the whole report and the last run's counts go into one
+    /// advice call. `None` without a model.
+    pub fn advice(
+        &self,
+        prompter: &mut dyn Prompter,
+        report: &StatusReport,
+        last_run: impl Serialize,
+    ) -> Result<Option<String>, ServiceError> {
+        let Some(llm) = &self.llm else {
+            return Ok(None);
+        };
+        let prompt = next_step_prompt(&report.phase, last_run, &report.requirements);
+        let reply = match llm.ask(
+            prompter,
+            &prompt,
+            |text| {
+                let body = strip_code_fences(text);
+                if body.trim().is_empty() {
+                    Err("the advice reply was empty".into())
+                } else {
+                    Ok(body)
+                }
+            },
+            |_, _, _, _| {},
+        ) {
+            Ok(reply) => reply,
+            Err(LlmReplyError::Call(e)) => {
+                return Err(ServiceError(LlmReplyError::call_failed(&e)));
+            }
+            Err(LlmReplyError::Invalid { reason }) => {
+                return Err(ServiceError(reason));
+            }
+        };
+        Ok(Some(reply))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::application::agent_service::NullPrompter;
+    use crate::domain::model::{Requirement, Spec, TestRunSummary};
+    use crate::ports::SourceFile;
+    use crate::test_support::{
+        FakeLlm, FakeSources, InMemoryFeatureCatalog, InMemorySpecRepository, calculator_catalog,
+        calculator_spec, covered_steps_source, flat_layout, unit_test_source,
+    };
+
+    fn service_with_llm(
+        sources: Vec<SourceFile>,
+        llm: Option<ResolvedLlm<FakeLlm>>,
+    ) -> StatusService<InMemoryFeatureCatalog, FakeSources, InMemorySpecRepository, FakeLlm> {
+        StatusService::new(
+            calculator_catalog(),
+            FakeSources(sources),
+            InMemorySpecRepository(Ok(calculator_spec())),
+            Language::Java,
+            flat_layout(Language::Java),
+            llm,
+        )
+    }
+
+    fn service(
+        sources: Vec<SourceFile>,
+    ) -> StatusService<InMemoryFeatureCatalog, FakeSources, InMemorySpecRepository, FakeLlm> {
+        service_with_llm(sources, None)
+    }
+
+    #[test]
+    fn status_on_green_names_the_whole_close_the_loop_chain() {
+        let service = service(vec![covered_steps_source(), unit_test_source()]);
+        let report = service.status("GREEN").unwrap();
+        assert!(
+            report.next_step.contains("spec mark-implemented REQ-001"),
+            "next step: {}",
+            report.next_step
+        );
+        assert!(
+            report.next_step.contains("then spec validate"),
+            "validate is part of the chain: {}",
+            report.next_step
+        );
+        let by_id = |id: &str| report.requirements.iter().find(|r| r.id == id).unwrap();
+        assert!(by_id("REQ-001").findings.is_empty(), "REQ-001 is in flight");
+        assert!(!by_id("REQ-002").findings.is_empty(), "REQ-002 has gaps");
+        assert_eq!(by_id("REQ-003").status, "implemented");
+        assert!(by_id("REQ-003").findings.is_empty());
+    }
+
+    #[test]
+    fn status_off_green_with_a_requirement_in_flight_points_to_the_test_run() {
+        let service = service(vec![covered_steps_source(), unit_test_source()]);
+        let report = service.status("RED").unwrap();
+        assert!(
+            report.next_step.contains("run spec test"),
+            "next step: {}",
+            report.next_step
+        );
+        assert!(report.next_step.contains("spec implement REQ-001"));
+    }
+
+    #[test]
+    fn status_names_the_earliest_gap_when_nothing_is_in_flight() {
+        let report = service(vec![]).status("START").unwrap();
+        assert!(
+            report.next_step.contains("spec steps generate"),
+            "REQ-001's first gap leads: {}",
+            report.next_step
+        );
+    }
+
+    #[test]
+    fn status_with_every_requirement_implemented_points_to_the_next_draft() {
+        let spec = Spec {
+            project: "Kata".into(),
+            requirements: vec![Requirement {
+                id: "REQ-001".into(),
+                title: "Adds two numbers".into(),
+                status: "implemented".into(),
+                story: "As a user, I want sums so that I can add.".into(),
+                acceptance_criteria: vec!["Given a, when b, then 3".into()],
+                feature_file: Some("features/calc.feature".into()),
+                ..Default::default()
+            }],
+            ..Spec::default()
+        };
+        let service: StatusService<_, _, _, FakeLlm> = StatusService::new(
+            calculator_catalog(),
+            FakeSources(vec![]),
+            InMemorySpecRepository(Ok(spec)),
+            Language::Java,
+            flat_layout(Language::Java),
+            None,
+        );
+        let report = service.status("GREEN").unwrap();
+        assert_eq!(
+            report.next_step,
+            "Every requirement is implemented. Draft the next one with spec draft."
+        );
+    }
+
+    #[test]
+    fn the_status_report_serializes_next_step_in_camel_case() {
+        let report = service(vec![]).status("START").unwrap();
+        let json = serde_json::to_string(&report).unwrap();
+        assert!(json.contains("nextStep"));
+        assert!(json.contains("requirements"));
+    }
+
+    #[test]
+    fn advice_without_a_model_is_none() {
+        let service = service(vec![]);
+        assert!(!service.has_model());
+        let report = service.status("START").unwrap();
+        assert_eq!(
+            service
+                .advice(&mut NullPrompter, &report, TestRunSummary::default())
+                .unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn advice_briefs_the_model_with_the_workflow_and_the_whole_state() {
+        let service = service_with_llm(
+            vec![],
+            Some(FakeLlm::replying(
+                "Run spec steps generate, then spec test.",
+            )),
+        );
+        assert!(service.has_model());
+        let report = service.status("RED").unwrap();
+        let advice = service
+            .advice(
+                &mut NullPrompter,
+                &report,
+                TestRunSummary {
+                    tests: 6,
+                    failures: 2,
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(advice, "Run spec steps generate, then spec test.");
+        let prompts = service.llm.as_ref().unwrap().chat().prompts.borrow();
+        assert!(
+            prompts[0].contains("THE LOOP FOR ONE REQUIREMENT"),
+            "the workflow process briefs the model"
+        );
+        assert!(prompts[0].contains("The TDD phase: RED"));
+        assert!(prompts[0].contains("tests=6 failures=2 errors=0 skipped=0"));
+        assert!(prompts[0].contains("REQ-001"));
+        assert!(prompts[0].contains("status=implemented") || prompts[0].contains("status=pending"));
+    }
+
+    #[test]
+    fn a_model_failure_during_advice_is_reported() {
+        let service = service_with_llm(vec![], Some(FakeLlm::failing()));
+        let report = service.status("RED").unwrap();
+        assert_eq!(
+            service
+                .advice(&mut NullPrompter, &report, TestRunSummary::default())
+                .unwrap_err()
+                .0,
+            "the model call failed - model crashed"
+        );
+    }
+
+    #[test]
+    fn an_empty_advice_reply_is_reported_as_invalid() {
+        let service = service_with_llm(vec![], Some(FakeLlm::replying("   ")));
+        let report = service.status("RED").unwrap();
+        let error = service
+            .advice(&mut NullPrompter, &report, TestRunSummary::default())
+            .unwrap_err();
+        assert!(
+            error.0.contains("empty") || error.0.contains("invalid"),
+            "got: {}",
+            error.0
+        );
+    }
+
+    fn status_report(findings: Vec<String>) -> StatusReport {
+        StatusReport {
+            phase: "RED".into(),
+            requirements: vec![
+                RequirementStatus {
+                    id: "REQ-001".into(),
+                    title: "Add two numbers".into(),
+                    status: "implemented".into(),
+                    findings: Vec::new(),
+                },
+                RequirementStatus {
+                    id: "HARNESS-012".into(),
+                    title: "Serve the spec".into(),
+                    status: "pending".into(),
+                    findings,
+                },
+            ],
+            next_id: "REQ-003".into(),
+            next_step: "Run spec draft.".into(),
+        }
+    }
+
+    #[test]
+    fn status_lines_up_its_requirements_under_the_phase() {
+        let rendered = status_report(Vec::new()).human();
+        assert!(
+            rendered.starts_with("Phase    RED\nNext id  REQ-003"),
+            "{rendered}"
+        );
+        // Ids of different lengths still start their status in the
+        // same column.
+        assert!(
+            rendered.contains("REQ-001      implemented  Add two numbers"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("HARNESS-012  pending      Serve the spec"),
+            "{rendered}"
+        );
+    }
+
+    /// A finding hangs under the id it belongs to, so a reader never
+    /// has to match one back to a requirement.
+    #[test]
+    fn findings_are_attributed_to_the_requirement_that_has_them() {
+        let rendered = status_report(vec!["no scenario yet".into()]).human();
+        assert!(
+            rendered.contains("HARNESS-012:\n  - no scenario yet"),
+            "{rendered}"
+        );
+    }
+
+    #[test]
+    fn a_status_with_no_findings_says_nothing_about_findings() {
+        let rendered = status_report(Vec::new()).human();
+        assert!(!rendered.contains("  - "), "{rendered}");
+        assert_eq!(
+            status_report(Vec::new()).next_step(),
+            Some("Run spec draft.")
+        );
+    }
+}

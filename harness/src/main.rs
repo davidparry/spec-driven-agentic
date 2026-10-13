@@ -1,0 +1,3737 @@
+//! `spec` — spec-driven BDD/TDD harness with an embedded MCP server.
+//!
+//! This binary is a composition root: it names concrete adapters and
+//! wires them into application services, and nothing else.
+
+use std::borrow::Cow;
+use std::path::{Path, PathBuf};
+
+use clap::{Args, Parser, Subcommand};
+
+use spec_harness::adapters::auto_prompt::AutoPrompter;
+use spec_harness::adapters::chat_cache::{CachedConversation, DEFAULT_CACHE_TTL};
+use spec_harness::adapters::config::{
+    TomlDecisionStore, TomlModelStore, TomlToolStore, config_path, deliver_attempts,
+    inspect_config, refactor_attempts, tools_settings,
+};
+use spec_harness::adapters::console_prompt::{ConsolePrompter, MUTED_YELLOW};
+use spec_harness::adapters::fs_project::FsProjectFiles;
+use spec_harness::adapters::fs_scaffold::FsScaffoldWriter;
+use spec_harness::adapters::fs_session::current_session;
+use spec_harness::adapters::fs_spec::FsSpecRepository;
+use spec_harness::adapters::fs_worktree::FsWorkTree;
+use spec_harness::adapters::mcp_client::McpToolBroker;
+use spec_harness::adapters::mcp_config::FsMcpRegistry;
+use spec_harness::adapters::ollama::{DEFAULT_ENDPOINT, DEFAULT_GENERATION_TIMEOUT, OllamaCatalog};
+use spec_harness::adapters::ollama_chat::OllamaChat;
+use spec_harness::adapters::process_runtime::ProcessRuntimeProbe;
+use spec_harness::adapters::prompt_end::AbortOnEndOfInput;
+use spec_harness::adapters::readline_prompt::ReadlinePrompter;
+use spec_harness::adapters::readline_shell::ReadlineShell;
+use spec_harness::adapters::runners::detect_runner;
+use spec_harness::adapters::spec_home::{ensure_spec_home, log_dir, spec_file};
+use spec_harness::adapters::spinner::{HushingPrompter, Spinner};
+use spec_harness::adapters::tool_cache::CachedDiscovery;
+use spec_harness::application::DEFAULT_LLM_ATTEMPTS;
+use spec_harness::application::agent_service::AgentConfig;
+use spec_harness::application::decision_service::DecisionService;
+use spec_harness::application::generation_service::{GenerationService, ResolvedLlm};
+use spec_harness::application::implement_service::ImplementService;
+use spec_harness::application::init_service::InitService;
+use spec_harness::application::inspect_service::InspectService;
+use spec_harness::application::memory_service::MemoryAwareConversation;
+use spec_harness::application::model_service::{
+    DecisionReadiness, ModelResolution, ModelService, ModelSource, SessionDecision, SessionModel,
+};
+use spec_harness::application::refactor_service::RefactorService;
+use spec_harness::application::spec_mutation_service::{
+    AskTarget, Decisions, NewRequirement, RequirementUpdate, SpecMutationService,
+};
+use spec_harness::application::status_service::StatusService;
+use spec_harness::application::tdd_service::TddError;
+use spec_harness::application::tool_call_service::ToolCallService;
+use spec_harness::application::tool_service::ToolService;
+use spec_harness::bootstrap::{prompt_language, refresh_project_memory, settle_project_memory};
+use spec_harness::deliver::{Deliver, DeliverOptions, parse_target};
+use spec_harness::domain::ask::{AcceptedBy, Mode as AskMode};
+use spec_harness::domain::config_report::{ConfigSource, LLM_MODEL_KEY};
+use spec_harness::domain::decision::{DECISION_PLANE_HELP, Transition};
+use spec_harness::domain::human::{Human, counted};
+use spec_harness::domain::language::Language;
+use spec_harness::domain::layout::outside_feature_root;
+use spec_harness::domain::mcp_registry::ServerSpec;
+use spec_harness::domain::prompts::ask_prompt;
+use spec_harness::domain::requirement_id::is_id_shape;
+use spec_harness::domain::session::SessionId;
+use spec_harness::domain::spec_validator::{is_structural_issue, structural_repair};
+use spec_harness::domain::tdd::ImplementAttempt;
+use spec_harness::domain::tool_profile::{Caller, resolve};
+use spec_harness::domain::{CACHE_DIR, HISTORY_FILE, RECOMMENDED_MODEL, spec_rel};
+use spec_harness::greenfield::Greenfield;
+use spec_harness::mcp::{WorkflowServer, builtin_tool_definitions};
+use spec_harness::ports::{
+    FeatureCatalog as _, McpRegistrySource as _, Prompter, TestFilter, ToolStore as _,
+};
+use spec_harness::repl::{Ending, is_greenfield_start, offer_greenfield, run_shell};
+use spec_harness::wiring::{self, DynLlm};
+use spec_harness::workspace::{
+    SPEC_PATH, detect_project_layout, discover_project_root, project_layout,
+};
+
+/// `spec refine --help`.
+///
+/// Refinement judges automatically, so the help has to say both what
+/// turns that on and what turns it off — a reader who never configured
+/// a decision model should be able to tell, from this text alone, that
+/// none of it is happening to them.
+fn refine_help() -> String {
+    format!(
+        "Review one requirement's wording for quality (refine_requirement).\n\n\
+         The findings come from deterministic rules and are the whole of this \
+         command until a decision model is configured with `spec judge use \
+         <model>`. With one configured, each criterion is also judged.\n\n\
+         {DECISION_PLANE_HELP}\n\n\
+         Set `mode = \"off\"` under `[decision]` to keep the model configured \
+         for `spec judge` while this command stops asking."
+    )
+}
+
+/// `spec draft --help`.
+fn draft_help() -> String {
+    "Draft requirements.\n\n\
+     spec draft \"<what to build>\"   preserves the words as an ask (ASK-nnn, type \
+     ask_requirement) and breaks them into actionable requirements, each linked back \
+     to the ask. Without --interactive nothing is asked: proposals the review passes \
+     are accepted on its authority, the rest stay pending with their findings, and \
+     the questions raised are recorded unanswered. With --interactive every proposal \
+     is put to you - approve, reject, revise, or exclude - and you confirm the \
+     accepted requirements cover the request. Running the same words again adds \
+     nothing already there; naming the ask (spec draft ASK-001) carries on with it.\n\n\
+     spec draft --title ... --story ... --criterion ...   writes one requirement \
+     directly; add --parent ASK-nnn to derive it from an ask.\n\n\
+     spec draft --request-only \"<words>\"   preserves an ask without breaking it \
+     down.\n\n\
+     spec draft   with no arguments opens the wizard."
+        .to_string()
+}
+
+/// `spec judge criterion --help`.
+///
+/// The one judgment a human asks for by name, which is why it answers
+/// even under `mode = "off"` and why that exception is stated here
+/// rather than left to be discovered.
+fn judge_criterion_help() -> String {
+    format!(
+        "Judge one acceptance criterion and show the typed answer.\n\n\
+         {DECISION_PLANE_HELP}\n\n\
+         This command answers whatever `[decision] mode` says, including \
+         `off`: that setting suppresses the automatic judgments inside \
+         `spec refine`, not one a human typed. It gates on the same terms \
+         as `spec refine` does, so an action other than CONTINUE exits \
+         nonzero. Under `off` the action is always CONTINUE."
+    )
+}
+
+#[derive(Parser)]
+#[command(
+    name = "spec",
+    version,
+    about = "Spec-driven BDD/TDD authoring, validation, and execution"
+)]
+struct Cli {
+    /// Override the configured LLM model for this invocation
+    #[arg(long, global = true)]
+    model: Option<String>,
+
+    /// Override the configured decision model for this invocation.
+    /// Separate from --model: the two roles are different models.
+    #[arg(long, global = true, value_name = "MODEL")]
+    decision_model: Option<String>,
+
+    /// Project root (where requirements/ and .spec/config.toml live).
+    /// Defaults to the nearest enclosing project, searching upward from
+    /// the working directory.
+    #[arg(long, global = true)]
+    root: Option<PathBuf>,
+
+    /// Verbose diagnostic logging on stderr (prompts, responses, cache, MCP)
+    #[arg(long, global = true)]
+    debug: bool,
+
+    /// Max attempts when a model reply fails validation (default 3)
+    #[arg(long, global = true)]
+    retry: Option<u32>,
+
+    /// Replace this command's tool profile for one run (comma-separated names)
+    #[arg(long, global = true)]
+    tools: Option<String>,
+
+    /// Override [tools] max_rounds for one run
+    #[arg(long, global = true)]
+    max_rounds: Option<u32>,
+
+    /// Do not offer a git branch before a generating run: write the
+    /// project where it stands, and do not check for git at all
+    #[arg(long, global = true)]
+    no_branch: bool,
+
+    /// Resume the session with this GUID (one from the list the shell
+    /// prints at start), and make it the current one. Without it, bare
+    /// `spec` begins a new session once the current one has recorded
+    /// work, and one-shot commands continue the current one.
+    #[arg(long, global = true, value_name = "GUID")]
+    session: Option<String>,
+
+    /// Omitted entirely: print help and open the interactive shell
+    #[command(subcommand)]
+    command: Option<Command>,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Scaffold build files, Cucumber runner, empty spec, and config
+    Init(InitArgs),
+    /// Run the full orchestrated loop from zero (two human gates)
+    Greenfield,
+    /// Drive a requirement, a description, or the whole backlog to implemented
+    Deliver(DeliverArgs),
+    // Flattened, so the requirements-spec verbs are `spec list`, `spec draft`,
+    // `spec validate`, … rather than `spec spec …`.
+    #[command(flatten)]
+    Spec(SpecCommand),
+    /// Detect project languages, build system, runtimes, and roots
+    Inspect,
+    /// Feature discovery and creation
+    #[command(subcommand)]
+    Feature(FeatureCommand),
+    /// Scenario mutations
+    #[command(subcommand)]
+    Scenario(ScenarioCommand),
+    /// Step-definition discovery and generation
+    #[command(subcommand)]
+    Steps(StepsCommand),
+    /// Unit-test generation (the TDD altitude)
+    #[command(subcommand)]
+    Unittest(UnittestCommand),
+    /// Ask the model to make the failing tests pass (stages the files)
+    Implement {
+        req_id: String,
+        /// Production file the work belongs in. Only needed when the
+        /// step definitions are still pending, so nothing in the
+        /// project points at one.
+        #[arg(long, value_name = "PATH")]
+        into: Option<String>,
+    },
+    /// Run tests and update the RED/GREEN/REFACTOR phase (run_tests)
+    Test(TestArgs),
+    /// Show the current TDD phase and last run (get_tdd_state)
+    State {
+        /// Print the raw JSON reply instead of the readable summary
+        #[arg(long)]
+        json: bool,
+    },
+    /// Where every requirement stands on the road to implemented, and the next step
+    Status {
+        /// Print the raw JSON reply instead of the readable summary
+        #[arg(long)]
+        json: bool,
+    },
+    /// Begin a refactor step; only allowed on GREEN (start_refactor)
+    Refactor(RefactorArgs),
+    /// LLM model discovery and selection (Ollama)
+    #[command(subcommand)]
+    Model(ModelCommand),
+    /// Decision model: selection, and bounded judgments you can inspect
+    #[command(subcommand)]
+    Judge(JudgeCommand),
+    /// Print resolved configuration and where each value came from
+    Config {
+        /// Print JSON instead of the tab-separated table
+        #[arg(long)]
+        json: bool,
+    },
+    /// MCP server
+    #[command(subcommand)]
+    Mcp(McpCommand),
+    /// Per-command tool profiles and the external MCP registry
+    #[command(subcommand)]
+    Tools(ToolsCommand),
+    /// Free-form question with the read-only tool profile
+    Ask {
+        /// The question. Omit on a tty for a multi-turn prompt.
+        task: Vec<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Explain the uncommitted change under a path (git_diff)
+    Diff {
+        /// Path to diff, relative to the project root, e.g.
+        /// requirements. Omit for the whole project.
+        path: Option<String>,
+        /// Print the diff itself instead of asking the model to explain it
+        #[arg(long)]
+        raw: bool,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+/// Who a decision belongs to, as the command line says it.
+#[derive(Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+enum By {
+    /// The review's own authority: it accepts only what the rules pass
+    Automatic,
+    /// A person said so
+    User,
+}
+
+impl From<By> for AcceptedBy {
+    fn from(by: By) -> Self {
+        match by {
+            By::Automatic => AcceptedBy::Automatic,
+            By::User => AcceptedBy::User,
+        }
+    }
+}
+
+#[derive(Subcommand)]
+enum SpecCommand {
+    /// List every requirement with id, title, and status (list_requirements)
+    List {
+        /// Print the raw JSON reply instead of the readable summary
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show one requirement, enriched with locations and a workflow hint (get_requirement)
+    Show {
+        req_id: String,
+        /// Print the raw JSON reply instead of the readable summary
+        #[arg(long)]
+        json: bool,
+    },
+    /// Draft requirements: a request in plain words (or an ASK id to
+    /// continue) is preserved as an ask and broken into requirements;
+    /// --title/--story/--criterion write one directly; no arguments
+    /// opens the wizard.
+    #[command(long_about = draft_help())]
+    Draft {
+        /// What to build, in plain words - or the id of an ask to carry on
+        /// with (e.g. ASK-001)
+        request: Option<String>,
+        /// Put every proposal to you to approve, reject, revise, or
+        /// exclude, and ask the open questions. Without it nothing is
+        /// asked: the rules accept what they can and record the rest.
+        #[arg(long)]
+        interactive: bool,
+        /// Title of one requirement written directly (with --story and
+        /// --criterion, no wizard)
+        #[arg(long)]
+        title: Option<String>,
+        /// Its user story: As a ..., I want ..., so that ...
+        #[arg(long)]
+        story: Option<String>,
+        /// Repeatable Given/When/Then acceptance criterion
+        #[arg(long)]
+        criterion: Vec<String>,
+        /// Preserve these words as an ask without breaking them down
+        #[arg(long, conflicts_with_all = ["request", "title", "story", "criterion", "parent"])]
+        request_only: Option<String>,
+        /// The ask a directly written requirement derives from
+        #[arg(long)]
+        parent: Option<String>,
+        /// Who accepts a requirement written under --parent: `user` when
+        /// a person approved these words, `automatic` (the default) to
+        /// let the review decide
+        #[arg(long, value_enum, default_value_t = By::Automatic)]
+        by: By,
+        /// Draft into this included spec file instead of the root
+        /// catalog (e.g. requirements/core/math.json)
+        #[arg(long)]
+        file: Option<String>,
+    },
+    /// Record decisions on an ask without a wizard or a model: accept,
+    /// reject, or exclude proposals by number, answer questions, and
+    /// mark the decomposition complete or confirmed
+    Decide {
+        /// The ask, e.g. ASK-001
+        ask_id: String,
+        /// Accept proposal N (repeatable)
+        #[arg(long, value_name = "N")]
+        accept: Vec<u32>,
+        /// Reject proposal N, optionally with a reason: N or N:reason
+        #[arg(long, value_name = "N[:REASON]")]
+        reject: Vec<String>,
+        /// Exclude proposal N from scope, optionally with a reason
+        #[arg(long, value_name = "N[:REASON]")]
+        exclude: Vec<String>,
+        /// Answer question N: N=answer
+        #[arg(long, value_name = "N=ANSWER")]
+        answer: Vec<String>,
+        /// Mark the decomposition complete
+        #[arg(long, conflicts_with = "reopen")]
+        complete: bool,
+        /// Reopen the decomposition
+        #[arg(long)]
+        reopen: bool,
+        /// Record that the user confirmed the accepted requirements
+        /// cover the request (needs --by user)
+        #[arg(long, conflicts_with = "unconfirm")]
+        confirm: bool,
+        /// Withdraw that confirmation
+        #[arg(long)]
+        unconfirm: bool,
+        /// Whose decisions these are. `automatic` may only accept what
+        /// the review would accept on its own and may not confirm.
+        #[arg(long, value_enum, default_value_t = By::Automatic)]
+        by: By,
+    },
+    /// Remove a requirement from the catalog
+    Delete {
+        req_id: String,
+        /// Remove an ask together with the requirements derived from it
+        #[arg(long)]
+        cascade: bool,
+    },
+    /// Link a requirement to the ask it derives from
+    Link {
+        /// The requirement, e.g. REQ-004
+        req_id: String,
+        /// The ask, e.g. ASK-001
+        ask_id: String,
+        /// Whose link this is: `user` records their acceptance
+        #[arg(long, value_enum, default_value_t = By::Automatic)]
+        by: By,
+    },
+    /// Take a requirement out from under its ask
+    Unlink { req_id: String },
+    /// Validate the requirements spec on disk (validate_spec)
+    Validate {
+        /// Print the raw JSON reply instead of the readable summary
+        #[arg(long)]
+        json: bool,
+    },
+    /// Review one requirement's wording for quality (refine_requirement)
+    #[command(long_about = refine_help())]
+    Refine {
+        /// The requirement to review, e.g. REQ-003
+        req_id: String,
+        /// Print the raw JSON reply instead of the readable summary
+        #[arg(long)]
+        json: bool,
+    },
+    /// Reword an existing requirement. Flags skip the wizard. A child
+    /// whose meaning changes loses its acceptance; an ask whose
+    /// --request changes reopens its decomposition.
+    Reword {
+        req_id: String,
+        /// New title; omit to keep the current one
+        #[arg(long)]
+        title: Option<String>,
+        /// New user story; omit to keep the current one
+        #[arg(long)]
+        story: Option<String>,
+        /// The full new set of criteria, repeated; omit to keep them.
+        /// Refused on an ask, whose criteria are derived
+        #[arg(long)]
+        criterion: Vec<String>,
+        /// The new request text of an ask
+        #[arg(long)]
+        request: Option<String>,
+        /// Move the requirement under this ask
+        #[arg(long, conflicts_with = "unlink")]
+        parent: Option<String>,
+        /// Take the requirement out from under its ask
+        #[arg(long)]
+        unlink: bool,
+        /// Whose link --parent records: `user` records their acceptance
+        #[arg(long, value_enum, default_value_t = By::Automatic)]
+        by: By,
+    },
+    /// Point a requirement at a feature file (for extracted specs)
+    SetFeature {
+        req_id: String,
+        #[arg(long)]
+        file: String,
+    },
+    /// Declare where a requirement's production code lives; repeat
+    /// --file for a requirement whose code is more than one file
+    SetProduction {
+        req_id: String,
+        #[arg(long, required = true)]
+        file: Vec<String>,
+    },
+    /// Flip a requirement's status to implemented (requirement_mark_implemented)
+    MarkImplemented { req_id: String },
+    /// Manage the spec catalog's included files
+    #[command(subcommand)]
+    Include(IncludeCommand),
+}
+
+#[derive(Subcommand)]
+enum IncludeCommand {
+    /// Include a spec file in the catalog; created empty when missing
+    Add {
+        /// The spec file to include, e.g. requirements/core/math.json
+        path: String,
+        /// The catalog document declaring the include (default: the root
+        /// requirements.json)
+        #[arg(long)]
+        from: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum FeatureCommand {
+    /// List every feature file with its name and scenario count
+    List,
+    /// Show one parsed feature file (path relative to --root)
+    Show { path: String },
+    /// Create a feature file
+    Create {
+        /// Feature file path relative to --root
+        #[arg(long)]
+        path: String,
+        /// Feature name (the text after "Feature:")
+        #[arg(long)]
+        name: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum ScenarioCommand {
+    /// Append a tagged scenario to a feature file
+    Add {
+        /// Feature file path relative to --root
+        #[arg(long)]
+        feature: String,
+        /// Requirement id the scenario implements (tagged @REQ-...)
+        #[arg(long)]
+        req: String,
+        /// Scenario name
+        #[arg(long)]
+        name: String,
+        /// One full Gherkin step per flag, e.g. --step "Given a calculator"
+        #[arg(long = "step")]
+        steps: Vec<String>,
+    },
+    /// Write a requirement's scenarios from its acceptance criteria
+    Generate {
+        req_id: String,
+        /// Feature file to append to; defaults to the requirement's own
+        #[arg(long)]
+        feature: Option<String>,
+    },
+    /// Replace a scenario's steps and/or requirement tag
+    Update {
+        #[arg(long)]
+        feature: String,
+        #[arg(long)]
+        name: String,
+        /// New requirement id for the tag; omit to keep the current tag
+        #[arg(long)]
+        req: Option<String>,
+        /// New steps; omit to keep the current steps
+        #[arg(long = "step")]
+        steps: Vec<String>,
+    },
+    /// Remove a scenario from a feature file
+    Delete {
+        #[arg(long)]
+        feature: String,
+        #[arg(long)]
+        name: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum StepsCommand {
+    /// Report undefined and ambiguous steps (step_definitions_find)
+    Missing,
+    /// Generate step definitions for undefined steps (step_definition_create)
+    Generate,
+}
+
+#[derive(Subcommand)]
+enum UnittestCommand {
+    /// Generate a unit test from a requirement's acceptance criteria (unit_test_create)
+    Generate { req_id: String },
+}
+
+#[derive(Args)]
+struct InitArgs {
+    /// Target language (java, javascript, typescript, dotnet, rust); prompted when omitted
+    #[arg(long)]
+    language: Option<String>,
+    /// Project name; defaults to the root directory's name
+    #[arg(long)]
+    name: Option<String>,
+}
+
+#[derive(Args)]
+struct DeliverArgs {
+    /// A requirement id (REQ-003) to see through to implemented, or a
+    /// plain-words requirement to break down and deliver. Omit for every
+    /// pending requirement in the spec.
+    target: Vec<String>,
+    /// RED-to-GREEN attempts per requirement (default 3)
+    #[arg(long)]
+    attempts: Option<u32>,
+    /// Stop at the first requirement that falls short instead of
+    /// carrying on to the next
+    #[arg(long)]
+    fail_fast: bool,
+    /// Skip the refactor step even on a green bar
+    #[arg(long)]
+    no_refactor: bool,
+    /// Draft new requirements into this included spec file instead of
+    /// the root catalog (e.g. requirements/core/math.json)
+    #[arg(long)]
+    file: Option<String>,
+    /// Put each drafted criterion to the decision model and give the
+    /// drafting model one round to reword what it cannot read as an
+    /// assertion. Off by default: the question misreads a fifth of
+    /// ordinary criteria, so this costs a redraft it is often wrong to
+    /// ask for
+    #[arg(long)]
+    judge_draft: bool,
+}
+
+#[derive(Args)]
+struct TestArgs {
+    /// Run only one feature
+    #[arg(long)]
+    feature: Option<String>,
+    /// Run only one scenario
+    #[arg(long)]
+    scenario: Option<String>,
+    /// Print the raw JSON reply instead of the readable summary
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+struct RefactorArgs {
+    /// What you intend to refactor and why. With a model resolved this
+    /// is also the brief it is given
+    #[arg(long)]
+    note: Option<String>,
+    /// The requirement whose behaviour must not change, shown to the
+    /// model as the specification it is preserving
+    #[arg(long = "req")]
+    req_id: Option<String>,
+    /// Mark the phase and stop - the cleanup stays in your hands
+    #[arg(long)]
+    manual: bool,
+    /// Print the raw JSON reply instead of the readable summary
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Subcommand)]
+enum ModelCommand {
+    /// List models available in Ollama
+    List,
+    /// Show the resolved model and where it came from (flag, config, discovery)
+    Current,
+    /// Persist a model choice in configuration
+    Use { model_name: String },
+}
+
+/// The decision role, deliberately parallel to `spec model` rather than
+/// folded into it: a decision model and a coding model are not
+/// interchangeable, and one command that set "the model" would make it
+/// look as though they were.
+#[derive(Subcommand)]
+enum JudgeCommand {
+    /// List installed models that can answer decisions
+    Models,
+    /// Show the resolved decision model, mode, and threshold
+    Current {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Persist the decision model choice (writes [decision] model,
+    /// never llm.model)
+    Use { model_name: String },
+    /// Judge one acceptance criterion and show the typed answer
+    #[command(long_about = judge_criterion_help())]
+    Criterion {
+        /// A requirement id whose criteria are judged, e.g. REQ-003.
+        /// Omit when using --text.
+        req_id: Option<String>,
+        /// Judge this wording instead of a requirement's criteria
+        #[arg(long, conflicts_with = "req_id")]
+        text: Option<String>,
+        /// Print the whole judgment record as JSON
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum McpCommand {
+    /// Serve the MCP tools over stdio
+    Serve,
+    /// List tools over one throwaway MCP session
+    Tools {
+        /// Spawn `spec mcp serve` as a child instead of the in-process loopback
+        #[arg(long)]
+        stdio: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Call one tool over a throwaway MCP session
+    Call {
+        tool: String,
+        /// Repeatable key=value (always a string unless the value parses as JSON)
+        #[arg(long = "arg", value_parser = parse_arg_pair)]
+        arg: Vec<(String, String)>,
+        /// JSON object merged under --arg
+        #[arg(long = "args")]
+        args: Option<String>,
+        /// Spawn `spec mcp serve` as a child instead of the in-process loopback
+        #[arg(long)]
+        stdio: bool,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum ToolsCommand {
+    /// List tools (optionally one caller's resolved profile)
+    List {
+        #[arg(long = "for")]
+        for_caller: Option<String>,
+        #[arg(long)]
+        offline: bool,
+        #[arg(long)]
+        refresh: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Every caller and its resolved tool set
+    Profiles {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Description, JSON Schema, and origin of one tool
+    Show { name: String },
+    /// Attach a tool to one command's profile
+    Enable {
+        name: String,
+        #[arg(long = "for")]
+        for_caller: Option<String>,
+    },
+    /// Remove a tool from one command's profile
+    Disable {
+        name: String,
+        #[arg(long = "for")]
+        for_caller: Option<String>,
+    },
+    /// Rediscover every registered server and rewrite the catalog cache
+    Refresh,
+    /// Registered servers, config path, and problems
+    Servers {
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+fn parse_arg_pair(raw: &str) -> Result<(String, String), String> {
+    let (key, value) = raw
+        .split_once('=')
+        .ok_or_else(|| format!("--arg expects key=value, got {raw}"))?;
+    if key.is_empty() {
+        return Err("--arg key is empty".into());
+    }
+    Ok((key.to_string(), value.to_string()))
+}
+
+/// A command that already printed its (JSON) reply but must exit
+/// nonzero — the structured `runtime_missing` refusal. A sentinel
+/// instead of `process::exit` so the interactive shell survives it.
+#[derive(Debug)]
+struct NonzeroExit;
+
+impl std::fmt::Display for NonzeroExit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "nonzero exit")
+    }
+}
+
+impl std::error::Error for NonzeroExit {}
+
+/// The directory `spec` operates on.
+///
+/// A concrete `--root` wins. An empty value, or an unexpanded template
+/// such as `${CLAUDE_PROJECT_DIR:-.}` (Claude Code stores that string
+/// as-is; it does not apply bash defaults), is not a directory. In that
+/// case `SPEC_PROJECT_DIR` is used when it names a real path. With
+/// neither, `discovered` carries the project found by walking up from
+/// the working directory, and failing that the process keeps the
+/// directory it was launched in.
+fn resolve_project_root(
+    flag: Option<PathBuf>,
+    spec_project_dir: Option<&str>,
+    discovered: Option<PathBuf>,
+) -> PathBuf {
+    if let Some(flag) = flag.filter(|path| usable_root(path)) {
+        return flag;
+    }
+    if let Some(from_env) = spec_project_dir
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        let path = PathBuf::from(from_env);
+        if usable_root(&path) {
+            return path;
+        }
+    }
+    discovered.unwrap_or_else(|| PathBuf::from("."))
+}
+
+fn usable_root(path: &Path) -> bool {
+    let text = path.to_string_lossy();
+    let trimmed = text.trim();
+    !trimmed.is_empty() && !is_unexpanded_template(trimmed)
+}
+
+fn is_unexpanded_template(value: &str) -> bool {
+    value.contains("${")
+        || value.contains("$CLAUDE_PROJECT_DIR")
+        || value.contains("$SPEC_PROJECT_DIR")
+}
+
+fn main() -> anyhow::Result<()> {
+    let cli = Cli::parse();
+    let from_env = std::env::var("SPEC_PROJECT_DIR").ok();
+    let discovered = std::env::current_dir()
+        .ok()
+        .as_deref()
+        .and_then(discover_project_root);
+    let root = resolve_project_root(cli.root.clone(), from_env.as_deref(), discovered);
+    ensure_spec_home(&root)?;
+    match cli.command {
+        Some(ref command) => {
+            let resumes = resumes_the_shell(command);
+            // A one-shot command with --session switches to it quietly
+            // - and for good: the pointer it moves is what later
+            // invocations without the flag will follow. Without the
+            // flag the current session stands, and reading the pointer
+            // settles which one that is without opening anything.
+            //
+            // Either way this happens before logging, so the run's
+            // diagnostics land in the directory of the session it
+            // belongs to. A pointer that cannot be read leaves the
+            // session unknown; the command itself reports why.
+            let session = match cli.session.as_deref() {
+                Some(requested) => match wiring::session_service(&root).resume(Some(requested)) {
+                    Ok(opened) => Some(opened.id),
+                    Err(refusal) => {
+                        eprintln!("\x1b[31merror: {}\x1b[0m", refusal.0);
+                        std::process::exit(1)
+                    }
+                },
+                None => current_session(&root).ok().flatten(),
+            };
+            // Held until exit so the logging worker thread drains its queue.
+            let log_guard = init_logging(cli.debug, &root, session.as_ref());
+            match execute(
+                &root,
+                cli.model.as_deref(),
+                cli.decision_model.as_deref(),
+                cli.retry,
+                cli.tools.as_deref(),
+                cli.max_rounds,
+                cli.no_branch,
+                command,
+            ) {
+                Err(error) if error.is::<NonzeroExit>() => {
+                    // process::exit skips destructors; flush the log queue first.
+                    drop(log_guard);
+                    std::process::exit(1)
+                }
+                Ok(()) if resumes => resume_shell_after_orchestrator(
+                    &root,
+                    cli.model.as_deref(),
+                    cli.decision_model.as_deref(),
+                    cli.retry,
+                ),
+                other => other,
+            }
+        }
+        // The shell installs its own logging, once it knows the session
+        // it opened, and holds the guard until the loop ends - so the
+        // queue is already drained by the time this returns.
+        None => match run_shell_mode(
+            &root,
+            cli.model.as_deref(),
+            cli.decision_model.as_deref(),
+            cli.retry,
+            cli.session.as_deref(),
+            cli.debug,
+        ) {
+            Err(error) if error.is::<NonzeroExit>() => std::process::exit(1),
+            other => other,
+        },
+    }
+}
+
+/// Whether a finished command hands the terminal to the interactive
+/// shell instead of exiting. The orchestrators do: a run that just
+/// closed a loop is nearly always followed by another command, and
+/// relaunching to type it is friction for nothing.
+///
+/// A delivery asks nothing *during* the run, but it has finished by the
+/// time this is reached, so handing back a prompt is the convenience and
+/// not a contradiction. `resume_shell_after_orchestrator` still ends the
+/// process when there is no terminal, so a piped or CI run is unaffected.
+fn resumes_the_shell(command: &Command) -> bool {
+    matches!(command, Command::Greenfield | Command::Deliver(_))
+}
+
+/// Diagnostics go to daily-rolling files under the session's own
+/// directory, `<root>/.spec/log/<guid>/`, so stdout stays clean for JSON
+/// output and the MCP stdio protocol, stderr stays clean for user-facing
+/// messages, and a run can be read back without every other session's
+/// lines interleaved. `session` is whatever the caller resolved before
+/// this point; `None` - a one-shot on a project that has never opened a
+/// session - keeps the flat `.spec/log/`.
+///
+/// Writes go through an in-memory queue drained by a dedicated worker
+/// thread; the returned guard flushes the queue on exit and must live
+/// until then. When the log directory cannot be created, diagnostics
+/// fall back to stderr. `RUST_LOG` overrides both the default level and
+/// `--debug`.
+fn init_logging(
+    debug: bool,
+    root: &Path,
+    session: Option<&SessionId>,
+) -> Option<tracing_appender::non_blocking::WorkerGuard> {
+    use tracing_subscriber::EnvFilter;
+
+    let default_directives = if debug {
+        "spec=debug,spec_harness=debug"
+    } else {
+        "spec=info,spec_harness=info"
+    };
+    let filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_directives));
+    let dir = log_dir(root, session);
+    if std::fs::create_dir_all(&dir).is_err() {
+        tracing_subscriber::fmt()
+            .with_env_filter(filter)
+            .with_writer(std::io::stderr)
+            .with_target(debug)
+            .compact()
+            .init();
+        return None;
+    }
+    let appender = tracing_appender::rolling::daily(dir, "spec.log");
+    // lossy(false): a full queue blocks the caller instead of dropping
+    // lines, so prompts and responses are never missing from the file.
+    let (writer, guard) = tracing_appender::non_blocking::NonBlockingBuilder::default()
+        .lossy(false)
+        .finish(appender);
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_writer(writer)
+        .with_ansi(false)
+        .with_target(debug)
+        .compact()
+        .init();
+    Some(guard)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn execute(
+    root: &Path,
+    model: Option<&str>,
+    decision_model: Option<&str>,
+    retry: Option<u32>,
+    tools: Option<&str>,
+    max_rounds: Option<u32>,
+    no_branch: bool,
+    command: &Command,
+) -> anyhow::Result<()> {
+    let attempts = resolve_llm_attempts(root, retry);
+    match command {
+        Command::Spec(command) => run_spec(
+            root,
+            model,
+            decision_model,
+            attempts,
+            tools,
+            max_rounds,
+            command,
+        ),
+        Command::Model(command) => run_model(root, model, command),
+        Command::Judge(command) => run_judge(root, decision_model, command),
+        Command::Config { json } => {
+            let report = config_report(root);
+            if *json {
+                print_json(&report)
+            } else {
+                print!("{report}");
+                Ok(())
+            }
+        }
+        Command::Inspect => {
+            let service = InspectService::new(
+                FsProjectFiles::new(root.to_path_buf()),
+                ProcessRuntimeProbe,
+                spec_harness::wiring::vcs(root),
+                spec_harness::workspace::project_layout(root),
+            );
+            print_json(&service.inspect())
+        }
+        Command::Feature(command) => run_feature(root, command),
+        Command::Scenario(command) => run_scenario(
+            root,
+            model,
+            decision_model,
+            attempts,
+            tools,
+            max_rounds,
+            command,
+        ),
+        Command::Init(args) => run_init(root, args),
+        Command::Greenfield => run_greenfield(root, model, attempts, no_branch),
+        Command::Deliver(args) => {
+            run_deliver(root, model, decision_model, attempts, no_branch, args)
+        }
+        Command::Mcp(command) => run_mcp(root, command),
+        Command::Tools(command) => run_tools(root, command),
+        Command::Ask { task, json } => {
+            run_ask(root, model, attempts, tools, max_rounds, task, *json)
+        }
+        Command::Diff { path, raw, json } => run_diff(
+            root,
+            model,
+            attempts,
+            tools,
+            max_rounds,
+            path.as_deref(),
+            *raw,
+            *json,
+        ),
+        Command::Test(args) => run_test(root, args),
+        Command::State { json } => tdd_reply(tdd_service(root).state(), *json),
+        Command::Status { json } => {
+            let state = tdd_service(root)
+                .state()
+                .map_err(|e| anyhow::anyhow!(tdd_error_message(e)))?;
+            let service = status_service(root, model, attempts, tools, max_rounds)?;
+            let report = service.status(&state.phase)?;
+            print_report(&report, *json)?;
+            // Deterministic nextStep already names the command for asset
+            // gaps. Do not let the model override that with spec draft.
+            if service.has_model() && !deterministic_status_gap(&report.next_step) {
+                const RED: &str = "\x1b[31m";
+                const RESET: &str = "\x1b[0m";
+                let work = Spinner::start("Asking the model for the next step - working");
+                let mut prompter = interactive_prompter(Prompts::Incidental);
+                let advice = service.advice(prompter.as_mut(), &report, &state.last_run);
+                drop(work);
+                match advice {
+                    Ok(Some(advice)) => println!("Model advice: {advice}"),
+                    Ok(None) => {}
+                    Err(e) => println!("{RED}{}{RESET}", e.0),
+                }
+            }
+            Ok(())
+        }
+        Command::Refactor(args) => {
+            const RED: &str = "\x1b[31m";
+            const RESET: &str = "\x1b[0m";
+            // The phase transition is the gate: it refuses off GREEN and
+            // logs the note, exactly as it did when marking the phase was
+            // all this command could do. The loop only runs once it has
+            // agreed a refactor is legitimate here.
+            let marked = tdd_service(root).refactor(args.note.as_deref());
+            if args.manual {
+                return tdd_reply(marked, args.json);
+            }
+            let phase = match marked {
+                Ok(phase) => phase,
+                Err(error) => return tdd_error_reply(error, args.json),
+            };
+            let service =
+                refactor_service(root, model, decision_model, attempts, tools, max_rounds)?;
+            if !service.has_model() {
+                // No model, no loop: the phase is marked and the cleanup
+                // is the developer's, which is the whole behaviour this
+                // command used to have.
+                return print_report(&phase, args.json);
+            }
+            let runner = detect_runner(root).map_err(|message| anyhow::anyhow!(message))?;
+            let mut prompter = interactive_prompter(Prompts::Incidental);
+            let report = service.run(
+                prompter.as_mut(),
+                runner.as_ref(),
+                args.note.as_deref(),
+                args.req_id.as_deref(),
+            )?;
+            if let Some(warning) = &report.warning {
+                println!("{RED}{warning}{RESET}");
+            }
+            print_report(&report, args.json)
+        }
+        Command::Steps(command) => {
+            let service = generation_service(
+                root,
+                model,
+                decision_model,
+                attempts,
+                tools,
+                max_rounds,
+                Caller::StepsGenerate,
+            )?;
+            match command {
+                StepsCommand::Missing => print_json(&service.steps_missing()?),
+                StepsCommand::Generate => {
+                    let mut prompter = interactive_prompter(Prompts::Incidental);
+                    let report = service.steps_generate(prompter.as_mut())?;
+                    narrate_review(&report.judgments);
+                    print_json(&report)
+                }
+            }
+        }
+        Command::Implement { req_id, into } => {
+            let into = into.as_deref();
+            const RED: &str = "\x1b[31m";
+            const GREEN: &str = "\x1b[32m";
+            const RESET: &str = "\x1b[0m";
+            let service = implement_service(
+                root,
+                model,
+                decision_model,
+                attempts,
+                tools,
+                max_rounds,
+                Caller::Implement,
+            )?;
+            let tdd = tdd_service(root);
+            let phase = tdd
+                .state()
+                .map_err(|e| anyhow::anyhow!(tdd_error_message(e)))?
+                .phase;
+            // The last run's failure details (stack traces included) are
+            // the model's brief, together with every prior attempt on
+            // this requirement; a fresh RED bar comes from spec test
+            // right before this. The attempt is logged so the next one
+            // learns from it.
+            let brief = tdd
+                .implementation_brief(req_id)
+                .map_err(|e| anyhow::anyhow!(tdd_error_message(e)))?;
+            println!(
+                "{req_id}: checking prerequisites - phase {phase}, \
+                 {} recorded failure(s), {} prior attempt(s).",
+                brief.failures.len(),
+                brief.history.len()
+            );
+            let readiness = service.readiness(req_id, &phase, &brief.failures, into)?;
+            for asset in &readiness.assets {
+                let mark = if asset.present {
+                    format!("{GREEN}present{RESET}")
+                } else {
+                    format!("{RED}missing{RESET}")
+                };
+                println!("  {}: {} - {mark}", asset.role, asset.path);
+            }
+            let mut prompter = interactive_prompter(Prompts::Incidental);
+            if !readiness.ready {
+                for finding in &readiness.findings {
+                    println!("{RED}{finding}{RESET}");
+                }
+                if service.has_model() {
+                    let work =
+                        Spinner::start("Asking the model whether implement can run - working");
+                    let advice_service = implement_service(
+                        root,
+                        model,
+                        decision_model,
+                        attempts,
+                        tools,
+                        max_rounds,
+                        Caller::ImplementAdvice,
+                    )?;
+                    let advice = advice_service.advice(
+                        prompter.as_mut(),
+                        req_id,
+                        &readiness,
+                        &brief.failures,
+                    );
+                    drop(work);
+                    match advice {
+                        Ok(Some(advice)) => println!("Model advice: {advice}"),
+                        Ok(None) => {}
+                        Err(e) => println!("{RED}{}{RESET}", e.0),
+                    }
+                }
+                return print_json(&readiness);
+            }
+            let work = Spinner::start(
+                "Sending the sources, the failures, and the attempt history \
+                 to the model - working",
+            );
+            let report = service
+                .generate(
+                    prompter.as_mut(),
+                    req_id,
+                    &brief.failures,
+                    &brief.history,
+                    &brief.states,
+                    into,
+                )
+                .map_err(anyhow::Error::from);
+            drop(work);
+            let report = report?;
+            for target in &report.targets {
+                println!("  wrote: {target}");
+            }
+            if let Some(warning) = &report.warning {
+                println!("{RED}{warning}{RESET}");
+            }
+            narrate_review(&report.judgments);
+            // The step bodies the scenarios still run through as
+            // placeholders, written against the code just put down -
+            // the same second pass a delivery makes.
+            match service.fill_pending_steps(prompter.as_mut(), req_id, &brief.failures) {
+                Ok(Some(filled)) => println!(
+                    "  wrote: {} ({} pending step bodies, {})",
+                    filled.target, filled.filled, filled.source
+                ),
+                Ok(None) => {}
+                Err(e) => println!("{RED}{}{RESET}", e.0),
+            }
+            // The outcome stays empty until the next test run attaches
+            // what these changes actually caused.
+            tdd.record_attempt(ImplementAttempt {
+                requirement: req_id.clone(),
+                targets: report.targets.clone(),
+                failures: brief.failures,
+                ..Default::default()
+            })
+            .map_err(|e| anyhow::anyhow!(tdd_error_message(e)))?;
+            print_json(&report)?;
+            drop(prompter);
+            if report.written && !report.targets.is_empty() {
+                implement_follow_up(root, req_id)?;
+            }
+            Ok(())
+        }
+        Command::Unittest(UnittestCommand::Generate { req_id }) => {
+            let service = generation_service(
+                root,
+                model,
+                decision_model,
+                attempts,
+                tools,
+                max_rounds,
+                Caller::UnittestGenerate,
+            )?;
+            let mut prompter = interactive_prompter(Prompts::Incidental);
+            print_json(&service.unittest_generate(prompter.as_mut(), req_id)?)
+        }
+    }
+}
+
+/// Bare `spec`: print the help, then hand the terminal to the
+/// interactive shell. Each line is parsed exactly like a one-shot
+/// invocation, inheriting the shell's --root, --model, and --retry unless the
+/// line sets its own; errors are printed and the shell keeps going.
+/// Without a terminal (pipes, CI) the help alone is the whole reply.
+/// The shell banner: the harness mark as ASCII art - the red-to-green
+/// cycle looping around the prompt - with the compiled-in version.
+fn print_banner() {
+    const R: &str = "\x1b[31m"; // the red arc
+    const G: &str = "\x1b[32m"; // the green arc
+    const Y: &str = MUTED_YELLOW; // muted yellow - the refactor step
+    const B: &str = "\x1b[1m"; // bold
+    const D: &str = "\x1b[2m"; // dim
+    const X: &str = "\x1b[0m"; // reset
+    // Interior width of the loop, in display columns.
+    const W: usize = 34;
+    let version = env!("CARGO_PKG_VERSION");
+    let title = format!("> spec  v{version}");
+    let title_pad = " ".repeat(W - 4 - title.len());
+    let top = "─".repeat(W);
+    let gap = " ".repeat(W);
+    println!();
+    println!("  {R}╭{top}╮{X}");
+    println!("  {R}│{X}{gap}{R}▼{X}");
+    println!("  {R}│{X}    {B}> spec{X}  {D}v{version}{X}{title_pad}{G}│{X}");
+    println!(
+        "  {R}│{X}    {D}spec →{X} {R}RED{X} {D}→{X} {G}GREEN{X} {D}→{X} {Y}REFACTOR{X} {G}│{X}"
+    );
+    println!("  {G}▲{X}{gap}{G}│{X}");
+    println!("  {G}╰{top}╯{X}");
+    println!();
+}
+
+/// The startup inference line: what this session will generate with, or
+/// exactly what to install to make generation work. Discovery is
+/// session-only - the configuration is never touched until the user
+/// runs `spec model use`. Returns whether a model is ready, which gates
+/// the greenfield nudge.
+///
+/// "Inference" rather than plain "model" because a session announces
+/// two of them. The roles are different models doing different work,
+/// and a line that named neither would leave the pair ambiguous.
+fn announce_session_model(root: &Path, flag: Option<&str>) -> bool {
+    let session = model_service(root).session_model(flag);
+    let ready = matches!(session, SessionModel::Ready { .. });
+    match session {
+        SessionModel::Ready { model, source } => match source {
+            ModelSource::Flag => println!("Inference model set: {model} (from the --model flag)."),
+            ModelSource::Config => println!("Inference model set: {model} (from configuration)."),
+            ModelSource::OnlyInstalled | ModelSource::FirstInstalled => println!(
+                "Inference model set for this session: {model} (not saved - keep it with: \
+                 spec model use {model})."
+            ),
+        },
+        SessionModel::NoModels => println!(
+            "Ollama is running but has no models - generation will use \
+             deterministic templates. For optimal results pull a coding \
+             model, e.g.: ollama pull {RECOMMENDED_MODEL} \
+             (mileage varies with models not trained for development)"
+        ),
+        SessionModel::NoGenerativeModel { installed } => println!(
+            "Ollama has {} installed, which answers decisions rather than chat - \
+             generation will use deterministic templates. Pull a coding model too, \
+             e.g.: ollama pull {RECOMMENDED_MODEL} (the decision model stays \
+             available to spec judge)",
+            installed.join(", ")
+        ),
+        SessionModel::ProviderDown(_) => println!(
+            "Ollama is not reachable - generation will use deterministic \
+             templates. Install it from https://ollama.com, start it, and \
+             pull a coding model, e.g.: ollama pull {RECOMMENDED_MODEL} \
+             (mileage varies with models not trained for development)"
+        ),
+    }
+    ready
+}
+
+/// The startup decision line, printed beside the inference one so a
+/// session states both roles before its first prompt.
+///
+/// Resolved here rather than left to the first `spec judge`: a decision
+/// model named in configuration but never pulled used to go unnoticed
+/// until a judgment was asked for, and the session that most wants to
+/// know is the one just starting.
+///
+/// Announcing is all this does. Nothing is gated on the result: a
+/// session with nothing to ask returns the deterministic answer it
+/// always did.
+fn announce_decision_model(root: &Path, flag: Option<&str>) {
+    match wiring::session_decision(root, flag) {
+        SessionDecision::Ready { model, source } => match source {
+            ModelSource::Flag => {
+                println!("Decision model set: {model} (from the --decision-model flag).");
+            }
+            ModelSource::Config => println!("Decision model set: {model} (from configuration)."),
+            ModelSource::OnlyInstalled | ModelSource::FirstInstalled => println!(
+                "Decision model set for this session: {model} (not saved - keep it \
+                 with: spec judge use {model})."
+            ),
+        },
+        SessionDecision::Off { remedy } => println!("{remedy}"),
+    }
+}
+
+fn run_shell_mode(
+    root: &Path,
+    model: Option<&str>,
+    decision_model: Option<&str>,
+    retry: Option<u32>,
+    session: Option<&str>,
+    debug: bool,
+) -> anyhow::Result<()> {
+    use clap::CommandFactory as _;
+    use std::io::IsTerminal as _;
+    Cli::command().print_help()?;
+    if !std::io::stdin().is_terminal() {
+        return Ok(());
+    }
+    print_banner();
+    // Bare `spec` opens a session - a new one, or the current one again
+    // when it recorded nothing; `--session` resumes the one it names.
+    // Either way the session line and the read-only list come first, so
+    // every later command in this shell is known to act on that session.
+    let Some(opened) = open_session(root, session) else {
+        return Err(NonzeroExit.into());
+    };
+    // Logging waits for the session so every line this shell writes -
+    // including the commands typed into it - lands in that session's
+    // directory. The guard lives as long as the shell does, which is
+    // when the queue is drained.
+    let _log_guard = init_logging(debug, root, Some(&opened));
+    let model_ready = announce_session_model(root, model);
+    announce_decision_model(root, decision_model);
+    // Session start is where the layout question belongs: a human is
+    // attached, and the answer is recorded for every later command.
+    let llm =
+        cached_chat(root, model).map(|(model, chat)| (model, std::sync::Arc::new(chat) as DynLlm));
+    let mut prompter = interactive_prompter(Prompts::Incidental);
+    settle_project_memory(
+        root,
+        llm.as_ref(),
+        resolve_llm_attempts(root, retry),
+        prompter.as_mut(),
+    );
+    drop(prompter);
+    println!(
+        "Interactive shell - type commands without the spec prefix \
+         (e.g. list). exit, quit, or Ctrl+C leaves. The session \
+         history lives in {}.",
+        spec_rel(HISTORY_FILE)
+    );
+    interactive_shell_loop(root, model, decision_model, retry, true, model_ready)
+}
+
+/// Open the session the shell runs in and print the session line plus
+/// the list of every session on record. The id comes back so the caller
+/// can file this run's diagnostics under it. A refusal - text that is
+/// not a GUID, or a GUID the project does not know - is printed and
+/// reported as `None`; nothing has changed on disk in that case.
+fn open_session(root: &Path, requested: Option<&str>) -> Option<SessionId> {
+    match wiring::session_service(root).start(requested) {
+        Ok(start) => {
+            println!("{}", start.human());
+            Some(start.opened.id)
+        }
+        Err(refusal) => {
+            eprintln!("\x1b[31merror: {}\x1b[0m", refusal.0);
+            None
+        }
+    }
+}
+
+/// After a one-shot orchestrator run (`spec greenfield`, `spec deliver`)
+/// on a real terminal, keep the session open at the `spec>` prompt so the
+/// next requirement (or any other command) can be typed without
+/// relaunching. Without a terminal - a pipe, CI - the run simply ends.
+fn resume_shell_after_orchestrator(
+    root: &Path,
+    model: Option<&str>,
+    decision_model: Option<&str>,
+    retry: Option<u32>,
+) -> anyhow::Result<()> {
+    use std::io::IsTerminal as _;
+    if !std::io::stdin().is_terminal() {
+        return Ok(());
+    }
+    println!(
+        "Interactive shell - type commands without the spec prefix \
+         (e.g. list, deliver, greenfield). exit, quit, or Ctrl+C leaves."
+    );
+    interactive_shell_loop(root, model, decision_model, retry, false, false)
+}
+
+fn interactive_shell_loop(
+    root: &Path,
+    model: Option<&str>,
+    decision_model: Option<&str>,
+    retry: Option<u32>,
+    offer: bool,
+    model_ready: bool,
+) -> anyhow::Result<()> {
+    use clap::CommandFactory as _;
+    let history = spec_file(root, HISTORY_FILE);
+    let first_session = !history.exists();
+    let mut shell = ReadlineShell::open(history).map_err(|error| anyhow::anyhow!(error.0))?;
+    let mut dispatch = |tokens: Vec<String>| {
+        let argv = std::iter::once("spec".to_string()).chain(tokens);
+        match Cli::try_parse_from(argv) {
+            Err(error) => {
+                let _ = error.print();
+            }
+            Ok(cli) => match cli.command {
+                None => {
+                    let _ = Cli::command().print_help();
+                }
+                Some(command) => {
+                    let line_root = cli.root.as_deref().unwrap_or(root);
+                    // Commands inherit the shell's session through the
+                    // `currentSession` pointer; a line naming --session
+                    // switches the shell to that one first.
+                    if cli.session.is_some()
+                        && open_session(line_root, cli.session.as_deref()).is_none()
+                    {
+                        return;
+                    }
+                    let line_model = cli.model.as_deref().or(model);
+                    let line_decision = cli.decision_model.as_deref().or(decision_model);
+                    let line_retry = cli.retry.or(retry);
+                    match execute(
+                        line_root,
+                        line_model,
+                        line_decision,
+                        line_retry,
+                        cli.tools.as_deref(),
+                        cli.max_rounds,
+                        cli.no_branch,
+                        &command,
+                    ) {
+                        Ok(()) => {}
+                        // The refusal already printed its JSON reply.
+                        Err(error) if error.is::<NonzeroExit>() => {}
+                        Err(error) => eprintln!("\x1b[31merror: {error}\x1b[0m"),
+                    }
+                }
+            },
+        }
+    };
+    if offer {
+        let spec_exists = root.join(SPEC_PATH).exists();
+        if is_greenfield_start(first_session, model_ready, spec_exists) {
+            offer_greenfield(&mut shell, &mut dispatch);
+        }
+    }
+    let summary = run_shell(&mut shell, &mut dispatch);
+    if let Ending::Failed(reason) = summary.ending {
+        anyhow::bail!(reason);
+    }
+    println!(
+        "Session over - {} command{} run.",
+        summary.commands,
+        if summary.commands == 1 { "" } else { "s" }
+    );
+    Ok(())
+}
+
+/// Detect the project's primary language. Memory (a greenfield choice)
+/// wins over marker detection so a polyglot tree keeps the chosen stack.
+fn primary_language(root: &Path) -> anyhow::Result<Language> {
+    spec_harness::workspace::primary_language(root).map_err(anyhow::Error::msg)
+}
+
+type ProjectFeatures = wiring::ProjectFeatures;
+type ProjectTree = wiring::ProjectTree;
+
+fn feature_catalog(root: &Path) -> ProjectFeatures {
+    wiring::feature_catalog(root)
+}
+
+fn deterministic_status_gap(next_step: &str) -> bool {
+    next_step.contains("spec scenario add")
+        || next_step.contains("spec unittest generate")
+        || next_step.contains("spec steps generate")
+        || next_step.contains("spec mark-implemented")
+        || next_step.contains("spec implement")
+}
+
+/// The three generating services, built the way `spec deliver` builds
+/// them - through `wiring` - with the CLI's tool-connected model handle.
+/// One constructor each, so the gate a delivery run attaches is the gate
+/// the hand-run command attaches.
+fn generation_service(
+    root: &Path,
+    model_flag: Option<&str>,
+    decision_model: Option<&str>,
+    attempts: u32,
+    tools: Option<&str>,
+    max_rounds: Option<u32>,
+    caller: Caller,
+) -> anyhow::Result<
+    GenerationService<
+        ProjectFeatures,
+        ProjectTree,
+        FsWorkTree,
+        FsSpecRepository,
+        ChatLlm,
+        LiveBroker,
+    >,
+> {
+    let language = primary_language(root)?;
+    Ok(wiring::generation_service(
+        root,
+        language,
+        connected_llm(root, model_flag, caller, attempts, tools, max_rounds),
+        decision_model,
+    ))
+}
+
+fn implement_service(
+    root: &Path,
+    model_flag: Option<&str>,
+    decision_model: Option<&str>,
+    attempts: u32,
+    tools: Option<&str>,
+    max_rounds: Option<u32>,
+    caller: Caller,
+) -> anyhow::Result<
+    ImplementService<
+        ProjectFeatures,
+        ProjectTree,
+        FsWorkTree,
+        FsSpecRepository,
+        ChatLlm,
+        LiveBroker,
+    >,
+> {
+    let language = primary_language(root)?;
+    Ok(wiring::implement_service(
+        root,
+        language,
+        connected_llm(root, model_flag, caller, attempts, tools, max_rounds),
+        decision_model,
+    ))
+}
+
+fn refactor_service(
+    root: &Path,
+    model_flag: Option<&str>,
+    decision_model: Option<&str>,
+    attempts: u32,
+    tools: Option<&str>,
+    max_rounds: Option<u32>,
+) -> anyhow::Result<RefactorService<ProjectTree, FsWorkTree, FsSpecRepository, ChatLlm, LiveBroker>>
+{
+    let language = primary_language(root)?;
+    let rounds = refactor_attempts(&config_path(root));
+    Ok(wiring::refactor_service(
+        root,
+        language,
+        connected_llm(
+            root,
+            model_flag,
+            Caller::Refactor,
+            attempts,
+            tools,
+            max_rounds,
+        ),
+        rounds,
+        decision_model,
+    ))
+}
+
+fn status_service(
+    root: &Path,
+    model_flag: Option<&str>,
+    attempts: u32,
+    tools: Option<&str>,
+    max_rounds: Option<u32>,
+) -> anyhow::Result<
+    StatusService<ProjectFeatures, ProjectTree, FsSpecRepository, ChatLlm, LiveBroker>,
+> {
+    let layout = project_layout(root);
+    Ok(StatusService::new(
+        feature_catalog(root),
+        wiring::source_tree(root, layout.module_root.as_deref()),
+        wiring::spec_repository(root),
+        primary_language(root)?,
+        layout,
+        connected_llm(
+            root,
+            model_flag,
+            Caller::Status,
+            attempts,
+            tools,
+            max_rounds,
+        ),
+    ))
+}
+
+fn spec_service(
+    root: &Path,
+) -> spec_harness::application::spec_service::SpecService<
+    FsSpecRepository,
+    spec_harness::adapters::fs_spec::FsFeatureFiles,
+> {
+    wiring::spec_service(root, detect_project_layout(root))
+}
+
+fn mutation_service(
+    root: &Path,
+    attempts: u32,
+) -> SpecMutationService<
+    FsSpecRepository,
+    ProjectFeatures,
+    spec_harness::adapters::fs_worktree::FsWorkTree,
+    spec_harness::adapters::fs_state::FsStateStore,
+> {
+    wiring::mutation_service(root, attempts)
+}
+
+fn scenario_service(
+    root: &Path,
+) -> spec_harness::application::scenario_service::ScenarioService<
+    spec_harness::adapters::fs_worktree::FsWorkTree,
+    ProjectFeatures,
+> {
+    wiring::scenario_service(root)
+}
+
+fn tdd_service(
+    root: &Path,
+) -> spec_harness::application::tdd_service::TddService<
+    spec_harness::adapters::fs_state::FsStateStore,
+    spec_harness::adapters::clock::SystemClock,
+> {
+    wiring::tdd_service(root)
+}
+
+fn run_test(root: &Path, args: &TestArgs) -> anyhow::Result<()> {
+    // One shared language→runner dispatch (adapters::runners). The harness
+    // only executes when the language's runtime is present; the runner
+    // enforces that with the structured `runtime_missing` refusal.
+    let runner = detect_runner(root).map_err(|message| anyhow::anyhow!(message))?;
+    let filter = TestFilter {
+        feature: args.feature.clone(),
+        scenario: args.scenario.clone(),
+    };
+    tdd_reply(
+        tdd_service(root).run_tests(runner.as_ref(), &filter),
+        args.json,
+    )
+}
+
+/// After `spec implement` writes its files, close the loop. On a
+/// terminal the command offers to run the tests right away; a decline,
+/// or piped stdin, still says the next command in plain words instead
+/// of leaving it inside the JSON.
+fn implement_follow_up(root: &Path, req_id: &str) -> anyhow::Result<()> {
+    const RED: &str = "\x1b[31m";
+    const GREEN: &str = "\x1b[32m";
+    const RESET: &str = "\x1b[0m";
+    use std::io::IsTerminal as _;
+    let accepted = std::io::stdin().is_terminal()
+        && HushingPrompter::new(ConsolePrompter::new(
+            std::io::BufReader::new(std::io::stdin()),
+            std::io::stdout(),
+        ))
+        .confirm("Run the tests now?")
+        .unwrap_or(false);
+    if !accepted {
+        println!(
+            "Next: {GREEN}test{RESET} - then \
+             {GREEN}implement {req_id}{RESET} again if the bar stays RED."
+        );
+        return Ok(());
+    }
+    let runner = detect_runner(root).map_err(|message| anyhow::anyhow!(message))?;
+    let filter = TestFilter {
+        feature: None,
+        scenario: None,
+    };
+    match tdd_service(root).run_tests(runner.as_ref(), &filter) {
+        Ok(run) => {
+            let green = run.phase == "GREEN";
+            print_json(&run)?;
+            if green {
+                println!(
+                    "{GREEN}GREEN{RESET} - next: refactor (optional), then \
+                     {GREEN}mark-implemented {req_id}{RESET}."
+                );
+            } else {
+                println!(
+                    "{RED}Still RED{RESET} - the fresh failures are recorded; \
+                     run {GREEN}implement {req_id}{RESET} for another model \
+                     attempt, or implement by hand and rerun test."
+                );
+            }
+            Ok(())
+        }
+        Err(e) => tdd_error_reply(e, false),
+    }
+}
+
+/// Print a TDD reply, turning a missing runtime into the structured
+/// `runtime_missing` refusal with a nonzero exit (signalled, not
+/// `process::exit`, so the interactive shell survives it).
+fn tdd_reply<T: serde::Serialize + Human>(
+    result: Result<T, TddError>,
+    json: bool,
+) -> anyhow::Result<()> {
+    match result {
+        Ok(report) => print_report(&report, json),
+        Err(error) => tdd_error_reply(error, json),
+    }
+}
+
+/// The error half of a TDD reply.
+///
+/// Split out because a command whose own reply is not a TDD report
+/// still refuses the same way, and it has no report type to name.
+fn tdd_error_reply(error: TddError, json: bool) -> anyhow::Result<()> {
+    match error {
+        TddError::RuntimeMissing { runtime, hint } => {
+            print_report(
+                &RuntimeMissing {
+                    error: "runtime_missing",
+                    runtime,
+                    hint,
+                },
+                json,
+            )?;
+            Err(NonzeroExit.into())
+        }
+        TddError::Other(message) => anyhow::bail!(message),
+    }
+}
+
+/// The refusal when the tests cannot run because the toolchain is not
+/// installed. Field order and names are the shape a scripted caller
+/// already matches on.
+#[derive(serde::Serialize)]
+struct RuntimeMissing {
+    error: &'static str,
+    runtime: String,
+    hint: String,
+}
+
+impl Human for RuntimeMissing {
+    fn human(&self) -> String {
+        format!("The {} runtime is not installed.", self.runtime)
+    }
+
+    fn next_step(&self) -> Option<&str> {
+        Some(&self.hint)
+    }
+}
+
+/// Flatten a TDD error into its human message, for commands whose reply
+/// is not a TDD report.
+fn tdd_error_message(error: TddError) -> String {
+    match error {
+        TddError::Other(message) => message,
+        TddError::RuntimeMissing { hint, .. } => hint,
+    }
+}
+
+fn run_scenario(
+    root: &Path,
+    model: Option<&str>,
+    decision_model: Option<&str>,
+    attempts: u32,
+    tools: Option<&str>,
+    max_rounds: Option<u32>,
+    command: &ScenarioCommand,
+) -> anyhow::Result<()> {
+    let service = scenario_service(root);
+    if let ScenarioCommand::Generate { req_id, feature } = command {
+        let generation = generation_service(
+            root,
+            model,
+            decision_model,
+            attempts,
+            tools,
+            max_rounds,
+            Caller::ScenarioGenerate,
+        )?;
+        let mut prompter = interactive_prompter(Prompts::Incidental);
+        let report = generation.scenario_generate(
+            prompter.as_mut(),
+            &service,
+            req_id,
+            feature.as_deref(),
+        )?;
+        drop(prompter);
+        let _ = mutation_service(root, DEFAULT_LLM_ATTEMPTS).set_feature(req_id, &report.feature);
+        narrate_review(&report.judgments);
+        return print_json(&report);
+    }
+    let report = match command {
+        ScenarioCommand::Generate { .. } => unreachable!("handled above"),
+        ScenarioCommand::Add {
+            feature,
+            req,
+            name,
+            steps,
+        } => {
+            let report = service.add_scenario(feature, req, name, steps.clone())?;
+            let _ = mutation_service(root, DEFAULT_LLM_ATTEMPTS).set_feature(req, feature);
+            report
+        }
+        ScenarioCommand::Update {
+            feature,
+            name,
+            req,
+            steps,
+        } => service.update_scenario(feature, name, steps.clone(), req.as_deref())?,
+        ScenarioCommand::Delete { feature, name } => service.delete_scenario(feature, name)?,
+    };
+    print_json(&report)
+}
+
+fn run_spec(
+    root: &Path,
+    model: Option<&str>,
+    decision_model: Option<&str>,
+    attempts: u32,
+    tools: Option<&str>,
+    max_rounds: Option<u32>,
+    command: &SpecCommand,
+) -> anyhow::Result<()> {
+    let service = spec_service(root);
+    match command {
+        SpecCommand::List { json } => {
+            let requirements = mutation_service(root, attempts).list_requirements()?;
+            print_report(&requirements, *json)
+        }
+        SpecCommand::Show { req_id, json } => {
+            let requirement = service.get_requirement(req_id)?;
+            print_report(&requirement, *json)
+        }
+        SpecCommand::Validate { json } => {
+            let mut report = service.validate_spec();
+            // The service words its next step for the MCP agent; the
+            // shell gets the same advice naming commands. Catalog
+            // structure is the exception - no command repairs it, so the
+            // service's remedy stands as written.
+            report.next_step = match structural_repair(&report.issues) {
+                Some(repair) if report.issues.iter().all(|i| is_structural_issue(i)) => repair,
+                Some(repair) => {
+                    format!("{repair} Run spec reword for the remaining wording issues.")
+                }
+                None if report.valid => {
+                    "The spec is valid. Run spec list, pick a pending requirement, and write \
+                     its Gherkin scenario (spec scenario add)."
+                        .into()
+                }
+                None => "Run spec reword to fix the issues, then run spec validate again.".into(),
+            };
+            let valid = report.valid;
+            print_report(&report, *json)?;
+            // A gate scripted on this used to pass on an invalid spec:
+            // the report said "valid": false and the exit status said
+            // 0. `spec list` already exits 1 on a circular include, so
+            // the binary disagreed with itself as well.
+            if valid {
+                Ok(())
+            } else {
+                Err(NonzeroExit.into())
+            }
+        }
+        SpecCommand::Refine { req_id, json } => {
+            let mut report = service.refine_requirement(req_id)?;
+            // Judged before the advice is worded, not after: a gating
+            // judgment adds its findings and clears `clean`, and advice
+            // written from the deterministic verdict alone would tell
+            // the reader there is nothing to fix directly above the
+            // finding that has to be fixed.
+            let gated = judge_refinement(root, decision_model, &mut report)?;
+            // Same advice as the service gives the agent, naming commands
+            // instead of tools.
+            if !report.clean {
+                report.next_step = format!(
+                    "Run spec reword {req_id} to address each finding, then run \
+                     spec refine {req_id} again. Iterate until there are no findings."
+                );
+            }
+            print_report(&report, *json)?;
+            if gated {
+                // The judgment asked for rework or a human. The reply is
+                // already on stdout; the exit code is the gate.
+                return Err(NonzeroExit.into());
+            }
+            Ok(())
+        }
+        SpecCommand::Draft {
+            request,
+            interactive,
+            title,
+            story,
+            criterion,
+            request_only,
+            parent,
+            by,
+            file,
+        } => {
+            let mutations = mutation_service(root, attempts);
+            let file = file.as_deref();
+            if let Some(words) = request_only {
+                let report = mutations.create_direct(
+                    NewRequirement {
+                        request: Some(words.clone()),
+                        ..Default::default()
+                    },
+                    file,
+                )?;
+                return print_json(&report);
+            }
+            if title.is_some() || story.is_some() || !criterion.is_empty() {
+                if request.is_some() {
+                    anyhow::bail!(
+                        "spec draft takes either a request in plain words to break down or \
+                         --title/--story/--criterion to write one requirement, not both."
+                    );
+                }
+                if let Some(complaint) =
+                    missing_draft_flags(title.is_some(), story.is_some(), !criterion.is_empty())
+                {
+                    anyhow::bail!(complaint);
+                }
+                let report = mutations.create_direct(
+                    NewRequirement {
+                        title: title.clone().expect("checked above"),
+                        story: story.clone().expect("checked above"),
+                        criteria: criterion.clone(),
+                        parent: parent.clone(),
+                        by: parent.as_ref().map(|_| (*by).into()),
+                        ..Default::default()
+                    },
+                    file,
+                )?;
+                return print_json(&report);
+            }
+            if parent.is_some() {
+                anyhow::bail!(
+                    "--parent goes with --title, --story, and --criterion: it names the ask a \
+                     directly written requirement derives from."
+                );
+            }
+            // The automatic breakdown asks nothing, so it gets the
+            // prompter that never stops to ask - the same one `spec
+            // deliver` runs with - and the terminal still hears the
+            // narration.
+            let mut prompter = if request.is_some() && !*interactive {
+                deliver_prompter()
+            } else {
+                interactive_prompter(Prompts::Wizard)
+            };
+            let chat = resolved_chat(root, model);
+            let Some(request) = request else {
+                // The wizard: with a model it asks for the words and
+                // breaks them down with you; without one you word the
+                // requirement yourself.
+                let report = match &chat {
+                    Some((name, chat)) => {
+                        let mutations = mutation_with_tools(
+                            root,
+                            attempts,
+                            Caller::SpecDraft,
+                            tools,
+                            max_rounds,
+                        );
+                        mutations.draft_assisted_in(prompter.as_mut(), name, chat, file)?
+                    }
+                    None => {
+                        let report = mutations.draft_in(prompter.as_mut(), file)?;
+                        return print_json(&report);
+                    }
+                };
+                return print_json(&report);
+            };
+            let target = if is_id_shape(request) {
+                AskTarget::Existing(request.clone())
+            } else {
+                AskTarget::Text(request.clone())
+            };
+            let mode = if *interactive {
+                AskMode::Interactive
+            } else {
+                AskMode::Automatic
+            };
+            let report = match &chat {
+                Some((name, chat)) => {
+                    let mutations =
+                        mutation_with_tools(root, attempts, Caller::SpecDraft, tools, max_rounds);
+                    mutations.decompose(
+                        prompter.as_mut(),
+                        Some((name.as_str(), chat)),
+                        file,
+                        target,
+                        mode,
+                    )?
+                }
+                None => mutations.decompose(prompter.as_mut(), None, file, target, mode)?,
+            };
+            print_json(&report)
+        }
+        SpecCommand::Decide {
+            ask_id,
+            accept,
+            reject,
+            exclude,
+            answer,
+            complete,
+            reopen,
+            confirm,
+            unconfirm,
+            by,
+        } => {
+            let decisions = Decisions {
+                accept: accept.clone(),
+                reject: reject
+                    .iter()
+                    .map(|entry| numbered_reason(entry, "--reject"))
+                    .collect::<anyhow::Result<_>>()?,
+                exclude: exclude
+                    .iter()
+                    .map(|entry| numbered_reason(entry, "--exclude"))
+                    .collect::<anyhow::Result<_>>()?,
+                answers: answer
+                    .iter()
+                    .map(|entry| numbered_answer(entry))
+                    .collect::<anyhow::Result<_>>()?,
+                complete: match (complete, reopen) {
+                    (true, _) => Some(true),
+                    (_, true) => Some(false),
+                    _ => None,
+                },
+                confirmed: match (confirm, unconfirm) {
+                    (true, _) => Some(true),
+                    (_, true) => Some(false),
+                    _ => None,
+                },
+                by: Some((*by).into()),
+            };
+            let report = mutation_service(root, attempts).decide(ask_id, decisions)?;
+            print_json(&report)
+        }
+        SpecCommand::Delete { req_id, cascade } => {
+            let report = mutation_service(root, attempts).delete(req_id, *cascade)?;
+            print_json(&report)
+        }
+        SpecCommand::Link { req_id, ask_id, by } => {
+            let report = mutation_service(root, attempts).update_direct(
+                req_id,
+                RequirementUpdate {
+                    parent: Some(ask_id.clone()),
+                    by: Some((*by).into()),
+                    ..Default::default()
+                },
+            )?;
+            print_json(&report)
+        }
+        SpecCommand::Unlink { req_id } => {
+            let report = mutation_service(root, attempts).update_direct(
+                req_id,
+                RequirementUpdate {
+                    unlink: true,
+                    ..Default::default()
+                },
+            )?;
+            print_json(&report)
+        }
+        SpecCommand::Reword {
+            req_id,
+            title,
+            story,
+            criterion,
+            request,
+            parent,
+            unlink,
+            by,
+        } => {
+            let mutations = mutation_service(root, attempts);
+            if title.is_some()
+                || story.is_some()
+                || !criterion.is_empty()
+                || request.is_some()
+                || parent.is_some()
+                || *unlink
+            {
+                let report = mutations.update_direct(
+                    req_id,
+                    RequirementUpdate {
+                        title: title.clone(),
+                        story: story.clone(),
+                        criteria: criterion.clone(),
+                        request: request.clone(),
+                        parent: parent.clone(),
+                        unlink: *unlink,
+                        by: Some((*by).into()),
+                    },
+                )?;
+                return print_json(&report);
+            }
+            let mut prompter = interactive_prompter(Prompts::Wizard);
+            let report = match resolved_chat(root, model) {
+                Some((name, chat)) => {
+                    let mutations =
+                        mutation_with_tools(root, attempts, Caller::SpecReword, tools, max_rounds);
+                    mutations.reword_assisted(prompter.as_mut(), req_id, &name, &chat)
+                }
+                None => mutations.reword(prompter.as_mut(), req_id),
+            }?;
+            print_json(&report)
+        }
+        SpecCommand::SetFeature { req_id, file } => {
+            let report = mutation_service(root, attempts).set_feature(req_id, file)?;
+            print_json(&report)
+        }
+        SpecCommand::SetProduction { req_id, file } => {
+            let report = mutation_service(root, attempts).set_production(req_id, file)?;
+            print_json(&report)
+        }
+        SpecCommand::MarkImplemented { req_id } => {
+            let report = mutation_service(root, attempts).mark_implemented(req_id)?;
+            print_json(&report)
+        }
+        SpecCommand::Include(IncludeCommand::Add { path, from }) => {
+            let report = mutation_service(root, attempts).include_add(path, from.as_deref())?;
+            print_json(&report)
+        }
+    }
+}
+
+fn config_file(root: &Path) -> PathBuf {
+    config_path(root)
+}
+
+/// The configuration dump. When the file names no model, Ollama is
+/// asked which one a run would actually use, so `llm.model` shows that
+/// instead of `(unset)`. A configured model skips the call entirely;
+/// an unreachable or empty provider leaves the key unset.
+fn config_report(root: &Path) -> spec_harness::domain::config_report::ConfigReport {
+    let mut report = inspect_config(&config_file(root));
+    let configured = report
+        .setting(LLM_MODEL_KEY)
+        .is_some_and(|setting| setting.source != ConfigSource::Default);
+    if !configured
+        && let SessionModel::Ready { model, .. } = model_service(root).session_model(None)
+    {
+        report.apply_discovered_model(&model);
+    }
+    report
+}
+
+fn run_feature(root: &Path, command: &FeatureCommand) -> anyhow::Result<()> {
+    let catalog = feature_catalog(root);
+    match command {
+        FeatureCommand::List => {
+            let summaries = catalog.list()?;
+            print_json(&summaries)
+        }
+        FeatureCommand::Show { path } => {
+            let doc = catalog.read(path)?;
+            print_json(&doc)
+        }
+        FeatureCommand::Create { path, name } => {
+            let report = scenario_service(root).create_feature(path, name)?;
+            note_new_feature_root(root, path);
+            print_json(&report)
+        }
+    }
+}
+
+/// Rescan after a feature file lands outside the recorded features
+/// root, so the catalog that reads features back is looking where they
+/// now are. Done here rather than in `ScenarioService`: the service
+/// writes a file and should not also own project memory.
+///
+/// A feature inside the recorded root changes nothing, so the common
+/// case costs one comparison instead of a filesystem walk.
+fn note_new_feature_root(root: &Path, path: &str) {
+    if outside_feature_root(&spec_harness::workspace::project_layout(root), path) {
+        refresh_project_memory(root, None);
+    }
+}
+
+fn model_service(root: &Path) -> ModelService<OllamaCatalog, TomlModelStore> {
+    let store = TomlModelStore::new(config_file(root));
+    let endpoint = store
+        .endpoint()
+        .unwrap_or_else(|| DEFAULT_ENDPOINT.to_string());
+    ModelService::new(OllamaCatalog::new(endpoint), store)
+}
+
+/// Cached Ollama chat without project-memory wrapping. Greenfield wraps
+/// after the scaffold scan so a brand-new project still briefs the
+/// model with the files that were just written.
+type CachedChat = CachedConversation<OllamaChat>;
+
+fn cached_chat(root: &Path, model_flag: Option<&str>) -> Option<(String, CachedChat)> {
+    match model_service(root).resolve(model_flag) {
+        ModelResolution::Resolved { model, .. } => {
+            let store = TomlModelStore::new(config_file(root));
+            let endpoint = store
+                .endpoint()
+                .unwrap_or_else(|| DEFAULT_ENDPOINT.to_string());
+            let timeout = store
+                .timeout_seconds()
+                .map_or(DEFAULT_GENERATION_TIMEOUT, std::time::Duration::from_secs);
+            let ttl = store
+                .cache_ttl_seconds()
+                .map_or(DEFAULT_CACHE_TTL, std::time::Duration::from_secs);
+            let context = endpoint.clone();
+            let chat = CachedConversation::new(
+                OllamaChat::with_timeout(endpoint, timeout),
+                spec_file(root, CACHE_DIR),
+                ttl,
+                context,
+            );
+            Some((model, chat))
+        }
+        ModelResolution::Unavailable(_) => None,
+    }
+}
+
+/// Attaches the decision model's judgment to a refinement reply.
+///
+/// Returns whether the harness is gating on it, which only an enforcing
+/// mode can cause. A gating judgment has already folded its lines into
+/// `findings` and cleared `clean` by the time this returns, so the
+/// caller words its advice from the merged verdict. With no decision
+/// model configured this does nothing at all and the reply is
+/// byte-for-byte what it has always been.
+/// A progress indicator, but only when someone is there to read it.
+///
+/// The spinner settles onto stdout, and `spec refine` writes its report
+/// to stdout as JSON. On a terminal that line is the human's answer to
+/// "has it hung?"; through a pipe it would be a line of prose in front
+/// of the JSON, so off a terminal there is nothing watching and nothing
+/// is printed.
+fn watched_spinner(message: &str) -> Option<Spinner> {
+    use std::io::IsTerminal as _;
+    std::io::stdout()
+        .is_terminal()
+        .then(|| Spinner::start(message))
+}
+
+fn judge_refinement(
+    root: &Path,
+    flag: Option<&str>,
+    report: &mut spec_harness::application::spec_service::RefinementReport,
+) -> anyhow::Result<bool> {
+    // `when_asking` is what makes `off` mean off here: the judgment in
+    // `spec refine` is one the workflow takes on its own initiative,
+    // not one a human typed the way `spec judge` is. Taking the service
+    // from there rather than relying on the no-op inside
+    // `judge_refinement` is also what keeps the indicator below honest
+    // - under `off` there is no model call to announce.
+    let Some(service) = wiring::decision_service(root, flag).and_then(DecisionService::when_asking)
+    else {
+        return Ok(false);
+    };
+    let criteria = match spec_service(root).criteria(&report.id) {
+        Ok(criteria) => criteria,
+        // The caller already refined this id successfully, so a failure
+        // here is not worth turning into the command's error.
+        Err(_) => return Ok(false),
+    };
+    // Started only once a model is resolved and there is something to
+    // ask it about: the deterministic review is instant, and a
+    // "working" line in front of it would be claiming a wait that
+    // never happens.
+    let _work = watched_spinner(&format!(
+        "Asking the decision model about {} - working",
+        counted(criteria.len(), "criterion", "criteria")
+    ));
+    match service.judge_refinement(report, &criteria) {
+        Ok(action) => Ok(action != Transition::Continue),
+        // Enforcing mode with no answer. Never silently an approval:
+        // the refusal is the command's error.
+        Err(error) => Err(anyhow::anyhow!(
+            "decision gate refused to pass without an answer - {error}"
+        )),
+    }
+}
+
+fn run_judge(root: &Path, flag: Option<&str>, command: &JudgeCommand) -> anyhow::Result<()> {
+    match command {
+        JudgeCommand::Models => {
+            let models = model_service(root).decision_models()?;
+            if models.is_empty() {
+                anyhow::bail!(
+                    "{}",
+                    DecisionReadiness::NoneInstalled
+                        .remedy()
+                        .expect("an empty machine has a remedy")
+                );
+            }
+            for model in models {
+                println!("{model}");
+            }
+            Ok(())
+        }
+        JudgeCommand::Current { json } => {
+            let settings = wiring::resolved_decision(root, flag);
+            // The resolved model, which is the configured one or the
+            // one discovery borrowed. Reporting only what the file says
+            // would leave `current` disagreeing with the model that
+            // actually answers.
+            let resolved = wiring::session_decision(root, flag);
+            let source = match &resolved {
+                SessionDecision::Ready { source, .. } => match source {
+                    ModelSource::Flag => "--decision-model flag",
+                    ModelSource::Config => "configuration",
+                    ModelSource::OnlyInstalled => "the only installed decision model",
+                    ModelSource::FirstInstalled => {
+                        "the first installed decision model, this session only - \
+                         persist it with: spec judge use <model-name>"
+                    }
+                },
+                SessionDecision::Off { .. } => "(unset)",
+            };
+            if *json {
+                return print_json(&serde_json::json!({
+                    "model": resolved.model(),
+                    "source": source,
+                    "endpoint": settings.endpoint,
+                    "timeoutSeconds": settings.timeout.as_secs(),
+                    "mode": settings.policy().mode,
+                    "minConfidence": settings.policy().threshold,
+                    "question": spec_harness::domain::decision::CRITERION_MEASURABLE.version(),
+                }));
+            }
+            match &resolved {
+                SessionDecision::Ready { model, .. } => println!("{model} (from {source})"),
+                SessionDecision::Off { remedy } => println!("{remedy}"),
+            }
+            println!("endpoint\t{}", settings.endpoint);
+            println!("timeout_seconds\t{}", settings.timeout.as_secs());
+            println!("mode\t{}", settings.policy().mode);
+            println!("min_confidence\t{}", settings.policy().threshold);
+            Ok(())
+        }
+        JudgeCommand::Use { model_name } => {
+            let available = model_service(root).decision_models();
+            if let Ok(models) = &available
+                && !models.is_empty()
+                && !models.iter().any(|m| m == model_name)
+            {
+                anyhow::bail!(
+                    "'{model_name}' cannot answer decisions - installed decision models: {}",
+                    models.join(", ")
+                );
+            }
+            TomlDecisionStore::new(config_file(root)).persist(model_name)?;
+            let file = config_file(root);
+            let shown = file.canonicalize().unwrap_or(file);
+            println!("Configured decision model: {model_name}");
+            println!("Written to: {} ([decision] model)", shown.display());
+            println!("The generative model is unchanged - see llm.model in spec config.");
+            Ok(())
+        }
+        JudgeCommand::Criterion { req_id, text, json } => {
+            // A judgment needs a model that can answer one. Checked
+            // against the resolved model - the configured name or the
+            // one discovery borrowed - rather than the round trip, so
+            // the reply names the command that fixes it. Worded as a
+            // refusal because this command is blocked without one,
+            // unlike the startup line that merely reports.
+            let resolved = wiring::session_decision(root, flag);
+            if let Some(remedy) = model_service(root)
+                .decision_readiness(resolved.model())
+                .remedy()
+            {
+                anyhow::bail!("{remedy}");
+            }
+            let Some(service) = wiring::decision_service(root, flag) else {
+                anyhow::bail!(
+                    "No decision model could be reached - pick one with spec judge models, \
+                     then spec judge use <model-name> (or pass --decision-model)"
+                );
+            };
+            let (input, criteria) = match (req_id, text) {
+                (_, Some(text)) => ("--text".to_string(), vec![text.clone()]),
+                (Some(req_id), None) => {
+                    let requirement = spec_service(root).get_requirement(req_id)?;
+                    (req_id.clone(), requirement.acceptance_criteria)
+                }
+                (None, None) => anyhow::bail!(
+                    "name a requirement (spec judge criterion REQ-003) or pass \
+                     --text \"<acceptance criterion>\""
+                ),
+            };
+            if criteria.is_empty() {
+                anyhow::bail!("{input} has no acceptance criteria to judge");
+            }
+            let review = service
+                .review_criteria(&input, &criteria)
+                .map_err(|error| anyhow::anyhow!("{error}"))?;
+            // The same gate the workflow applies, so scripting this
+            // command and scripting `spec refine` agree about the same
+            // wording. `off` reaches here - a human typed it - but its
+            // transition is always CONTINUE, so `off` still gates
+            // nothing.
+            let gated = review.action != Transition::Continue;
+            if *json {
+                print_json(&review)?;
+                return if gated {
+                    Err(NonzeroExit.into())
+                } else {
+                    Ok(())
+                };
+            }
+            println!("model\t{}", service.model());
+            println!(
+                "question\t{}",
+                spec_harness::domain::decision::CRITERION_MEASURABLE.version()
+            );
+            println!("mode\t{}", service.policy().mode);
+            println!("min_confidence\t{}", service.policy().threshold);
+            for (criterion, judgment) in criteria.iter().zip(&review.judgments) {
+                println!();
+                println!("criterion\t{criterion}");
+                println!("answer\t{}", judgment.answer.summary());
+                println!("verdict\t{}", judgment.verdict);
+                println!("action\t{}", judgment.action);
+                println!("input\t{}", judgment.provenance.input);
+                println!("state\t{}", judgment.provenance.state);
+                println!(
+                    "tokens\tin {} out {}",
+                    judgment.usage.input_tokens, judgment.usage.output_tokens
+                );
+            }
+            if !review.advisories.is_empty() {
+                println!();
+                for advisory in &review.advisories {
+                    println!("{advisory}");
+                }
+            }
+            println!();
+            println!(
+                "A judgment gates on wording only. It becomes a finding and exits \
+                 nonzero, the same as a deterministic one, and it does not change \
+                 the test bar or whether a requirement is implemented."
+            );
+            if gated {
+                return Err(NonzeroExit.into());
+            }
+            Ok(())
+        }
+    }
+}
+
+fn run_model(root: &Path, flag: Option<&str>, command: &ModelCommand) -> anyhow::Result<()> {
+    let service = model_service(root);
+    match command {
+        ModelCommand::List => {
+            let models = service.list()?;
+            if models.is_empty() {
+                println!(
+                    "No models installed - pull one first (e.g. `ollama pull {RECOMMENDED_MODEL}`)."
+                );
+                return Ok(());
+            }
+            for model in models {
+                let size = model
+                    .size_bytes
+                    .map(|b| format!("{:.1} GB", b as f64 / 1_000_000_000.0))
+                    .unwrap_or_else(|| "-".to_string());
+                let modified = model.modified_at.as_deref().unwrap_or("-");
+                println!("{}\t{}\t{}", model.name, size, modified);
+            }
+            Ok(())
+        }
+        ModelCommand::Current => match service.resolve(flag) {
+            ModelResolution::Resolved { model, source } => {
+                let source = match source {
+                    ModelSource::Flag => "--model flag",
+                    ModelSource::Config => "configuration",
+                    ModelSource::OnlyInstalled => "the only installed model",
+                    ModelSource::FirstInstalled => {
+                        "the first installed model, this session only - \
+                         persist it with: spec model use <model-name>"
+                    }
+                };
+                println!("{model} (from {source})");
+                Ok(())
+            }
+            ModelResolution::Unavailable(message) => anyhow::bail!(message),
+        },
+        ModelCommand::Use { model_name } => {
+            service.choose(model_name)?;
+            let file = config_file(root);
+            // Canonicalize after the write so the user sees the real
+            // absolute location, not the raw --root-relative path.
+            let shown = file.canonicalize().unwrap_or(file);
+            println!("Configured model: {model_name}");
+            println!("Written to: {}", shown.display());
+            Ok(())
+        }
+    }
+}
+
+fn run_init(root: &Path, args: &InitArgs) -> anyhow::Result<()> {
+    let language = match &args.language {
+        Some(answer) => Language::parse(answer).ok_or_else(|| {
+            anyhow::anyhow!(
+                "unknown language {answer:?} - pick java, javascript, typescript, dotnet, or rust"
+            )
+        })?,
+        None => {
+            let mut prompter = interactive_prompter(Prompts::Incidental);
+            prompt_language(prompter.as_mut())?
+        }
+    };
+    let name = match &args.name {
+        Some(name) => name.clone(),
+        None => root
+            .canonicalize()
+            .ok()
+            .and_then(|path| path.file_name().map(|n| n.to_string_lossy().into_owned()))
+            .unwrap_or_else(|| "project".into()),
+    };
+    let report =
+        InitService::new(FsScaffoldWriter::new(root.to_path_buf())).init(language, &name)?;
+    refresh_project_memory(root, Some(language));
+    print_json(&report)
+}
+
+fn run_greenfield(
+    root: &Path,
+    model_flag: Option<&str>,
+    attempts: u32,
+    no_branch: bool,
+) -> anyhow::Result<()> {
+    let llm = cached_chat(root, model_flag)
+        .map(|(model, chat)| (model, std::sync::Arc::new(chat) as DynLlm));
+    let mut prompter = interactive_prompter(Prompts::Wizard);
+    let report = Greenfield::new(root.to_path_buf(), llm)
+        .with_llm_attempts(attempts)
+        .without_branch(no_branch)
+        .run(prompter.as_mut())
+        .map_err(|message| anyhow::anyhow!(message))?;
+    print_json(&report)
+}
+
+/// `spec deliver`: resolve the target, work the plan, and let the exit
+/// status carry the verdict. A plan the run did not finish exits nonzero
+/// through [`NonzeroExit`], so the same command works as a gate - the
+/// JSON reply has already been printed by then.
+fn run_deliver(
+    root: &Path,
+    model_flag: Option<&str>,
+    decision_model: Option<&str>,
+    attempts: u32,
+    no_branch: bool,
+    args: &DeliverArgs,
+) -> anyhow::Result<()> {
+    let options = DeliverOptions {
+        // Flag, then `[deliver] attempts` in the config, then the default.
+        attempts: args
+            .attempts
+            .unwrap_or_else(|| deliver_attempts(&config_path(root)))
+            .max(1),
+        fail_fast: args.fail_fast,
+        refactor: !args.no_refactor,
+        file: args.file.clone(),
+    };
+    let llm = cached_chat(root, model_flag)
+        .map(|(model, chat)| (model, std::sync::Arc::new(chat) as DynLlm));
+    let deliver = Deliver::new(root.to_path_buf(), llm, options)
+        .with_llm_attempts(attempts)
+        .with_decision_model(decision_model.map(str::to_string), args.judge_draft);
+    // The argument is read against the ids the catalog holds, so a spec
+    // numbering HARNESS-014 is as deliverable as one numbering REQ-003.
+    let target = parse_target(Some(args.target.join(" ").as_str()), &deliver.known_ids())
+        .map_err(|message| anyhow::anyhow!(message))?;
+    // The branch gate is the one question `spec deliver` stops for, so
+    // it is asked here, on a prompter a human can actually answer,
+    // before the auto-answering one takes over. Scaffolding questions
+    // come after, and `Deliver::run` refuses a project it would have to
+    // scaffold - so the same refusal is made first, rather than asking
+    // about a branch for a run that cannot start. `--no-branch` is read
+    // here too, before a prompter exists: the prompter for a pipe warns
+    // that prompts come from the pipe, and a run that asks nothing has
+    // no business saying so.
+    if !no_branch && spec_harness::bootstrap::project_detected(root) {
+        let mut asking = interactive_prompter(Prompts::Incidental);
+        spec_harness::branch::offer_branch(
+            asking.as_mut(),
+            &spec_harness::wiring::vcs(root),
+            no_branch,
+            &spec_harness::branch::today(),
+            spec_harness::branch::seed(),
+        );
+    }
+    // The auto-answering prompter is wrapped here, at the one place that
+    // decides who answers the questions, so nothing further down has to
+    // know that nobody is attached.
+    let mut prompter = deliver_prompter();
+    let report = deliver
+        .run(prompter.as_mut(), &target)
+        .map_err(|message| anyhow::anyhow!(message))?;
+    drop(prompter);
+    let completed = report.completed;
+    print_json(&report)?;
+    if completed {
+        Ok(())
+    } else {
+        Err(NonzeroExit.into())
+    }
+}
+
+/// Who answers `spec deliver`'s questions: nobody. Every proposal is
+/// accepted and every gate approved, so the run drives through instead of
+/// stopping at a prompt. Narration still reaches the terminal.
+fn deliver_prompter() -> Box<dyn Prompter> {
+    Box::new(AutoPrompter::new(
+        HushingPrompter::new(ConsolePrompter::new(
+            std::io::BufReader::new(std::io::stdin()),
+            std::io::stdout(),
+        )),
+        "spec deliver never stops to ask",
+    ))
+}
+
+fn resolve_llm_attempts(root: &Path, flag: Option<u32>) -> u32 {
+    if let Some(n) = flag {
+        return n.max(1);
+    }
+    TomlModelStore::new(config_file(root))
+        .retry()
+        .and_then(|n| u32::try_from(n).ok())
+        .map(|n| n.max(1))
+        .unwrap_or(DEFAULT_LLM_ATTEMPTS)
+}
+
+/// Warned once when a command that prompts starts on piped stdin. A read
+/// past the end of the pipe returns an empty line, which the prompter
+/// cannot tell apart from pressing Enter, so every remaining prompt takes
+/// its default and every confirmation declines. True of every command
+/// that prompts, so every command that prompts says it.
+const PIPED_STDIN_WARNING: &str = "stdin is not a terminal: prompts are read from the pipe, and \
+     once it runs out every remaining prompt takes its default and every confirmation declines.";
+
+/// What the warning adds for a wizard. The draft/reword wizard does its
+/// model work and then loses it: the last question is "Write this?" and
+/// an exhausted pipe declines it, so the command writes nothing and
+/// still exits 0. `spec implement`, `spec unittest generate` and
+/// `spec steps generate` have no wizard and write regardless - they used
+/// to print this too, which told a scripted run its work had been
+/// thrown away when it had not.
+const PIPED_STDIN_WIZARD_WARNING: &str =
+    "A wizard that ends in \"Write this?\" therefore writes nothing.";
+
+const PIPED_STDIN_REMEDY: &str = "Run this in a terminal to answer the prompts.";
+
+/// Whether the command about to prompt is a wizard whose last question
+/// decides if anything is kept.
+#[derive(Clone, Copy, PartialEq)]
+enum Prompts {
+    /// Ends in "Write this?": a declined prompt throws the work away.
+    Wizard,
+    /// Prompts along the way - an optional tool call, a setup question -
+    /// and finishes either way.
+    Incidental,
+}
+
+/// The wizard prompter. On a real terminal, rustyline gives the answers
+/// full line editing - arrow keys move the cursor anywhere in the typed
+/// text, Home/End jump, up-arrow recalls this session's answers. Piped
+/// input (scripts, CI) falls back to plain buffered reads.
+/// Both prompters are decorated here rather than inside themselves:
+/// this is the one place the CLI decides who asks the questions, so it
+/// is the one place that can promise every question survives the
+/// spinner running above it ([`HushingPrompter`]) and that no question
+/// is put to an input that has already ended
+/// ([`AbortOnEndOfInput`]). A wizard written later inherits both
+/// without naming either.
+fn interactive_prompter(prompts: Prompts) -> Box<dyn Prompter> {
+    use std::io::IsTerminal as _;
+    if std::io::stdin().is_terminal()
+        && let Ok(prompter) = ReadlinePrompter::new()
+    {
+        return Box::new(AbortOnEndOfInput::new(HushingPrompter::new(prompter)));
+    }
+    // stderr, so a caller parsing the JSON on stdout still can.
+    eprintln!("{}", piped_stdin_warning(prompts));
+    Box::new(AbortOnEndOfInput::new(HushingPrompter::new(
+        ConsolePrompter::new(std::io::BufReader::new(std::io::stdin()), std::io::stdout()),
+    )))
+}
+
+fn piped_stdin_warning(prompts: Prompts) -> String {
+    match prompts {
+        Prompts::Wizard => {
+            format!("{PIPED_STDIN_WARNING} {PIPED_STDIN_WIZARD_WARNING} {PIPED_STDIN_REMEDY}")
+        }
+        Prompts::Incidental => format!("{PIPED_STDIN_WARNING} {PIPED_STDIN_REMEDY}"),
+    }
+}
+
+fn print_json<T: serde::Serialize>(value: &T) -> anyhow::Result<()> {
+    println!("{}", speak_cli(&serde_json::to_string_pretty(value)?));
+    Ok(())
+}
+
+/// What the decision model made of a reply, laid out for a reader, on
+/// the terminal only. The same rows ride in the JSON reply under
+/// `judgments` for anything else that is listening, and a pipe reading
+/// that JSON must not find a table in front of it.
+fn narrate_review(judgments: &[spec_harness::domain::decision::Judgment]) {
+    use std::io::IsTerminal as _;
+    if judgments.is_empty() || !std::io::stdout().is_terminal() {
+        return;
+    }
+    println!(
+        "{}",
+        spec_harness::domain::decision::second_review(judgments)
+    );
+}
+
+/// A reply, printed for whoever is reading it.
+///
+/// JSON when something is parsing the output, prose when a person is
+/// watching a terminal. The same reply either way - only the rendering
+/// differs, so a reader and a script never disagree about what
+/// happened.
+fn print_report<T: serde::Serialize + Human>(value: &T, json: bool) -> anyhow::Result<()> {
+    use std::io::IsTerminal as _;
+    if wants_json(json, std::io::stdout().is_terminal()) {
+        return print_json(value);
+    }
+    // A reply whose whole answer is its advice renders as nothing, and
+    // a blank line in front of it would read as output that went
+    // missing.
+    let body = value.human();
+    if !body.is_empty() {
+        println!("{body}");
+    }
+    // The advice arrives worded for the agent; the CLI says it in
+    // commands. Done here rather than in the rendering so that
+    // translation stays at the one place the CLI prints a reply.
+    if let Some(step) = value.next_step() {
+        let gap = if body.is_empty() { "" } else { "\n" };
+        println!("{gap}Next step: {}", cli_next_step(step));
+    }
+    Ok(())
+}
+
+/// Which rendering a reply gets.
+///
+/// Off a terminal nothing but JSON will do: that is `spec deliver`
+/// reading a step, an agent reading a reply, a CI gate reading a
+/// verdict, and `| jq`. On a terminal the reader is a person, unless
+/// they asked for JSON anyway with `--json`.
+///
+/// A function of its two inputs rather than a read of the real stdout,
+/// so the policy is covered by tests that have no terminal to offer.
+fn wants_json(flag: bool, stdout_is_terminal: bool) -> bool {
+    flag || !stdout_is_terminal
+}
+
+/// What is wrong with a half-given `spec draft`, said in terms of the
+/// flags actually typed.
+///
+/// The old message picked whichever flag it happened to check first,
+/// so `--title X` on its own was answered with "spec draft --story
+/// requires --title and --criterion" - naming a flag the user had not
+/// typed and demanding one they had.
+/// `N` or `N:reason`, as `--reject` and `--exclude` take it.
+fn numbered_reason(entry: &str, flag: &str) -> anyhow::Result<(u32, Option<String>)> {
+    let (number, reason) = match entry.split_once(':') {
+        Some((number, reason)) => (number, Some(reason.trim().to_string())),
+        None => (entry, None),
+    };
+    let number = number.trim().parse::<u32>().map_err(|_| {
+        anyhow::anyhow!(
+            "{flag} takes a proposal number, optionally followed by :reason - got {entry:?}."
+        )
+    })?;
+    Ok((number, reason.filter(|r| !r.is_empty())))
+}
+
+/// `N=answer`, as `--answer` takes it.
+fn numbered_answer(entry: &str) -> anyhow::Result<(u32, String)> {
+    let Some((number, answer)) = entry.split_once('=') else {
+        anyhow::bail!(
+            "--answer takes N=answer, the question number and its answer - got {entry:?}."
+        );
+    };
+    let number = number.trim().parse::<u32>().map_err(|_| {
+        anyhow::anyhow!("--answer takes N=answer with N the question number - got {entry:?}.")
+    })?;
+    Ok((number, answer.trim().to_string()))
+}
+
+fn missing_draft_flags(title: bool, story: bool, criterion: bool) -> Option<String> {
+    let named = |present: bool, flag: &'static str| present.then_some(flag);
+    let supplied: Vec<&str> = [
+        named(title, "--title"),
+        named(story, "--story"),
+        named(criterion, "--criterion"),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    let missing: Vec<&str> = [
+        named(!title, "--title"),
+        named(!story, "--story"),
+        named(!criterion, "--criterion"),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    if missing.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "spec draft with {} also needs {}. Give all three, or none of them \
+         to be asked question by question.",
+        list_flags(&supplied),
+        list_flags(&missing),
+    ))
+}
+
+fn list_flags(flags: &[&str]) -> String {
+    match flags {
+        [] => "nothing".into(),
+        [one] => (*one).to_string(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    }
+}
+
+/// Every MCP tool the shell has a command for.
+///
+/// The services word their advice for the agent, which calls tools.
+/// None of those names exist on the shell, so a student who follows
+/// the advice literally types something that does not run. Tools with
+/// no CLI equivalent are deliberately absent - leaving the tool name
+/// visible is better than inventing a command.
+const CLI_FOR_TOOL: [(&str, &str); 19] = [
+    ("requirement_mark_implemented", "spec mark-implemented"),
+    ("step_definitions_find", "spec steps missing"),
+    ("step_definition_create", "spec steps generate"),
+    ("requirement_reword", "spec reword"),
+    ("refine_requirement", "spec refine"),
+    ("list_requirements", "spec list"),
+    ("unit_test_create", "spec unittest generate"),
+    ("scenario_update", "spec scenario update"),
+    ("scenario_delete", "spec scenario delete"),
+    ("get_requirement", "spec show"),
+    ("project_inspect", "spec inspect"),
+    ("start_refactor", "spec refactor"),
+    ("feature_create", "spec feature create"),
+    ("get_tdd_state", "spec state"),
+    ("validate_spec", "spec validate"),
+    ("feature_list", "spec feature list"),
+    ("feature_read", "spec feature show"),
+    ("scenario_add", "spec scenario add"),
+    ("run_tests", "spec test"),
+];
+
+/// Command phrases the services write without their `spec ` prefix, so
+/// "run validate" and "run spec validate" do not both ship. Only
+/// unambiguous multi-word phrases are listed: bare words like
+/// "validate" and "list" are ordinary English as often as they are
+/// commands, and guessing wrong reads worse than leaving them be.
+const BARE_CLI_PHRASES: [&str; 2] = ["run validate", "run list"];
+
+/// Rewrite every `nextStep` in a reply into the shell's dialect.
+///
+/// Done here, at the one place the CLI prints a reply, rather than in
+/// each command handler: there are two dozen replies carrying advice
+/// and they should all speak the same way. The MCP server builds its
+/// own payloads and never passes through here, so the tool-facing
+/// wording it promises is untouched.
+///
+/// Works on the rendered text rather than a parsed `serde_json::Value`
+/// because that type sorts its keys, and the order the reports declare
+/// their fields in is how they are meant to be read.
+fn speak_cli(rendered: &str) -> String {
+    rendered
+        .lines()
+        .map(translated_line)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// One rendered line. Pretty JSON puts each key and its value on a
+/// line of their own, and a string value is escaped onto that one
+/// line, so a `nextStep` can be swapped without reparsing the reply.
+fn translated_line(line: &str) -> Cow<'_, str> {
+    const KEY: &str = "\"nextStep\": ";
+    let Some((indent, rest)) = line.split_once(KEY) else {
+        return Cow::Borrowed(line);
+    };
+    // Only a key sits alone at the start of its line; an occurrence
+    // inside some other value has text in front of it.
+    if !indent.chars().all(char::is_whitespace) {
+        return Cow::Borrowed(line);
+    }
+    let (literal, tail) = match rest.strip_suffix(',') {
+        Some(literal) => (literal, ","),
+        None => (rest, ""),
+    };
+    let Ok(text) = serde_json::from_str::<String>(literal) else {
+        return Cow::Borrowed(line);
+    };
+    let spoken = serde_json::to_string(&cli_next_step(&text)).expect("a string always renders");
+    Cow::Owned(format!("{indent}{KEY}{spoken}{tail}"))
+}
+
+/// One `nextStep`, in commands a reader can paste.
+fn cli_next_step(text: &str) -> String {
+    let mut out = text.to_string();
+    for (tool, command) in CLI_FOR_TOOL {
+        if !out.contains(tool) {
+            continue;
+        }
+        out = out.replace(&format!("`{tool}`"), command);
+        out = out.replace(tool, command);
+        // "Call spec test" is not how anyone says it.
+        out = out.replace(&format!("Call {command}"), &format!("Run {command}"));
+        out = out.replace(&format!("call {command}"), &format!("run {command}"));
+    }
+    for phrase in BARE_CLI_PHRASES {
+        out = prefix_with_spec(&out, phrase);
+    }
+    out
+}
+
+/// `phrase` given its `spec ` prefix wherever it does not already have
+/// one, so no reply says "run spec spec validate".
+fn prefix_with_spec(text: &str, phrase: &str) -> String {
+    let bare = phrase.strip_prefix("run ").unwrap_or(phrase);
+    let lead = &phrase[..phrase.len() - bare.len()];
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find(phrase) {
+        let end = at + phrase.len();
+        let (before, after) = (&rest[..at], &rest[end..]);
+        // "run validated input" does not name the validate command.
+        if after.starts_with(|c: char| c.is_alphanumeric() || c == '_' || c == '-') {
+            out.push_str(&rest[..end]);
+            rest = after;
+            continue;
+        }
+        out.push_str(before);
+        out.push_str(lead);
+        if !(lead.is_empty() && before.ends_with("spec ")) {
+            out.push_str("spec ");
+        }
+        out.push_str(bare);
+        rest = after;
+    }
+    out.push_str(rest);
+    out
+}
+
+type ChatLlm = MemoryAwareConversation<CachedConversation<OllamaChat>>;
+type LiveBroker = McpToolBroker<WorkflowServer>;
+type LiveTools = ToolService<TomlToolStore, CachedDiscovery<LiveBroker>, FsMcpRegistry>;
+
+fn live_broker(root: &Path) -> LiveBroker {
+    let settings = tools_settings(&config_file(root));
+    let servers = mcp_registry(root).load().servers;
+    McpToolBroker::with_timeouts(
+        WorkflowServer::new(root.to_path_buf()),
+        servers,
+        settings.discovery_timeout,
+        settings.call_timeout,
+    )
+}
+
+fn mcp_registry(root: &Path) -> FsMcpRegistry {
+    FsMcpRegistry::new(
+        root.to_path_buf(),
+        tools_settings(&config_file(root)).mcp_config.clone(),
+    )
+}
+
+fn tool_service(root: &Path) -> LiveTools {
+    let settings = tools_settings(&config_file(root));
+    ToolService::new(
+        TomlToolStore::new(config_file(root)),
+        CachedDiscovery::new(
+            live_broker(root),
+            spec_file(root, CACHE_DIR).join("tools"),
+            settings.cache_ttl,
+        ),
+        mcp_registry(root),
+        builtin_tool_definitions(),
+    )
+}
+
+fn self_stdio_spec(root: &Path) -> anyhow::Result<ServerSpec> {
+    let program = std::env::current_exe()
+        .map_err(|e| anyhow::anyhow!("cannot locate this spec binary: {e}"))?;
+    Ok(ServerSpec {
+        name: "spec".into(),
+        program: program.display().to_string(),
+        args: vec![
+            "mcp".into(),
+            "serve".into(),
+            "--root".into(),
+            root.display().to_string(),
+        ],
+        env: vec![],
+    })
+}
+
+fn call_broker(root: &Path, stdio: bool) -> anyhow::Result<LiveBroker> {
+    let broker = live_broker(root);
+    if stdio {
+        Ok(broker.with_self_stdio(self_stdio_spec(root)?))
+    } else {
+        Ok(broker)
+    }
+}
+
+fn parse_caller_arg(raw: Option<&str>) -> anyhow::Result<Caller> {
+    spec_harness::application::tool_service::parse_caller(raw).map_err(anyhow::Error::from)
+}
+
+fn warn_unknown(unknown: &[String]) {
+    for name in unknown {
+        eprintln!("warning: tool {name} is named in config but not in the catalog");
+    }
+}
+
+fn one_shot_overrides(
+    root: &Path,
+    caller: Caller,
+    tools_flag: Option<&str>,
+) -> spec_harness::domain::tool_profile::ProfileOverrides {
+    let mut overrides = TomlToolStore::new(config_file(root)).overrides();
+    if let Some(flag) = tools_flag {
+        let names: Vec<String> = flag
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        overrides.pinned.insert(caller.key().into(), names);
+    }
+    overrides
+}
+
+fn connected_llm(
+    root: &Path,
+    model_flag: Option<&str>,
+    caller: Caller,
+    attempts: u32,
+    tools_flag: Option<&str>,
+    max_rounds_flag: Option<u32>,
+) -> Option<ResolvedLlm<ChatLlm, LiveBroker>> {
+    let (model, chat) = resolved_chat(root, model_flag)?;
+    let settings = tools_settings(&config_file(root));
+    let catalog = tool_service(root).catalog(false, false);
+    warn_unknown(&catalog.problems);
+    let resolved = resolve(
+        caller,
+        &one_shot_overrides(root, caller, tools_flag),
+        &catalog.tools,
+    );
+    warn_unknown(&resolved.unknown);
+    Some(ResolvedLlm::connected(
+        model,
+        chat,
+        live_broker(root),
+        resolved.tools,
+        AgentConfig::new(
+            caller.section(),
+            attempts,
+            max_rounds_flag.unwrap_or(settings.max_rounds),
+            settings.confirm,
+        ),
+    ))
+}
+
+fn resolved_chat(root: &Path, model_flag: Option<&str>) -> Option<(String, ChatLlm)> {
+    cached_chat(root, model_flag).map(|(model, chat)| {
+        (
+            model,
+            MemoryAwareConversation::new(chat, refresh_project_memory(root, None).brief()),
+        )
+    })
+}
+
+fn mutation_with_tools(
+    root: &Path,
+    attempts: u32,
+    caller: Caller,
+    tools_flag: Option<&str>,
+    max_rounds_flag: Option<u32>,
+) -> SpecMutationService<
+    FsSpecRepository,
+    ProjectFeatures,
+    spec_harness::adapters::fs_worktree::FsWorkTree,
+    spec_harness::adapters::fs_state::FsStateStore,
+> {
+    let settings = tools_settings(&config_file(root));
+    let catalog = tool_service(root).catalog(false, false);
+    warn_unknown(&catalog.problems);
+    let resolved = resolve(
+        caller,
+        &one_shot_overrides(root, caller, tools_flag),
+        &catalog.tools,
+    );
+    warn_unknown(&resolved.unknown);
+    mutation_service(root, attempts).with_tool_loop(
+        resolved.tools,
+        max_rounds_flag.unwrap_or(settings.max_rounds),
+        settings.confirm,
+        Box::new(live_broker(root)),
+    )
+}
+
+fn run_tools(root: &Path, command: &ToolsCommand) -> anyhow::Result<()> {
+    let service = tool_service(root);
+    match command {
+        ToolsCommand::List {
+            for_caller,
+            offline,
+            refresh,
+            json,
+        } => {
+            if let Some(raw) = for_caller {
+                let caller = parse_caller_arg(Some(raw))?;
+                let (resolved, problems) = service.list_for(caller, *refresh, *offline);
+                for problem in &problems {
+                    eprintln!("warning: {problem}");
+                }
+                warn_unknown(&resolved.unknown);
+                if *json {
+                    return print_json(&resolved.tools.iter().map(|t| &t.name).collect::<Vec<_>>());
+                }
+                for tool in &resolved.tools {
+                    println!(
+                        "{}\t{}",
+                        tool.name,
+                        ToolService::<TomlToolStore, CachedDiscovery<LiveBroker>, FsMcpRegistry>::origin_label(
+                            &tool.origin
+                        )
+                    );
+                }
+                return Ok(());
+            }
+            let list = service.catalog(*refresh, *offline);
+            for problem in &list.problems {
+                eprintln!("warning: {problem}");
+            }
+            if *json {
+                return print_json(&list.tools.iter().map(|t| &t.name).collect::<Vec<_>>());
+            }
+            for tool in &list.tools {
+                println!(
+                    "{}\t{}",
+                    tool.name,
+                    ToolService::<TomlToolStore, CachedDiscovery<LiveBroker>, FsMcpRegistry>::origin_label(
+                        &tool.origin
+                    )
+                );
+            }
+            if *offline {
+                for name in &list.undiscovered {
+                    eprintln!("warning: {name} (not discovered — run spec tools refresh)");
+                }
+            }
+            Ok(())
+        }
+        ToolsCommand::Profiles { json } => {
+            let (views, problems) = service.profiles(false);
+            for problem in &problems {
+                eprintln!("warning: {problem}");
+            }
+            if *json {
+                return print_json(
+                    &views
+                        .iter()
+                        .map(|v| {
+                            serde_json::json!({
+                                "caller": v.caller,
+                                "tools": v.tools,
+                                "from_config": v.from_config,
+                                "unknown": v.unknown,
+                            })
+                        })
+                        .collect::<Vec<_>>(),
+                );
+            }
+            for view in views {
+                warn_unknown(&view.unknown);
+                // A tool the config added on top of the defaults is
+                // marked so the shipped set stays recognisable.
+                let names: Vec<String> = view
+                    .tools
+                    .iter()
+                    .map(|name| {
+                        if view.from_config.contains(name) {
+                            format!("{name} (config)")
+                        } else {
+                            name.clone()
+                        }
+                    })
+                    .collect();
+                println!("{}\t{}\t{}", view.caller, names.len(), names.join(", "));
+            }
+            Ok(())
+        }
+        ToolsCommand::Show { name } => {
+            let shown = service.show(name)?;
+            println!(
+                "{}\t{}",
+                shown.name,
+                ToolService::<TomlToolStore, CachedDiscovery<LiveBroker>, FsMcpRegistry>::origin_label(
+                    &shown.origin
+                )
+            );
+            println!("{}", shown.description);
+            println!("{}", serde_json::to_string_pretty(&shown.schema)?);
+            Ok(())
+        }
+        ToolsCommand::Enable { name, for_caller } => {
+            let caller = parse_caller_arg(for_caller.as_deref())?;
+            service.enable(name, caller)?;
+            println!("Enabled {name} for {}", caller.key());
+            Ok(())
+        }
+        ToolsCommand::Disable { name, for_caller } => {
+            let caller = parse_caller_arg(for_caller.as_deref())?;
+            service.disable(name, caller)?;
+            println!("Disabled {name} for {}", caller.key());
+            Ok(())
+        }
+        ToolsCommand::Refresh => {
+            let list = service.catalog(true, false);
+            for problem in &list.problems {
+                eprintln!("warning: {problem}");
+            }
+            println!("Refreshed {} tool(s).", list.tools.len());
+            Ok(())
+        }
+        ToolsCommand::Servers { json } => {
+            let load = service.registry();
+            if *json {
+                return print_json(&serde_json::json!({
+                    "path": load.path,
+                    "servers": load.servers.iter().map(|s| {
+                        serde_json::json!({
+                            "name": s.name,
+                            "program": s.program,
+                            "args": s.args,
+                        })
+                    }).collect::<Vec<_>>(),
+                    "problems": load.problems,
+                }));
+            }
+            match &load.path {
+                Some(path) => println!("{path}"),
+                None => println!("(no mcp.json found)"),
+            }
+            for server in &load.servers {
+                println!(
+                    "{}\t{}\t{}",
+                    server.name,
+                    server.program,
+                    server.args.join(" ")
+                );
+            }
+            for problem in &load.problems {
+                eprintln!("warning: {problem}");
+            }
+            Ok(())
+        }
+    }
+}
+
+fn run_mcp(root: &Path, command: &McpCommand) -> anyhow::Result<()> {
+    match command {
+        McpCommand::Serve => {
+            let runtime = tokio::runtime::Runtime::new()?;
+            runtime.block_on(spec_harness::mcp::serve_stdio(root.to_path_buf()))
+        }
+        McpCommand::Tools { stdio, json } => {
+            let broker = call_broker(root, *stdio)?;
+            let tools = broker.list_builtin_tools()?;
+            if *json {
+                return print_json(&tools.iter().map(|t| &t.name).collect::<Vec<_>>());
+            }
+            for tool in tools {
+                println!("{}", tool.name);
+            }
+            Ok(())
+        }
+        McpCommand::Call {
+            tool,
+            arg,
+            args,
+            stdio,
+            json,
+        } => {
+            let mut catalog = builtin_tool_definitions();
+            if spec_harness::domain::tools::find(&catalog, tool).is_err() {
+                catalog = tool_service(root).catalog(false, false).tools;
+            }
+            let arguments = ToolCallService::merge_arguments(args.as_deref(), arg)?;
+            ToolCallService::prepare(&catalog, tool, &arguments)?;
+            let broker = call_broker(root, *stdio)?;
+            let envelope = ToolCallService::call(&broker, &catalog, tool, &arguments)?;
+            if *json {
+                print_json(&envelope)?;
+            } else {
+                println!("{}", envelope.content);
+            }
+            if envelope.is_error {
+                return Err(NonzeroExit.into());
+            }
+            Ok(())
+        }
+    }
+}
+
+fn run_ask(
+    root: &Path,
+    model: Option<&str>,
+    attempts: u32,
+    tools: Option<&str>,
+    max_rounds: Option<u32>,
+    task: &[String],
+    json: bool,
+) -> anyhow::Result<()> {
+    let Some(llm) = connected_llm(root, model, Caller::Ask, attempts, tools, max_rounds) else {
+        anyhow::bail!("no model resolved - pull one with ollama and run spec model use <name>");
+    };
+    let mut prompter = interactive_prompter(Prompts::Incidental);
+    let joined = task.join(" ").trim().to_string();
+    if joined.is_empty() {
+        use std::io::IsTerminal as _;
+        if !std::io::stdin().is_terminal() {
+            anyhow::bail!("spec ask needs a task (or a tty for the multi-turn prompt)");
+        }
+        loop {
+            let line = prompter.ask("ask> ")?;
+            let line = line.trim().to_string();
+            if line.is_empty() || line == "exit" || line == "quit" {
+                break;
+            }
+            ask_once(&llm, prompter.as_mut(), &line, json)?;
+        }
+        return Ok(());
+    }
+    ask_once(&llm, prompter.as_mut(), &joined, json)
+}
+
+fn ask_once(
+    llm: &ResolvedLlm<ChatLlm, LiveBroker>,
+    prompter: &mut dyn Prompter,
+    task: &str,
+    json: bool,
+) -> anyhow::Result<()> {
+    let prompt = ask_prompt(task);
+    let answer = llm
+        .ask(
+            prompter,
+            &prompt,
+            |text| {
+                let body = text.trim();
+                if body.is_empty() {
+                    Err("the answer was empty".into())
+                } else {
+                    Ok(body.to_string())
+                }
+            },
+            |_, _, _, _| {},
+        )
+        .map_err(|e| match e {
+            spec_harness::application::LlmReplyError::Call(error) => anyhow::anyhow!(error.0),
+            spec_harness::application::LlmReplyError::Invalid { reason } => anyhow::anyhow!(reason),
+        })?;
+    if json {
+        print_json(&serde_json::json!({ "answer": answer }))
+    } else {
+        println!("{answer}");
+        Ok(())
+    }
+}
+
+/// `spec diff`: what changed under a path since the last commit, in prose.
+///
+/// Unlike `spec ask`, a missing model is not the end of the command.
+/// The diff is the thing being asked about and the harness already has
+/// it, so an unexplained diff is printed rather than refused - the
+/// developer still learns what changed.
+#[allow(clippy::too_many_arguments)]
+fn run_diff(
+    root: &Path,
+    model: Option<&str>,
+    attempts: u32,
+    tools: Option<&str>,
+    max_rounds: Option<u32>,
+    path: Option<&str>,
+    raw: bool,
+    json: bool,
+) -> anyhow::Result<()> {
+    let report = wiring::diff_service(root).diff(path)?;
+
+    // Nothing to explain, and the reply already says what to check. A
+    // model asked to summarize an empty diff invents a change.
+    let nothing_changed = report.diff.is_empty() && report.untracked.is_empty();
+    let llm = (!raw && !nothing_changed)
+        .then(|| connected_llm(root, model, Caller::Diff, attempts, tools, max_rounds))
+        .flatten();
+
+    let Some(llm) = llm else {
+        if json {
+            return print_json(&report);
+        }
+        if !report.diff.is_empty() {
+            print!("{}", report.diff);
+        }
+        for file in &report.untracked {
+            println!("untracked: {file}");
+        }
+        println!("{}", report.next_step);
+        return Ok(());
+    };
+
+    let prompt = spec_harness::domain::prompts::diff_prompt(
+        report.path.as_deref(),
+        &report.diff,
+        report.truncated,
+        &report.untracked,
+    );
+    let mut prompter = interactive_prompter(Prompts::Incidental);
+    let work = Spinner::start("Reading the diff - working");
+    let summary = llm.ask(
+        prompter.as_mut(),
+        &prompt,
+        |text| {
+            let body = text.trim();
+            if body.is_empty() {
+                Err("the summary was empty".into())
+            } else {
+                Ok(body.to_string())
+            }
+        },
+        |_, _, _, _| {},
+    );
+    drop(work);
+    let summary = summary.map_err(|e| match e {
+        spec_harness::application::LlmReplyError::Call(error) => anyhow::anyhow!(error.0),
+        spec_harness::application::LlmReplyError::Invalid { reason } => anyhow::anyhow!(reason),
+    })?;
+
+    if json {
+        let mut body = serde_json::to_value(&report)?;
+        body["summary"] = serde_json::Value::String(summary);
+        print_json(&body)
+    } else {
+        println!("{summary}");
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The indicator names how many questions are going to the model,
+    /// and a requirement with one criterion is the common case.
+    #[test]
+    fn the_judgment_indicator_counts_criteria_in_the_readers_grammar() {
+        assert_eq!(counted(1, "criterion", "criteria"), "1 criterion");
+        assert_eq!(counted(4, "criterion", "criteria"), "4 criteria");
+        assert_eq!(counted(0, "criterion", "criteria"), "0 criteria");
+    }
+
+    /// Off a terminal nothing but JSON will do - that is `spec
+    /// deliver` reading a step, an agent reading a reply, a CI gate
+    /// reading a verdict, and `| jq`. On a terminal the reader is a
+    /// person, unless they asked for JSON anyway.
+    #[test]
+    fn anything_that_is_not_a_person_reading_gets_json() {
+        assert!(wants_json(false, false), "a pipe must still get JSON");
+        assert!(wants_json(true, false), "--json through a pipe is JSON");
+        assert!(wants_json(true, true), "--json on a terminal is JSON");
+        assert!(
+            !wants_json(false, true),
+            "a person on a terminal gets the readable reply"
+        );
+    }
+
+    /// The wording the student guides quote verbatim, for the command
+    /// they quote it about.
+    #[test]
+    fn a_wizard_on_a_pipe_is_told_its_work_will_be_thrown_away() {
+        assert_eq!(
+            piped_stdin_warning(Prompts::Wizard),
+            "stdin is not a terminal: prompts are read from the pipe, and once it runs out \
+             every remaining prompt takes its default and every confirmation declines. \
+             A wizard that ends in \"Write this?\" therefore writes nothing. \
+             Run this in a terminal to answer the prompts."
+        );
+    }
+
+    /// `spec unittest generate` and `spec steps generate` have no
+    /// wizard and write either way. Telling a scripted run they wrote
+    /// nothing was simply false.
+    #[test]
+    fn a_command_that_writes_regardless_does_not_claim_it_writes_nothing() {
+        let warning = piped_stdin_warning(Prompts::Incidental);
+        assert!(warning.starts_with("stdin is not a terminal:"), "{warning}");
+        assert!(warning.ends_with("Run this in a terminal to answer the prompts."));
+        assert!(!warning.contains("writes nothing"), "{warning}");
+    }
+
+    #[test]
+    fn an_unexpanded_root_uses_spec_project_dir_or_the_launch_directory() {
+        let placeholder = Some(PathBuf::from("${CLAUDE_PROJECT_DIR:-.}"));
+        assert_eq!(
+            resolve_project_root(placeholder.clone(), Some("/work/kata"), None),
+            PathBuf::from("/work/kata")
+        );
+        assert_eq!(
+            resolve_project_root(placeholder, None, None),
+            PathBuf::from(".")
+        );
+        assert_eq!(
+            resolve_project_root(Some(PathBuf::from("${SPEC_PROJECT_DIR}")), Some("  "), None),
+            PathBuf::from(".")
+        );
+        assert_eq!(
+            resolve_project_root(Some(PathBuf::from(".")), Some("/work/kata"), None),
+            PathBuf::from(".")
+        );
+        assert_eq!(
+            resolve_project_root(Some(PathBuf::from("/explicit")), Some("/work/kata"), None),
+            PathBuf::from("/explicit")
+        );
+    }
+
+    /// An explicit `--root` is the whole answer, so a discovered
+    /// enclosing project never overrides what was typed.
+    #[test]
+    fn what_was_typed_outranks_what_was_discovered() {
+        let discovered = Some(PathBuf::from("/work/kata"));
+        assert_eq!(
+            resolve_project_root(Some(PathBuf::from("/explicit")), None, discovered.clone()),
+            PathBuf::from("/explicit")
+        );
+        assert_eq!(
+            resolve_project_root(None, Some("/from/env"), discovered.clone()),
+            PathBuf::from("/from/env")
+        );
+        assert_eq!(
+            resolve_project_root(None, None, discovered),
+            PathBuf::from("/work/kata")
+        );
+        assert_eq!(resolve_project_root(None, None, None), PathBuf::from("."));
+    }
+
+    #[test]
+    fn the_tdd_phase_advice_names_commands_rather_than_tools() {
+        assert_eq!(
+            cli_next_step("No tests have been run yet. Call run_tests to establish a baseline."),
+            "No tests have been run yet. Run spec test to establish a baseline."
+        );
+        assert_eq!(
+            cli_next_step(
+                "All tests pass. Either call start_refactor to clean up, or call \
+                 get_requirement for the next pending requirement and write a failing \
+                 test for it."
+            ),
+            "All tests pass. Either run spec refactor to clean up, or run spec show \
+             for the next pending requirement and write a failing test for it."
+        );
+    }
+
+    #[test]
+    fn a_tool_name_in_backticks_is_replaced_along_with_its_backticks() {
+        assert_eq!(
+            cli_next_step("Call `validate_spec`, then `get_requirement`."),
+            "Run spec validate, then spec show."
+        );
+    }
+
+    /// One service said "run validate" and another "run spec
+    /// validate". Only one of them can be pasted.
+    #[test]
+    fn a_command_named_without_its_prefix_gains_one() {
+        assert_eq!(
+            cli_next_step("Fix the wording, run validate, then run list."),
+            "Fix the wording, run spec validate, then run spec list."
+        );
+    }
+
+    #[test]
+    fn a_command_that_already_has_its_prefix_does_not_get_a_second() {
+        let already = "Fix the wording, then run spec validate.";
+        assert_eq!(cli_next_step(already), already);
+    }
+
+    /// The prefixer matches a phrase, not the letters that start one.
+    #[test]
+    fn an_english_word_that_starts_like_a_command_is_left_alone() {
+        let prose = "Read the validated input above before you decide.";
+        assert_eq!(cli_next_step(prose), prose);
+    }
+
+    #[test]
+    fn a_reply_without_advice_passes_through_untouched() {
+        let reply = "{\n  \"valid\": true\n}";
+        assert_eq!(speak_cli(reply), reply);
+    }
+
+    #[test]
+    fn only_the_next_step_field_is_rewritten_and_the_rest_keeps_its_order() {
+        let rendered = "{\n  \"phase\": \"START\",\n  \
+                        \"nextStep\": \"Call run_tests to start.\",\n  \
+                        \"note\": \"Call run_tests to start.\"\n}";
+        assert_eq!(
+            speak_cli(rendered),
+            "{\n  \"phase\": \"START\",\n  \
+             \"nextStep\": \"Run spec test to start.\",\n  \
+             \"note\": \"Call run_tests to start.\"\n}"
+        );
+    }
+
+    #[test]
+    fn a_next_step_holding_quotes_survives_the_rewrite() {
+        let rendered = "{\n  \"nextStep\": \"Answer \\\"Write this?\\\", then call run_tests.\"\n}";
+        assert_eq!(
+            speak_cli(rendered),
+            "{\n  \"nextStep\": \"Answer \\\"Write this?\\\", then run spec test.\"\n}"
+        );
+    }
+
+    /// The old message answered `--title X` by naming `--story` as the
+    /// flag that was supplied and `--title` as the one missing.
+    #[test]
+    fn a_half_given_draft_is_told_what_it_typed_and_what_is_missing() {
+        let complaint = missing_draft_flags(true, false, false).expect("a complaint");
+        assert!(
+            complaint.starts_with("spec draft with --title also needs --story and --criterion."),
+            "{complaint}"
+        );
+        assert_eq!(
+            missing_draft_flags(false, false, true).expect("a complaint"),
+            "spec draft with --criterion also needs --title and --story. Give all three, \
+             or none of them to be asked question by question."
+        );
+        assert!(
+            missing_draft_flags(true, true, false)
+                .expect("a complaint")
+                .starts_with("spec draft with --title and --story also needs --criterion.")
+        );
+    }
+
+    #[test]
+    fn a_fully_given_draft_has_no_complaint() {
+        assert_eq!(missing_draft_flags(true, true, true), None);
+    }
+
+    /// Advice is only worth rewriting if what it names can be run.
+    /// Caught `spec project inspect`, which does not exist - the
+    /// command is `spec inspect`.
+    #[test]
+    fn every_command_the_table_names_is_a_command_that_exists() {
+        use clap::CommandFactory as _;
+        for (tool, command) in CLI_FOR_TOOL {
+            let mut node = Cli::command();
+            let words = command.strip_prefix("spec ").expect("a spec command");
+            for word in words.split(' ') {
+                node.build();
+                node = node
+                    .find_subcommand(word)
+                    .unwrap_or_else(|| panic!("{tool} -> {command:?}: no subcommand {word:?}"))
+                    .clone();
+            }
+        }
+    }
+
+    /// Two tools mapping to the same command, or a tool name that is
+    /// part of another, would make the rewrite order matter.
+    #[test]
+    fn no_tool_name_in_the_table_contains_another() {
+        for (tool, _) in CLI_FOR_TOOL {
+            for (other, _) in CLI_FOR_TOOL {
+                assert!(
+                    tool == other || !tool.contains(other),
+                    "{other} hides inside {tool}"
+                );
+            }
+        }
+    }
+}

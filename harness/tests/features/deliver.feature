@@ -1,0 +1,1043 @@
+Feature: Deliver mode
+  spec deliver is the top-level orchestrator. It resolves what to work on -
+  one requirement id, the requirements a plain-words description is split
+  into, or the whole pending backlog - then drives each one through
+  scenario, steps, unit test, RED, implement, GREEN, refactor, and
+  mark-implemented. Every step is verified against the asset survey before
+  the next one starts, and the report says which requirements landed and
+  which did not, so an unfinished plan can never read as a success.
+
+  A run never stops to ask. Every proposal is accepted and every gate
+  approved, and anything that genuinely needs an answer no default can
+  supply is refused up front with the reason - so a run either completes
+  or says why not, and never waits at a prompt.
+
+  Scenario: A named requirement is taken through to implemented
+    Given a Java project marker
+    And a working spec with the pending requirements "REQ-001"
+    And the delivery skips the refactor
+    And the test runs will report:
+      """
+      1 tests and 0 failures
+      """
+    When the delivery runs for "REQ-001"
+    Then the delivery completes
+    And the delivery planned "REQ-001"
+    And the delivery delivered "REQ-001"
+    And the working tree file "features/kata.feature" contains "@REQ-001"
+    And the working tree file "requirements/requirements.json" contains "implemented"
+    And the developer was told a finding containing "[1 of 1] REQ-001"
+    And the developer was told a finding containing "Saving status - working ..."
+    And the delivery next step contains "All 1 planned requirement(s) are implemented"
+
+  Scenario: A lower-case id still names the requirement
+    Given a Java project marker
+    And a working spec with the pending requirements "REQ-001"
+    And the delivery skips the refactor
+    And the test runs will report:
+      """
+      1 tests and 0 failures
+      """
+    When the delivery runs for "req-001"
+    Then the delivery completes
+    And the delivery planned "REQ-001"
+
+  Scenario: An id that is not in the catalog is refused before any work starts
+    Given a Java project marker
+    And a working spec with the pending requirements "REQ-001"
+    When the delivery runs for "REQ-404"
+    Then the delivery error contains "No requirement with id REQ-404"
+    And the delivery error contains "spec list"
+    And the working tree file "features/kata.feature" does not exist
+
+  Scenario: A requirement that is already implemented is reported, not redone
+    Given a Java project marker
+    And a working spec with the implemented requirement "REQ-001"
+    When the delivery runs for "REQ-001"
+    Then the delivery completes
+    And the delivery delivered "REQ-001"
+    And the developer was told a finding containing "REQ-001 is already implemented - nothing to do."
+
+  Scenario: No argument plans every pending requirement in catalog order
+    Given a Java project marker
+    And a working spec with the pending requirements "REQ-001, REQ-002"
+    And the delivery skips the refactor
+    And the test runs will report:
+      """
+      1 tests and 0 failures
+      1 tests and 0 failures
+      """
+    When the delivery runs
+    Then the delivery completes
+    And the delivery planned "REQ-001, REQ-002"
+    And the delivery delivered "REQ-001, REQ-002"
+    And the developer was told a finding containing "Plan: 2 requirement(s) - REQ-001, REQ-002."
+    And the developer was told a finding containing "[2 of 2] REQ-002"
+    And the working tree file "features/kata.feature" contains "@REQ-002"
+
+  Scenario: An exhausted backlog is a completed run with nothing to do
+    Given a Java project marker
+    And a working spec with the implemented requirement "REQ-001"
+    When the delivery runs
+    Then the delivery completes
+    And the delivery delivered nothing
+    And the delivery next step contains "Nothing is pending."
+
+  Scenario: A description is broken down and the requirements it holds are delivered
+    Given a Java project marker
+    And an empty working spec
+    And a model is resolved
+    And the model will reply:
+      """
+      [{"title": "Empty string returns zero", "story": "As a calculator user, I want an empty string to return 0 so that no input is a safe default.", "acceptanceCriteria": ["Given an empty string \"\", when add is called, then the result is 0"]}]
+      """
+    And the delivery skips the refactor
+    And the test runs will report:
+      """
+      1 tests and 0 failures
+      """
+    When the delivery runs for "empty input means zero"
+    Then the delivery completes
+    And the delivery planned "REQ-001"
+    And the developer was told a finding containing "The request holds 1 requirement(s) and 0 question(s)."
+    And the developer was told a finding containing "REQ-001 committed to the spec under ASK-001."
+    And the working tree file "src/test/resources/features/empty-string-returns-zero.feature" contains "@REQ-001"
+    And the working tree file "requirements/requirements.json" contains "implemented"
+
+  # An ask is implemented when every requirement derived from it is. The
+  # run that lands the last of them closes the ask itself, so a request
+  # is never left pending over children that are all done.
+  Scenario: The ask is closed once every requirement derived from it has landed
+    Given a Java project marker
+    And an empty working spec
+    And a model is resolved
+    And the model will reply:
+      """
+      [{"title": "Empty string returns zero", "story": "As a calculator user, I want an empty string to return 0 so that no input is a safe default.", "acceptanceCriteria": ["Given an empty string \"\", when add is called, then the result is 0"]}]
+      """
+    And the delivery skips the refactor
+    And the test runs will report:
+      """
+      1 tests and 0 failures
+      """
+    When the delivery runs for "empty input means zero"
+    Then the delivery completes
+    And the delivery delivered "REQ-001"
+    And the delivery implemented the asks "ASK-001"
+    And the developer was told a finding containing "ASK-001 is implemented - every requirement derived from it has landed."
+    And the written spec shows "REQ-001" as "implemented"
+    And the written spec shows "ASK-001" as "implemented"
+    And the written spec validates clean
+
+  Scenario: An ask stays pending while a requirement derived from it is outstanding
+    Given a Java project marker
+    And an empty working spec
+    And a model is resolved
+    And the model will reply:
+      """
+      [{"title": "Empty string returns zero", "story": "As a calculator user, I want an empty string to return 0 so that no input is a safe default.", "acceptanceCriteria": ["Given an empty string \"\", when add is called, then the result is 0"]}, {"title": "Blank input is rejected", "story": "As a calculator user, I want blank input rejected so that mistakes surface early.", "acceptanceCriteria": ["Given a blank string \" \", when add is called, then an error is raised"]}]
+      """
+    And the delivery skips the refactor
+    And the test runs will report:
+      """
+      1 tests and 0 failures
+      the build failed with "Req002Test.java:12: cannot find symbol"
+      """
+    When the delivery runs for "calculator basics"
+    Then the delivery is not completed
+    And the delivery delivered "REQ-001"
+    And the delivery leaves "REQ-002" outstanding because "before any test ran"
+    And the delivery implemented no asks
+    And the written spec shows "ASK-001" as "pending"
+    And the developer was not told a finding containing "ASK-001 is implemented"
+    And the developer was not told a finding containing "ASK-001 stays pending"
+
+  # A spec an earlier build left behind: the requirement implemented, the
+  # ask it came from still pending. Delivering the ask again has nothing
+  # to work and closes it rather than refusing because its children are done.
+  Scenario: An ask whose derived requirements landed in an earlier run is closed by the next one
+    Given a Java project marker
+    And an empty working spec
+    And a model is resolved
+    And the model will reply:
+      """
+      [{"title": "Empty string returns zero", "story": "As a calculator user, I want an empty string to return 0 so that no input is a safe default.", "acceptanceCriteria": ["Given an empty string \"\", when add is called, then the result is 0"]}]
+      """
+    And the delivery skips the refactor
+    And the test runs will report:
+      """
+      1 tests and 0 failures
+      """
+    And the delivery runs for "empty input means zero"
+    And "ASK-001" is put back to pending in the working spec by hand
+    When the delivery runs for "ASK-001"
+    Then the delivery completes
+    And the delivery delivered nothing
+    And the delivery implemented the asks "ASK-001"
+    And the written spec shows "ASK-001" as "implemented"
+
+  Scenario: Every requirement a description holds is planned, not only the first
+    Given a Java project marker
+    And an empty working spec
+    And a model is resolved
+    And the model will reply:
+      """
+      [{"title": "Empty string returns zero", "story": "As a calculator user, I want an empty string to return 0 so that no input is a safe default.", "acceptanceCriteria": ["Given an empty string \"\", when add is called, then the result is 0"]}, {"title": "Blank input is rejected", "story": "As a calculator user, I want blank input rejected so that mistakes surface early.", "acceptanceCriteria": ["Given a blank string \" \", when add is called, then an error is raised"]}]
+      """
+    And the delivery skips the refactor
+    And the test runs will report:
+      """
+      1 tests and 0 failures
+      1 tests and 0 failures
+      """
+    When the delivery runs for "calculator basics"
+    Then the delivery completes
+    And the delivery planned "REQ-001, REQ-002"
+    And the delivery delivered "REQ-001, REQ-002"
+    And the developer was told a finding containing "REQ-001, REQ-002 committed to the spec under ASK-001."
+
+  Scenario: Every gate is approved rather than asked about
+    Given a Java project marker
+    And a working spec with the pending requirements "REQ-001"
+    And the delivery skips the refactor
+    And the test runs will report:
+      """
+      1 tests and 0 failures
+      """
+    When the delivery runs for "REQ-001"
+    Then the delivery completes
+    And the delivery delivered "REQ-001"
+    And the developer was not asked anything containing "Commit the generated"
+
+  Scenario: Every proposal a description is broken into is taken as offered
+    Given a Java project marker
+    And an empty working spec
+    And a model is resolved
+    And the model will reply:
+      """
+      [{"title": "Empty string returns zero", "story": "As a calculator user, I want an empty string to return 0 so that no input is a safe default.", "acceptanceCriteria": ["Given an empty string \"\", when add is called, then the result is 0"]}]
+      """
+    And the delivery skips the refactor
+    And the test runs will report:
+      """
+      1 tests and 0 failures
+      """
+    When the delivery runs for "empty input means zero"
+    Then the delivery completes
+    And the delivery delivered "REQ-001"
+    And the developer was told a finding containing "ASK-001 (automatic mode): ready"
+    And the working tree file "requirements/requirements.json" contains "Empty string returns zero"
+
+  Scenario: An empty directory is refused rather than asked which language to scaffold
+    When the delivery runs
+    Then the delivery error contains "No project was detected here"
+    And the delivery error contains "spec init --language"
+    And the delivery error contains "spec greenfield"
+    And the developer was not asked anything containing "Language for the new project"
+
+  Scenario: An empty catalog with nothing described is refused, not drafted from nothing
+    Given a Java project marker
+    And an empty working spec
+    When the delivery runs
+    Then the delivery error contains "nothing was described"
+    And the delivery error contains "spec greenfield"
+    And the spec file is unchanged
+
+  Scenario: A description with no model to break it down is handed back
+    Given a Java project marker
+    And an empty working spec
+    When the delivery runs for "empty input means zero"
+    Then the delivery error contains "needs a model, and none is resolved"
+    And the delivery error contains "spec model use"
+    And the spec file is unchanged
+
+  Scenario: One word reaching for a requirement id is refused, not drafted
+    Given a Java project marker
+    And a working spec with the pending requirements "REQ-001"
+    When the delivery runs for "req7"
+    Then the delivery error contains "req7 is not a requirement id"
+    And the delivery error contains "spec list"
+    And the spec file is unchanged
+
+  # "R-003" reads as an id - an uppercase prefix, a dash, a number - so
+  # the catalog is what decides, not the shape. A prefix the catalog does
+  # not use is reported by name rather than drafted from as prose.
+  Scenario: An id shaped correctly but naming nothing is reported by name
+    Given a Java project marker
+    And a working spec with the pending requirements "REQ-001"
+    When the delivery runs for "R-003"
+    Then the delivery error contains "No requirement with id R-003"
+    And the delivery error contains "spec list"
+    And the spec file is unchanged
+
+  # The prefix belongs to the catalog: this crate's own spec numbers
+  # HARNESS-014, and the same command has to reach it.
+  Scenario: A requirement carrying the catalog's own prefix is delivered
+    Given a Java project marker
+    And a working spec with the pending requirements "HARNESS-001"
+    And the delivery skips the refactor
+    And the test runs will report:
+      """
+      1 tests and 1 failures detailed "Harness001Test: TODO: assert"
+      """
+    When the delivery runs for "HARNESS-001"
+    Then the delivery is not completed
+    And the delivery planned "HARNESS-001"
+
+  Scenario: A RED bar with no model stops the requirement and says who must implement it
+    Given a Java project marker
+    And a working spec with the pending requirements "REQ-001"
+    And the delivery skips the refactor
+    And the test runs will report:
+      """
+      1 tests and 1 failures detailed "Req001Test: TODO: assert"
+      """
+    When the delivery runs for "REQ-001"
+    Then the delivery is not completed
+    And the delivery leaves "REQ-001" outstanding because "no model is resolved"
+    And the developer was told a finding containing "Req001Test: TODO: assert"
+
+  Scenario: The model drives a red bar to green within its budget
+    Given a Java project marker
+    And a working spec with the pending requirements "REQ-001"
+    And a model is resolved
+    And the model will reply:
+      """
+      [{"path": "src/main/java/Kata.java", "content": "public class Kata { int add(String input) { return 0; } }"}]
+      """
+    And the model will also fill in the generated unit test
+    And the delivery skips the refactor
+    And the delivery budget is 3 attempts
+    And the test runs will report:
+      """
+      1 tests and 1 failures detailed "Req001Test: TODO: assert"
+      1 tests and 0 failures
+      """
+    When the delivery runs for "REQ-001"
+    Then the delivery completes
+    And the developer was told a finding containing "Attempt 1 of 3."
+    And the developer was told a finding containing "src/main/java/Kata.java - working"
+    And the working tree file "src/main/java/Kata.java" contains "public class Kata"
+
+  # The generated unit test ships with a `TODO: assert` placeholder on
+  # purpose - writing the assertion is the point of the exercise. An
+  # attempt that writes production code and leaves the placeholder
+  # standing is asked again, and the complaint is told. The production
+  # file that did arrive is kept: refusing the stub used to throw the
+  # implementation away with it, so the named source file was never written.
+  Scenario: An attempt that leaves the generated placeholder standing keeps the production file
+    Given a Java project marker
+    And a working spec with the pending requirements "REQ-001"
+    And a model is resolved
+    And the model will reply:
+      """
+      [{"path": "src/main/java/Kata.java", "content": "public class Kata { int add(String input) { return 0; } }"}]
+      """
+    And the delivery skips the refactor
+    And the delivery budget is 1 attempts
+    And the test runs will report:
+      """
+      1 tests and 1 failures detailed "Req001Test: TODO: assert"
+      1 tests and 1 failures detailed "Req001Test: TODO: assert"
+      """
+    When the delivery runs for "REQ-001"
+    Then the delivery is not completed
+    And the developer was told a finding containing "still carries the generated placeholder"
+    And the working tree file "src/main/java/Kata.java" contains "public class Kata"
+
+  # The file a delivery wrote is recorded on the requirement, so the next
+  # attempt writes where the last one did instead of inferring the path
+  # again from step definitions that may not name it.
+  Scenario: A delivery records where it wrote the production code
+    Given a Java project marker
+    And a working spec with the pending requirements "REQ-001"
+    And a model is resolved
+    And the model will reply:
+      """
+      [{"path": "src/main/java/Kata.java", "content": "public class Kata { int add(String input) { return 0; } }"}]
+      """
+    And the model will also fill in the generated unit test
+    And the delivery skips the refactor
+    And the delivery budget is 3 attempts
+    And the test runs will report:
+      """
+      1 tests and 1 failures detailed "Req001Test: TODO: assert"
+      1 tests and 0 failures
+      """
+    When the delivery runs for "REQ-001"
+    Then the delivery completes
+    And the working tree file "requirements/requirements.json" contains "productionFiles"
+    And the working tree file "requirements/requirements.json" contains "src/main/java/Kata.java"
+
+  # The step-definition file is the one file an implementation attempt
+  # never gets back whole - it is shared by every requirement and is the
+  # largest file in a project that has been at this for a while. Its
+  # pending bodies are filled as a fragment of their own, after the
+  # production code they should call has been written.
+  Scenario: A delivery fills the pending step bodies after writing the production code
+    Given a Java project marker
+    And a working spec with the pending requirements "REQ-001"
+    And a model is resolved
+    And the model will reply:
+      """
+      [{"path": "src/main/java/Kata.java", "content": "public class Kata { int add(String input) { return 0; } }"}]
+      """
+    And the model will also fill in the generated unit test
+    And the model will fill the step bodies with:
+      """
+          @Given("a")
+          public void givenA() {
+              kata = new Kata();
+          }
+
+          @When("b")
+          public void whenB() {
+              result = kata.add("1,2");
+          }
+
+          @Then("{int}")
+          public void thenTheResultIs(int expected) {
+              org.junit.jupiter.api.Assertions.assertEquals(expected, result);
+          }
+      """
+    And the delivery skips the refactor
+    And the delivery budget is 3 attempts
+    And the test runs will report:
+      """
+      1 tests and 1 failures detailed "Req001Test: TODO: assert"
+      1 tests and 0 failures
+      """
+    When the delivery runs for "REQ-001"
+    Then the delivery completes
+    And the developer was told a finding containing "Filled 3 pending step bodies in src/test/java/GeneratedSteps.java (llm)."
+    And the working tree file "src/test/java/GeneratedSteps.java" contains "result = kata.add("
+    And the working tree file "src/test/java/GeneratedSteps.java" does not contain "PendingException();"
+
+  # A step body that needs state the world does not have may ask for
+  # it: the reply leads with the world type holding only the new
+  # fields, and they go into the file beside the bodies. The rule used
+  # to forbid this, and three measured attempts read E0609 for a field
+  # the model was not allowed to add.
+  Scenario: A step-filling reply may add the world fields its bodies need
+    Given a Java project marker
+    And a working spec with the pending requirements "REQ-001"
+    And a model is resolved
+    And the model will reply:
+      """
+      [{"path": "src/main/java/Kata.java", "content": "public class Kata { int add(String input) { return 0; } }"}]
+      """
+    And the model will also fill in the generated unit test
+    And the model will fill the step bodies with:
+      """
+      public class GeneratedSteps {
+          private Kata kata;
+          private int result;
+      }
+
+          @Given("a")
+          public void givenA() {
+              kata = new Kata();
+          }
+
+          @When("b")
+          public void whenB() {
+              result = kata.add("1,2");
+          }
+
+          @Then("{int}")
+          public void thenTheResultIs(int expected) {
+              org.junit.jupiter.api.Assertions.assertEquals(expected, result);
+          }
+      """
+    And the delivery skips the refactor
+    And the delivery budget is 3 attempts
+    And the test runs will report:
+      """
+      1 tests and 1 failures detailed "Req001Test: TODO: assert"
+      1 tests and 0 failures
+      """
+    When the delivery runs for "REQ-001"
+    Then the delivery completes
+    And the developer was told a finding containing "Filled 3 pending step bodies and added 2 world field(s) in src/test/java/GeneratedSteps.java (llm)."
+    And the working tree file "src/test/java/GeneratedSteps.java" contains "private Kata kata;"
+    And the working tree file "src/test/java/GeneratedSteps.java" contains "private int result;"
+    And the working tree file "src/test/java/GeneratedSteps.java" contains "result = kata.add("
+    And the working tree file "src/test/java/GeneratedSteps.java" does not contain "PendingException();"
+
+  # A reply that leaves one definition pending keeps that stub and
+  # writes the definitions that came back finished. The attempt is not
+  # lost over the one that stayed a placeholder.
+  Scenario: A step-filling reply that keeps a placeholder keeps that step and fills the rest
+    Given a Java project marker
+    And a working spec with the pending requirements "REQ-001"
+    And a model is resolved
+    And the model will reply:
+      """
+      [{"path": "src/main/java/Kata.java", "content": "public class Kata { int add(String input) { return 0; } }"}]
+      """
+    And the model will also fill in the generated unit test
+    And the model will fill the step bodies with:
+      """
+          @Given("a")
+          public void givenA() {
+              throw new PendingException();
+          }
+
+          @When("b")
+          public void whenB() {
+              result = new Kata().add("1,2");
+          }
+
+          @Then("{int}")
+          public void thenTheResultIs(int expected) {
+              org.junit.jupiter.api.Assertions.assertEquals(expected, result);
+          }
+      """
+    And the delivery skips the refactor
+    And the delivery budget is 1 attempts
+    And the test runs will report:
+      """
+      1 tests and 1 failures detailed "Req001Test: TODO: assert"
+      1 tests and 1 failures detailed "Given a: FAILED"
+      """
+    When the delivery runs for "REQ-001"
+    Then the delivery is not completed
+    And the developer was told a finding containing "Filled 2 pending step bodies in src/test/java/GeneratedSteps.java (llm)."
+    And the working tree file "src/test/java/GeneratedSteps.java" contains "result = new Kata().add("
+    And the working tree file "src/test/java/GeneratedSteps.java" contains "PendingException();"
+
+  # A run nobody watched can still be read for what the decision plane
+  # made of each gated stage. The judgments ride in the report per stage,
+  # and the run says them as it goes, the same way `spec refine` does.
+  Scenario: A delivery reports what the decision model made of each gated stage
+    Given a Java project marker
+    And a working spec with the pending requirements "REQ-001"
+    And a model is resolved
+    And a decision model that answers every question favourably is configured for the project
+    And the model will reply:
+      """
+      [{"path": "src/main/java/Kata.java", "content": "public class Kata { int add(String input) { return 0; } }"}]
+      """
+    And the model will also fill in the generated unit test
+    And the delivery skips the refactor
+    And the delivery budget is 3 attempts
+    And the test runs will report:
+      """
+      1 tests and 1 failures detailed "Req001Test: TODO: assert"
+      1 tests and 0 failures
+      """
+    When the delivery runs for "REQ-001"
+    Then the delivery completes
+    And the delivery report carries a "drive_to_green" judgment from the gate "UNIT_TEST_ASSERTS"
+    And the delivery report carries a "drive_to_green" judgment from the gate "IMPLEMENTATION_COMPLETE"
+    And every delivery judgment reads "HOLDS"
+    And the developer was told a finding containing "A second review (IMPLEMENTATION_COMPLETE, implementation_complete/v1) judged 1 file:"
+
+  # The same run with no decision model named reports exactly what it
+  # reported before there was a plane to consult.
+  Scenario: A delivery without a decision model carries no judgments
+    Given a Java project marker
+    And a working spec with the pending requirements "REQ-001"
+    And a model is resolved
+    And the model will reply:
+      """
+      [{"path": "src/main/java/Kata.java", "content": "public class Kata { int add(String input) { return 0; } }"}]
+      """
+    And the model will also fill in the generated unit test
+    And the delivery skips the refactor
+    And the delivery budget is 3 attempts
+    And the test runs will report:
+      """
+      1 tests and 1 failures detailed "Req001Test: TODO: assert"
+      1 tests and 0 failures
+      """
+    When the delivery runs for "REQ-001"
+    Then the delivery completes
+    And the delivery report carries no judgments
+
+  Scenario: A budget that runs out leaves the requirement outstanding with its phase
+    Given a Java project marker
+    And a working spec with the pending requirements "REQ-001"
+    And a model is resolved
+    And the model will reply:
+      """
+      [{"path": "src/main/java/Kata.java", "content": "public class Kata { int add(String input) { return 1; } }"}]
+      """
+    And the delivery skips the refactor
+    And the delivery budget is 2 attempts
+    And the test runs will report:
+      """
+      1 tests and 1 failures detailed "Req001Test: TODO: assert"
+      1 tests and 1 failures detailed "Req001Test: expected 0 but was 1"
+      1 tests and 1 failures detailed "Req001Test: expected 0 but was 1"
+      """
+    When the delivery runs for "REQ-001"
+    Then the delivery is not completed
+    And the delivery leaves "REQ-001" outstanding because "still RED after 2 attempt(s)"
+    And the developer was told a finding containing "Attempt 2 of 2."
+    And the working tree file "requirements/requirements.json" contains "pending"
+    And the delivery next step contains "spec deliver REQ-001 again"
+
+  # A build error and a failing test are both red bars to the state
+  # machine, and the implement loop can only move one of them. Spending
+  # the budget writing production code against a compiler error is how a
+  # run burns three model calls and finishes further back than it began.
+  Scenario: A bar that is a build error stops the requirement instead of spending attempts
+    Given a Java project marker
+    And a working spec with the pending requirements "REQ-001"
+    And a model is resolved
+    And the model will reply:
+      """
+      [{"path": "src/main/java/Kata.java", "content": "public class Kata {}"}]
+      """
+    And the delivery skips the refactor
+    And the delivery budget is 3 attempts
+    And the test runs will report:
+      """
+      the build failed with "Req001Test.java:12: cannot find symbol"
+      """
+    When the delivery runs for "REQ-001"
+    Then the delivery is not completed
+    And the delivery leaves "REQ-001" outstanding because "before any test ran"
+    And the developer was told a finding containing "generated unit test is the usual cause"
+    And the developer was not told a finding containing "Attempt 1 of 3."
+
+  # "Templates are the fallback" is the run's second line. The polish
+  # pass checks a unit test's shape and never whether it compiles, so a
+  # model that adds a helper the file cannot build is the one break the
+  # run can mend by itself: the template it polished compiles.
+  Scenario: A unit test the model broke is rewritten from the template before the run stops
+    Given a Java project marker
+    And a working spec with the pending requirements "REQ-001"
+    And a model is resolved
+    And the model will reply:
+      """
+      [{"path": "src/main/java/Kata.java", "content": "public class Kata {}"}]
+      """
+    And the model will polish the unit test into:
+      """
+      import org.junit.jupiter.api.Test;
+
+      class Req001Test {
+          @Test
+          void addsNumbers() { Helper.notDeclaredAnywhere(); }
+      }
+      """
+    And the model will also fill in the generated unit test
+    And the delivery skips the refactor
+    And the delivery budget is 1 attempt
+    And the test runs will report:
+      """
+      the build failed with "Req001Test.java:5: cannot find symbol Helper"
+      1 tests and 1 failures detailed "Req001Test: TODO: assert"
+      1 tests and 0 failures
+      """
+    When the delivery runs for "REQ-001"
+    Then the delivery completes
+    And the delivery delivered "REQ-001"
+    And the developer was told a finding containing "rewritten from the template"
+    And the developer was told a finding containing "Attempt 1 of 1."
+    And the working tree file "src/test/java/Req001Test.java" does not contain "Helper.notDeclaredAnywhere"
+
+  # The same break with the template already in place is somebody
+  # else's: there is nothing to fall back to, so the stop stands.
+  Scenario: A build broken by something other than the model's unit test still stops the requirement
+    Given a Java project marker
+    And a working spec with the pending requirements "REQ-001"
+    And a model is resolved
+    And the model will reply:
+      """
+      [{"path": "src/main/java/Kata.java", "content": "public class Kata {}"}]
+      """
+    And the model will polish the unit test into:
+      """
+      import org.junit.jupiter.api.Test;
+
+      class Req001Test {
+          @Test
+          void addsNumbers() { Helper.notDeclaredAnywhere(); }
+      }
+      """
+    And the delivery skips the refactor
+    And the delivery budget is 1 attempt
+    And the test runs will report:
+      """
+      the build failed with "Req001Test.java:5: cannot find symbol Helper"
+      the build failed with "Kata.java:1: class Kata is public, should be declared in a file named Kata.java"
+      """
+    When the delivery runs for "REQ-001"
+    Then the delivery is not completed
+    And the developer was told a finding containing "rewritten from the template"
+    And the delivery leaves "REQ-001" outstanding because "before any test ran"
+    And the developer was not told a finding containing "Attempt 1 of 1."
+
+  # The attempt that breaks the build is worse than the one before it:
+  # it briefs the next attempt with a compiler error instead of a failing
+  # test, and leaves the break on disk when the budget runs out.
+  Scenario: An attempt that stops the code compiling is put back
+    Given a Java project marker
+    And a project source file "src/main/java/Kata.java" containing:
+      """
+      public class Kata { int add(String input) { return 0; } }
+      """
+    And a working spec with the pending requirements "REQ-001"
+    And a model is resolved
+    And the model will reply:
+      """
+      [{"path": "src/main/java/Kata.java", "content": "public class Kata { int add( }"}]
+      """
+    And the model will also fill in the generated unit test
+    And the delivery skips the refactor
+    And the delivery budget is 1 attempt
+    And the test runs will report:
+      """
+      1 tests and 1 failures detailed "Req001Test: TODO: assert"
+      the build failed with "Kata.java:1: ')' expected"
+      """
+    When the delivery runs for "REQ-001"
+    Then the delivery is not completed
+    And the developer was told a finding containing "Attempt 1 left the build not compiling"
+    And the developer was told a finding containing "src/main/java/Kata.java"
+    And the working tree file "src/main/java/Kata.java" contains "return 0;"
+
+  # The tree is not the attempt's alone. A developer with the project
+  # open edits it while the model thinks, and a revert that put back
+  # every file that differed from the snapshot put back their edit too.
+  # Only the files the attempt wrote go back; the rest are named and
+  # left as they are.
+  Scenario: A revert puts back only what the attempt wrote
+    Given a Java project marker
+    And a project source file "src/main/java/Kata.java" containing:
+      """
+      public class Kata { int add(String input) { return 0; } }
+      """
+    And a project source file "src/main/java/Helper.java" containing:
+      """
+      public class Helper { }
+      """
+    And "src/main/java/Helper.java" is edited outside the run to contain:
+      """
+      public class Helper { int handEdit() { return 7; } }
+      """
+    And a working spec with the pending requirements "REQ-001"
+    And a model is resolved
+    And the model will reply:
+      """
+      [{"path": "src/main/java/Kata.java", "content": "public class Kata { int add( }"}]
+      """
+    And the model will also fill in the generated unit test
+    And the delivery skips the refactor
+    And the delivery budget is 1 attempt
+    And the test runs will report:
+      """
+      1 tests and 1 failures detailed "Req001Test: TODO: assert"
+      the build failed with "Kata.java:1: ')' expected"
+      """
+    When the delivery runs for "REQ-001"
+    Then the delivery is not completed
+    And the developer was told a finding containing "Attempt 1 left the build not compiling, so src/main/java/Kata.java"
+    And the developer was told a finding containing "src/main/java/Helper.java changed during the attempt but not by it, so it was left as it is."
+    And the working tree file "src/main/java/Kata.java" contains "return 0;"
+    And the working tree file "src/main/java/Helper.java" contains "handEdit"
+
+  # The attempt after a reverted one is briefed from the last recorded
+  # run. Left as the broken build, that is a compiler error for code no
+  # longer on disk, naming files the next prompt then carries whole -
+  # measured as a 216 KB step file and eleven minutes of prefill. So the
+  # bar is read again once the files are back, and the next attempt
+  # starts from what the tree actually says.
+  Scenario: The attempt after a reverted one reads the bar again first
+    Given a Java project marker
+    And a project source file "src/main/java/Kata.java" containing:
+      """
+      public class Kata { int add(String input) { return 0; } }
+      """
+    And a working spec with the pending requirements "REQ-001"
+    And a model is resolved
+    And the model will reply:
+      """
+      [{"path": "src/main/java/Kata.java", "content": "public class Kata { int add(String i) { return 1; } }"}]
+      """
+    And the model will also fill in the generated unit test
+    And the delivery skips the refactor
+    And the delivery budget is 2 attempts
+    And the test runs will report:
+      """
+      1 tests and 1 failures detailed "Req001Test: TODO: assert"
+      the build failed with "Kata.java:1: ')' expected"
+      1 tests and 1 failures detailed "Req001Test: TODO: assert"
+      1 tests and 0 failures
+      """
+    When the delivery runs for "REQ-001"
+    Then the delivery completes
+    And the developer was told a finding containing "Attempt 1 left the build not compiling"
+    And the developer was told a finding containing "Attempt 2 of 2."
+
+  Scenario: A runtime that disappears mid-loop stops the requirement
+    Given a Java project marker
+    And a working spec with the pending requirements "REQ-001"
+    And a model is resolved
+    And the model will reply:
+      """
+      [{"path": "src/main/java/Kata.java", "content": "public class Kata {}"}]
+      """
+    And the delivery skips the refactor
+    And the test runs will report:
+      """
+      1 tests and 1 failures detailed "Req001Test: TODO: assert"
+      runtime "JDK" missing with hint "Install a JDK 17+ and Maven."
+      """
+    When the delivery runs for "REQ-001"
+    Then the delivery is not completed
+    And the delivery leaves "REQ-001" outstanding because "runtime disappeared mid-loop"
+
+  # The model never answered - a timeout on a prompt this size,
+  # usually. The loop stops with the requirement still pending instead
+  # of spending the remaining attempts waiting out the same timeout.
+  Scenario: A model outage stops the loop and hands the work back
+    Given a Java project marker
+    And a working spec with the pending requirements "REQ-001"
+    And the model is resolved but every call fails with "the endpoint refused the connection"
+    And the delivery skips the refactor
+    And the delivery budget is 3 attempts
+    And the test runs will report:
+      """
+      1 tests and 1 failures detailed "Req001Test: TODO: assert"
+      """
+    When the delivery runs for "REQ-001"
+    Then the delivery is not completed
+    And the developer was told a finding containing "Implement by hand instead."
+    And the delivery leaves "REQ-001" outstanding because "never answered"
+
+  Scenario: A build that cannot run at all is an error, not an outcome
+    Given a Java project marker
+    And a working spec with the pending requirements "REQ-001"
+    And the delivery skips the refactor
+    And the test runs will report:
+      """
+      failed "mvn exited 1: dependency resolution failed"
+      """
+    When the delivery runs for "REQ-001"
+    Then the delivery error contains "dependency resolution failed"
+
+  Scenario: A failure carries on to the next requirement by default
+    Given a Java project marker
+    And a working spec with the pending requirements "REQ-001, REQ-002"
+    And the delivery skips the refactor
+    And the test runs will report:
+      """
+      1 tests and 1 failures detailed "Req001Test: TODO: assert"
+      1 tests and 0 failures
+      """
+    When the delivery runs
+    Then the delivery is not completed
+    And the delivery delivered "REQ-002"
+    And the delivery leaves "REQ-001" outstanding because "no model is resolved"
+    And the developer was told a finding containing "[2 of 2] REQ-002"
+    And the delivery next step contains "1 of 2 delivered"
+
+  Scenario: Fail-fast leaves the rest of the plan untouched
+    Given a Java project marker
+    And a working spec with the pending requirements "REQ-001, REQ-002"
+    And the delivery stops at the first failure
+    And the delivery skips the refactor
+    And the test runs will report:
+      """
+      1 tests and 1 failures detailed "Req001Test: TODO: assert"
+      """
+    When the delivery runs
+    Then the delivery is not completed
+    And the delivery delivered nothing
+    And the developer was told a finding containing "Stopping here - the rest of the plan is untouched (--fail-fast)."
+    And the delivery next step contains "REQ-001, REQ-002"
+
+  Scenario: A missing runtime leaves the authoring in place and says so
+    Given a Java project marker
+    And a working spec with the pending requirements "REQ-001"
+    And the delivery skips the refactor
+    And the test runs will report:
+      """
+      runtime "JDK" missing with hint "Install a JDK 17+ and Maven."
+      """
+    When the delivery runs for "REQ-001"
+    Then the delivery is not completed
+    And the delivery leaves "REQ-001" outstanding because "the language runtime is missing"
+    And the developer was told a finding containing "Runtime missing (JDK): Install a JDK 17+ and Maven."
+    And the working tree file "features/kata.feature" contains "@REQ-001"
+
+  Scenario: No detectable build tool leaves the authoring in place and says so
+    Given a Java project marker
+    And a working spec with the pending requirements "REQ-001"
+    And the delivery skips the refactor
+    And no test runner is detectable because "no supported build tool found"
+    When the delivery runs for "REQ-001"
+    Then the delivery is not completed
+    And the delivery leaves "REQ-001" outstanding because "no supported build tool found"
+    And the working tree file "features/kata.feature" contains "@REQ-001"
+
+  Scenario: Scenarios and tests that are already in place are not written twice
+    Given a Java project marker
+    And a working spec with the pending requirements "REQ-001"
+    And the delivery skips the refactor
+    And the test runs will report:
+      """
+      1 tests and 0 failures
+      1 tests and 0 failures
+      """
+    When the delivery runs for "REQ-001"
+    Then the delivery completes
+    When the delivery runs for "REQ-001"
+    Then the delivery completes
+    And the developer was told a finding containing "REQ-001 is already implemented - nothing to do."
+
+  Scenario: On a green bar the refactor step runs and the loop still closes
+    Given a Java project marker
+    And a working spec with the pending requirements "REQ-001"
+    And a project source file "src/main/java/Kata.java" containing:
+      """
+      public class Kata {
+          int add(String input) { if (input.isEmpty()) { return 0; } return 0; }
+      }
+      """
+    And a model is resolved
+    And the model will reply:
+      """
+      [{"path": "src/main/java/Kata.java", "content": "public class Kata {\n    int add(String input) {\n        return 0;\n    }\n}\n"}]
+      """
+    And the test runs will report:
+      """
+      1 tests and 0 failures
+      1 tests and 0 failures
+      1 tests and 0 failures
+      1 tests and 0 failures
+      1 tests and 0 failures
+      """
+    When the delivery runs for "REQ-001"
+    Then the delivery completes
+    And the developer was not asked anything containing "Run the refactor step"
+    And the developer was told a finding containing "Refactored src/main/java/Kata.java."
+    And the working tree file "src/main/java/Kata.java" contains "int add(String input) {"
+    And the working tree file "requirements/requirements.json" contains "implemented"
+
+  Scenario: --no-refactor is how the refactor step is skipped
+    Given a Java project marker
+    And a working spec with the pending requirements "REQ-001"
+    And a model is resolved
+    And the model will reply:
+      """
+      [{"path": "src/main/java/Kata.java", "content": "public class Kata {}"}]
+      """
+    And the delivery skips the refactor
+    And the test runs will report:
+      """
+      1 tests and 0 failures
+      """
+    When the delivery runs for "REQ-001"
+    Then the delivery completes
+    And the developer was not asked anything containing "Run the refactor step"
+    And the working tree file "requirements/requirements.json" contains "implemented"
+
+  Scenario: Without a model there is no refactor step to run
+    Given a Java project marker
+    And a working spec with the pending requirements "REQ-001"
+    And the test runs will report:
+      """
+      1 tests and 0 failures
+      """
+    When the delivery runs for "REQ-001"
+    Then the delivery completes
+    And the developer was not asked anything containing "Run the refactor step"
+
+  Scenario: A refactor with nothing to refactor is skipped, not fatal
+    Given a Java project marker
+    And a working spec with the pending requirements "REQ-001"
+    And a model is resolved
+    And the model will reply:
+      """
+      [{"path": "src/main/java/Kata.java", "content": "public class Kata {}"}]
+      """
+    And the test runs will report:
+      """
+      1 tests and 0 failures
+      1 tests and 0 failures
+      1 tests and 0 failures
+      """
+    When the delivery runs for "REQ-001"
+    Then the delivery completes
+    And the developer was told a finding containing "Skipping the refactor."
+    And the working tree file "requirements/requirements.json" contains "implemented"
+
+  # The failure this guards against: deliver wrote the Gherkin to
+  # features/<slug>.feature while the catalog read the project's own
+  # features root, so a scenario could be written and then read back as
+  # missing. A drafted requirement carries no featureFile, which is the
+  # only case where deliver chooses the path itself.
+  Scenario: A drafted requirement's scenarios land in the project's own features root
+    Given a Java project marker
+    And an empty working spec
+    And a model is resolved
+    And the model will reply:
+      """
+      [{"title": "Empty string returns zero", "story": "As a calculator user, I want an empty string to return 0 so that no input is a safe default.", "acceptanceCriteria": ["Given an empty string \"\", when add is called, then the result is 0"]}]
+      """
+    And the delivery skips the refactor
+    And the test runs will report:
+      """
+      1 tests and 0 failures
+      """
+    When the delivery runs for "empty input means zero"
+    Then the delivery completes
+    And the delivery delivered "REQ-001"
+    And the working tree file "src/test/resources/features/empty-string-returns-zero.feature" contains "@REQ-001"
+    And the working tree file "requirements/requirements.json" contains "src/test/resources/features/empty-string-returns-zero.feature"
+    And the working tree file "features/empty-string-returns-zero.feature" does not exist
+    And the developer was not told a finding containing "can be read back"
+
+  Scenario: A requirement whose criteria are not Given/When/Then cannot be delivered
+    Given a Java project marker
+    And a working spec with the pending requirement "REQ-001" whose criteria are unshaped
+    And the delivery skips the refactor
+    When the delivery runs for "REQ-001"
+    Then the delivery is not completed
+    And the delivery leaves "REQ-001" outstanding because "is Given/When/Then shaped"
+    And the developer was told a finding containing "Skipping criterion"
+    And the spec file is unchanged
+
+  # After a revert the bar is read again, and the re-read loses the
+  # compiler error. The next attempt still has to be a different
+  # question from the one before it: the response cache answers an
+  # identical prompt from disk, and a run was measured replaying its
+  # second attempt as its third - same bodies, same compiler error - with
+  # no model call at all. So the error's headlines ride into the next
+  # brief, with the attempt number, and a step fill the model never got
+  # right says why in the transcript rather than only in the cache.
+  Scenario: The attempt after a reverted one is told what broke
+    Given a Java project marker
+    And a project source file "src/main/java/Kata.java" containing:
+      """
+      public class Kata { int add(String input) { return 0; } }
+      """
+    And a working spec with the pending requirements "REQ-001"
+    And a model is resolved
+    And the model will reply:
+      """
+      [{"path": "src/main/java/Kata.java", "content": "public class Kata { int add(String i) { return 1; } }"}]
+      """
+    And the model will also fill in the generated unit test
+    And the delivery skips the refactor
+    And the delivery budget is 2 attempts
+    And the test runs will report:
+      """
+      1 tests and 1 failures detailed "Req001Test: TODO: assert"
+      the build failed with "Kata.java:1: error: ')' expected"
+      1 tests and 1 failures detailed "Req001Test: TODO: assert"
+      1 tests and 0 failures
+      """
+    When the delivery runs for "REQ-001"
+    Then the delivery completes
+    And the model was asked a prompt containing "Attempt 1 did not compile and was reverted"
+    And the model was asked a prompt containing "Kata.java:1: error: ')' expected"
+    And the model was asked a prompt containing "This is attempt 2"
+    And the model was not asked a prompt containing "This is attempt 1"
+    And the developer was told a finding containing "The reply for the whole batch of pending steps was refused"
+    And the developer was told a finding containing "stays pending: the last reply was refused"

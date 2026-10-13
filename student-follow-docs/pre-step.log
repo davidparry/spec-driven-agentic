@@ -1,0 +1,217 @@
+
+@REQ-001
+Scenario: An empty string returns zero # features/string_calculator.feature:14
+  Given a string calculator            # com.davidparry.workshop.kata.StringCalculatorSteps.aStringCalculator()
+  When I add ""                        # com.davidparry.workshop.kata.StringCalculatorSteps.iAdd(java.lang.String)
+  Then the result is 0                 # com.davidparry.workshop.kata.StringCalculatorSteps.theResultIs(int)
+
+@REQ-002
+Scenario: A single number returns its value # features/string_calculator.feature:20
+  Given a string calculator                 # com.davidparry.workshop.kata.StringCalculatorSteps.aStringCalculator()
+  When I add "7"                            # com.davidparry.workshop.kata.StringCalculatorSteps.iAdd(java.lang.String)
+  Then the result is 7                      # com.davidparry.workshop.kata.StringCalculatorSteps.theResultIs(int)
+
+@REQ-002
+Scenario: Another single number returns its value # features/string_calculator.feature:26
+  Given a string calculator                       # com.davidparry.workshop.kata.StringCalculatorSteps.aStringCalculator()
+  When I add "42"                                 # com.davidparry.workshop.kata.StringCalculatorSteps.iAdd(java.lang.String)
+  Then the result is 42                           # com.davidparry.workshop.kata.StringCalculatorSteps.theResultIs(int)
+[Fatal Error] TEST-com.example.FooTest.xml:1:21: XML document structures must start and end within the same entity.
+
+@SRV-001
+Scenario: Listing requirements returns every requirement and its status                          # features/tdd_workflow_server.feature:11
+  Given a workflow server backed by a spec with an implemented "REQ-001" and a pending "REQ-002" # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.aWorkflowServer(java.lang.String,java.lang.String)
+  When the agent calls list_requirements                                                         # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.callsListRequirements()
+  Then the call succeeds                                                                         # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.callSucceeds()
+  And the result mentions "REQ-001" with status "implemented"                                    # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.resultMentionsWithStatus(java.lang.String,java.lang.String)
+  And the result mentions "REQ-002" with status "pending"                                        # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.resultMentionsWithStatus(java.lang.String,java.lang.String)
+  And the result names the project                                                               # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.resultNamesProject()
+
+@SRV-002
+Scenario: Fetching a requirement returns its criteria and a tagged workflow hint                 # features/tdd_workflow_server.feature:19
+  Given a workflow server backed by a spec with an implemented "REQ-001" and a pending "REQ-002" # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.aWorkflowServer(java.lang.String,java.lang.String)
+  When the agent calls get_requirement for "REQ-002"                                             # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.callsGetRequirement(java.lang.String)
+  Then the call succeeds                                                                         # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.callSucceeds()
+  And the result contains the acceptance criteria                                                # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.resultContainsAcceptanceCriteria()
+  And the result contains a workflow hint naming the tag "@REQ-002"                              # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.resultContainsWorkflowHint(java.lang.String)
+
+@SRV-002
+Scenario: Fetching an unknown requirement is a tool error, not a crash                           # features/tdd_workflow_server.feature:26
+  Given a workflow server backed by a spec with an implemented "REQ-001" and a pending "REQ-002" # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.aWorkflowServer(java.lang.String,java.lang.String)
+  When the agent calls get_requirement for "REQ-999"                                             # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.callsGetRequirement(java.lang.String)
+  Then the call fails as a tool error                                                            # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.callFailsAsToolError()
+  And the error points the agent at "list_requirements"                                          # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.errorPointsAt(java.lang.String)
+
+@SRV-003
+Scenario: A passing suite turns the bar GREEN                                                    # features/tdd_workflow_server.feature:32
+  Given a workflow server backed by a spec with an implemented "REQ-001" and a pending "REQ-002" # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.aWorkflowServer(java.lang.String,java.lang.String)
+  Given the kata suite passes with 5 tests                                                       # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.kataSuitePasses(int)
+  When the agent calls run_tests                                                                 # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.callsRunTests()
+  Then the call succeeds                                                                         # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.callSucceeds()
+  And the reported phase is "GREEN"                                                              # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.reportedPhaseIs(java.lang.String)
+
+@SRV-003
+Scenario: A failing suite turns the bar RED and carries the failure details                      # features/tdd_workflow_server.feature:39
+  Given a workflow server backed by a spec with an implemented "REQ-001" and a pending "REQ-002" # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.aWorkflowServer(java.lang.String,java.lang.String)
+  Given the kata suite fails with "expected 3 but was 1"                                         # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.kataSuiteFails(java.lang.String)
+  When the agent calls run_tests                                                                 # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.callsRunTests()
+  Then the call succeeds                                                                         # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.callSucceeds()
+  And the reported phase is "RED"                                                                # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.reportedPhaseIs(java.lang.String)
+  And the result contains "expected 3 but was 1"                                                 # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.resultContains(java.lang.String)
+
+@SRV-003
+Scenario: A build failure before any test ran is reported on the bar                             # features/tdd_workflow_server.feature:47
+  Given a workflow server backed by a spec with an implemented "REQ-001" and a pending "REQ-002" # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.aWorkflowServer(java.lang.String,java.lang.String)
+  Given the kata build fails before tests can run                                                # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.kataBuildFails()
+  When the agent calls run_tests                                                                 # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.callsRunTests()
+  Then the call succeeds                                                                         # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.callSucceeds()
+  And the reported phase is "RED"                                                                # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.reportedPhaseIs(java.lang.String)
+  And the result contains "Build failed before tests could run"                                  # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.resultContains(java.lang.String)
+
+@SRV-004
+Scenario: The TDD state reports the phase, the last run, and a next step                         # features/tdd_workflow_server.feature:55
+  Given a workflow server backed by a spec with an implemented "REQ-001" and a pending "REQ-002" # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.aWorkflowServer(java.lang.String,java.lang.String)
+  Given the kata suite passes with 5 tests                                                       # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.kataSuitePasses(int)
+  And the agent calls run_tests                                                                  # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.callsRunTests()
+  When the agent calls get_tdd_state                                                             # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.callsGetTddState()
+  Then the call succeeds                                                                         # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.callSucceeds()
+  And the reported phase is "GREEN"                                                              # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.reportedPhaseIs(java.lang.String)
+  And the result contains a suggested next step                                                  # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.resultContainsNextStep()
+
+@SRV-005
+Scenario: Refactoring is allowed on a green bar and the note is logged                           # features/tdd_workflow_server.feature:64
+  Given a workflow server backed by a spec with an implemented "REQ-001" and a pending "REQ-002" # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.aWorkflowServer(java.lang.String,java.lang.String)
+  Given the kata suite passes with 5 tests                                                       # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.kataSuitePasses(int)
+  And the agent calls run_tests                                                                  # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.callsRunTests()
+  When the agent calls start_refactor with note "extract the parser"                             # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.callsStartRefactor(java.lang.String)
+  Then the call succeeds                                                                         # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.callSucceeds()
+  And the reported phase is "REFACTOR"                                                           # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.reportedPhaseIs(java.lang.String)
+  And the refactor log records "extract the parser"                                              # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.refactorLogRecords(java.lang.String)
+
+@SRV-005
+Scenario: Refactoring on a red bar is refused by the tool                                        # features/tdd_workflow_server.feature:73
+  Given a workflow server backed by a spec with an implemented "REQ-001" and a pending "REQ-002" # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.aWorkflowServer(java.lang.String,java.lang.String)
+  Given the kata suite fails with "boom"                                                         # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.kataSuiteFails(java.lang.String)
+  And the agent calls run_tests                                                                  # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.callsRunTests()
+  When the agent calls start_refactor with note "cleanup"                                        # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.callsStartRefactor(java.lang.String)
+  Then the call fails as a tool error                                                            # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.callFailsAsToolError()
+  And the error names the "red bar" rule                                                         # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.errorNamesRule(java.lang.String)
+
+@SRV-006
+Scenario: The assembled server identifies itself and exposes the seven tools                                                                         # features/tdd_workflow_server.feature:81
+  Given a workflow server backed by a spec with an implemented "REQ-001" and a pending "REQ-002"                                                     # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.aWorkflowServer(java.lang.String,java.lang.String)
+  When the server is assembled                                                                                                                       # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.serverIsAssembled()
+  Then it identifies as "spec-driven-server" version "1.0.0"                                                                                        # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.identifiesAs(java.lang.String,java.lang.String)
+  And it exposes exactly the tools "list_requirements, get_requirement, validate_spec, refine_requirement, run_tests, get_tdd_state, start_refactor" # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.exposesExactlyTheTools(java.lang.String)
+
+@SRV-007
+Scenario: A valid spec passes validation and points at the next step                             # features/tdd_workflow_server.feature:87
+  Given a workflow server backed by a spec with an implemented "REQ-001" and a pending "REQ-002" # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.aWorkflowServer(java.lang.String,java.lang.String)
+  Given the spec on disk is rewritten to be valid                                                # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.specRewrittenValid()
+  When the agent calls validate_spec                                                             # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.callsValidateSpec()
+  Then the call succeeds                                                                         # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.callSucceeds()
+  And the spec is reported valid                                                                 # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.specReportedValid()
+  And the result contains "write its Gherkin scenario"                                           # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.resultContains(java.lang.String)
+
+@SRV-007
+Scenario: An invalid spec returns actionable issues to iterate on                                # features/tdd_workflow_server.feature:95
+  Given a workflow server backed by a spec with an implemented "REQ-001" and a pending "REQ-002" # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.aWorkflowServer(java.lang.String,java.lang.String)
+  Given the spec on disk is rewritten with a requirement missing its acceptance criteria         # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.specRewrittenInvalid()
+  When the agent calls validate_spec                                                             # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.callsValidateSpec()
+  Then the call succeeds                                                                         # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.callSucceeds()
+  And the spec is reported invalid                                                               # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.specReportedInvalid()
+  And the result contains "at least one acceptance criterion is required"                        # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.resultContains(java.lang.String)
+  And the result contains "call validate_spec again"                                             # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.resultContains(java.lang.String)
+
+@SRV-008
+Scenario: A well-worded requirement gets a clean bill and hands off to the scenario              # features/tdd_workflow_server.feature:104
+  Given a workflow server backed by a spec with an implemented "REQ-001" and a pending "REQ-002" # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.aWorkflowServer(java.lang.String,java.lang.String)
+  Given the spec on disk is rewritten with polished wording on "REQ-001"                         # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.specRewrittenPolished(java.lang.String)
+  When the agent calls refine_requirement for "REQ-001"                                          # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.callsRefineRequirement(java.lang.String)
+  Then the call succeeds                                                                         # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.callSucceeds()
+  And the wording is reported clean                                                              # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.wordingReportedClean()
+  And the result contains "Confirm it with the developer"                                        # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.resultContains(java.lang.String)
+
+@SRV-008
+Scenario: Vague wording comes back as findings for the agent to reword                           # features/tdd_workflow_server.feature:112
+  Given a workflow server backed by a spec with an implemented "REQ-001" and a pending "REQ-002" # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.aWorkflowServer(java.lang.String,java.lang.String)
+  Given the spec on disk is rewritten with vague wording on "REQ-001"                            # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.specRewrittenVague(java.lang.String)
+  When the agent calls refine_requirement for "REQ-001"                                          # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.callsRefineRequirement(java.lang.String)
+  Then the call succeeds                                                                         # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.callSucceeds()
+  And the wording is reported unclean                                                            # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.wordingReportedUnclean()
+  And the result contains "is ambiguous"                                                         # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.resultContains(java.lang.String)
+  And the result contains "call refine_requirement again"                                        # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.resultContains(java.lang.String)
+
+@SRV-008
+Scenario: Refining an unknown requirement is a tool error, not a crash                           # features/tdd_workflow_server.feature:121
+  Given a workflow server backed by a spec with an implemented "REQ-001" and a pending "REQ-002" # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.aWorkflowServer(java.lang.String,java.lang.String)
+  When the agent calls refine_requirement for "REQ-404"                                          # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.callsRefineRequirement(java.lang.String)
+  Then the call fails as a tool error                                                            # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.callFailsAsToolError()
+  And the error points the agent at "list_requirements"                                          # com.davidparry.workshop.mcp.server.tdd.TddWorkflowServerSteps.errorPointsAt(java.lang.String)
+
+@CLI-001
+Scenario: The handshake narration names the server and quotes its instructions          # features/tdd_workshop_agent.feature:12
+  Given a workflow server that identifies as "spec-driven-server" version "1.0.0"      # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.serverIdentifiesAs(java.lang.String,java.lang.String)
+  Given the server provides the instructions "Drives a spec-driven TDD/BDD workflow."   # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.serverProvidesInstructions(java.lang.String)
+  When the walkthrough runs                                                             # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.walkthroughRuns()
+  Then the narration contains "Server identified itself as: spec-driven-server v1.0.0" # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.narrationContains(java.lang.String)
+  And the narration contains "    Drives a spec-driven TDD/BDD workflow."               # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.narrationContains(java.lang.String)
+
+@CLI-001
+Scenario: A server without instructions gets no instructions block                 # features/tdd_workshop_agent.feature:19
+  Given a workflow server that identifies as "spec-driven-server" version "1.0.0" # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.serverIdentifiesAs(java.lang.String,java.lang.String)
+  When the walkthrough runs                                                        # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.walkthroughRuns()
+  Then the narration does not contain "Server instructions for the agent"          # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.narrationDoesNotContain(java.lang.String)
+
+@CLI-002
+Scenario: Discovery narrates each tool with the first sentence of its description                            # features/tdd_workshop_agent.feature:24
+  Given a workflow server that identifies as "spec-driven-server" version "1.0.0"                           # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.serverIdentifiesAs(java.lang.String,java.lang.String)
+  Given the server exposes a tool "run_tests" described as "Run the kata test suite. Updates the bar color." # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.serverExposesTool(java.lang.String,java.lang.String)
+  And the server exposes a tool "get_tdd_state" described as "Get the current phase"                         # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.serverExposesTool(java.lang.String,java.lang.String)
+  When the walkthrough runs                                                                                  # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.walkthroughRuns()
+  Then the narration contains "- run_tests: Run the kata test suite."                                        # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.narrationContains(java.lang.String)
+  And the narration contains "- get_tdd_state: Get the current phase"                                        # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.narrationContains(java.lang.String)
+
+@CLI-003
+Scenario: The baseline test run announces the bar color                            # features/tdd_workshop_agent.feature:32
+  Given a workflow server that identifies as "spec-driven-server" version "1.0.0" # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.serverIdentifiesAs(java.lang.String,java.lang.String)
+  Given the tool "run_tests" answers with phase "GREEN"                            # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.toolAnswersWithPhase(java.lang.String,java.lang.String)
+  When the walkthrough runs                                                        # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.walkthroughRuns()
+  Then the narration contains ">>> The bar is GREEN."                              # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.narrationContains(java.lang.String)
+
+@CLI-004
+Scenario: A pending requirement is fetched and named in the handoff                   # features/tdd_workshop_agent.feature:38
+  Given a workflow server that identifies as "spec-driven-server" version "1.0.0"    # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.serverIdentifiesAs(java.lang.String,java.lang.String)
+  Given the backlog lists "REQ-001" as "implemented" and "REQ-003" as "pending"       # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.backlogLists(java.lang.String,java.lang.String,java.lang.String,java.lang.String)
+  When the walkthrough runs                                                           # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.walkthroughRuns()
+  Then the narration contains "STEP 6 — tools/call get_requirement (REQ-003)"         # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.narrationContains(java.lang.String)
+  And the narration contains "write a Gherkin scenario for REQ-003 (tagged @REQ-003)" # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.narrationContains(java.lang.String)
+
+@CLI-004
+Scenario: No pending work skips the detail step and uses a placeholder                             # features/tdd_workshop_agent.feature:45
+  Given a workflow server that identifies as "spec-driven-server" version "1.0.0"                 # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.serverIdentifiesAs(java.lang.String,java.lang.String)
+  Given the backlog lists "REQ-001" as "implemented" and "REQ-002" as "implemented"                # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.backlogLists(java.lang.String,java.lang.String,java.lang.String,java.lang.String)
+  When the walkthrough runs                                                                        # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.walkthroughRuns()
+  Then the narration does not contain "STEP 6"                                                     # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.narrationDoesNotContain(java.lang.String)
+  And the narration contains "write a Gherkin scenario for the next requirement (tagged @REQ-XXX)" # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.narrationContains(java.lang.String)
+
+@CLI-005
+Scenario: An error result is flagged in the narration                              # features/tdd_workshop_agent.feature:52
+  Given a workflow server that identifies as "spec-driven-server" version "1.0.0" # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.serverIdentifiesAs(java.lang.String,java.lang.String)
+  Given the tool "get_tdd_state" answers with an error "TDD state unavailable"     # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.toolAnswersWithError(java.lang.String,java.lang.String)
+  When the walkthrough runs                                                        # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.walkthroughRuns()
+  Then the narration contains "Result (isError=true):"                             # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.narrationContains(java.lang.String)
+  And the narration contains "    TDD state unavailable"                           # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.narrationContains(java.lang.String)
+
+@CLI-006
+Scenario: The connection is closed after a completed walkthrough                   # features/tdd_workshop_agent.feature:59
+  Given a workflow server that identifies as "spec-driven-server" version "1.0.0" # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.serverIdentifiesAs(java.lang.String,java.lang.String)
+  When the walkthrough runs                                                        # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.walkthroughRuns()
+  Then the server connection has been closed                                       # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.connectionClosed()
+
+@CLI-006
+Scenario: The connection is closed even when a tool call blows up                  # features/tdd_workshop_agent.feature:64
+  Given a workflow server that identifies as "spec-driven-server" version "1.0.0" # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.serverIdentifiesAs(java.lang.String,java.lang.String)
+  Given the tool "run_tests" fails catastrophically                                # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.toolFailsCatastrophically(java.lang.String)
+  When the walkthrough runs and fails                                              # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.walkthroughRunsAndFails()
+  Then the server connection has been closed                                       # com.davidparry.workshop.smoke.TddWorkshopAgentSteps.connectionClosed()

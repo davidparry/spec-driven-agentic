@@ -1,0 +1,3507 @@
+//! Implementation attempts: the readiness preflight, the model-driven
+//! attempt that stages file updates, and the advice call when the
+//! preflight found problems. There is no template fallback: without a
+//! model, implementing stays in the developer's hands.
+
+use serde::Serialize;
+
+use crate::application::LlmReplyError;
+use crate::application::assets::{
+    asset_survey, find_requirement, load_spec, production_candidates, production_path,
+    scenario_evidence, unattended_production_file, unit_test_path,
+};
+use crate::application::decision_service::{Brief, TaskJudge, gated};
+use crate::application::generation_service::{ResolvedLlm, retry_note};
+use crate::application::incremental::Exam;
+use crate::application::incremental::placeholder_exam;
+use crate::application::spec_service::ServiceError;
+use crate::domain::connection::{
+    Candidates, ConnectionInput, connection_prompt, parse_connection_checked,
+};
+use crate::domain::coverage::covers_all;
+use crate::domain::decision::{
+    IMPLEMENTATION_COMPLETE, Judgment, Policies, UNIT_TEST_ASSERTS, changed_code,
+    implementation_state, test_asserts_state,
+};
+use crate::domain::generation::{
+    FileUpdate, ImplementAsset, advice_prompt, implementation_prompt, is_pending_step_body,
+    parse_file_updates_checked, strip_code_fences, unasserted_criteria,
+};
+use crate::domain::language::Language;
+use crate::domain::layout::allowed_targets;
+use crate::domain::memory::ProjectStructure;
+use crate::domain::model::{Requirement, Spec};
+use crate::domain::module_declaration::{
+    declare_rust_module, declared_modules, library_paths_from_test_crate, top_level_module,
+};
+use crate::domain::neighborhood::declared_symbols;
+use crate::domain::reply_guard::{Damage, damage};
+use crate::domain::step_fill;
+use crate::domain::steps::{extract_patterns, source_extension};
+use crate::domain::tdd::{ImplementAttempt, StateEntry};
+use crate::ports::{
+    FeatureCatalog, LlmConversation, Prompter, SourceFiles, SpecRepository, ToolBroker, WorkTree,
+};
+
+/// Reply of the step-filling pass: which step file had its pending
+/// bodies written, and how many.
+#[derive(Debug, Serialize, PartialEq)]
+pub struct StepFillReport {
+    pub target: String,
+    pub filled: usize,
+    /// Fields the reply added to the world type so the bodies compile.
+    pub fields_added: usize,
+    pub source: String,
+}
+
+/// Reply of an implementation attempt: the files the model updated.
+#[derive(Debug, Serialize, PartialEq)]
+pub struct ImplementationReport {
+    pub targets: Vec<String>,
+    /// Which of `targets` were production files rather than tests or
+    /// step definitions. A delivery records these on the requirement so
+    /// the next attempt writes where this one did.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub production: Vec<String>,
+    pub written: bool,
+    pub source: String,
+    /// Set when the reply left the production code untouched - the
+    /// attempt is incomplete and the caller narrates it loudly.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warning: Option<String>,
+    /// Every judgment this attempt earned, in the order they were made.
+    /// Empty when no decision model was attached, which is the shipped
+    /// state. The accepted reply is the one that satisfied them; the
+    /// ones that did not are the complaints it was re-asked with.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub judgments: Vec<Judgment>,
+    #[serde(rename = "nextStep")]
+    pub next_step: String,
+}
+
+/// What [`ImplementService::target`] found: the file the evidence
+/// names, or the admission that nothing does, carrying the conventional
+/// path so a caller that must still choose has something to choose.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ImplementTarget {
+    Resolved(String),
+    Unresolved { conventional: String },
+}
+
+/// Where a requirement's work belongs, once the question has been
+/// settled one way or another.
+///
+/// [`ImplementTarget`] reports what the code can work out on its own.
+/// This is what [`ImplementService::connect`] settled on, including the
+/// case the code cannot work out: nothing named a file, so the model
+/// was asked to choose between the ones an attempt may write.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Connection {
+    /// The requirement records the file, or the code its scenarios run
+    /// through names it. Nothing was asked.
+    Known(String),
+    /// Nothing named one, so the model chose from the candidates.
+    Chosen(String),
+    /// Nothing named one and the model could not say - there is none
+    /// configured, or its reply named nothing on the list - so
+    /// convention stands.
+    Convention(String),
+}
+
+impl Connection {
+    /// The file the work goes in, however it was settled.
+    pub fn path(&self) -> &str {
+        match self {
+            Self::Known(path) | Self::Chosen(path) | Self::Convention(path) => path,
+        }
+    }
+
+    /// The path to hand an attempt as its explicit target, or `None`
+    /// when the attempt will resolve the same file on its own.
+    ///
+    /// A known file needs no forcing: the attempt reads the same record
+    /// and the same evidence. A chosen or conventional one does, or the
+    /// attempt would ask again and could be told something else.
+    pub fn forced(&self) -> Option<&str> {
+        match self {
+            Self::Known(_) => None,
+            Self::Chosen(path) | Self::Convention(path) => Some(path),
+        }
+    }
+}
+
+/// Why the question had to be asked at all. Shared by both answers so
+/// a reader sees the same reason whichever way it was settled.
+fn nothing_names_a_file(req_id: &str) -> String {
+    format!("No step definition {req_id}'s scenarios run through names a production file")
+}
+
+/// What the model chose. A choice nobody can see is a file the next
+/// reader cannot account for.
+fn connection_chosen(req_id: &str, model: &str, path: &str) -> String {
+    format!(
+        "{}, so {model} was asked where the work belongs: {path}.",
+        nothing_names_a_file(req_id)
+    )
+}
+
+/// Why convention stood after all, and how to say otherwise.
+fn connection_by_convention(req_id: &str, why: &str, path: &str) -> String {
+    format!(
+        "{} {why}, so {path} stands by convention - spec set-production {req_id} \
+         --file <path> to put it elsewhere.",
+        nothing_names_a_file(req_id)
+    )
+}
+
+/// The implement preflight: whether every prerequisite of an
+/// implementation attempt is in place, the asset survey, and the
+/// findings naming the step to take instead when one is not.
+#[derive(Debug, Serialize, PartialEq, Eq)]
+pub struct ReadinessReport {
+    pub ready: bool,
+    pub assets: Vec<ImplementAsset>,
+    pub findings: Vec<String>,
+    #[serde(rename = "nextStep")]
+    pub next_step: String,
+}
+
+pub struct ImplementService<F, S, C, R, L, B = crate::application::agent_service::NullBroker>
+where
+    F: FeatureCatalog,
+    S: SourceFiles,
+    C: WorkTree,
+    R: SpecRepository,
+    L: LlmConversation,
+    B: ToolBroker,
+{
+    features: F,
+    sources: S,
+    store: C,
+    spec: R,
+    language: Language,
+    layout: ProjectStructure,
+    llm: Option<ResolvedLlm<L, B>>,
+    /// Asked about an attempt before it is accepted, when the caller has
+    /// a decision model. `None` means ask nothing - the composition root
+    /// decides that, so no service ever consults a mode.
+    judge: Option<Box<dyn TaskJudge>>,
+    /// How strictly each gate's answers are read. Inert without a judge.
+    policies: Policies,
+    /// Judgments from attempts that were refused and never became a
+    /// report, kept so a caller can still read what the plane said
+    /// about them. A report carries its own.
+    judgments: std::cell::RefCell<Vec<Judgment>>,
+    /// The transport failure from an attempt the model never answered -
+    /// a timeout on a prompt this size, usually. Nothing was staged and
+    /// nothing was refused, so asking the same prompt again only spends
+    /// another timeout. Kept so a caller can stop its loop instead of
+    /// burning the remaining attempts proving that.
+    unanswered: std::cell::RefCell<Option<String>>,
+}
+
+/// One definition from a fill reply, when it keeps `pattern` and the
+/// placeholder is gone. A reply that also carries the neighbours is
+/// fine: only the definition for this pattern is taken.
+/// Every definition a batched fill reply filled in, by pattern. A
+/// definition the reply dropped, or handed back still pending, is
+/// simply absent and the caller asks for it on its own; a partial
+/// reply is accepted for what it has. A reply with none of them is
+/// refused, because the retry that follows re-sends the conversation
+/// with the refusal appended and the model's server has the prompt's
+/// prefix cached - measured at 27s against the 110s of a fresh
+/// question - while the per-step pass pays a fresh prompt per step.
+/// Observed from a model told not to think: "Let me look at the world
+/// type and any relevant status report fields." and nothing else.
+/// What a fill reply gave: the bodies by pattern, and the fields it
+/// asked the world type for.
+#[derive(Debug, Default)]
+struct FilledSteps {
+    bodies: std::collections::HashMap<String, String>,
+    fields: Vec<String>,
+}
+
+/// The reply's definitions and world fields, the world block taken
+/// out. A file with no world type to extend - the JS family, a Rust
+/// file the regex cannot read - keeps the whole reply as definitions.
+fn definitions_and_fields(
+    language: Language,
+    reply: &str,
+    world: Option<&step_fill::WorldSpan>,
+) -> Result<(String, Vec<String>), String> {
+    let code = strip_code_fences(reply);
+    match world {
+        Some(world) => {
+            let split = step_fill::split_world_fragment(language, &code, world)?;
+            Ok((split.definitions, split.fields))
+        }
+        None => Ok((code, Vec::new())),
+    }
+}
+
+/// What a fill reply is read against: the world type it may extend and
+/// the functions the file already has, which are the only ones a body
+/// may call on the world.
+#[derive(Debug, Clone, Default)]
+struct StepFileShape {
+    world: Option<step_fill::WorldSpan>,
+    methods: Vec<String>,
+}
+
+impl StepFileShape {
+    fn of(language: Language, content: &str) -> Self {
+        Self {
+            world: step_fill::world_span(language, content),
+            methods: step_fill::declared_methods(language, content),
+        }
+    }
+}
+
+fn accept_filled_definitions(
+    language: Language,
+    reply: &str,
+    patterns: &[String],
+    shape: &StepFileShape,
+) -> Result<FilledSteps, String> {
+    let world = shape.world.as_ref();
+    let (code, fields) = definitions_and_fields(language, reply, world)?;
+    let bodies: std::collections::HashMap<String, String> =
+        step_fill::definition_spans(language, &code)
+            .into_iter()
+            .filter(|span| patterns.contains(&span.pattern))
+            .filter(|span| !is_pending_step_body(language, span.text(&code)))
+            .map(|span| (span.pattern.clone(), span.text(&code).to_string()))
+            .collect();
+    if bodies.is_empty() {
+        return Err(format!(
+            "the reply held none of the {} definition(s) asked for with its placeholder \
+             replaced; reply with the definitions themselves, bodies written, and no prose",
+            patterns.len()
+        ));
+    }
+    if let Some(world) = world {
+        world_access_check(language, &code, world, &fields, &shape.methods)?;
+    }
+    Ok(FilledSteps { bodies, fields })
+}
+
+/// Whether every world member the bodies reach will resolve once they
+/// are spliced in: fields the world has or the reply adds, methods the
+/// file already declares. The methods first - a body that calls a
+/// helper the reply brought along has no fix in adding fields.
+fn world_access_check(
+    language: Language,
+    code: &str,
+    world: &step_fill::WorldSpan,
+    fields: &[String],
+    methods: &[String],
+) -> Result<(), String> {
+    let called = step_fill::undeclared_world_methods(language, code, world, methods);
+    if !called.is_empty() {
+        return Err(undeclared_methods_reason(&called, world));
+    }
+    let missing = step_fill::undeclared_world_fields(language, code, world, fields);
+    if !missing.is_empty() {
+        return Err(undeclared_fields_reason(&missing, world));
+    }
+    Ok(())
+}
+
+/// Said when the one-question-for-all reply was refused for the last
+/// time, with the last reason, before the steps are asked for one by
+/// one. Measured: a delivery stalled on refused fills for three
+/// attempts and the transcript never said why.
+fn batch_refused_notice(reason: &str) -> String {
+    format!(
+        "The reply for the whole batch of pending steps was refused ({reason}); asking \
+         for each step on its own."
+    )
+}
+
+/// Said when a step's own asks are all refused and its stub stays.
+fn step_refused_notice(pattern: &str, reason: &str) -> String {
+    format!("The step {pattern:?} stays pending: the last reply was refused ({reason}).")
+}
+
+/// Why a reply whose bodies call methods nobody declared is sent back:
+/// a reply cannot add methods, so the body has to read the state
+/// directly.
+fn undeclared_methods_reason(called: &[String], world: &step_fill::WorldSpan) -> String {
+    format!(
+        "the bodies call methods the {} type does not have: {}. A reply cannot add \
+         methods or impl blocks - only fields - so read the fields directly (for example \
+         `world.{}.as_ref().expect(...)`) and reply again with the same definitions",
+        world.name,
+        called
+            .iter()
+            .map(|name| format!("{name}()"))
+            .collect::<Vec<_>>()
+            .join(", "),
+        called[0]
+    )
+}
+
+/// Whether `path` is a Rust file cargo compiles as its own crate: one
+/// directly under `tests/`.
+fn is_test_crate_file(path: &str) -> bool {
+    let normalized = path.trim_start_matches("./");
+    normalized.ends_with(".rs")
+        && (normalized.starts_with("tests/") || normalized.contains("/tests/"))
+}
+
+/// Why a reply whose bodies use world fields nobody declared is sent
+/// back: it names the fields, and where to put them.
+fn undeclared_fields_reason(missing: &[String], world: &step_fill::WorldSpan) -> String {
+    format!(
+        "the bodies use fields the world type does not have: {}. Reply again with a \
+         `struct {} {{ ... }}` block first, holding ONLY those new fields (Default-able \
+         types, values wrapped in Option), then the same definitions",
+        missing.join(", "),
+        world.name
+    )
+}
+
+fn accept_filled_definition(
+    language: Language,
+    reply: &str,
+    pattern: &str,
+    shape: &StepFileShape,
+) -> Result<(String, Vec<String>), String> {
+    let world = shape.world.as_ref();
+    let (code, fields) = definitions_and_fields(language, reply, world)?;
+    let Some(found) = step_fill::definition_spans(language, &code)
+        .into_iter()
+        .find(|span| span.pattern == pattern)
+    else {
+        return Err(format!("the reply did not keep the expression {pattern:?}"));
+    };
+    let body = found.text(&code).to_string();
+    if let Some(world) = world {
+        world_access_check(language, &body, world, &fields, &shape.methods)?;
+    }
+    match placeholder_exam(pattern, is_pending_step_body(language, &body)) {
+        Exam::Accept => Ok((body, fields)),
+        Exam::Retry(reason) => Err(reason),
+        Exam::Ask(_) => Ok((body, fields)),
+    }
+}
+
+impl<F, S, C, R, L, B> ImplementService<F, S, C, R, L, B>
+where
+    F: FeatureCatalog,
+    S: SourceFiles,
+    C: WorkTree,
+    R: SpecRepository,
+    L: LlmConversation,
+    B: ToolBroker,
+{
+    pub fn new(
+        features: F,
+        sources: S,
+        store: C,
+        spec: R,
+        language: Language,
+        layout: ProjectStructure,
+        llm: Option<ResolvedLlm<L, B>>,
+    ) -> Self {
+        Self {
+            features,
+            sources,
+            store,
+            spec,
+            language,
+            layout,
+            llm,
+            judge: None,
+            policies: Policies::default(),
+            judgments: std::cell::RefCell::new(Vec::new()),
+            unanswered: std::cell::RefCell::new(None),
+        }
+    }
+
+    /// The judgments of attempts that were refused outright, handed over
+    /// and cleared. An accepted attempt reports its own judgments
+    /// instead, so the two never double up.
+    pub fn take_judgments(&self) -> Vec<Judgment> {
+        std::mem::take(&mut *self.judgments.borrow_mut())
+    }
+
+    /// The transport failure of an attempt the model never answered,
+    /// handed over and cleared. `None` when the last attempt either
+    /// produced a reply or never ran.
+    pub fn take_unanswered(&self) -> Option<String> {
+        self.unanswered.borrow_mut().take()
+    }
+
+    /// The decision model this service puts its gates' questions to, and
+    /// the policies their answers are read against.
+    ///
+    /// Attached by the caller rather than read from config, because
+    /// whether to ask at all is the policy's call and
+    /// [`crate::application::decision_service::DecisionService::when_asking`]
+    /// has already made it by the time there is anything to pass here.
+    pub fn with_judge(mut self, judge: Box<dyn TaskJudge>, policies: Policies) -> Self {
+        self.judge = Some(judge);
+        self.policies = policies;
+        self
+    }
+
+    /// Whether a decision model gates this service's attempts. The
+    /// composition root decides that; this only reports it.
+    pub fn judges(&self) -> bool {
+        self.judge.is_some()
+    }
+
+    /// Whether a model is resolved; callers narrate model calls only
+    /// when one will actually happen.
+    pub fn has_model(&self) -> bool {
+        self.llm.is_some()
+    }
+
+    /// Which production file an attempt would write to, asked before
+    /// attempting.
+    ///
+    /// [`production_path`] answers "which file does the evidence point
+    /// at?" and refuses to guess when nothing does. That refusal is
+    /// right for `spec implement`, where a developer can answer
+    /// `--into`. It leaves an unattended caller with a question and
+    /// nobody to ask, so the refusal is reported alongside the
+    /// conventional path - what to do about it is the caller's policy,
+    /// not this service's.
+    pub fn target(&self, req_id: &str) -> Result<ImplementTarget, ServiceError> {
+        let spec = load_spec(&self.spec)?;
+        let requirement = find_requirement(&spec, req_id)?;
+        let declared = requirement.production_files.as_slice();
+        let sources = self.sources.sources(source_extension(self.language))?;
+        let evidence = scenario_evidence(
+            &self.features,
+            &sources,
+            self.language,
+            &format!("@{req_id}"),
+        )?;
+        let resolved = production_path(
+            &sources,
+            self.language,
+            &spec.project,
+            &self.layout,
+            &evidence,
+            None,
+            declared,
+        );
+        Ok(match resolved {
+            Some(path) => ImplementTarget::Resolved(path),
+            None => ImplementTarget::Unresolved {
+                conventional: unattended_production_file(
+                    &self.layout,
+                    self.language,
+                    &spec.project,
+                    &requirement.title,
+                ),
+            },
+        })
+    }
+
+    /// Where this requirement's work belongs, asking the model when the
+    /// code cannot work it out.
+    ///
+    /// [`Self::target`] refuses to choose between several production
+    /// files when nothing points at any of them. That refusal is the
+    /// honest answer and a dead end: `spec implement` asked for
+    /// `--into` and an unattended run took the conventional path, and
+    /// neither connects the requirement to anything, so the next run
+    /// re-derives the same nothing.
+    ///
+    /// Here the refusal is a question instead. The requirement, its
+    /// scenarios, and whatever code they do reach go to the model,
+    /// which chooses between the files an attempt may write. Without a
+    /// model, or on a reply naming none of them, convention stands as
+    /// it always did - the answer is never worse than it was.
+    pub fn connect(
+        &self,
+        prompter: &mut dyn Prompter,
+        req_id: &str,
+    ) -> Result<Connection, ServiceError> {
+        let spec = load_spec(&self.spec)?;
+        let requirement = find_requirement(&spec, req_id)?;
+        let sources = self.sources.sources(source_extension(self.language))?;
+        let evidence = scenario_evidence(
+            &self.features,
+            &sources,
+            self.language,
+            &format!("@{req_id}"),
+        )?;
+        match production_path(
+            &sources,
+            self.language,
+            &spec.project,
+            &self.layout,
+            &evidence,
+            None,
+            &requirement.production_files,
+        ) {
+            Some(path) => Ok(Connection::Known(path)),
+            None => Ok(self.ask_where(prompter, requirement, &sources, &evidence, &spec.project)),
+        }
+    }
+
+    /// Put the choice to the model and narrate what came back.
+    ///
+    /// Separate from [`Self::connect`] because [`Self::generate`]
+    /// reaches the same dead end from the other side - it has already
+    /// weighed `--into` and the requirement's own record - and the two
+    /// must ask the same question of the same candidates, or a delivery
+    /// would narrate one file and write another.
+    fn ask_where(
+        &self,
+        prompter: &mut dyn Prompter,
+        requirement: &Requirement,
+        sources: &[crate::ports::SourceFile],
+        evidence: &str,
+        project: &str,
+    ) -> Connection {
+        let req_id = requirement.id.as_str();
+        let conventional =
+            unattended_production_file(&self.layout, self.language, project, &requirement.title);
+        let Some(llm) = &self.llm else {
+            prompter.warn(&connection_by_convention(
+                req_id,
+                "and no model is configured",
+                &conventional,
+            ));
+            return Connection::Convention(conventional);
+        };
+        let candidates =
+            Candidates::new(&production_candidates(sources, &self.layout), &conventional);
+        let scenarios = self
+            .tagged_scenarios(&format!("@{req_id}"))
+            .map(|(text, _)| text)
+            .unwrap_or_default();
+        let prompt = connection_prompt(
+            &ConnectionInput {
+                id: req_id,
+                title: &requirement.title,
+                story: &requirement.story,
+                criteria: &requirement.acceptance_criteria,
+                scenarios: &scenarios,
+                evidence,
+            },
+            &candidates,
+        );
+        tracing::debug!(requirement = %req_id, "calling LLM for a production file");
+        let work = prompter.working(&format!(
+            "Asking {} where {req_id} belongs - working",
+            llm.model()
+        ));
+        let answer = llm.ask(
+            prompter,
+            &prompt,
+            |reply| parse_connection_checked(reply, &candidates),
+            |prompter, attempt, of, reason| {
+                prompter.warn(&retry_note(attempt, of, reason, "a production file"));
+            },
+        );
+        drop(work);
+        match answer {
+            Ok(path) => {
+                prompter.tell(&connection_chosen(req_id, llm.model(), &path));
+                Connection::Chosen(path)
+            }
+            Err(_) => {
+                prompter.warn(&connection_by_convention(
+                    req_id,
+                    &format!("and {} did not choose one of the candidates", llm.model()),
+                    &conventional,
+                ));
+                Connection::Convention(conventional)
+            }
+        }
+    }
+
+    /// The production files this attempt will write, as project-relative
+    /// paths, named before the model is asked. The primary target, then
+    /// any other file the requirement already declares. Empty is not an
+    /// answer `target` gives: a conventional file stands in when nothing
+    /// else does.
+    pub fn attempt_destinations(&self, req_id: &str) -> Result<Vec<String>, ServiceError> {
+        let spec = load_spec(&self.spec)?;
+        let requirement = find_requirement(&spec, req_id)?;
+        let primary = match self.target(req_id)? {
+            ImplementTarget::Resolved(path) => path,
+            ImplementTarget::Unresolved { conventional } => conventional,
+        };
+        Ok(allowed_targets(&primary, &requirement.production_files))
+    }
+
+    /// Write the bodies of the step definitions this requirement's
+    /// scenarios run through that are still generated placeholders.
+    ///
+    /// The second half of making the bar green, after [`Self::generate`]
+    /// has written the production code. It is a separate pass with a
+    /// separate brief because the step-definition file is the one file
+    /// the implementation prompt can never get back whole: it is shared
+    /// by every requirement, it is the largest file in a project that
+    /// has been at this for a while, and three measured runs on this
+    /// crate spent every attempt rewriting the production file while
+    /// the bar stayed RED on three `todo!()` bodies in it. Only the
+    /// pending definitions go to the model, with the production code
+    /// they should call and the head of their file; only they come
+    /// back, and they are spliced in where they were.
+    ///
+    /// `Ok(None)` when nothing bound to the requirement is pending, or
+    /// when every pending body stayed a placeholder. All the pending
+    /// definitions go in one question first; whatever that reply left
+    /// out or left pending is then asked for one definition at a time,
+    /// and when that attempt budget is spent the stub stays while the
+    /// definitions already filled are kept.
+    pub fn fill_pending_steps(
+        &self,
+        prompter: &mut dyn Prompter,
+        req_id: &str,
+        failures: &[String],
+    ) -> Result<Option<StepFillReport>, ServiceError> {
+        self.fill_pending_steps_on_attempt(prompter, req_id, failures, 1)
+    }
+
+    /// [`Self::fill_pending_steps`] as one attempt of a loop. The
+    /// attempt number goes into the prompt, so the second attempt's
+    /// question is not the first's: with the response cache on, an
+    /// identical prompt is answered from disk, and a delivery was
+    /// measured replaying attempt 2 as attempt 3 - same bodies, same
+    /// compiler error - without the model being asked.
+    pub fn fill_pending_steps_on_attempt(
+        &self,
+        prompter: &mut dyn Prompter,
+        req_id: &str,
+        failures: &[String],
+        attempt: u32,
+    ) -> Result<Option<StepFillReport>, ServiceError> {
+        let Some(llm) = &self.llm else {
+            return Ok(None);
+        };
+        let spec = load_spec(&self.spec)?;
+        let requirement = find_requirement(&spec, req_id)?;
+        let (scenarios, step_lines) = self.tagged_scenarios(&format!("@{req_id}"))?;
+        if step_lines.is_empty() {
+            return Ok(None);
+        }
+        let sources = self.sources.sources(source_extension(self.language))?;
+        // The file with the most of this requirement's pending steps.
+        // One file is what a project has; picking the fullest keeps a
+        // stray stub elsewhere from splitting the pass in two.
+        let Some((file, pending)) = sources
+            .iter()
+            .map(|file| {
+                (
+                    file,
+                    step_fill::pending_step_definitions(self.language, &file.content, &step_lines),
+                )
+            })
+            .filter(|(_, pending)| !pending.is_empty())
+            .max_by_key(|(_, pending)| pending.len())
+        else {
+            return Ok(None);
+        };
+        // The production files the requirement records - a delivery
+        // writes them after its first attempt - or, before anything is
+        // recorded, the file the evidence resolves to today.
+        let mut wanted = requirement.production_files.clone();
+        if wanted.is_empty()
+            && let Ok(
+                ImplementTarget::Resolved(path)
+                | ImplementTarget::Unresolved { conventional: path },
+            ) = self.target(req_id)
+        {
+            wanted.push(path);
+        }
+        let production: Vec<(String, String)> = sources
+            .iter()
+            .filter(|source| wanted.contains(&source.path))
+            .map(|source| (source.path.clone(), source.content.clone()))
+            .collect();
+        let preamble = step_fill::step_file_preamble(self.language, &file.content);
+        let declared = extract_patterns(self.language, &file.content);
+        let symbols = declared_symbols(self.language, &file.content);
+        // The world type the bodies share state through, and the
+        // functions the file has. A body that needs a field the world
+        // does not have may ask for it, and the rule used to forbid
+        // that: three measured attempts wrote `world.proven_report`
+        // against a world with no such field, and every bar read E0609.
+        // A body may not call a method the file does not have: the
+        // `impl` block a reply brings along never lands.
+        let shape = StepFileShape::of(self.language, &file.content);
+        let language = self.language;
+        // Last definition first, so a splice does not move the offsets
+        // of the definitions still waiting.
+        let mut ordered = pending.clone();
+        ordered.sort_by_key(|span| std::cmp::Reverse(span.start));
+        let mut content = file.content.clone();
+        let mut filled = 0usize;
+
+        // One question for the whole batch. The brief - scenarios, file
+        // head, production code - is the same for every definition and
+        // is most of the prompt; asked once per definition it was paid
+        // for once per definition (nine ~6.5k-token prompts under one
+        // progress line, a quarter hour with nothing said).
+        let batch = prompter.working(&format!(
+            "Asking {} to write {} pending step bodies in {} - working",
+            llm.model(),
+            pending.len(),
+            file.path
+        ));
+        let mut fragment = String::new();
+        for span in pending.iter() {
+            fragment.push_str(span.text(&content).trim_end());
+            fragment.push_str("\n\n");
+        }
+        let patterns: Vec<String> = pending.iter().map(|span| span.pattern.clone()).collect();
+        let prompt = step_fill::fill_steps_prompt(
+            language,
+            requirement,
+            &step_fill::FillBrief {
+                scenarios: &scenarios,
+                fragment: fragment.trim_end(),
+                count: pending.len(),
+                preamble,
+                production: &production,
+                failures,
+                attempt,
+            },
+        );
+        let asked = llm.ask(
+            prompter,
+            &prompt,
+            |reply| accept_filled_definitions(language, reply, &patterns, &shape),
+            |_, _, _, _| {},
+        );
+        drop(batch);
+        let FilledSteps {
+            mut bodies,
+            mut fields,
+        } = match asked {
+            Ok(filled) => filled,
+            Err(LlmReplyError::Call(error)) => {
+                return Err(ServiceError(LlmReplyError::call_failed(&error)));
+            }
+            // Said, not swallowed: a run that stalls here used to leave
+            // the transcript with nothing but "Asking again", and the
+            // reason was only in the response cache.
+            Err(LlmReplyError::Invalid { reason }) => {
+                prompter.warn(&batch_refused_notice(&reason));
+                Default::default()
+            }
+        };
+
+        // What the batch left pending is asked for one definition at a
+        // time, each under its own line so a long wait has a name.
+        for (index, span) in ordered.iter().enumerate() {
+            if !bodies.contains_key(&span.pattern) {
+                let fragment = span.text(&content).trim_end().to_string();
+                let prompt = step_fill::fill_steps_prompt(
+                    language,
+                    requirement,
+                    &step_fill::FillBrief {
+                        scenarios: &scenarios,
+                        fragment: &fragment,
+                        count: 1,
+                        preamble,
+                        production: &production,
+                        failures,
+                        attempt,
+                    },
+                );
+                let pattern = span.pattern.clone();
+                let work = prompter.working(&format!(
+                    "Asking {} again for step {} of {}, {:?} - working",
+                    llm.model(),
+                    ordered.len() - index,
+                    ordered.len(),
+                    pattern
+                ));
+                let outcome = llm.ask(
+                    prompter,
+                    &prompt,
+                    |reply| accept_filled_definition(language, reply, &pattern, &shape),
+                    |_, _, _, _| {},
+                );
+                drop(work);
+                match outcome {
+                    Ok((body, more_fields)) => {
+                        bodies.insert(span.pattern.clone(), body);
+                        fields.extend(more_fields);
+                    }
+                    Err(LlmReplyError::Call(error)) => {
+                        return Err(ServiceError(LlmReplyError::call_failed(&error)));
+                    }
+                    Err(LlmReplyError::Invalid { reason }) => {
+                        prompter.warn(&step_refused_notice(&pattern, &reason));
+                        continue;
+                    }
+                }
+            }
+            if let Some(body) = bodies.get(&span.pattern) {
+                content.replace_range(span.start..span.end, body);
+                filled += 1;
+            }
+        }
+        if filled == 0 {
+            return Ok(None);
+        }
+        // The fields go in last: the world sits above every definition,
+        // and the splices above were made against the offsets of the
+        // file as it was read. Re-read where the world is now, and
+        // keep one line per field name whatever the replies repeated.
+        let mut unique_fields: Vec<String> = Vec::new();
+        for field in fields {
+            let name = step_fill::field_name(language, &field);
+            if !unique_fields
+                .iter()
+                .any(|kept| step_fill::field_name(language, kept) == name)
+            {
+                unique_fields.push(field);
+            }
+        }
+        let fields_added = unique_fields.len();
+        if fields_added > 0
+            && let Some(world) = step_fill::world_span(self.language, &content)
+        {
+            content = step_fill::insert_fields(self.language, &content, &world, &unique_fields);
+        }
+        // A step file under `tests/` is its own crate: a body or field
+        // reaching the library as `crate::...` resolves nothing there.
+        if is_test_crate_file(&file.path)
+            && let Some((crate_name, modules)) = self.library_crate(&production)?
+        {
+            content = library_paths_from_test_crate(&content, &crate_name, &modules);
+        }
+        let kept = extract_patterns(self.language, &content);
+        if kept != declared {
+            return Err(ServiceError(
+                "splicing the filled steps in would change which steps the file declares".into(),
+            ));
+        }
+        if declared_symbols(self.language, &content) != symbols {
+            return Err(ServiceError(
+                "splicing the filled steps in would change which types and functions the \
+                 file declares"
+                    .into(),
+            ));
+        }
+        let summary = if fields_added > 0 {
+            format!(
+                "fill {filled} pending step definition(s) and add {fields_added} world \
+                 field(s) for {req_id}"
+            )
+        } else {
+            format!("fill {filled} pending step definition(s) for {req_id}")
+        };
+        self.store.write(&file.path, &content, &summary)?;
+        tracing::info!(
+            requirement = %req_id,
+            target = %file.path,
+            filled,
+            fields_added,
+            "pending step bodies written"
+        );
+        Ok(Some(StepFillReport {
+            target: file.path.clone(),
+            filled,
+            fields_added,
+            source: "llm".into(),
+        }))
+    }
+
+    /// The requirement's scenarios as Gherkin text, with their step
+    /// texts (keywords dropped) for matching against definitions.
+    fn tagged_scenarios(&self, tag: &str) -> Result<(String, Vec<String>), ServiceError> {
+        let mut text = String::new();
+        let mut steps = Vec::new();
+        for summary in self.features.list()? {
+            let doc = self.features.read(&summary.path)?;
+            for scenario in &doc.scenarios {
+                if !scenario.tags.iter().chain(&doc.tags).any(|t| t == tag) {
+                    continue;
+                }
+                text.push_str(&format!("  {tag}\n  Scenario: {}\n", scenario.name));
+                for step in &scenario.steps {
+                    text.push_str(&format!("    {step}\n"));
+                }
+                text.push('\n');
+                steps.extend(scenario.steps.iter().cloned());
+            }
+        }
+        Ok((text, step_fill::step_texts(&steps)))
+    }
+
+    /// Ask the model to make the failing tests pass: production code plus
+    /// real bodies for the TODO placeholders in the test scaffolding.
+    /// Every update is written; the caller reruns the tests -
+    /// the test run is the real validator.
+    pub fn generate(
+        &self,
+        prompter: &mut dyn Prompter,
+        req_id: &str,
+        failures: &[String],
+        history: &[ImplementAttempt],
+        states: &[StateEntry],
+        into: Option<&str>,
+    ) -> Result<ImplementationReport, ServiceError> {
+        let Some(llm) = &self.llm else {
+            return Err(ServiceError(
+                "No model resolved - implement by hand and rerun spec test.".into(),
+            ));
+        };
+        let spec = load_spec(&self.spec)?;
+        let requirement = find_requirement(&spec, req_id)?;
+        let sources = self.sources.sources(source_extension(self.language))?;
+        let files: Vec<(String, String)> = sources
+            .iter()
+            .cloned()
+            .map(|file| (file.path, file.content))
+            .collect();
+        // The same evidence the preflight used, so the file it told the
+        // developer about is the file the attempt actually writes.
+        let evidence = scenario_evidence(
+            &self.features,
+            &sources,
+            self.language,
+            &format!("@{req_id}"),
+        )?;
+        // Nothing names a file: not `--into`, not the requirement's own
+        // record, not the code its scenarios run through. Asking the
+        // model which of the candidates the work belongs in is what
+        // this used to refuse to do, leaving the attempt unspent and
+        // the requirement connected to nothing.
+        let production = match production_path(
+            &sources,
+            self.language,
+            &spec.project,
+            &self.layout,
+            &evidence,
+            into,
+            &requirement.production_files,
+        ) {
+            Some(path) => path,
+            None => self
+                .ask_where(prompter, requirement, &sources, &evidence, &spec.project)
+                .path()
+                .to_string(),
+        };
+        // The primary plus whatever else the requirement declares. A
+        // declared file that does not exist yet is the one an attempt is
+        // there to create, so it has to survive the reply filter below.
+        let allowed = allowed_targets(&production, &requirement.production_files);
+        // The assertions this attempt is expected to write. The prompt
+        // has always asked for them; nothing checked, and six measured
+        // attempts left every placeholder standing while the failure
+        // count climbed.
+        //
+        // Scoped to this requirement's own criteria, not to the file:
+        // the kata's test class is shared, and refusing over the next
+        // requirement's stub would be a complaint no reply to this
+        // prompt could answer.
+        let unit_test = unit_test_path(&sources, self.language, req_id, &self.layout);
+        let prompt = implementation_prompt(
+            self.language,
+            requirement,
+            failures,
+            history,
+            states,
+            &files,
+            &allowed,
+            &unit_test,
+        );
+        let criteria = requirement.acceptance_criteria.as_slice();
+        tracing::debug!(requirement = %req_id, "calling LLM for an implementation attempt");
+        // Two gates on one reply, nested so each keeps its own narrow
+        // question: did the test get a real assertion, and is the
+        // production code more than a stub? The deterministic check
+        // below catches a literal placeholder left standing; neither
+        // gate can be reached until it passes, and neither rule can see
+        // what the gates are for - `assertTrue(true)` and a method that
+        // returns a constant both read as perfectly good code.
+        let judge = self.judge.as_deref();
+        let mut judgments = Vec::new();
+        let mut asserts = Vec::new();
+        // The last reply that actually contained production code. A later
+        // refusal - placeholders still standing, or the array cut off
+        // after this file - must not throw that code away.
+        let kept_production = std::cell::RefCell::new(Vec::new());
+        let asserts_gate = gated(
+            judge,
+            self.policies.policy_for(&UNIT_TEST_ASSERTS),
+            &UNIT_TEST_ASSERTS,
+            &mut asserts,
+            |updates: &Vec<FileUpdate>| test_briefs(req_id, criteria, updates, &unit_test),
+            |reply| {
+                let updates: Vec<FileUpdate> = parse_file_updates_checked(reply)?
+                    .into_iter()
+                    .filter(|update| {
+                        allowed.contains(&update.path)
+                            || files.iter().any(|(path, _)| *path == update.path)
+                    })
+                    .collect();
+                if updates.is_empty() {
+                    return Err("the reply held no usable file update for this project".into());
+                }
+                let production_updates: Vec<FileUpdate> = updates
+                    .iter()
+                    .filter(|update| allowed.contains(&update.path))
+                    .filter(|update| !is_unchanged(&files, update))
+                    .cloned()
+                    .collect();
+                if !production_updates.is_empty() {
+                    *kept_production.borrow_mut() = production_updates;
+                }
+                let unasserted = unasserted_criteria(&files, &updates, &unit_test, criteria);
+                if !unasserted.is_empty() {
+                    return Err(format!(
+                        "{unit_test} still carries the generated placeholder for {} - replace \
+                         each one with an assertion that calls the production code",
+                        unasserted
+                            .iter()
+                            .map(|criterion| format!("{criterion:?}"))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ));
+                }
+                Ok(updates)
+            },
+        );
+        let mut complete = Vec::new();
+        // A refused reply costs another full model call - minutes on a
+        // local model. Each re-ask says so as it happens, so a wait that
+        // spans several reads as retries rather than one hung call.
+        let attempt = llm.ask(
+            prompter,
+            &prompt,
+            gated(
+                judge,
+                self.policies.policy_for(&IMPLEMENTATION_COMPLETE),
+                &IMPLEMENTATION_COMPLETE,
+                &mut complete,
+                |updates: &Vec<FileUpdate>| {
+                    production_briefs(req_id, criteria, updates, &allowed, &files)
+                },
+                asserts_gate,
+            ),
+            |prompter, attempt, of, reason| {
+                prompter.warn(&retry_note(attempt, of, reason, "the implementation"));
+            },
+        );
+        judgments.append(&mut asserts);
+        judgments.append(&mut complete);
+        let salvaged = kept_production.into_inner();
+        let (updates, refusal) = match attempt {
+            Ok(updates) => (updates, None),
+            Err(error) => {
+                let reason = match error {
+                    LlmReplyError::Call(e) => {
+                        let reason = LlmReplyError::call_failed(&e);
+                        self.unanswered.borrow_mut().replace(reason.clone());
+                        reason
+                    }
+                    // The reason names the file still holding a stub,
+                    // which is the one thing a developer rerunning this
+                    // by hand needs.
+                    LlmReplyError::Invalid { reason } => {
+                        format!("The model's reply was refused: {reason}")
+                    }
+                };
+                // The production file was in the reply. Refusing the
+                // rest - a placeholder the model left, a later file the
+                // reply never finished - used to discard that file too,
+                // so the attempt ended with the path named and nothing
+                // on disk.
+                if salvaged.is_empty() {
+                    // A refused attempt has no report to carry its
+                    // judgments, so they are kept for the caller to read.
+                    self.judgments.borrow_mut().append(&mut judgments);
+                    return Err(ServiceError(reason));
+                }
+                (salvaged, Some(reason))
+            }
+        };
+        let summary = format!("implementation attempt for {req_id} (llm)");
+        let mut targets = Vec::new();
+        let mut refused = Vec::new();
+        for update in &updates {
+            // The model is shown every source file and often hands one
+            // back word for word. Exclusive that puts a "modify" on the
+            // review surface with nothing in it to review, and the
+            // reviewer has to diff it to find out.
+            if is_unchanged(&files, update) {
+                tracing::debug!(path = %update.path, "implement: reply matches the file on disk");
+                continue;
+            }
+            if let Some(damage) = replacing(&files, update, self.language) {
+                tracing::warn!(path = %update.path, ?damage, "implement: destructive reply refused");
+                refused.push((update.path.as_str(), damage));
+                continue;
+            }
+            self.store.write(&update.path, &update.content, &summary)?;
+            targets.push(update.path.clone());
+        }
+        let mut warnings: Vec<String> = Vec::new();
+        warnings.extend(self.declare_new_modules(prompter, req_id, &files, &mut targets)?);
+        self.reach_the_library_by_name(req_id, &files, &targets)?;
+        // One of three declared files written is not an incomplete
+        // attempt - the test run decides that. Only an attempt that
+        // touched none of them has demonstrably left the bar where it
+        // was.
+        let written_production: Vec<String> = allowed
+            .iter()
+            .filter(|path| targets.contains(path))
+            .cloned()
+            .collect();
+        let production_refused = refused
+            .iter()
+            .any(|(path, _)| allowed.contains(&(*path).to_string()));
+        warnings.extend(refused.iter().map(|(path, damage)| damage.describe(path)));
+        if let Some(reason) = refusal {
+            warnings.insert(0, reason);
+        }
+        // A reply without the production code is an incomplete attempt:
+        // the tests will stay RED. Stage what arrived, but say so. A
+        // refusal has already said it, and said more.
+        if written_production.is_empty() && !production_refused {
+            warnings.push(if targets.is_empty() {
+                format!(
+                    "The model left every file as it found it, including the \
+                     production code ({}) - nothing was written.",
+                    allowed.join(", ")
+                )
+            } else {
+                format!(
+                    "The model left the production code untouched ({}) - \
+                     it only wrote: {}.",
+                    allowed.join(", "),
+                    targets.join(", ")
+                )
+            });
+        }
+        warnings.extend(ran_ahead_of_the_spec(&updates, &spec, req_id));
+        let next_step = if !written_production.is_empty() {
+            "Run spec test - the run decides.".to_string()
+        } else if targets.is_empty() {
+            format!(
+                "There is nothing to apply. Run spec implement {req_id} again - \
+                 or implement {production} by hand."
+            )
+        } else {
+            format!(
+                "The attempt is incomplete without {production}. Rerun spec test, \
+                 then spec implement {req_id} again - or implement {production} by hand."
+            )
+        };
+        Ok(ImplementationReport {
+            written: !targets.is_empty(),
+            targets,
+            production: written_production,
+            source: "llm".into(),
+            warning: (!warnings.is_empty()).then(|| warnings.join(" ")),
+            judgments,
+            next_step,
+        })
+    }
+
+    /// Wire every new top-level Rust source file the attempt created
+    /// into the crate root, so the next build compiles it.
+    ///
+    /// A `src/<module>.rs` no `mod` line names is not in the crate, and
+    /// the tests that call it fail with E0433 whatever it says. Three
+    /// measured attempts wrote the file correctly and never touched
+    /// `lib.rs`: the prompt asks for the production file, and the
+    /// declaration is a line in a file it was not asked about. The
+    /// crate root is `lib.rs` when there is one, else `main.rs`; one
+    /// the model wrote itself this attempt is read as written. Other
+    /// languages have no such line and are left alone.
+    fn declare_new_modules(
+        &self,
+        prompter: &mut dyn Prompter,
+        req_id: &str,
+        files: &[(String, String)],
+        targets: &mut Vec<String>,
+    ) -> Result<Vec<String>, ServiceError> {
+        if self.language != Language::Rust {
+            return Ok(Vec::new());
+        }
+        let root_dir = self.layout.production.as_deref().unwrap_or("src");
+        let on_disk_before = |path: &str| files.iter().any(|(existing, _)| existing == path);
+        let new_modules: Vec<String> = targets
+            .iter()
+            .filter(|path| !on_disk_before(path))
+            .filter_map(|path| top_level_module(path, root_dir).map(str::to_string))
+            .collect();
+        if new_modules.is_empty() {
+            return Ok(Vec::new());
+        }
+        let candidates = [format!("{root_dir}/lib.rs"), format!("{root_dir}/main.rs")];
+        let mut crate_root = None;
+        for candidate in candidates {
+            if let Some(content) = self.store.read(&candidate)? {
+                crate_root = Some((candidate, content));
+                break;
+            }
+            if let Some((_, content)) = files.iter().find(|(path, _)| *path == candidate) {
+                crate_root = Some((candidate, content.clone()));
+                break;
+            }
+        }
+        let Some((crate_root, mut content)) = crate_root else {
+            return Ok(vec![format!(
+                "{} is not declared anywhere: {root_dir}/lib.rs and {root_dir}/main.rs are \
+                 both missing, so the module has no crate root to be declared in. Add the \
+                 `mod` line by hand.",
+                new_modules.join(", ")
+            )]);
+        };
+        let mut declared = Vec::new();
+        for module in new_modules {
+            if let Some(updated) = declare_rust_module(&content, &module) {
+                content = updated;
+                declared.push(module);
+            }
+        }
+        if declared.is_empty() {
+            return Ok(Vec::new());
+        }
+        self.store.write(
+            &crate_root,
+            &content,
+            &format!("declare module {} for {req_id}", declared.join(", ")),
+        )?;
+        if !targets.contains(&crate_root) {
+            targets.push(crate_root.clone());
+        }
+        prompter.tell(&format!(
+            "Declared {} in {crate_root}.",
+            declared
+                .iter()
+                .map(|module| format!("`pub mod {module};`"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+        Ok(Vec::new())
+    }
+
+    /// The library a Rust test file reaches by name: the crate's import
+    /// name from `Cargo.toml` and the modules its root declares - read
+    /// from the store first (this attempt may have just declared one),
+    /// then from the files the attempt was shown. `None` off Rust, or
+    /// when either is missing.
+    fn library_crate(
+        &self,
+        files: &[(String, String)],
+    ) -> Result<Option<(String, Vec<String>)>, ServiceError> {
+        if self.language != Language::Rust {
+            return Ok(None);
+        }
+        let Some(cargo) = self.store.read("Cargo.toml")? else {
+            return Ok(None);
+        };
+        let Some(name) = crate::domain::memory::crate_name(&cargo) else {
+            return Ok(None);
+        };
+        let root_dir = self.layout.production.as_deref().unwrap_or("src");
+        let lib = format!("{root_dir}/lib.rs");
+        let content = match self.store.read(&lib)? {
+            Some(content) => content,
+            None => match files.iter().find(|(path, _)| *path == lib) {
+                Some((_, content)) => content.clone(),
+                None => return Ok(None),
+            },
+        };
+        Ok(Some((name, declared_modules(&content))))
+    }
+
+    /// Rewrite `crate::<library module>` in every test file the attempt
+    /// wrote as `<crate name>::<module>`. An integration test is its own
+    /// crate, so `crate::` there never reaches the library - observed
+    /// live as E0433 for a module that existed.
+    fn reach_the_library_by_name(
+        &self,
+        req_id: &str,
+        files: &[(String, String)],
+        targets: &[String],
+    ) -> Result<(), ServiceError> {
+        let Some((crate_name, modules)) = self.library_crate(files)? else {
+            return Ok(());
+        };
+        for path in targets.iter().filter(|path| is_test_crate_file(path)) {
+            let Some(content) = self.store.read(path)? else {
+                continue;
+            };
+            let rewritten = library_paths_from_test_crate(&content, &crate_name, &modules);
+            if rewritten != content {
+                self.store.write(
+                    path,
+                    &rewritten,
+                    &format!("reach the library as {crate_name} from {path} for {req_id}"),
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    /// The implement preflight: survey every prerequisite of an
+    /// implementation attempt - the tagged scenario, the step
+    /// definitions, the unit test, and a recorded RED bar - and name
+    /// the step to take instead of implementing when one is missing.
+    pub fn readiness(
+        &self,
+        req_id: &str,
+        phase: &str,
+        failures: &[String],
+        into: Option<&str>,
+    ) -> Result<ReadinessReport, ServiceError> {
+        let spec = load_spec(&self.spec)?;
+        let requirement = find_requirement(&spec, req_id)?;
+        let mut findings = Vec::new();
+        if requirement.status == "implemented" {
+            findings.push(format!(
+                "{req_id} is already implemented - pick the next pending requirement \
+                 with spec list."
+            ));
+        }
+        if phase != "RED" || failures.is_empty() {
+            findings.push(match phase {
+                "GREEN" => "The bar is GREEN - there is nothing to implement. Refactor \
+                            with spec refactor or close the loop with spec mark-implemented."
+                    .to_string(),
+                _ => "No RED test run is recorded - run spec test first so its failures \
+                      brief the model."
+                    .to_string(),
+            });
+        }
+
+        let (assets, asset_findings) = asset_survey(
+            &self.features,
+            &self.sources,
+            self.language,
+            requirement,
+            &spec.project,
+            &self.layout,
+            into,
+        )?;
+        findings.extend(asset_findings);
+
+        let ready = findings.is_empty();
+        let next_step = findings.first().cloned().unwrap_or_else(|| {
+            format!("Every prerequisite is in place - spec implement {req_id} can run.")
+        });
+        Ok(ReadinessReport {
+            ready,
+            assets,
+            findings,
+            next_step,
+        })
+    }
+
+    /// Ask the model what to do next when the preflight found problems:
+    /// the requirement, the asset survey, the findings, and the last
+    /// failures go into one advice call. `None` without a model.
+    pub fn advice(
+        &self,
+        prompter: &mut dyn Prompter,
+        req_id: &str,
+        readiness: &ReadinessReport,
+        failures: &[String],
+    ) -> Result<Option<String>, ServiceError> {
+        let Some(llm) = &self.llm else {
+            return Ok(None);
+        };
+        let spec = load_spec(&self.spec)?;
+        let requirement = find_requirement(&spec, req_id)?;
+        let prompt = advice_prompt(
+            self.language,
+            requirement,
+            &readiness.findings,
+            &readiness.assets,
+            failures,
+        );
+        tracing::debug!(requirement = %req_id, "calling LLM for implement advice");
+        let reply = match llm.ask(
+            prompter,
+            &prompt,
+            |text| {
+                let body = strip_code_fences(text);
+                if body.trim().is_empty() {
+                    Err("the advice reply was empty".into())
+                } else {
+                    Ok(body)
+                }
+            },
+            |_, _, _, _| {},
+        ) {
+            Ok(reply) => reply,
+            Err(LlmReplyError::Call(e)) => {
+                return Err(ServiceError(LlmReplyError::call_failed(&e)));
+            }
+            Err(LlmReplyError::Invalid { reason }) => {
+                return Err(ServiceError(reason));
+            }
+        };
+        Ok(Some(reply))
+    }
+}
+
+/// Did the attempt reach past the requirement it was asked for?
+///
+/// Observed live: `spec implement REQ-006` implemented REQ-005 too, the
+/// bar went green, and nothing said a word — the run had drifted ahead
+/// of the spec it is supposed to be driven by. The written code is
+/// matched against the other pending requirements with the literal
+/// Whether the model handed back a file exactly as it was given it.
+///
+/// `files` is what the prompt showed the model, which is the working
+/// tree as it stands - so a match means writing this update would
+/// change nothing.
+/// What [`UNIT_TEST_ASSERTS`] is asked about: one question per
+/// criterion, against the test file this attempt wrote.
+///
+/// Nothing to ask when the attempt left the test file alone - the
+/// question is about work this reply did, and a file it did not touch
+/// is the previous attempt's business.
+fn test_briefs(
+    req_id: &str,
+    criteria: &[String],
+    updates: &[FileUpdate],
+    unit_test: &str,
+) -> Vec<Brief> {
+    briefs_for(
+        req_id,
+        criteria,
+        written(updates, unit_test),
+        test_asserts_state,
+    )
+}
+
+/// What [`IMPLEMENTATION_COMPLETE`] is graded on: one question per
+/// criterion, against what this attempt changed in the production file.
+///
+/// Only the primary file, and only the lines the attempt changed in it,
+/// with a little context. The brief is the criterion plus the one
+/// change on purpose - `MAX_REQUEST_BYTES` is 64KB and the shipped
+/// decision models load an 8,192-token context and refuse what
+/// overflows it. A brief that grows to the whole module is a brief
+/// that is never answered, and because this gate ships advisory the
+/// refusal is a line in the log and a verdict nobody gave. Measured
+/// against this crate's router, the whole file was 19,885 tokens.
+///
+/// A file handed back word for word changed nothing, and the gate is
+/// asked nothing: the question is about work this reply did.
+fn production_briefs(
+    req_id: &str,
+    criteria: &[String],
+    updates: &[FileUpdate],
+    allowed: &[String],
+    files: &[(String, String)],
+) -> Vec<Brief> {
+    let Some(primary) = allowed.first() else {
+        return Vec::new();
+    };
+    let prior = files
+        .iter()
+        .find(|(path, _)| path == primary)
+        .map(|(_, content)| content.as_str());
+    let change = written(updates, primary).map(|after| changed_code(prior, after));
+    briefs_for(
+        req_id,
+        criteria,
+        change.as_deref().filter(|change| !change.is_empty()),
+        implementation_state,
+    )
+}
+
+/// What this reply wrote to `path`, if it wrote it at all.
+fn written<'a>(updates: &'a [FileUpdate], path: &str) -> Option<&'a str> {
+    updates
+        .iter()
+        .find(|update| update.path == path)
+        .map(|update| update.content.as_str())
+}
+
+/// One brief per criterion over the same body, numbered the way
+/// `review_criteria` numbers them so provenance reads the same wherever
+/// a judgment came from.
+fn briefs_for(
+    req_id: &str,
+    criteria: &[String],
+    body: Option<&str>,
+    state: impl Fn(&str, &str) -> serde_json::Value,
+) -> Vec<Brief> {
+    let Some(body) = body else {
+        return Vec::new();
+    };
+    criteria
+        .iter()
+        .enumerate()
+        .map(|(index, criterion)| {
+            let input = match criteria.len() {
+                1 => req_id.to_string(),
+                _ => format!("{req_id} acceptance criterion {}", index + 1),
+            };
+            Brief::new(input, state(criterion, body))
+        })
+        .collect()
+}
+
+fn is_unchanged(files: &[(String, String)], update: &FileUpdate) -> bool {
+    files
+        .iter()
+        .any(|(path, content)| *path == update.path && *content == update.content)
+}
+
+/// What writing this update would destroy.
+///
+/// A path the project has never seen is the attempt creating something,
+/// and there is nothing there to lose except a body cut off mid-way:
+/// unclosed braces are not a file yet.
+fn replacing(
+    files: &[(String, String)],
+    update: &FileUpdate,
+    language: Language,
+) -> Option<Damage> {
+    match files.iter().find(|(path, _)| *path == update.path) {
+        Some((_, before)) => damage(language, before, &update.content),
+        None => damage(language, "", &update.content).filter(|found| found == &Damage::Truncated),
+    }
+}
+
+/// [`covers_all`] heuristic, which is why this warns rather than
+/// blocks: a shared input literal can make two requirements look alike,
+/// and only the developer can say whether the extra code belongs.
+fn ran_ahead_of_the_spec(updates: &[FileUpdate], spec: &Spec, req_id: &str) -> Option<String> {
+    let written: String = updates
+        .iter()
+        .map(|update| update.content.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let reached: Vec<&str> = spec
+        .requirements
+        .iter()
+        .filter(|requirement| requirement.id != req_id && requirement.status == "pending")
+        .filter(|requirement| covers_all(&written, &requirement.acceptance_criteria))
+        .map(|requirement| requirement.id.as_str())
+        .collect();
+    (!reached.is_empty()).then(|| {
+        format!(
+            "The code written also satisfies {}, still pending - {req_id} was the \
+             requirement asked for. Read the diff with git diff and drop what \
+             {req_id} does not need, so each requirement keeps its own RED bar.",
+            reached.join(", ")
+        )
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::application::agent_service::NullPrompter;
+    use crate::ports::SourceFile;
+    use crate::test_support::{
+        FakeLlm, FakeSources, InMemoryFeatureCatalog, InMemorySpecRepository, InMemoryWorkTree,
+        calculator_catalog, calculator_spec, covered_steps_source, flat_layout, unit_test_source,
+    };
+
+    fn service(
+        sources: Vec<SourceFile>,
+        llm: Option<ResolvedLlm<FakeLlm>>,
+    ) -> ImplementService<
+        InMemoryFeatureCatalog,
+        FakeSources,
+        InMemoryWorkTree,
+        InMemorySpecRepository,
+        FakeLlm,
+    > {
+        ImplementService::new(
+            calculator_catalog(),
+            FakeSources(sources),
+            InMemoryWorkTree::default(),
+            InMemorySpecRepository(Ok(calculator_spec())),
+            Language::Java,
+            flat_layout(Language::Java),
+            llm,
+        )
+    }
+
+    /// A prompter that keeps what it was told, for the tests that
+    /// check the narration.
+    #[derive(Default)]
+    struct RecordingPrompter {
+        told: Vec<String>,
+    }
+
+    impl Prompter for RecordingPrompter {
+        fn tell(&mut self, message: &str) {
+            self.told.push(message.to_string());
+        }
+        fn warn(&mut self, message: &str) {
+            self.told.push(message.to_string());
+        }
+        fn ask(&mut self, question: &str) -> Result<String, crate::ports::PromptError> {
+            panic!("no question is asked, but {question:?} was");
+        }
+        fn confirm(&mut self, question: &str) -> Result<bool, crate::ports::PromptError> {
+            panic!("nothing is confirmed, but {question:?} was");
+        }
+    }
+
+    /// The same service with REQ-001 declaring where its production code
+    /// lives - a port and the adapter beside it, which is the case one
+    /// path cannot describe.
+    fn service_declaring(
+        declared: &[&str],
+        sources: Vec<SourceFile>,
+        llm: Option<ResolvedLlm<FakeLlm>>,
+    ) -> ImplementService<
+        InMemoryFeatureCatalog,
+        FakeSources,
+        InMemoryWorkTree,
+        InMemorySpecRepository,
+        FakeLlm,
+    > {
+        let mut spec = calculator_spec();
+        spec.requirements[0].production_files =
+            declared.iter().map(|path| (*path).to_string()).collect();
+        ImplementService::new(
+            calculator_catalog(),
+            FakeSources(sources),
+            InMemoryWorkTree::default(),
+            InMemorySpecRepository(Ok(spec)),
+            Language::Java,
+            flat_layout(Language::Java),
+            llm,
+        )
+    }
+
+    /// Two production files and no step definition pointing at either.
+    /// `spec implement` stops here and asks for `--into`; the service
+    /// still has to hand back a usable conventional path so an
+    /// unattended caller is not left with only the refusal.
+    #[test]
+    fn an_unresolvable_target_comes_back_with_the_conventional_path() {
+        let sources = vec![
+            SourceFile {
+                path: "src/main/java/Alpha.java".into(),
+                content: "public class Alpha {}".into(),
+            },
+            SourceFile {
+                path: "src/main/java/Beta.java".into(),
+                content: "public class Beta {}".into(),
+            },
+        ];
+        assert_eq!(
+            service(sources, None).target("REQ-001").unwrap(),
+            ImplementTarget::Unresolved {
+                conventional: "src/main/java/Kata.java".into()
+            }
+        );
+    }
+
+    /// Two production files and nothing pointing at either, which is
+    /// the only state the connection question is asked in.
+    fn ambiguous_sources() -> Vec<SourceFile> {
+        vec![
+            SourceFile {
+                path: "src/main/java/Alpha.java".into(),
+                content: "public class Alpha {}".into(),
+            },
+            SourceFile {
+                path: "src/main/java/Beta.java".into(),
+                content: "public class Beta {}".into(),
+            },
+        ]
+    }
+
+    /// A project with one production file is not a choice, so there is
+    /// nothing to ask and no model call to pay for.
+    #[test]
+    fn a_requirement_whose_file_the_code_knows_is_never_asked_about() {
+        let sources = vec![SourceFile {
+            path: "src/main/java/Only.java".into(),
+            content: "public class Only {}".into(),
+        }];
+        let service = service(sources, Some(FakeLlm::replying("{}")));
+        let mut prompter = RecordingPrompter::default();
+        let connection = service.connect(&mut prompter, "REQ-001").unwrap();
+        assert_eq!(
+            connection,
+            Connection::Known("src/main/java/Only.java".into())
+        );
+        assert_eq!(connection.forced(), None, "nothing to force");
+        assert!(prompter.told.is_empty(), "{:?}", prompter.told);
+        assert!(
+            service
+                .llm
+                .as_ref()
+                .unwrap()
+                .chat()
+                .prompts
+                .borrow()
+                .is_empty(),
+            "a file the code knows costs no model call"
+        );
+    }
+
+    /// The refusal used to end the matter. Now the choice goes to the
+    /// model, and the file it names is the one the attempt is pointed
+    /// at - said out loud, because a choice nobody can see is a file
+    /// the next reader cannot account for.
+    #[test]
+    fn nothing_naming_a_file_puts_the_choice_to_the_model() {
+        let service = service(
+            ambiguous_sources(),
+            Some(FakeLlm::replying(
+                r#"{"productionFile": "src/main/java/Beta.java"}"#,
+            )),
+        );
+        let mut prompter = RecordingPrompter::default();
+        let connection = service.connect(&mut prompter, "REQ-001").unwrap();
+        assert_eq!(
+            connection,
+            Connection::Chosen("src/main/java/Beta.java".into())
+        );
+        assert_eq!(connection.forced(), Some("src/main/java/Beta.java"));
+        let said = prompter.told.join("\n");
+        assert!(
+            said.contains("fake-model was asked where the work belongs"),
+            "{said}"
+        );
+        assert!(said.contains("src/main/java/Beta.java"), "{said}");
+    }
+
+    /// The question has to carry the files it is a choice between, or
+    /// an answer cannot be checked against them. The conventional path
+    /// rides along as the "none of these" option.
+    #[test]
+    fn the_question_carries_the_candidates_and_the_requirement() {
+        let service = service(
+            ambiguous_sources(),
+            Some(FakeLlm::replying(
+                r#"{"productionFile": "src/main/java/Alpha.java"}"#,
+            )),
+        );
+        service
+            .connect(&mut RecordingPrompter::default(), "REQ-001")
+            .unwrap();
+        let sent = service.llm.as_ref().unwrap().chat().prompts.borrow()[0].clone();
+        assert!(sent.contains("- src/main/java/Alpha.java"), "{sent}");
+        assert!(sent.contains("- src/main/java/Beta.java"), "{sent}");
+        assert!(
+            sent.contains("- src/main/java/Kata.java (new file)"),
+            "{sent}"
+        );
+        assert!(sent.contains("REQ-001"), "{sent}");
+    }
+
+    /// Without a model the answer is no worse than it has always been:
+    /// convention stands, the transcript says why, and it names the
+    /// command that overrides it.
+    #[test]
+    fn without_a_model_convention_stands_and_names_the_way_to_override_it() {
+        let mut prompter = RecordingPrompter::default();
+        let connection = service(ambiguous_sources(), None)
+            .connect(&mut prompter, "REQ-001")
+            .unwrap();
+        assert_eq!(
+            connection,
+            Connection::Convention("src/main/java/Kata.java".into())
+        );
+        let said = prompter.told.join("\n");
+        assert!(said.contains("no model is configured"), "{said}");
+        assert!(
+            said.contains("spec set-production REQ-001 --file"),
+            "{said}"
+        );
+    }
+
+    /// A reply naming a file nobody offered is not an answer: an
+    /// implementation written into a module nobody chose is the bug
+    /// the candidate list exists to prevent. Convention stands, and
+    /// the transcript says the model declined rather than pretending
+    /// it agreed.
+    #[test]
+    fn a_choice_outside_the_candidates_leaves_convention_standing() {
+        let service = service(
+            ambiguous_sources(),
+            Some(FakeLlm::replying(
+                r#"{"productionFile": "src/main/java/Invented.java"}"#,
+            )),
+        );
+        let mut prompter = RecordingPrompter::default();
+        assert_eq!(
+            service.connect(&mut prompter, "REQ-001").unwrap(),
+            Connection::Convention("src/main/java/Kata.java".into())
+        );
+        let said = prompter.told.join("\n");
+        assert!(
+            said.contains("did not choose one of the candidates"),
+            "{said}"
+        );
+    }
+
+    /// The attempt itself reaches the same dead end from the other
+    /// side, having already weighed `--into` and the requirement's own
+    /// record. It used to refuse and leave the attempt unspent; now it
+    /// asks, and writes where the answer says.
+    #[test]
+    fn an_attempt_with_nothing_naming_a_file_asks_where_instead_of_refusing() {
+        let llm = FakeLlm::replying_in_turn(&[
+            r#"{"productionFile": "src/main/java/Beta.java"}"#,
+            r#"[{"path": "src/main/java/Beta.java", "content": "public class Beta { int add() { return 3; } }"}]"#,
+        ]);
+        let report = service(ambiguous_sources(), Some(llm))
+            .generate(
+                &mut RecordingPrompter::default(),
+                "REQ-001",
+                &[],
+                &[],
+                &[],
+                None,
+            )
+            .unwrap();
+        assert_eq!(report.targets, vec!["src/main/java/Beta.java".to_string()]);
+    }
+
+    /// `--into` is still the developer's own answer and still ends the
+    /// question, so the model is never asked when one was given.
+    #[test]
+    fn an_explicit_target_is_never_put_to_the_model() {
+        let service = service(
+            ambiguous_sources(),
+            Some(FakeLlm::replying(
+                r#"[{"path": "src/main/java/Alpha.java", "content": "public class Alpha { int add() { return 3; } }"}]"#,
+            )),
+        );
+        let report = service
+            .generate(
+                &mut RecordingPrompter::default(),
+                "REQ-001",
+                &[],
+                &[],
+                &[],
+                Some("src/main/java/Alpha.java"),
+            )
+            .unwrap();
+        assert_eq!(report.targets, vec!["src/main/java/Alpha.java".to_string()]);
+        let prompts = service.llm.as_ref().unwrap().chat().prompts.borrow();
+        assert!(
+            prompts
+                .iter()
+                .all(|p| !p.contains("Candidate production files:")),
+            "{prompts:#?}"
+        );
+    }
+
+    /// Rust's conventional file is `lib.rs` for every crate, and this
+    /// project already has modules. A new requirement with nothing
+    /// pointing at one of them gets a file of its own.
+    #[test]
+    fn a_rust_project_with_nothing_to_point_at_gets_a_file_named_for_the_requirement() {
+        let sources = vec![
+            SourceFile {
+                path: "src/lib.rs".into(),
+                content: "pub mod a;".into(),
+            },
+            SourceFile {
+                path: "src/a.rs".into(),
+                content: "pub fn a() {}".into(),
+            },
+        ];
+        let service = ImplementService::new(
+            calculator_catalog(),
+            FakeSources(sources),
+            InMemoryWorkTree::default(),
+            InMemorySpecRepository(Ok(calculator_spec())),
+            Language::Rust,
+            flat_layout(Language::Rust),
+            None::<ResolvedLlm<FakeLlm>>,
+        );
+        assert_eq!(
+            service.target("REQ-001").unwrap(),
+            ImplementTarget::Unresolved {
+                conventional: "src/adds_two_numbers.rs".into(),
+            }
+        );
+    }
+
+    /// A Rust file no `mod` line names is not in the crate. Three
+    /// measured attempts wrote `src/<module>.rs` correctly and never
+    /// touched `lib.rs`, so every bar read E0433. The harness adds the
+    /// line, and the crate root joins the attempt's targets so a revert
+    /// knows it was written.
+    #[test]
+    fn a_new_rust_module_is_declared_in_the_crate_root() {
+        let sources = vec![
+            SourceFile {
+                path: "src/lib.rs".into(),
+                content: "//! Kata.\n\npub mod a;\n".into(),
+            },
+            SourceFile {
+                path: "src/a.rs".into(),
+                content: "pub fn a() {}\n".into(),
+            },
+        ];
+        let reply = r#"[{"path": "src/adds_two_numbers.rs", "content": "pub fn add(a: u32, b: u32) -> u32 { a + b }\n"}]"#;
+        let service = ImplementService::new(
+            calculator_catalog(),
+            FakeSources(sources),
+            InMemoryWorkTree::default(),
+            InMemorySpecRepository(Ok(calculator_spec())),
+            Language::Rust,
+            flat_layout(Language::Rust),
+            Some(FakeLlm::replying(reply)),
+        );
+        let mut prompter = RecordingPrompter::default();
+        let report = service
+            .generate(
+                &mut prompter,
+                "REQ-001",
+                &[],
+                &[],
+                &[],
+                Some("src/adds_two_numbers.rs"),
+            )
+            .unwrap();
+        assert_eq!(
+            report.targets,
+            vec![
+                "src/adds_two_numbers.rs".to_string(),
+                "src/lib.rs".to_string()
+            ]
+        );
+        assert_eq!(
+            service.store.read("src/lib.rs").unwrap().unwrap(),
+            "//! Kata.\n\npub mod a;\npub mod adds_two_numbers;\n"
+        );
+        assert!(
+            service
+                .store
+                .summaries()
+                .iter()
+                .any(|summary| summary == "declare module adds_two_numbers for REQ-001"),
+            "{:?}",
+            service.store.summaries()
+        );
+        assert!(
+            prompter
+                .told
+                .iter()
+                .any(|line| line == "Declared `pub mod adds_two_numbers;` in src/lib.rs."),
+            "{:?}",
+            prompter.told
+        );
+    }
+
+    /// A reply that already declares the module itself needs nothing
+    /// added, and a module that already existed is not "new".
+    #[test]
+    fn a_module_the_reply_declared_itself_is_not_declared_twice() {
+        let sources = vec![SourceFile {
+            path: "src/lib.rs".into(),
+            content: "pub mod a;\n".into(),
+        }];
+        let reply = r#"[{"path": "src/lib.rs", "content": "pub mod a;\npub mod adds_two_numbers;\n"},
+            {"path": "src/adds_two_numbers.rs", "content": "pub fn add() {}\n"}]"#;
+        let service = ImplementService::new(
+            calculator_catalog(),
+            FakeSources(sources),
+            InMemoryWorkTree::default(),
+            InMemorySpecRepository(Ok(calculator_spec())),
+            Language::Rust,
+            flat_layout(Language::Rust),
+            Some(FakeLlm::replying(reply)),
+        );
+        let report = service
+            .generate(
+                &mut NullPrompter,
+                "REQ-001",
+                &[],
+                &[],
+                &[],
+                Some("src/adds_two_numbers.rs"),
+            )
+            .unwrap();
+        assert_eq!(
+            report.targets,
+            vec![
+                "src/lib.rs".to_string(),
+                "src/adds_two_numbers.rs".to_string()
+            ]
+        );
+        assert_eq!(
+            service.store.read("src/lib.rs").unwrap().unwrap(),
+            "pub mod a;\npub mod adds_two_numbers;\n"
+        );
+    }
+
+    /// Java has no crate root. A new file there is written and nothing
+    /// else is touched.
+    #[test]
+    fn a_new_java_file_declares_nothing_anywhere() {
+        let reply = r#"[{"path": "src/main/java/Kata.java", "content": "public class Kata {}"}]"#;
+        let report = service(vec![], Some(FakeLlm::replying(reply)))
+            .generate(&mut NullPrompter, "REQ-001", &[], &[], &[], None)
+            .unwrap();
+        assert_eq!(report.targets, vec!["src/main/java/Kata.java".to_string()]);
+    }
+
+    /// Evidence still decides. The fallback is only reached when
+    /// nothing points anywhere, so a project with a single production
+    /// file resolves without it.
+    #[test]
+    fn a_single_production_file_resolves_without_the_fallback() {
+        let sources = vec![SourceFile {
+            path: "src/main/java/Only.java".into(),
+            content: "public class Only {}".into(),
+        }];
+        assert_eq!(
+            service(sources, None).target("REQ-001").unwrap(),
+            ImplementTarget::Resolved("src/main/java/Only.java".into())
+        );
+    }
+
+    #[test]
+    fn implement_without_a_model_is_refused() {
+        let error = service(vec![], None)
+            .generate(&mut NullPrompter, "REQ-001", &[], &[], &[], None)
+            .unwrap_err();
+        assert_eq!(
+            error.0,
+            "No model resolved - implement by hand and rerun spec test."
+        );
+    }
+
+    /// Observed live on REQ-003: the model was shown the step
+    /// definitions, handed them straight back, and spec wrote them as
+    /// a "modify" that was byte-identical to the working tree. The
+    /// reviewer had to diff it to discover there was nothing in it.
+    #[test]
+    fn a_file_handed_back_word_for_word_is_not_written_as_a_change() {
+        let steps = SourceFile {
+            path: "src/test/java/KataSteps.java".into(),
+            content: "public class KataSteps {}".into(),
+        };
+        let reply = format!(
+            r#"[{{"path": "src/test/java/KataSteps.java", "content": {}}},
+                {{"path": "src/main/java/Kata.java", "content": "public class Kata {{}}"}}]"#,
+            serde_json::to_string(&steps.content).unwrap()
+        );
+        let report = service(vec![steps], Some(FakeLlm::replying(&reply)))
+            .generate(&mut NullPrompter, "REQ-001", &[], &[], &[], None)
+            .unwrap();
+        assert_eq!(report.targets, vec!["src/main/java/Kata.java".to_string()]);
+        assert!(report.written);
+    }
+
+    /// A file changed only in whitespace is still a change - the model
+    /// meant it, and the reviewer should see it.
+    #[test]
+    fn a_file_returned_with_any_difference_at_all_is_still_written() {
+        let steps = SourceFile {
+            path: "src/main/java/Kata.java".into(),
+            content: "public class Kata {}".into(),
+        };
+        let reply = r#"[{"path": "src/main/java/Kata.java", "content": "public class Kata { }"}]"#;
+        let report = service(vec![steps], Some(FakeLlm::replying(reply)))
+            .generate(&mut NullPrompter, "REQ-001", &[], &[], &[], None)
+            .unwrap();
+        assert_eq!(report.targets, vec!["src/main/java/Kata.java".to_string()]);
+    }
+
+    /// If every file came back unchanged there is nothing to review,
+    /// and saying "written" would send the student to an empty diff.
+    #[test]
+    fn a_reply_that_changes_nothing_stages_nothing_and_says_so() {
+        let production = SourceFile {
+            path: "src/main/java/Kata.java".into(),
+            content: "public class Kata {}".into(),
+        };
+        let reply = r#"[{"path": "src/main/java/Kata.java", "content": "public class Kata {}"}]"#;
+        let report = service(vec![production], Some(FakeLlm::replying(reply)))
+            .generate(&mut NullPrompter, "REQ-001", &[], &[], &[], None)
+            .unwrap();
+        assert!(report.targets.is_empty());
+        assert!(!report.written);
+        let warning = report.warning.expect("a warning that nothing landed");
+        assert!(
+            warning.contains("left every file as it found it"),
+            "{warning}"
+        );
+        assert!(
+            report.next_step.contains("nothing to apply"),
+            "{}",
+            report.next_step
+        );
+    }
+
+    /// Observed live: asked to add one tool to a 1124-line module, the
+    /// model replied `placeholder`. It was written over the file, and the
+    /// build stopped. The test run cannot be the validator for a reply
+    /// that deletes the code the tests were going to run.
+    #[test]
+    fn a_reply_that_would_delete_the_production_file_is_not_written() {
+        let production = SourceFile {
+            path: "src/main/java/Kata.java".into(),
+            content: "public class Kata {\n  int add(String in) { return 0; }\n}".into(),
+        };
+        let reply = r#"[{"path": "src/main/java/Kata.java", "content": "placeholder"}]"#;
+        let service = service(vec![production], Some(FakeLlm::replying(reply)));
+        let report = service
+            .generate(
+                &mut NullPrompter,
+                "REQ-001",
+                &["boom".into()],
+                &[],
+                &[],
+                None,
+            )
+            .unwrap();
+        assert!(report.targets.is_empty());
+        assert!(!report.written);
+        assert_eq!(
+            service.store.read("src/main/java/Kata.java").unwrap(),
+            None,
+            "nothing reached the file"
+        );
+        let warning = report.warning.expect("the refusal is reported");
+        assert!(warning.contains("Kata"), "{warning}");
+        assert!(warning.contains("not written"), "{warning}");
+        assert!(
+            !warning.contains("left every file as it found it"),
+            "a refusal is not the model leaving the file alone: {warning}"
+        );
+        assert!(
+            report.next_step.contains("spec implement REQ-001"),
+            "{}",
+            report.next_step
+        );
+    }
+
+    /// The guard is per file: one bad update does not discard the rest
+    /// of an attempt that was otherwise fine.
+    #[test]
+    fn a_refusal_does_not_throw_away_the_rest_of_the_attempt() {
+        let steps = SourceFile {
+            path: "src/test/java/Steps.java".into(),
+            content: "class Steps {}".into(),
+        };
+        let production = SourceFile {
+            path: "src/main/java/Kata.java".into(),
+            content: "public class Kata {}".into(),
+        };
+        let reply = r#"[
+            {"path": "src/test/java/Steps.java", "content": "nothing left"},
+            {"path": "src/main/java/Kata.java", "content": "public class Kata { int add() { return 1; } }"}
+        ]"#;
+        let service = service(vec![steps, production], Some(FakeLlm::replying(reply)));
+        let report = service
+            .generate(
+                &mut NullPrompter,
+                "REQ-001",
+                &["boom".into()],
+                &[],
+                &[],
+                None,
+            )
+            .unwrap();
+        assert_eq!(report.targets, vec!["src/main/java/Kata.java"]);
+        assert!(report.written);
+        let warning = report.warning.expect("the refused file is reported");
+        assert!(warning.contains("src/test/java/Steps.java"), "{warning}");
+    }
+
+    /// A path the project has never seen is the attempt creating a
+    /// file, and nothing can be lost from a file that is not there.
+    #[test]
+    fn the_completeness_brief_is_the_change_not_the_file() {
+        let prior: String = (0..600)
+            .map(|n| format!("fn existing_{n}() -> u32 {{\n    {n}\n}}\n"))
+            .collect();
+        let added = "fn add(input: &str) -> u32 {\n    3\n}\n";
+        let update = FileUpdate {
+            path: "src/lib.rs".into(),
+            content: format!("{prior}{added}"),
+        };
+        let criteria = vec!["Given \"1,2\", when add is called, then 3".to_string()];
+        let briefs = production_briefs(
+            "REQ-001",
+            &criteria,
+            std::slice::from_ref(&update),
+            &["src/lib.rs".to_string()],
+            &[("src/lib.rs".to_string(), prior.clone())],
+        );
+        assert_eq!(briefs.len(), 1);
+        let code = briefs[0].state["production_code"].as_str().unwrap();
+        assert!(code.contains(added), "{code}");
+        assert!(
+            code.len() < prior.len() / 10,
+            "{} bytes of {}",
+            code.len(),
+            prior.len()
+        );
+    }
+
+    #[test]
+    fn a_file_handed_back_word_for_word_asks_the_completeness_gate_nothing() {
+        let prior = "fn add() -> u32 { 3 }\n".to_string();
+        let update = FileUpdate {
+            path: "src/lib.rs".into(),
+            content: prior.clone(),
+        };
+        let briefs = production_briefs(
+            "REQ-001",
+            &["a criterion".to_string()],
+            std::slice::from_ref(&update),
+            &["src/lib.rs".to_string()],
+            &[("src/lib.rs".to_string(), prior)],
+        );
+        assert_eq!(briefs.len(), 0);
+    }
+
+    /// REQ-001's steps with the When and Then still pending, beside a
+    /// hand-written Given and another requirement's stub.
+    fn pending_steps() -> SourceFile {
+        SourceFile {
+            path: "src/test/java/steps/Steps.java".into(),
+            content: "package steps;\n\nimport io.cucumber.java.PendingException;\nimport io.cucumber.java.en.*;\n\npublic class Steps {\n    private int result;\n\n    @Given(\"a calculator\")\n    public void a() { result = -1; }\n\n    @When(\"add is called with {string}\")\n    public void b(String s) {\n        throw new PendingException();\n    }\n\n    @Then(\"the result is {int}\")\n    public void c(int n) {\n        throw new PendingException();\n    }\n\n    @Then(\"something REQ-002 asks\")\n    public void d() {\n        throw new PendingException();\n    }\n}\n".into(),
+        }
+    }
+
+    fn production() -> SourceFile {
+        SourceFile {
+            path: "src/main/java/Kata.java".into(),
+            content: "public class Kata { int add(String in) { return 3; } }".into(),
+        }
+    }
+
+    const FILLED_STEPS: &str = "    @When(\"add is called with {string}\")\n    public void b(String s) {\n        result = new Kata().add(s);\n    }\n\n    @Then(\"the result is {int}\")\n    public void c(int n) {\n        org.junit.jupiter.api.Assertions.assertEquals(n, result);\n    }\n";
+
+    #[test]
+    fn the_pending_step_bodies_bound_to_the_requirement_are_filled_in_place() {
+        let service = service(
+            vec![pending_steps(), production()],
+            Some(FakeLlm::replying(FILLED_STEPS)),
+        );
+        let report = service
+            .fill_pending_steps(
+                &mut NullPrompter,
+                "REQ-001",
+                &["the result is 3: FAILED".into()],
+            )
+            .unwrap()
+            .expect("two pending steps to fill");
+        assert_eq!(report.target, "src/test/java/steps/Steps.java");
+        assert_eq!(report.filled, 2);
+        let written = service
+            .store
+            .read("src/test/java/steps/Steps.java")
+            .unwrap()
+            .expect("the step file was written");
+        assert!(written.contains("result = new Kata().add(s);"), "{written}");
+        assert!(written.contains("assertEquals(n, result);"), "{written}");
+        assert!(
+            written.contains("public void a() { result = -1; }"),
+            "{written}"
+        );
+        assert!(written.contains("something REQ-002 asks"), "{written}");
+        assert_eq!(
+            written.matches("PendingException();").count(),
+            1,
+            "{written}"
+        );
+        let prompts = service
+            .llm
+            .as_ref()
+            .unwrap()
+            .chat()
+            .prompts
+            .borrow()
+            .clone();
+        assert_eq!(
+            prompts.len(),
+            1,
+            "both definitions were asked for in one question: {prompts:#?}"
+        );
+        let prompt = prompts[0].clone();
+        assert!(prompt.contains("bodies of 2 "), "{prompt}");
+        assert!(prompt.contains("add is called with {string}"), "{prompt}");
+        assert!(prompt.contains("the result is {int}"), "{prompt}");
+        assert!(
+            prompt.contains("int add(String in)"),
+            "the production code is in the brief"
+        );
+        assert!(
+            prompt.contains("private int result;"),
+            "the file head is in the brief"
+        );
+        assert!(
+            !prompt.contains("something REQ-002 asks"),
+            "another requirement's stub is not"
+        );
+    }
+
+    #[test]
+    fn a_reply_that_leaves_a_step_pending_keeps_that_step_and_fills_the_rest() {
+        let still_pending = "    @When(\"add is called with {string}\")\n    public void b(String s) {\n        result = new Kata().add(s);\n    }\n\n    @Then(\"the result is {int}\")\n    public void c(int n) {\n        throw new PendingException();\n    }\n";
+        let service = service(
+            vec![pending_steps(), production()],
+            Some(FakeLlm::replying(still_pending)),
+        );
+        let report = service
+            .fill_pending_steps(&mut NullPrompter, "REQ-001", &[])
+            .unwrap()
+            .expect("the When is filled even though the Then stays pending");
+        assert_eq!(report.filled, 1);
+        let written = service
+            .store
+            .read("src/test/java/steps/Steps.java")
+            .unwrap()
+            .expect("the step that bound is written");
+        assert!(written.contains("result = new Kata().add(s);"), "{written}");
+        assert!(
+            written.contains("throw new PendingException();"),
+            "{written}"
+        );
+        let prompts = service
+            .llm
+            .as_ref()
+            .unwrap()
+            .chat()
+            .prompts
+            .borrow()
+            .clone();
+        assert!(
+            prompts.len() >= 2,
+            "the Then was asked for again: {prompts:#?}"
+        );
+        let again = &prompts[1];
+        assert!(again.contains("bodies of 1 "), "{again}");
+        assert!(again.contains("the result is {int}"), "{again}");
+        assert!(
+            !again.contains("public void b(String s)"),
+            "the When that was filled is not asked for again: {again}"
+        );
+    }
+
+    #[test]
+    fn a_batched_fill_reply_is_taken_for_what_it_filled_and_refused_when_that_is_nothing() {
+        let patterns = vec![
+            "add is called with {string}".to_string(),
+            "the result is {int}".to_string(),
+        ];
+        let whole = accept_filled_definitions(
+            Language::Java,
+            FILLED_STEPS,
+            &patterns,
+            &StepFileShape::default(),
+        )
+        .unwrap()
+        .bodies;
+        assert_eq!(whole.len(), 2, "{whole:?}");
+        assert!(whole["the result is {int}"].contains("assertEquals(n, result);"));
+
+        let partial = "    @When(\"add is called with {string}\")\n    public void b(String s) {\n        result = new Kata().add(s);\n    }\n\n    @Then(\"the result is {int}\")\n    public void c(int n) {\n        throw new PendingException();\n    }\n\n    @Then(\"something REQ-002 asks\")\n    public void d() { result = 0; }\n";
+        let taken = accept_filled_definitions(
+            Language::Java,
+            partial,
+            &patterns,
+            &StepFileShape::default(),
+        )
+        .unwrap()
+        .bodies;
+        assert_eq!(
+            taken.keys().collect::<Vec<_>>(),
+            vec!["add is called with {string}"],
+            "the still-pending one and the stranger are left out"
+        );
+
+        let prose = "Let me look at the world type and any relevant status report fields.";
+        let refused =
+            accept_filled_definitions(Language::Java, prose, &patterns, &StepFileShape::default())
+                .unwrap_err();
+        assert!(refused.contains("none of the 2 definition(s)"), "{refused}");
+    }
+
+    /// Observed on this harness: the bodies needed `world.proven_report`,
+    /// the world had no such field, the rule forbade adding one, and
+    /// three attempts read E0609. A reply may now lead with the world
+    /// type holding only the new fields; they go into the struct and
+    /// the definitions go where they were.
+    #[test]
+    fn a_fill_reply_may_add_the_world_fields_its_bodies_need() {
+        let steps = SourceFile {
+            path: "tests/steps/kata.rs".into(),
+            content: "use cucumber::{World, given, then, when};\n\n#[derive(Debug, Default, World)]\npub struct KataWorld {\n    result: Option<u32>,\n}\n\n#[given(expr = \"a calculator\")]\nfn a(w: &mut KataWorld) {\n    w.result = None;\n}\n\n#[when(expr = \"add is called with {string}\")]\nfn b(_w: &mut KataWorld, _s: String) {\n    todo!(\"implement step: add is called with {string}\");\n}\n\n#[then(expr = \"the result is {int}\")]\nfn c(_w: &mut KataWorld, _n: u32) {\n    todo!(\"implement step: the result is 3\");\n}\n".into(),
+        };
+        let lib = SourceFile {
+            path: "src/lib.rs".into(),
+            content: "pub struct Report { pub ok: bool }\npub fn add(a: u32, b: u32) -> Report { Report { ok: a + b == 3 } }\n".into(),
+        };
+        let reply = "#[derive(Debug, Default, World)]\npub struct KataWorld {\n    result: Option<u32>,\n    report: Option<Report>,\n}\n\n#[when(expr = \"add is called with {string}\")]\nfn b(w: &mut KataWorld, _s: String) {\n    w.report = Some(kata::add(1, 2));\n}\n\n#[then(expr = \"the result is {int}\")]\nfn c(w: &mut KataWorld, _n: u32) {\n    assert!(w.report.as_ref().unwrap().ok);\n}\n";
+        let service = ImplementService::new(
+            calculator_catalog(),
+            FakeSources(vec![steps, lib]),
+            InMemoryWorkTree::default(),
+            InMemorySpecRepository(Ok(calculator_spec())),
+            Language::Rust,
+            flat_layout(Language::Rust),
+            Some(FakeLlm::replying(reply)),
+        );
+        let report = service
+            .fill_pending_steps(&mut NullPrompter, "REQ-001", &[])
+            .unwrap()
+            .expect("two pending steps to fill");
+        assert_eq!(report.filled, 2);
+        assert_eq!(report.fields_added, 1);
+        let written = service
+            .store
+            .read("tests/steps/kata.rs")
+            .unwrap()
+            .expect("the step file was written");
+        assert!(
+            written.contains(
+                "pub struct KataWorld {\n    result: Option<u32>,\n    report: Option<Report>,\n}\n"
+            ),
+            "{written}"
+        );
+        assert!(
+            written.contains("w.report = Some(kata::add(1, 2));"),
+            "{written}"
+        );
+        assert!(written.contains("w.result = None;"), "{written}");
+        assert!(!written.contains("todo!"), "{written}");
+        assert_eq!(written.matches("struct KataWorld").count(), 1, "{written}");
+        assert!(
+            service
+                .store
+                .summaries()
+                .iter()
+                .any(|s| s
+                    == "fill 2 pending step definition(s) and add 1 world field(s) for REQ-001"),
+            "{:?}",
+            service.store.summaries()
+        );
+        let prompt = service.llm.as_ref().unwrap().chat().prompts.borrow()[0].clone();
+        assert!(prompt.contains("ONLY the new fields"), "{prompt}");
+    }
+
+    /// Measured: three attempts of refused fills, and the transcript
+    /// said only "Asking again". The reason each stub stayed is said.
+    #[test]
+    fn a_fill_that_is_refused_to_the_end_says_why_each_stub_stayed() {
+        let steps = SourceFile {
+            path: "tests/steps/kata.rs".into(),
+            content: "use cucumber::{World, then, when};\n\n#[derive(Debug, Default, World)]\npub struct KataWorld {\n    result: Option<u32>,\n}\n\n#[when(expr = \"add is called with {string}\")]\nfn b(_w: &mut KataWorld, _s: String) {\n    todo!(\"implement step: add is called with {string}\");\n}\n\n#[then(expr = \"the result is {int}\")]\nfn c(_w: &mut KataWorld, _n: u32) {\n    todo!(\"implement step: the result is 3\");\n}\n".into(),
+        };
+        let reply = "impl KataWorld {\n    fn total(&self) -> u32 { 3 }\n}\n\n#[when(expr = \"add is called with {string}\")]\nfn b(w: &mut KataWorld, _s: String) {\n    w.result = Some(w.total());\n}\n\n#[then(expr = \"the result is {int}\")]\nfn c(w: &mut KataWorld, n: u32) {\n    assert_eq!(w.total(), n);\n}\n";
+        let service = ImplementService::new(
+            calculator_catalog(),
+            FakeSources(vec![steps]),
+            InMemoryWorkTree::default(),
+            InMemorySpecRepository(Ok(calculator_spec())),
+            Language::Rust,
+            flat_layout(Language::Rust),
+            Some(FakeLlm::replying(reply)),
+        );
+        let mut prompter = RecordingPrompter::default();
+        let report = service
+            .fill_pending_steps(&mut prompter, "REQ-001", &[])
+            .unwrap();
+        assert!(report.is_none(), "{report:?}");
+        let batch = prompter
+            .told
+            .iter()
+            .find(|line| line.contains("whole batch"))
+            .expect("the batch refusal is said");
+        assert!(batch.contains("total()"), "{batch}");
+        for pattern in ["add is called with {string}", "the result is {int}"] {
+            assert!(
+                prompter
+                    .told
+                    .iter()
+                    .any(|line| line.contains("stays pending") && line.contains(pattern)),
+                "{:?}",
+                prompter.told
+            );
+        }
+    }
+
+    /// Observed live: a reply carried `impl SpecWorld { fn
+    /// generated_report(&self) ... }` and a body calling it. The impl
+    /// block is dropped on splice, the call passed the field check, and
+    /// the bar read E0599. The call is refused with the way out, and
+    /// the reply that reads the field instead is taken.
+    #[test]
+    fn a_fill_reply_calling_a_method_the_file_does_not_have_is_sent_back() {
+        let steps = SourceFile {
+            path: "tests/steps/kata.rs".into(),
+            content: "use cucumber::{World, given, then, when};\n\n#[derive(Debug, Default, World)]\npub struct KataWorld {\n    result: Option<u32>,\n    report: Option<Report>,\n}\n\nimpl KataWorld {\n    fn reset(&mut self) {\n        self.result = None;\n    }\n}\n\n#[given(expr = \"a calculator\")]\nfn a(w: &mut KataWorld) {\n    w.reset();\n}\n\n#[then(expr = \"the result is {int}\")]\nfn c(_w: &mut KataWorld, _n: u32) {\n    todo!(\"implement step: the result is 3\");\n}\n".into(),
+        };
+        let lib = SourceFile {
+            path: "src/lib.rs".into(),
+            content: "pub struct Report { pub ok: bool }\n".into(),
+        };
+        let calling = "impl KataWorld {\n    fn generated_report(&self) -> &Report {\n        self.report.as_ref().expect(\"a report\")\n    }\n}\n\n#[then(expr = \"the result is {int}\")]\nfn c(w: &mut KataWorld, _n: u32) {\n    w.reset();\n    assert!(w.generated_report().ok);\n}\n";
+        let reading = "#[then(expr = \"the result is {int}\")]\nfn c(w: &mut KataWorld, _n: u32) {\n    w.reset();\n    assert!(w\n        .report\n        .as_ref()\n        .expect(\"a report\")\n        .ok);\n}\n";
+        let service = ImplementService::new(
+            calculator_catalog(),
+            FakeSources(vec![steps, lib]),
+            InMemoryWorkTree::default(),
+            InMemorySpecRepository(Ok(calculator_spec())),
+            Language::Rust,
+            flat_layout(Language::Rust),
+            Some(FakeLlm::replying_in_turn(&[calling, reading])),
+        );
+        let report = service
+            .fill_pending_steps(&mut NullPrompter, "REQ-001", &[])
+            .unwrap()
+            .expect("one pending step to fill");
+        assert_eq!(report.filled, 1);
+        assert_eq!(report.fields_added, 0);
+        let written = service
+            .store
+            .read("tests/steps/kata.rs")
+            .unwrap()
+            .expect("the step file was written");
+        assert!(
+            written.contains(".expect(\"a report\")\n        .ok);"),
+            "{written}"
+        );
+        assert!(!written.contains("generated_report"), "{written}");
+        let prompts = service
+            .llm
+            .as_ref()
+            .unwrap()
+            .chat()
+            .prompts
+            .borrow()
+            .clone();
+        let retry = prompts
+            .iter()
+            .find(|p| p.contains("generated_report()"))
+            .expect("the refusal names the call");
+        assert!(retry.contains("cannot add methods"), "{retry}");
+        assert!(retry.contains("generated_report.as_ref()"), "{retry}");
+    }
+
+    /// Observed live: the fill declared a world field of type
+    /// `crate::report::Criterion` in `tests/cucumber.rs`, where `crate`
+    /// is the test file, and the bar read E0433 for a module that
+    /// existed. Paths into the library's modules are written by the
+    /// crate's name; the test crate's own `crate::` paths are kept.
+    #[test]
+    fn a_filled_step_file_under_tests_reaches_the_library_by_its_crate_name() {
+        let steps = SourceFile {
+            path: "tests/cucumber.rs".into(),
+            content: "use cucumber::{World, then, when};\n\nmod helpers { pub fn ok() -> bool { true } }\n\n#[derive(Debug, Default, World)]\npub struct KataWorld {\n    result: Option<u32>,\n}\n\n#[when(expr = \"add is called with {string}\")]\nfn b(_w: &mut KataWorld, _s: String) {\n    todo!(\"implement step: add is called with {string}\");\n}\n\n#[then(expr = \"the result is {int}\")]\nfn c(_w: &mut KataWorld, _n: u32) {\n    todo!(\"implement step: the result is 3\");\n}\n".into(),
+        };
+        let lib = SourceFile {
+            path: "src/lib.rs".into(),
+            content: "pub mod report;\n".into(),
+        };
+        let reply = "pub struct KataWorld {\n    seen: Option<crate::report::Criterion>,\n}\n\n#[when(expr = \"add is called with {string}\")]\nfn b(w: &mut KataWorld, _s: String) {\n    w.seen = Some(crate::report::Criterion::new());\n}\n\n#[then(expr = \"the result is {int}\")]\nfn c(w: &mut KataWorld, _n: u32) {\n    assert!(crate::helpers::ok());\n    assert!(w.seen.is_some());\n}\n";
+        let service = ImplementService::new(
+            calculator_catalog(),
+            FakeSources(vec![steps, lib]),
+            InMemoryWorkTree::default(),
+            InMemorySpecRepository(Ok(calculator_spec())),
+            Language::Rust,
+            flat_layout(Language::Rust),
+            Some(FakeLlm::replying(reply)),
+        );
+        service
+            .store
+            .write(
+                "Cargo.toml",
+                "[package]\nname = \"spec-kata\"\nversion = \"0.1.0\"\n",
+                "fixture",
+            )
+            .unwrap();
+        service
+            .store
+            .write("src/lib.rs", "pub mod report;\n", "fixture")
+            .unwrap();
+        let report = service
+            .fill_pending_steps(&mut NullPrompter, "REQ-001", &[])
+            .unwrap()
+            .expect("two pending steps to fill");
+        assert_eq!((report.filled, report.fields_added), (2, 1));
+        let written = service
+            .store
+            .read("tests/cucumber.rs")
+            .unwrap()
+            .expect("the step file was written");
+        assert!(
+            written.contains("seen: Option<spec_kata::report::Criterion>,"),
+            "{written}"
+        );
+        assert!(
+            written.contains("w.seen = Some(spec_kata::report::Criterion::new());"),
+            "{written}"
+        );
+        assert!(
+            written.contains("assert!(crate::helpers::ok());"),
+            "{written}"
+        );
+        assert!(!written.contains("crate::report"), "{written}");
+    }
+
+    /// The same for a test file the implementation reply wrote: the
+    /// module it declares this attempt counts too.
+    #[test]
+    fn a_test_file_the_attempt_wrote_reaches_the_library_by_its_crate_name() {
+        let sources = vec![
+            SourceFile {
+                path: "src/lib.rs".into(),
+                content: "//! Kata.\n".into(),
+            },
+            SourceFile {
+                path: "tests/kata_test.rs".into(),
+                content: "#[test]\nfn adds() { todo!(\"TODO: assert\"); }\n".into(),
+            },
+        ];
+        let reply = r#"[{"path": "src/adds_two_numbers.rs", "content": "pub fn add(a: u32, b: u32) -> u32 { a + b }\n"}, {"path": "tests/kata_test.rs", "content": "use crate::adds_two_numbers::add;\n#[test]\nfn adds() { assert_eq!(add(1, 2), 3); }\n"}]"#;
+        let service = ImplementService::new(
+            calculator_catalog(),
+            FakeSources(sources),
+            InMemoryWorkTree::default(),
+            InMemorySpecRepository(Ok(calculator_spec())),
+            Language::Rust,
+            flat_layout(Language::Rust),
+            Some(FakeLlm::replying(reply)),
+        );
+        service
+            .store
+            .write(
+                "Cargo.toml",
+                "[package]\nname = \"spec-kata\"\nversion = \"0.1.0\"\n",
+                "fixture",
+            )
+            .unwrap();
+        service
+            .generate(
+                &mut NullPrompter,
+                "REQ-001",
+                &[],
+                &[],
+                &[],
+                Some("src/adds_two_numbers.rs"),
+            )
+            .unwrap();
+        assert_eq!(
+            service.store.read("tests/kata_test.rs").unwrap().unwrap(),
+            "use spec_kata::adds_two_numbers::add;\n#[test]\nfn adds() { assert_eq!(add(1, 2), 3); }\n"
+        );
+    }
+
+    /// Observed right after a reply that asked for its fields properly:
+    /// the next one used `world.verified_flags` and declared nothing,
+    /// and the file did not compile. The reply is sent back naming the
+    /// fields, and the one that declares them is taken.
+    #[test]
+    fn a_fill_reply_using_undeclared_world_fields_is_asked_again_for_them() {
+        let steps = SourceFile {
+            path: "tests/steps/kata.rs".into(),
+            content: "use cucumber::{World, given, then, when};\n\n#[derive(Debug, Default, World)]\npub struct KataWorld {\n    result: Option<u32>,\n}\n\n#[when(expr = \"add is called with {string}\")]\nfn b(_w: &mut KataWorld, _s: String) {\n    todo!(\"implement step: add is called with {string}\");\n}\n\n#[then(expr = \"the result is {int}\")]\nfn c(_w: &mut KataWorld, _n: u32) {\n    todo!(\"implement step: the result is 3\");\n}\n".into(),
+        };
+        let lib = SourceFile {
+            path: "src/lib.rs".into(),
+            content: "pub fn add(a: u32, b: u32) -> u32 { a + b }\n".into(),
+        };
+        let bodies = "#[when(expr = \"add is called with {string}\")]\nfn b(w: &mut KataWorld, _s: String) {\n    w.flags.push(true);\n}\n\n#[then(expr = \"the result is {int}\")]\nfn c(w: &mut KataWorld, _n: u32) {\n    assert!(w.flags[0]);\n}\n";
+        let declared = format!("pub struct KataWorld {{\n    flags: Vec<bool>,\n}}\n\n{bodies}");
+        let service = ImplementService::new(
+            calculator_catalog(),
+            FakeSources(vec![steps, lib]),
+            InMemoryWorkTree::default(),
+            InMemorySpecRepository(Ok(calculator_spec())),
+            Language::Rust,
+            flat_layout(Language::Rust),
+            Some(FakeLlm::replying_in_turn(&[bodies, &declared])),
+        );
+        let report = service
+            .fill_pending_steps(&mut NullPrompter, "REQ-001", &[])
+            .unwrap()
+            .expect("filled on the second reply");
+        assert_eq!((report.filled, report.fields_added), (2, 1));
+        let written = service
+            .store
+            .read("tests/steps/kata.rs")
+            .unwrap()
+            .expect("written");
+        assert!(written.contains("    flags: Vec<bool>,\n}"), "{written}");
+        let prompts = service
+            .llm
+            .as_ref()
+            .unwrap()
+            .chat()
+            .prompts
+            .borrow()
+            .clone();
+        assert!(
+            prompts
+                .iter()
+                .any(|p| p.contains("fields the world type does not have: flags")),
+            "{prompts:#?}"
+        );
+    }
+
+    #[test]
+    fn nothing_pending_means_nothing_to_fill() {
+        let service = service(
+            vec![covered_steps_source(), production()],
+            Some(FakeLlm::replying(FILLED_STEPS)),
+        );
+        let outcome = service
+            .fill_pending_steps(&mut NullPrompter, "REQ-001", &[])
+            .unwrap();
+        assert!(outcome.is_none());
+        assert!(
+            service
+                .llm
+                .as_ref()
+                .unwrap()
+                .chat()
+                .prompts
+                .borrow()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn a_brand_new_file_is_not_measured_against_anything() {
+        let reply = r#"[{"path": "src/main/java/Kata.java", "content": "placeholder"}]"#;
+        let report = service(vec![], Some(FakeLlm::replying(reply)))
+            .generate(
+                &mut NullPrompter,
+                "REQ-001",
+                &["boom".into()],
+                &[],
+                &[],
+                None,
+            )
+            .unwrap();
+        assert_eq!(report.targets, vec!["src/main/java/Kata.java"]);
+    }
+
+    #[test]
+    fn an_attempt_that_also_satisfies_another_pending_requirement_is_flagged() {
+        // Observed live: spec implement REQ-006 implemented REQ-005 as
+        // well, the bar went green, and nothing said a word.
+        let reply = r#"[{"path": "src/main/java/Kata.java",
+            "content": "public class Kata {\n  int add(String in) { return in.equals(\"1,2\") ? 3 : 0; }\n  int subtract(String in) { return in.equals(\"3,1\") ? 2 : 0; }\n}"}]"#;
+        let report = service(vec![], Some(FakeLlm::replying(reply)))
+            .generate(&mut NullPrompter, "REQ-001", &[], &[], &[], None)
+            .unwrap();
+        let warning = report.warning.expect("the scope warning");
+        assert!(warning.contains("also satisfies REQ-002"), "{warning}");
+        assert!(warning.contains("git diff"), "{warning}");
+        // A warning, not a gate: the work is on disk.
+        assert!(report.written);
+    }
+
+    #[test]
+    fn an_attempt_confined_to_its_own_requirement_is_not_flagged() {
+        let reply = r#"[{"path": "src/main/java/Kata.java",
+            "content": "public class Kata {\n  int add(String in) { return in.equals(\"1,2\") ? 3 : 0; }\n}"}]"#;
+        let report = service(vec![], Some(FakeLlm::replying(reply)))
+            .generate(&mut NullPrompter, "REQ-001", &[], &[], &[], None)
+            .unwrap();
+        assert_eq!(report.warning, None);
+    }
+
+    #[test]
+    fn the_scope_warning_is_added_to_the_untouched_production_warning() {
+        // Both are true of the same attempt, and the report carries one
+        // warning field - neither may swallow the other.
+        let reply = r#"[{"path": "src/test/java/Steps.java",
+            "content": "assertEquals(3, calc.add(\"1,2\"));\nassertEquals(2, calc.subtract(\"3,1\"));"}]"#;
+        let sources = vec![SourceFile {
+            path: "src/test/java/Steps.java".into(),
+            content: "old steps".into(),
+        }];
+        let report = service(sources, Some(FakeLlm::replying(reply)))
+            .generate(&mut NullPrompter, "REQ-001", &[], &[], &[], None)
+            .unwrap();
+        let warning = report.warning.expect("both warnings");
+        assert!(
+            warning.contains("left the production code untouched"),
+            "{warning}"
+        );
+        assert!(warning.contains("also satisfies REQ-002"), "{warning}");
+    }
+
+    #[test]
+    fn an_implementation_attempt_stages_allowed_updates_and_drops_the_rest() {
+        let reply = r#"[
+            {"path": "src/main/java/Kata.java", "content": "public class Kata {}"},
+            {"path": "src/test/java/Steps.java", "content": "class Steps {}"},
+            {"path": "/etc/passwd", "content": "nope"}
+        ]"#;
+        let sources = vec![SourceFile {
+            path: "src/test/java/Steps.java".into(),
+            content: "old steps".into(),
+        }];
+        let service = service(sources, Some(FakeLlm::replying(reply)));
+        let report = service
+            .generate(
+                &mut NullPrompter,
+                "REQ-001",
+                &["Req001Test: TODO: assert".into()],
+                &[],
+                &[],
+                None,
+            )
+            .unwrap();
+        assert_eq!(
+            report.targets,
+            vec!["src/main/java/Kata.java", "src/test/java/Steps.java"]
+        );
+        assert!(report.written);
+        assert_eq!(report.source, "llm");
+        let production = service
+            .store
+            .read("src/main/java/Kata.java")
+            .unwrap()
+            .unwrap();
+        assert_eq!(production, "public class Kata {}");
+        assert!(service.store.read("/etc/passwd").unwrap().is_none());
+        let prompts = service.llm.as_ref().unwrap().chat().prompts.borrow();
+        assert!(prompts[0].contains("Req001Test: TODO: assert"));
+        assert!(prompts[0].contains("--- src/test/java/Steps.java ---"));
+        assert!(prompts[0].contains("Write the production code at src/main/java/Kata.java"));
+        assert!(
+            prompts[0].contains("Java best practices to follow:")
+                && prompts[0].contains("Package names are lowercase"),
+            "prompt pins the language's best practices"
+        );
+    }
+
+    #[test]
+    fn a_reply_without_the_production_file_carries_a_loud_warning() {
+        let reply =
+            r#"[{"path": "src/test/java/Steps.java", "content": "class Steps { real body }"}]"#;
+        let sources = vec![SourceFile {
+            path: "src/test/java/Steps.java".into(),
+            content: "old steps".into(),
+        }];
+        let service = service(sources, Some(FakeLlm::replying(reply)));
+        let report = service
+            .generate(
+                &mut NullPrompter,
+                "REQ-001",
+                &["Req001Test: TODO: assert".into()],
+                &[],
+                &[],
+                None,
+            )
+            .unwrap();
+        assert_eq!(report.targets, vec!["src/test/java/Steps.java"]);
+        let warning = report.warning.expect("the incomplete attempt warns");
+        assert!(warning.contains("left the production code untouched"));
+        assert!(warning.contains("src/main/java/Kata.java"));
+        assert!(
+            report
+                .next_step
+                .contains("incomplete without src/main/java/Kata.java")
+        );
+        assert!(report.next_step.contains("spec implement REQ-001"));
+    }
+
+    #[test]
+    fn a_complete_reply_stays_warning_free() {
+        let reply = r#"[{"path": "src/main/java/Kata.java", "content": "public class Kata {}"}]"#;
+        let service = service(vec![], Some(FakeLlm::replying(reply)));
+        let report = service
+            .generate(
+                &mut NullPrompter,
+                "REQ-001",
+                &["Req001Test: TODO: assert".into()],
+                &[],
+                &[],
+                None,
+            )
+            .unwrap();
+        assert_eq!(report.warning, None);
+        assert_eq!(report.next_step, "Run spec test - the run decides.");
+    }
+
+    #[test]
+    fn implement_targets_an_existing_production_class() {
+        let reply = r#"[{"path": "src/main/java/com/example/StringCalculator.java", "content": "class StringCalculator { int add(String n) { return 0; } }"}]"#;
+        let sources = vec![SourceFile {
+            path: "src/main/java/com/example/StringCalculator.java".into(),
+            content: "class StringCalculator {}".into(),
+        }];
+        let service = service(sources, Some(FakeLlm::replying(reply)));
+        let report = service
+            .generate(
+                &mut NullPrompter,
+                "REQ-001",
+                &["todo".into()],
+                &[],
+                &[],
+                None,
+            )
+            .unwrap();
+        assert_eq!(
+            report.targets,
+            vec!["src/main/java/com/example/StringCalculator.java"]
+        );
+        assert_eq!(report.warning, None);
+        let prompts = service.llm.as_ref().unwrap().chat().prompts.borrow();
+        assert!(prompts[0].contains(
+            "Write the production code at src/main/java/com/example/StringCalculator.java"
+        ));
+    }
+
+    #[test]
+    fn prior_attempts_reach_the_model_in_the_implementation_prompt() {
+        let reply = r#"[{"path": "src/main/java/Kata.java", "content": "public class Kata {}"}]"#;
+        let service = service(vec![], Some(FakeLlm::replying(reply)));
+        let history = vec![ImplementAttempt {
+            requirement: "REQ-001".into(),
+            targets: vec!["src/main/java/Kata.java".into()],
+            failures: vec!["Req001Test: expected 0 but was 1\nat Req001Test.java:9".into()],
+            outcome: vec!["Req001Test: cannot find symbol\nat Req001Test.java:3".into()],
+        }];
+        service
+            .generate(
+                &mut NullPrompter,
+                "REQ-001",
+                &["Req001Test: cannot find symbol".into()],
+                &history,
+                &[],
+                None,
+            )
+            .unwrap();
+        let prompts = service.llm.as_ref().unwrap().chat().prompts.borrow();
+        assert!(prompts[0].contains("This is attempt 2 on this requirement"));
+        assert!(prompts[0].contains("Attempt 1 wrote: src/main/java/Kata.java"));
+        assert!(
+            prompts[0].contains("Req001Test: expected 0 but was 1"),
+            "the prior failure's first line reaches the prompt"
+        );
+        assert!(
+            !prompts[0].contains("at Req001Test.java:9"),
+            "prior stack traces are briefed away - only current failures carry full detail"
+        );
+        assert!(
+            prompts[0]
+                .contains("The run after attempt 1 reported:\n- Req001Test: cannot find symbol"),
+            "the attempt's actual result reaches the prompt: {}",
+            prompts[0]
+        );
+        assert!(
+            prompts[0].contains("Req001Test: cannot find symbol"),
+            "the current failures stay complete"
+        );
+    }
+
+    /// The refusal names what was wrong with the reply. Flattening every
+    /// rejection to one sentence left a developer rerunning this by hand
+    /// nothing to act on.
+    #[test]
+    fn an_unusable_implementation_reply_is_refused_with_the_reason() {
+        // Two replies, two different faults. Each one's own reason has
+        // to survive the trip out, which is the whole point.
+        for (reply, expected) in [
+            ("Sure, here you go!", "not a JSON array"),
+            (
+                r#"[{"path": "not/a/project/file.java", "content": "x"}]"#,
+                "no usable file update for this project",
+            ),
+        ] {
+            let error = service(vec![], Some(FakeLlm::replying(reply)))
+                .generate(&mut NullPrompter, "REQ-001", &[], &[], &[], None)
+                .unwrap_err();
+            assert!(
+                error.0.starts_with("The model's reply was refused:"),
+                "{}",
+                error.0
+            );
+            assert!(error.0.contains(expected), "{}", error.0);
+        }
+    }
+
+    /// A refused reply costs another full model call - minutes on a
+    /// local model. Each re-ask leaves its reason behind, so a wait
+    /// spanning several reads as retries rather than one hung call.
+    #[test]
+    fn refused_replies_narrate_each_retry() {
+        #[derive(Default)]
+        struct Recording {
+            warned: Vec<String>,
+        }
+        impl Prompter for Recording {
+            fn tell(&mut self, _message: &str) {}
+            fn warn(&mut self, message: &str) {
+                self.warned.push(message.to_string());
+            }
+            fn ask(&mut self, question: &str) -> Result<String, crate::ports::PromptError> {
+                panic!("no question is asked, but {question:?} was");
+            }
+            fn confirm(&mut self, question: &str) -> Result<bool, crate::ports::PromptError> {
+                panic!("nothing is confirmed, but {question:?} was");
+            }
+        }
+        let reply = r#"[{"path": "not/a/project/file.java", "content": "x"}]"#;
+        let service = service(vec![], Some(FakeLlm::replying(reply)));
+        let mut prompter = Recording::default();
+        let error = service
+            .generate(&mut prompter, "REQ-001", &[], &[], &[], None)
+            .unwrap_err();
+        assert!(
+            error.0.starts_with("The model's reply was refused:"),
+            "{}",
+            error.0
+        );
+        assert!(
+            prompter
+                .warned
+                .iter()
+                .any(|warning| warning.contains("asking again")
+                    && warning.contains("no usable file update")),
+            "each re-ask leaves its reason: {:?}",
+            prompter.warned
+        );
+    }
+
+    /// A generated unit test as `spec unittest generate` leaves it: a
+    /// failing placeholder carrying REQ-001's criterion where the
+    /// assertion belongs. It names REQ-001, so `unit_test_path` resolves
+    /// to it. The criterion quotes `"1,2"`, so the file holds it escaped
+    /// the way Java quotes it - which is the case worth fixturing.
+    fn generated_test() -> SourceFile {
+        let placeholder =
+            r#"fail("TODO: assert - Given \"1,2\", when add is called, then the result is 3");"#;
+        SourceFile {
+            path: "src/test/java/Req001Test.java".into(),
+            content: format!(
+                "/** Generated from REQ-001: Adds two numbers */\n\
+                 class Req001Test {{\n\
+                 \x20   @Test\n\
+                 \x20   void addsNumbers() {{\n\
+                 \x20       {placeholder}\n\
+                 \x20   }}\n\
+                 }}\n"
+            ),
+        }
+    }
+
+    /// Observed across six measured attempts: the model writes the
+    /// production code and hands the generated `fail("TODO: assert")`
+    /// back untouched. The complaint still goes back, so the model is
+    /// asked again. When every reply leaves the placeholder, the
+    /// production file that did arrive is written anyway - refusing the
+    /// test stub used to throw the implementation away with it.
+    #[test]
+    fn a_reply_that_leaves_the_placeholders_standing_still_writes_the_production_file() {
+        let reply = r#"[{"path": "src/main/java/Kata.java",
+            "content": "public class Kata { int add(String in) { return 0; } }"}]"#;
+        let service = service(vec![generated_test()], Some(FakeLlm::replying(reply)));
+        let report = service
+            .generate(
+                &mut NullPrompter,
+                "REQ-001",
+                &["boom".into()],
+                &[],
+                &[],
+                None,
+            )
+            .unwrap();
+        assert_eq!(report.production, ["src/main/java/Kata.java"]);
+        let warning = report.warning.expect("the placeholder is still a finding");
+        assert!(
+            warning.contains("src/test/java/Req001Test.java"),
+            "the refusal names the file still holding the stub: {warning}"
+        );
+        assert!(
+            warning.contains("still carries the generated placeholder")
+                && warning.contains("when add is called"),
+            "the refusal names the criterion left unasserted: {warning}"
+        );
+        assert!(
+            service.llm.as_ref().unwrap().chat().prompts.borrow().len() > 1,
+            "a refused reply is asked again rather than handed back"
+        );
+    }
+
+    /// The production file arrived whole and the reply was then cut off
+    /// inside a later file. That first file is the implementation.
+    #[test]
+    fn a_reply_cut_off_after_the_production_file_still_writes_it() {
+        let reply = concat!(
+            r#"[{"path": "src/main/java/Kata.java", "content": "public class Kata { int add(String in) { return 0; } }"}, "#,
+            r#"{"path": "src/test/java/Req001Test.java", "content": "class Req001Test { "#
+        );
+        let service = service(vec![generated_test()], Some(FakeLlm::replying(reply)));
+        let report = service
+            .generate(
+                &mut NullPrompter,
+                "REQ-001",
+                &["boom".into()],
+                &[],
+                &[],
+                None,
+            )
+            .unwrap();
+        assert_eq!(report.production, ["src/main/java/Kata.java"], "{report:?}");
+    }
+
+    /// A declared file that does not exist yet is exactly the file an
+    /// attempt is there to create. The reply filter used to admit one
+    /// new path - the primary - so the second one was dropped without a
+    /// word, and the requirement could never gain its adapter.
+    #[test]
+    fn a_declared_file_that_does_not_exist_yet_is_still_written() {
+        let filled = "class Req001Test { @Test void t() { assertEquals(3, new Port().add()); } }";
+        let reply = format!(
+            r#"[{{"path": "src/main/java/Port.java", "content": "public class Port {{}}"}},
+                {{"path": "src/main/java/Adapter.java", "content": "public class Adapter {{}}"}},
+                {{"path": "src/test/java/Req001Test.java", "content": {}}}]"#,
+            serde_json::to_string(filled).unwrap()
+        );
+        let service = service_declaring(
+            &["src/main/java/Port.java", "src/main/java/Adapter.java"],
+            vec![generated_test()],
+            Some(FakeLlm::replying(&reply)),
+        );
+        let report = service
+            .generate(
+                &mut NullPrompter,
+                "REQ-001",
+                &["boom".into()],
+                &[],
+                &[],
+                None,
+            )
+            .unwrap();
+        assert!(
+            report
+                .targets
+                .contains(&"src/main/java/Adapter.java".to_string()),
+            "{:?}",
+            report.targets
+        );
+        assert_eq!(
+            report.production,
+            ["src/main/java/Port.java", "src/main/java/Adapter.java"],
+            "the report names which of the targets were production code"
+        );
+        assert_eq!(report.warning, None, "both declared files were written");
+    }
+
+    /// One of two declared files is not an incomplete attempt - the test
+    /// run decides that. Touching none of them is, and the warning has
+    /// to name the whole set so the developer knows what was expected.
+    #[test]
+    fn the_untouched_warning_fires_only_when_no_declared_file_was_written() {
+        let one = r#"[{"path": "src/main/java/Port.java", "content": "public class Port {}"}]"#;
+        let partial = service_declaring(
+            &["src/main/java/Port.java", "src/main/java/Adapter.java"],
+            vec![],
+            Some(FakeLlm::replying(one)),
+        );
+        let report = partial
+            .generate(
+                &mut NullPrompter,
+                "REQ-001",
+                &["boom".into()],
+                &[],
+                &[],
+                None,
+            )
+            .unwrap();
+        assert_eq!(report.warning, None, "one of two written is not a finding");
+        assert_eq!(report.next_step, "Run spec test - the run decides.");
+
+        let steps = r#"[{"path": "src/test/java/Steps.java", "content": "class Steps { real }"}]"#;
+        let none = service_declaring(
+            &["src/main/java/Port.java", "src/main/java/Adapter.java"],
+            vec![SourceFile {
+                path: "src/test/java/Steps.java".into(),
+                content: "old steps".into(),
+            }],
+            Some(FakeLlm::replying(steps)),
+        );
+        let warning = none
+            .generate(
+                &mut NullPrompter,
+                "REQ-001",
+                &["boom".into()],
+                &[],
+                &[],
+                None,
+            )
+            .unwrap()
+            .warning
+            .expect("an attempt that wrote no production code warns");
+        assert!(
+            warning.contains("left the production code untouched"),
+            "{warning}"
+        );
+        assert!(
+            warning.contains("src/main/java/Port.java")
+                && warning.contains("src/main/java/Adapter.java"),
+            "the warning names every file that was expected: {warning}"
+        );
+    }
+
+    /// The gate is satisfied by writing the assertion, and a reply that
+    /// does is written as normal and asked for only once.
+    #[test]
+    fn a_reply_that_writes_the_assertion_is_accepted() {
+        let filled = "/** Generated from REQ-001: Adds two numbers */\n\
+                      class Req001Test {\n\
+                      \x20   @Test\n\
+                      \x20   void addsNumbers() {\n\
+                      \x20       assertEquals(3, new Kata().add(\"1,2\"));\n\
+                      \x20   }\n\
+                      }\n";
+        let reply = format!(
+            r#"[{{"path": "src/main/java/Kata.java",
+                  "content": "public class Kata {{ int add(String in) {{ return 0; }} }}"}},
+                {{"path": "src/test/java/Req001Test.java", "content": {}}}]"#,
+            serde_json::to_string(filled).unwrap()
+        );
+        let service = service(vec![generated_test()], Some(FakeLlm::replying(&reply)));
+        let report = service
+            .generate(
+                &mut NullPrompter,
+                "REQ-001",
+                &["boom".into()],
+                &[],
+                &[],
+                None,
+            )
+            .unwrap();
+        assert!(
+            report
+                .targets
+                .contains(&"src/test/java/Req001Test.java".to_string()),
+            "{:?}",
+            report.targets
+        );
+        assert_eq!(
+            service.llm.as_ref().unwrap().chat().prompts.borrow().len(),
+            1,
+            "a reply that satisfied the gate is not asked again"
+        );
+    }
+
+    #[test]
+    fn a_model_failure_during_implementation_is_reported() {
+        let error = service(vec![], Some(FakeLlm::failing()))
+            .generate(&mut NullPrompter, "REQ-001", &[], &[], &[], None)
+            .unwrap_err();
+        assert_eq!(error.0, "the model call failed - model crashed");
+    }
+
+    /// A transport failure is flagged for the caller, a refused reply is
+    /// not: the loop stops on the first and retries the second.
+    #[test]
+    fn an_unanswered_attempt_is_flagged_while_a_refused_reply_is_not() {
+        let unanswered = service(vec![], Some(FakeLlm::failing()));
+        unanswered
+            .generate(&mut NullPrompter, "REQ-001", &[], &[], &[], None)
+            .unwrap_err();
+        let flagged = unanswered
+            .take_unanswered()
+            .expect("a transport failure is flagged");
+        assert!(flagged.contains("the model call failed"), "{flagged}");
+        assert!(
+            unanswered.take_unanswered().is_none(),
+            "taking the flag clears it"
+        );
+
+        let refused = service(vec![], Some(FakeLlm::replying("Sure, here you go!")));
+        refused
+            .generate(&mut NullPrompter, "REQ-001", &[], &[], &[], None)
+            .unwrap_err();
+        assert!(
+            refused.take_unanswered().is_none(),
+            "a refused reply is not an unanswered attempt"
+        );
+    }
+
+    #[test]
+    fn an_implementation_for_an_unknown_requirement_is_refused() {
+        let error = service(vec![], Some(FakeLlm::replying("[]")))
+            .generate(&mut NullPrompter, "REQ-404", &[], &[], &[], None)
+            .unwrap_err();
+        assert_eq!(
+            error.0,
+            "No requirement with id REQ-404. Call spec list to see valid ids."
+        );
+    }
+
+    #[test]
+    fn readiness_is_clean_when_every_prerequisite_is_in_place() {
+        let service = service(vec![covered_steps_source(), unit_test_source()], None);
+        let report = service
+            .readiness("REQ-001", "RED", &["Req001Test: TODO: assert".into()], None)
+            .unwrap();
+        assert!(report.ready, "report: {report:?}");
+        assert!(report.findings.is_empty());
+        assert_eq!(
+            report.next_step,
+            "Every prerequisite is in place - spec implement REQ-001 can run."
+        );
+        let asset = |path: &str| {
+            report
+                .assets
+                .iter()
+                .find(|a| a.path == path)
+                .unwrap_or_else(|| panic!("no asset {path}: {:?}", report.assets))
+        };
+        assert!(asset("features/calc.feature").present);
+        assert!(asset("src/test/java/Req001Test.java").present);
+        assert!(
+            !asset("src/main/java/Kata.java").present,
+            "production code does not exist yet - and that is not a finding"
+        );
+    }
+
+    #[test]
+    fn readiness_names_every_gap_and_the_step_to_take_instead() {
+        let report = service(vec![], None)
+            .readiness("REQ-001", "START", &[], None)
+            .unwrap();
+        assert!(!report.ready);
+        let has = |fragment: &str| {
+            assert!(
+                report.findings.iter().any(|f| f.contains(fragment)),
+                "no finding with {fragment:?}: {:?}",
+                report.findings
+            );
+        };
+        has("run spec test first");
+        has("spec steps generate");
+        has("spec unittest generate REQ-001");
+        assert!(
+            report.next_step.contains("spec test"),
+            "the earliest gap leads: {}",
+            report.next_step
+        );
+    }
+
+    #[test]
+    fn readiness_on_green_says_there_is_nothing_to_implement() {
+        let report = service(vec![], None)
+            .readiness("REQ-001", "GREEN", &[], None)
+            .unwrap();
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|f| f.contains("The bar is GREEN"))
+        );
+    }
+
+    #[test]
+    fn readiness_flags_a_missing_tag_and_an_already_implemented_requirement() {
+        let report = service(vec![], None)
+            .readiness("REQ-002", "RED", &["boom".into()], None)
+            .unwrap();
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|f| f.contains("No scenario is tagged @REQ-002"))
+        );
+        let report = service(vec![], None)
+            .readiness("REQ-003", "RED", &["boom".into()], None)
+            .unwrap();
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|f| f.contains("REQ-003 is already implemented"))
+        );
+    }
+
+    #[test]
+    fn readiness_and_advice_for_an_unknown_requirement_are_refused() {
+        let refusal = "No requirement with id REQ-404. Call spec list to see valid ids.";
+        let service = service(vec![], Some(FakeLlm::replying("irrelevant")));
+        assert_eq!(
+            service
+                .readiness("REQ-404", "RED", &[], None)
+                .unwrap_err()
+                .0,
+            refusal
+        );
+        let readiness = service.readiness("REQ-001", "START", &[], None).unwrap();
+        assert_eq!(
+            service
+                .advice(&mut NullPrompter, "REQ-404", &readiness, &[])
+                .unwrap_err()
+                .0,
+            refusal
+        );
+    }
+
+    #[test]
+    fn advice_without_a_model_is_none() {
+        let service = service(vec![], None);
+        assert!(!service.has_model());
+        let readiness = service.readiness("REQ-001", "START", &[], None).unwrap();
+        assert_eq!(
+            service
+                .advice(&mut NullPrompter, "REQ-001", &readiness, &[])
+                .unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn advice_sends_the_survey_to_the_model_and_returns_its_reply() {
+        let service = service(
+            vec![],
+            Some(FakeLlm::replying(
+                "No - run spec test first to record the RED bar.",
+            )),
+        );
+        assert!(service.has_model());
+        let readiness = service.readiness("REQ-001", "START", &[], None).unwrap();
+        let advice = service
+            .advice(&mut NullPrompter, "REQ-001", &readiness, &[])
+            .unwrap()
+            .unwrap();
+        assert_eq!(advice, "No - run spec test first to record the RED bar.");
+        let prompts = service.llm.as_ref().unwrap().chat().prompts.borrow();
+        assert!(prompts[0].contains("The project assets:"));
+        assert!(prompts[0].contains("No RED test run is recorded"));
+        assert!(prompts[0].contains("at most four short sentences"));
+    }
+
+    #[test]
+    fn a_model_failure_during_advice_is_reported() {
+        let service = service(vec![], Some(FakeLlm::failing()));
+        let readiness = service.readiness("REQ-001", "START", &[], None).unwrap();
+        assert_eq!(
+            service
+                .advice(&mut NullPrompter, "REQ-001", &readiness, &[])
+                .unwrap_err()
+                .0,
+            "the model call failed - model crashed"
+        );
+    }
+
+    #[test]
+    fn an_empty_advice_reply_is_reported_as_invalid() {
+        let service = service(vec![], Some(FakeLlm::replying("   ")));
+        let readiness = service.readiness("REQ-001", "START", &[], None).unwrap();
+        let error = service
+            .advice(&mut NullPrompter, "REQ-001", &readiness, &[])
+            .unwrap_err();
+        assert!(
+            error.0.contains("empty") || error.0.contains("invalid"),
+            "got: {}",
+            error.0
+        );
+    }
+}

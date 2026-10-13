@@ -1,0 +1,3902 @@
+//! Deterministic code generation: step-definition and unit-test
+//! templates per supported ecosystem, plus the validation applied to LLM
+//! output before it may replace a template. Everything here is pure text
+//! transformation.
+
+use std::sync::LazyLock;
+
+use regex::Regex;
+
+use crate::domain::language::Language;
+use crate::domain::model::Requirement;
+use crate::domain::neighborhood;
+use crate::domain::prompts::{RenderedPrompt, render};
+use crate::domain::proposal::escape_controls;
+use crate::domain::steps::{MissingStep, extract_patterns, step_to_expression};
+use crate::domain::tdd::{ImplementAttempt, StateEntry};
+
+/// Where generated step definitions are written, by ecosystem convention.
+pub fn steps_target_path(language: Language) -> &'static str {
+    match language {
+        // Default package on purpose: the production class is written at
+        // the default-package path src/main/java/<Project>.java, and Java
+        // forbids a named package from referencing a default-package
+        // class - steps in a "steps" package could never compile against
+        // the production code the implement loop writes.
+        Language::Java => "src/test/java/GeneratedSteps.java",
+        Language::JavaScript => "features/step_definitions/generated.steps.js",
+        Language::TypeScript => "features/step_definitions/generated.steps.ts",
+        Language::DotNet => "StepDefinitions/GeneratedSteps.cs",
+        Language::Rust => "tests/steps/generated.rs",
+    }
+}
+
+/// What a generated unit test for one requirement is called, without a
+/// directory: the resolved layout decides where it goes.
+pub fn unit_test_file_name(language: Language, req_id: &str) -> String {
+    let pascal = pascal_case(req_id);
+    match language {
+        Language::Java => format!("{pascal}Test.java"),
+        Language::JavaScript => format!("{}.test.js", snake_case(req_id)),
+        Language::TypeScript => format!("{}.test.ts", snake_case(req_id)),
+        Language::DotNet => format!("{pascal}Test.cs"),
+        Language::Rust => format!("{}_test.rs", snake_case(req_id)),
+    }
+}
+
+/// Whether `file_name` is one [`unit_test_file_name`] gave some
+/// requirement's generated unit test, rather than a test the project
+/// wrote for itself.
+///
+/// A requirement id ends in digits, so the name built from it does too
+/// once the ecosystem's test suffix comes off: `HARNESS-019` becomes
+/// `harness_019_test.rs` or `Harness019Test.java`. A project's own test
+/// is named for the thing under test and ends in a letter.
+///
+/// Appending to a generated test is what makes a second requirement's
+/// test land in a file named for the first, where the read-back that
+/// looks for the id cannot find it.
+pub fn is_generated_unit_test_name(language: Language, file_name: &str) -> bool {
+    let stem = match language {
+        Language::Java => file_name.strip_suffix("Test.java"),
+        Language::JavaScript => file_name.strip_suffix(".test.js"),
+        Language::TypeScript => file_name.strip_suffix(".test.ts"),
+        Language::DotNet => file_name.strip_suffix("Test.cs"),
+        Language::Rust => file_name.strip_suffix("_test.rs"),
+    };
+    stem.is_some_and(|stem| {
+        stem.ends_with(|c: char| c.is_ascii_digit()) && stem.contains(|c: char| c.is_alphabetic())
+    })
+}
+
+/// Where a generated unit test for one requirement is written in a
+/// project with no layout of its own yet.
+pub fn unit_test_target_path(language: Language, req_id: &str) -> String {
+    let name = unit_test_file_name(language, req_id);
+    match language {
+        Language::Java => format!("src/test/java/{name}"),
+        Language::JavaScript | Language::TypeScript => format!("test/{name}"),
+        Language::DotNet => format!("Tests/{name}"),
+        Language::Rust => format!("tests/{name}"),
+    }
+}
+
+/// The World a generated Rust file declares for itself when there is no
+/// existing file to read one from.
+const GENERATED_WORLD: &str = "GeneratedWorld";
+
+/// An existing definition is the most reliable witness of the World the
+/// project binds: it compiles today, so whatever type it takes is the
+/// one the new definitions must take too.
+static WORLD_PARAM: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"(?s)#\[(?:given|when|then)\s*\([^\]]*\)\]\s*(?:pub\s+)?(?:async\s+)?fn\s+[A-Za-z_][A-Za-z0-9_]*\s*\([^)]*?&mut\s+([A-Za-z_][A-Za-z0-9_]*)",
+    )
+    .expect("valid regex")
+});
+
+/// Failing that, the struct the derive is written on. Attributes may sit
+/// between the two - `#[world(init = Self::new)]` is common - so the
+/// span up to `struct` is skipped rather than required to be empty.
+pub(crate) static WORLD_DERIVE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?s)#\[derive\([^)]*\bWorld\b[^)]*\)\][^;{]*?\bstruct\s+([A-Za-z_][A-Za-z0-9_]*)")
+        .expect("valid regex")
+});
+
+/// The type Rust step definitions in `existing` take as their world.
+///
+/// `cucumber::World` is a trait, so a definition naming it is not a type
+/// error the model can be prompted out of - it simply does not compile.
+/// What a step binds is the struct the project derives `World` on, and
+/// that name belongs to the project, not to this generator.
+fn world_type(existing: &str) -> Option<String> {
+    WORLD_PARAM
+        .captures(existing)
+        .or_else(|| WORLD_DERIVE.captures(existing))
+        .map(|caps| caps[1].to_string())
+}
+
+/// A pending step-definition file covering every missing step. Steps
+/// whose texts collapse to the same cucumber expression (e.g. "the
+/// result is 3" and "the result is 5" both become "the result is
+/// {int}") share one definition - duplicates would make the runner
+/// refuse every scenario as ambiguous.
+pub fn step_definitions_template(language: Language, missing: &[MissingStep]) -> String {
+    let body = step_definitions(
+        language,
+        missing,
+        Vec::new(),
+        &mut MemberNames::in_file(""),
+        GENERATED_WORLD,
+    )
+    .join("\n");
+    match language {
+        Language::Java => format!(
+            "import io.cucumber.java.PendingException;\n\
+             import io.cucumber.java.en.Given;\n\
+             import io.cucumber.java.en.Then;\n\
+             import io.cucumber.java.en.When;\n\n\
+             public class GeneratedSteps {{\n\n{body}}}\n"
+        ),
+        Language::JavaScript => {
+            format!("const {{ Given, When, Then }} = require('@cucumber/cucumber');\n\n{body}")
+        }
+        Language::TypeScript => {
+            format!("import {{ Given, When, Then }} from '@cucumber/cucumber';\n\n{body}")
+        }
+        Language::DotNet => format!(
+            "using Reqnroll;\n\n\
+             namespace StepDefinitions;\n\n\
+             [Binding]\n\
+             public class GeneratedSteps\n{{\n{body}}}\n"
+        ),
+        // A greenfield file has no World to bind, and `crate::World` is
+        // a guess about a type the project may never declare. Declaring
+        // one here makes the file compile on its own; the first real
+        // step body replaces the fields.
+        Language::Rust => format!(
+            "use cucumber::{{World, given, then, when}};\n\n\
+             #[derive(Debug, Default, World)]\n\
+             pub struct {GENERATED_WORLD};\n\n{body}"
+        ),
+    }
+}
+
+/// One definition per missing step whose cucumber expression `seen` does
+/// not already cover, each named through `names` so no two definitions in
+/// the finished file declare the same member.
+fn step_definitions(
+    language: Language,
+    missing: &[MissingStep],
+    mut seen: Vec<String>,
+    names: &mut MemberNames,
+    world: &str,
+) -> Vec<String> {
+    missing
+        .iter()
+        .filter(|step| {
+            let expression = step_to_expression(&step.text);
+            if seen.contains(&expression) {
+                false
+            } else {
+                seen.push(expression);
+                true
+            }
+        })
+        .map(|step| step_definition(language, step, names, world))
+        .collect()
+}
+
+fn step_definition(
+    language: Language,
+    step: &MissingStep,
+    names: &mut MemberNames,
+    world: &str,
+) -> String {
+    let expression = step_to_expression(&step.text);
+    let placeholders = count_placeholders(&expression);
+    match language {
+        Language::Java => {
+            let params = parameter_list(&expression, |i, kind| match kind {
+                "{int}" => format!("int arg{i}"),
+                _ => format!("String arg{i}"),
+            });
+            format!(
+                "    @{keyword}(\"{expr}\")\n    public void {name}({params}) {{\n        throw new PendingException();\n    }}\n",
+                keyword = step.keyword,
+                expr = escape_literal(&expression, '"'),
+                name = names.claim(camel_case(&name_source(&step.text))),
+            )
+        }
+        Language::JavaScript | Language::TypeScript => {
+            let params: Vec<String> = (0..placeholders).map(|i| format!("arg{i}")).collect();
+            format!(
+                "{keyword}('{expr}', function ({params}) {{\n  return 'pending';\n}});\n",
+                keyword = step.keyword,
+                expr = escape_literal(&expression, '\''),
+                params = params.join(", "),
+            )
+        }
+        Language::DotNet => {
+            let params = parameter_list(&expression, |i, kind| match kind {
+                "{int}" => format!("int arg{i}"),
+                _ => format!("string arg{i}"),
+            });
+            format!(
+                "    [{keyword}(\"{expr}\")]\n    public void {name}({params})\n    {{\n        throw new PendingStepException();\n    }}\n",
+                keyword = step.keyword,
+                expr = escape_literal(&expression, '"'),
+                name = names.claim(pascal_case(&name_source(&step.text))),
+            )
+        }
+        Language::Rust => {
+            // `parameter_list` joins with ", "; the world parameter in
+            // front is the only separator this arm adds. Prefixing each
+            // parameter as well put ", ," between two placeholders.
+            let params = parameter_list(&expression, |i, kind| match kind {
+                "{int}" => format!("arg{i}: i64"),
+                _ => format!("arg{i}: String"),
+            });
+            let params = if params.is_empty() {
+                params
+            } else {
+                format!(", {params}")
+            };
+            format!(
+                "#[{keyword}(expr = \"{expr}\")]\nfn {name}(_world: &mut {world}{params}) {{\n    todo!(\"implement step: {text}\");\n}}\n",
+                keyword = step.keyword.to_lowercase(),
+                expr = escape_literal(&expression, '"'),
+                name = names.claim(snake_case(&name_source(&step.text))),
+                text = escape_literal(&step.text, '"'),
+            )
+        }
+    }
+}
+
+/// `code` with the braces inside every Rust pending marker's message
+/// doubled, so the message is a string and not a format string.
+///
+/// `todo!("implement step: a requirement with {int} criteria")` does
+/// not compile: `{int}` is an inline format argument naming a variable
+/// that does not exist (E0425). The template writes the step's text
+/// there, which has no braces; the polish pass that renames the
+/// template's functions was observed swapping in the cucumber
+/// expression, placeholders and all, and the whole step file stopped
+/// compiling before any test ran. The message is for a reader, so
+/// doubling is lossless; an already-doubled brace stays doubled.
+pub fn escape_pending_messages(language: Language, code: &str) -> String {
+    if language != Language::Rust {
+        return code.to_string();
+    }
+    let next_marker = |rest: &str| {
+        pending_markers(language)
+            .iter()
+            .filter_map(|marker| {
+                let open = format!("{marker}(\"");
+                rest.find(&open).map(|at| (at, open))
+            })
+            .min_by_key(|(at, _)| *at)
+    };
+    let mut out = String::with_capacity(code.len());
+    let mut rest = code;
+    while let Some((at, marker)) = next_marker(rest) {
+        let literal_start = at + marker.len();
+        out.push_str(&rest[..literal_start]);
+        let Some(literal_len) = string_literal_len(&rest[literal_start..]) else {
+            break;
+        };
+        let literal = &rest[literal_start..literal_start + literal_len];
+        out.push_str(
+            &literal
+                .replace("{{", "{")
+                .replace("}}", "}")
+                .replace('{', "{{")
+                .replace('}', "}}"),
+        );
+        rest = &rest[literal_start + literal_len..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// The length of the string literal body starting at `s` (just after
+/// the opening quote), up to but not including the closing quote,
+/// honouring backslash escapes. `None` when it never closes.
+fn string_literal_len(s: &str) -> Option<usize> {
+    let bytes = s.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'\\' => index += 2,
+            b'"' => return Some(index),
+            _ => index += 1,
+        }
+    }
+    None
+}
+
+/// What [`step_definition`] leaves in a body it has not filled in, per
+/// ecosystem. Kept beside the code that writes them so the two cannot
+/// drift apart.
+fn pending_markers(language: Language) -> &'static [&'static str] {
+    match language {
+        Language::Rust => &["todo!", "unimplemented!"],
+        Language::Java => &["PendingException"],
+        Language::DotNet => &["PendingStepException"],
+        Language::JavaScript | Language::TypeScript => &["return 'pending'", "return \"pending\""],
+    }
+}
+
+/// Whether `body` belongs to a step nobody has written yet.
+///
+/// A pending body is not evidence of anything. It echoes its own
+/// Gherkin back in the marker's message and names no production code,
+/// so reading it as a statement about where the behavior lives points
+/// at whichever file happens to share a word with the scenario text.
+pub fn is_pending_step_body(language: Language, body: &str) -> bool {
+    pending_markers(language)
+        .iter()
+        .any(|marker| body.contains(marker))
+}
+
+/// A failing (RED) unit-test file with one test per acceptance criterion.
+pub fn unit_test_template(language: Language, requirement: &Requirement) -> String {
+    let mut names = MemberNames::in_file("");
+    let tests: Vec<String> = requirement
+        .acceptance_criteria
+        .iter()
+        .map(|criterion| unit_test_case(language, criterion, &mut names))
+        .collect();
+    let body = tests.join("\n");
+    let header = format!("Generated from {}: {}", requirement.id, requirement.title);
+    match language {
+        Language::Java => format!(
+            "import org.junit.jupiter.api.Test;\n\n\
+             import static org.junit.jupiter.api.Assertions.fail;\n\n\
+             /** {header} */\n\
+             class {name}Test {{\n\n{body}}}\n",
+            name = pascal_case(&requirement.id),
+        ),
+        Language::JavaScript => format!(
+            "// {header}\n\
+             const test = require('node:test');\n\
+             const assert = require('node:assert');\n\n{body}"
+        ),
+        Language::TypeScript => format!(
+            "// {header}\n\
+             import test from 'node:test';\n\
+             import assert from 'node:assert';\n\n{body}"
+        ),
+        Language::DotNet => format!(
+            "using Xunit;\n\n\
+             namespace Tests;\n\n\
+             /// <summary>{header}</summary>\n\
+             public class {name}Test\n{{\n{body}}}\n",
+            name = pascal_case(&requirement.id),
+        ),
+        Language::Rust => format!("// {header}\n\n{body}"),
+    }
+}
+
+fn unit_test_case(language: Language, criterion: &str, names: &mut MemberNames) -> String {
+    let commented = escape_controls(criterion);
+    match language {
+        Language::Java => format!(
+            "    @Test\n    void {name}() {{\n        // {commented}\n        fail(\"TODO: assert - {escaped}\");\n    }}\n",
+            name = names.claim(snake_case(criterion)),
+            escaped = escape_literal(criterion, '"'),
+        ),
+        // The JavaScript and TypeScript case name is a string, not an
+        // identifier, so two criteria that read alike stay legal - there
+        // is no slug here to collide.
+        Language::JavaScript | Language::TypeScript => format!(
+            "test('{name}', () => {{\n  // {commented}\n  assert.fail('TODO: assert - {escaped}');\n}});\n",
+            name = escape_literal(criterion, '\''),
+            escaped = escape_literal(criterion, '\''),
+        ),
+        Language::DotNet => format!(
+            "    [Fact]\n    public void {name}()\n    {{\n        // {commented}\n        Assert.Fail(\"TODO: assert - {escaped}\");\n    }}\n",
+            name = names.claim(pascal_case(criterion)),
+            escaped = escape_literal(criterion, '"'),
+        ),
+        Language::Rust => format!(
+            "#[test]\nfn {name}() {{\n    // {commented}\n    unimplemented!(\"TODO: assert - {escaped}\");\n}}\n",
+            name = names.claim(snake_case(criterion)),
+            escaped = escape_literal(criterion, '"'),
+        ),
+    }
+}
+
+/// Where the project's production code lives, by ecosystem convention.
+/// Named after the project - the spec's `project` field.
+pub fn implementation_target_path(language: Language, project: &str) -> String {
+    let name = implementation_file_name(language, project);
+    match language {
+        Language::Java => format!("src/main/java/{name}"),
+        Language::JavaScript | Language::TypeScript | Language::Rust => format!("src/{name}"),
+        Language::DotNet => name,
+    }
+}
+
+/// What the production file is called, without a directory.
+pub fn implementation_file_name(language: Language, project: &str) -> String {
+    let pascal = pascal_case(project);
+    match language {
+        Language::Java => format!("{pascal}.java"),
+        Language::JavaScript => format!("{}.js", snake_case(project)),
+        Language::TypeScript => format!("{}.ts", snake_case(project)),
+        Language::DotNet => format!("{pascal}.cs"),
+        Language::Rust => "lib.rs".into(),
+    }
+}
+
+/// The session's craft notes for the detected language: every
+/// code-producing model call carries these so generated tests and
+/// implementations follow the ecosystem's conventions - package
+/// naming for Java, snake_case modules for Rust - instead of merely
+/// compiling. The language is captured once per session (detected or
+/// chosen at scaffold time) and the hints flow from it.
+pub fn best_practices(language: Language) -> &'static str {
+    match language {
+        Language::Java => {
+            "- Package names are lowercase and mirror the directory: code under \
+             src/main/java and tests under src/test/java declare matching packages.\n\
+             - Classes are PascalCase; methods and fields are camelCase; constants \
+             are UPPER_SNAKE_CASE.\n\
+             - Test methods carry descriptive behavior names and assert one \
+             behavior each.\n\
+             - Prefer explicit imports over wildcards."
+        }
+        Language::JavaScript => {
+            "- Use const/let (never var), strict equality (===), and camelCase names.\n\
+             - One module per concern with explicit exports.\n\
+             - Test names read as behavior sentences and assert one behavior each."
+        }
+        Language::TypeScript => {
+            "- Type every exported function and avoid any; let inference handle locals.\n\
+             - Use const/let (never var), strict equality (===), and camelCase names.\n\
+             - Test names read as behavior sentences and assert one behavior each."
+        }
+        Language::DotNet => {
+            "- Namespaces mirror the folder structure; namespaces, classes, methods, \
+             and properties are PascalCase; locals and parameters are camelCase.\n\
+             - Test methods carry descriptive behavior names and assert one \
+             behavior each.\n\
+             - Prefer expression-bodied members only when they stay readable."
+        }
+        Language::Rust => {
+            "- Modules, functions, and file names are snake_case; types and traits \
+             are PascalCase.\n\
+             - Return Result in library code instead of panicking; reserve unwrap \
+             and expect for tests.\n\
+             - Borrow instead of cloning where a reference suffices, and keep \
+             rustfmt-clean formatting."
+        }
+    }
+}
+
+/// One file the model wants to write during an implementation attempt.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+pub struct FileUpdate {
+    #[serde(default)]
+    pub path: String,
+    #[serde(default)]
+    pub content: String,
+}
+
+/// One prerequisite surveyed by the implement preflight: what it is,
+/// where it should live, and whether it exists right now.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct ImplementAsset {
+    pub role: String,
+    pub path: String,
+    pub present: bool,
+}
+
+/// The strict instructions for a workflow advice call: given the
+/// requirement, the preflight findings, the asset survey, and the last
+/// failures, the model says whether `spec implement` can succeed right
+/// now and names the exact next command to run. Rendered from the
+/// `[advice]` templates.
+pub fn advice_prompt(
+    language: Language,
+    requirement: &Requirement,
+    findings: &[String],
+    assets: &[ImplementAsset],
+    failures: &[String],
+) -> RenderedPrompt {
+    render(
+        "advice",
+        minijinja::context! {
+            workflow => crate::domain::workflow::WORKFLOW_PROCESS,
+            language => language.display(),
+            id => requirement.id,
+            title => requirement.title,
+            story => requirement.story,
+            criteria => requirement.acceptance_criteria,
+            assets,
+            findings,
+            failures,
+        },
+    )
+}
+
+/// One prior implementation attempt, as the `[implementation]` user
+/// template consumes it: the paths it wrote (already joined), the
+/// failures it was trying to fix, and what the run after it reported -
+/// both briefed to their first lines.
+#[derive(serde::Serialize)]
+struct AttemptContext {
+    targets: String,
+    failures: Vec<String>,
+    outcome: Vec<String>,
+}
+
+/// How many prior attempts the implementation prompt recounts, and how
+/// much of each prior failure survives. An unbounded history grows the
+/// prompt with every RED attempt (13 attempts reached 188KB of prompt,
+/// 84% of it old stack traces) until the model outlasts its timeout.
+/// The current failures keep full detail; old ones are context, not
+/// the assignment.
+const PROMPT_HISTORY_ATTEMPTS: usize = 3;
+
+/// How much source text one implementation prompt may carry, in bytes.
+/// A kata fits whole; a project of any size does not, and every byte
+/// past the change itself is prefill a local model pays for twice -
+/// once waiting, once generating. Roughly 6k tokens, which leaves
+/// room for the requirement, the failures, the attempt history, and
+/// the reply. The files the attempt must write (its targets, the files
+/// the failures name, and the unit test carrying the assertions) are
+/// seeds and are always shown whole; everything past the budget is
+/// named in the map instead. Sized against a measured run: a 128 GiB
+/// machine serving a 105 GB model prefilled 13.5k tokens in 2m40s and
+/// the attempt passed four minutes before the reply was in; the
+/// neighbours this trims are what that prompt could afford to lose.
+const PROMPT_SOURCE_BUDGET: usize = 24_000;
+const PROMPT_FAILURE_BRIEF_CHARS: usize = 300;
+
+/// Project files the failures point at, in the order they appear in
+/// `files`. Named by file name when the stack mentions one; otherwise
+/// every step-definition source when Cucumber reports an undefined step.
+pub(crate) fn implicated_paths<'a>(
+    failures: &[String],
+    files: &'a [(String, String)],
+) -> Vec<&'a str> {
+    let failure_text = failures.join("\n");
+    let named: Vec<&str> = files
+        .iter()
+        .map(|(path, _)| path.as_str())
+        .filter(|path| {
+            std::path::Path::new(path)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| failure_text.contains(name))
+        })
+        .collect();
+    if !named.is_empty() {
+        return named;
+    }
+    if !is_undefined_step_failure(&failure_text) {
+        return named;
+    }
+    files
+        .iter()
+        .map(|(path, _)| path.as_str())
+        .filter(|path| is_step_definition_path(path))
+        .collect()
+}
+
+fn is_undefined_step_failure(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    lower.contains("is undefined")
+        || lower.contains("undefinedstepexception")
+        || lower.contains("you can implement this step using the snippet")
+}
+
+fn is_step_definition_path(path: &str) -> bool {
+    let name = std::path::Path::new(path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("");
+    let lower = path.replace('\\', "/").to_ascii_lowercase();
+    name.contains("Steps")
+        || name.contains("steps.")
+        || lower.contains("/step_definitions/")
+        || lower.contains("/steps/")
+}
+
+/// Lines of context shown on each side of a line the failures name,
+/// when a file is too large to show whole.
+const EXCERPT_CONTEXT_LINES: usize = 40;
+
+/// The line numbers the failures give for `path`, from `name:LINE`
+/// mentions (a compiler's `--> tests/cucumber.rs:5610:1`, a panic's
+/// `tests/cucumber.rs:5610:5`, a Java frame's `(Steps.java:42)`).
+pub(crate) fn failure_lines(path: &str, failures: &[String]) -> Vec<usize> {
+    let Some(name) = std::path::Path::new(path)
+        .file_name()
+        .and_then(|name| name.to_str())
+    else {
+        return Vec::new();
+    };
+    let text = failures.join("\n");
+    let mut lines: Vec<usize> = text
+        .match_indices(name)
+        .filter_map(|(at, _)| {
+            let after = &text[at + name.len()..];
+            let digits: String = after
+                .strip_prefix(':')?
+                .chars()
+                .take_while(char::is_ascii_digit)
+                .collect();
+            digits.parse().ok()
+        })
+        .collect();
+    lines.sort_unstable();
+    lines.dedup();
+    lines
+}
+
+/// A file the failures name that the prompt cannot carry whole: the
+/// lines they point at with context on either side, and a line saying
+/// what was left out.
+///
+/// Shown whole, a 5,600-line step-definition file put 216 KB into one
+/// prompt - 58k tokens, eleven minutes of prefill on the local model
+/// before the first token came back - for a file the reply can never
+/// return whole either (the reply guard refuses a replacement that
+/// drops a name, and 58k tokens of output is longer than the wait).
+/// The file's pending bodies are the step-fill pass's business; the
+/// attempt needs to see the failing lines, not the file.
+///
+/// Without a line number the head of the file is shown, which is
+/// where the imports, the world type, and the fixtures are.
+pub(crate) fn excerpt_for_prompt(path: &str, content: &str, failures: &[String]) -> String {
+    let lines: Vec<&str> = content.lines().collect();
+    let total = lines.len();
+    let mut named = failure_lines(path, failures);
+    named.retain(|line| (1..=total).contains(line));
+    let mut ranges: Vec<(usize, usize)> = Vec::new();
+    if named.is_empty() {
+        ranges.push((1, EXCERPT_CONTEXT_LINES.min(total)));
+    }
+    for line in named {
+        let start = line.saturating_sub(EXCERPT_CONTEXT_LINES).max(1);
+        let end = (line + EXCERPT_CONTEXT_LINES).min(total);
+        match ranges.last_mut() {
+            Some((_, last_end)) if start <= *last_end + 1 => *last_end = (*last_end).max(end),
+            _ => ranges.push((start, end)),
+        }
+    }
+    let mut out = format!(
+        "// EXCERPT of {path}: {total} lines, {} bytes - too large for this prompt. Shown: the \
+         lines the failures name, with context. Do NOT reply with this file; what is wrong in \
+         it is fixed by its own pass.\n",
+        content.len()
+    );
+    let mut cursor = 1;
+    for (start, end) in ranges {
+        if start > cursor {
+            out.push_str(&format!(
+                "// ... lines {cursor}-{} omitted ...\n",
+                start - 1
+            ));
+        }
+        for (offset, line) in lines[start - 1..end].iter().enumerate() {
+            out.push_str(&format!("{:>5}| {line}\n", start + offset));
+        }
+        cursor = end + 1;
+    }
+    if cursor <= total {
+        out.push_str(&format!("// ... lines {cursor}-{total} omitted ...\n"));
+    }
+    out
+}
+
+/// A prior failure, briefed for the prompt: its first line, capped.
+pub(crate) fn brief_failure(failure: &str) -> String {
+    let first_line = failure.lines().next().unwrap_or("").trim();
+    let brief: String = first_line
+        .chars()
+        .take(PROMPT_FAILURE_BRIEF_CHARS)
+        .collect();
+    if first_line.chars().count() > PROMPT_FAILURE_BRIEF_CHARS {
+        format!("{brief} ...")
+    } else {
+        brief
+    }
+}
+
+/// One project file, as the `[implementation]` user template consumes it.
+#[derive(serde::Serialize)]
+struct FileContext<'a> {
+    path: &'a str,
+    content: &'a str,
+}
+
+/// One project file the prompt names but does not carry, so the model
+/// knows it exists and roughly what is in it.
+#[derive(serde::Serialize)]
+struct MappedContext<'a> {
+    path: &'a str,
+    symbols: String,
+}
+
+/// One dated TDD state, as the `[implementation]` user template consumes
+/// it: timestamp, phase, and last-run counts — no stack traces.
+#[derive(serde::Serialize)]
+struct StateContext {
+    timestamp: String,
+    phase: String,
+    tests: u32,
+    failures: u32,
+    errors: u32,
+    skipped: u32,
+    refactor_log: Vec<String>,
+}
+
+/// The strict instructions for an implementation attempt: make the
+/// failing tests pass by writing production code and replacing the
+/// TODO placeholders in the test scaffolding with real bodies. The
+/// prompt carries the full failure details (stack traces included),
+/// every prior attempt with the failures it was addressing, and only
+/// the three latest dated TDD states. Rendered from the
+/// `[implementation]` templates.
+#[allow(clippy::too_many_arguments)]
+pub fn implementation_prompt(
+    language: Language,
+    requirement: &Requirement,
+    failures: &[String],
+    history: &[ImplementAttempt],
+    states: &[StateEntry],
+    files: &[(String, String)],
+    targets: &[String],
+    unit_test: &str,
+) -> RenderedPrompt {
+    // Every rule in the template reads correctly about one file, so the
+    // first target stays the one they all name and the rest arrive as a
+    // single additive line. A requirement whose code is one file - which
+    // is nearly all of them - renders exactly the prompt it always did.
+    let (production_path, rest) = targets.split_first().expect("a production target");
+    let also_write = rest.join(", ");
+    let omitted = history.len().saturating_sub(PROMPT_HISTORY_ATTEMPTS);
+    let history_context: Vec<AttemptContext> = history[omitted..]
+        .iter()
+        .map(|attempt| AttemptContext {
+            targets: attempt.targets.join(", "),
+            failures: attempt.failures.iter().map(|f| brief_failure(f)).collect(),
+            outcome: attempt.outcome.iter().map(|f| brief_failure(f)).collect(),
+        })
+        .collect();
+    let omitted_states = states
+        .len()
+        .saturating_sub(crate::domain::tdd::LLM_STATE_ENTRIES);
+    let states_context: Vec<StateContext> = states[omitted_states..]
+        .iter()
+        .map(|entry| StateContext {
+            timestamp: entry.timestamp.clone(),
+            phase: entry.phase.to_string(),
+            tests: entry.last_run.tests,
+            failures: entry.last_run.failures,
+            errors: entry.last_run.errors,
+            skipped: entry.last_run.skipped,
+            refactor_log: entry.refactor_log.clone(),
+        })
+        .collect();
+    let implicated = implicated_paths(failures, files);
+    // The attempt has to write the production file and whatever the
+    // failures point at; everything else is only worth sending insofar
+    // as it explains those. Walking out from them keeps the prompt
+    // about this change instead of about the whole project. The unit
+    // test is seeded too: the assertions live there, and under a tight
+    // budget the walk could otherwise map it away just when the attempt
+    // has to replace its placeholders. A seed the project does not
+    // have is ignored by the walk, so a missing test costs nothing.
+    //
+    // A target that is not on disk yet is still a file the attempt has
+    // to write. The walk can only show a file it was given, so the
+    // missing one is handed over empty - the prompt's own rule reads an
+    // empty body as "this file does not exist yet; create it."
+    let mut shown: Vec<(String, String)> = files
+        .iter()
+        .map(|(path, content)| {
+            let whole = targets.contains(path)
+                || path == unit_test
+                || !implicated.contains(&path.as_str())
+                || content.len() <= PROMPT_SOURCE_BUDGET;
+            if whole {
+                (path.clone(), content.clone())
+            } else {
+                (path.clone(), excerpt_for_prompt(path, content, failures))
+            }
+        })
+        .collect();
+    for target in targets {
+        if !shown.iter().any(|(path, _)| path == target) {
+            shown.push((target.clone(), String::new()));
+        }
+    }
+    let mut seeds: Vec<&str> = targets.iter().map(String::as_str).collect();
+    seeds.extend(implicated.iter().copied());
+    if !unit_test.is_empty() {
+        seeds.push(unit_test);
+    }
+    let selected = neighborhood::select(language, &shown, &seeds, PROMPT_SOURCE_BUDGET);
+    let files_context: Vec<FileContext> = selected
+        .included
+        .iter()
+        .map(|(path, content)| FileContext { path, content })
+        .collect();
+    let mapped: Vec<MappedContext> = selected
+        .mapped
+        .iter()
+        .map(|file| MappedContext {
+            path: file.path,
+            symbols: file.symbols.join(", "),
+        })
+        .collect();
+    // The project files the current failures name (by file name, which
+    // covers bare stack-frame names and absolute paths alike). Observed
+    // live: 147 straight attempts rewrote only the production file while
+    // every stack trace pointed at a step-definition file - the prompt
+    // must say where the failing code lives, not just show it.
+    // Undefined Cucumber steps never name the glue file (the engine
+    // never entered it), so those failures implicate the step-definition
+    // sources even when the stack is only Cucumber internals.
+    let attempt = history.len() + 1;
+    tracing::debug!(requirement = %requirement.id, attempt, omitted, "implementation prompt");
+    tracing::debug!(files = %files_context.len(), implicated = %implicated.len(), "prompt files");
+    render(
+        "implementation",
+        minijinja::context! {
+            implicated,
+            language => language.display(),
+            practices => best_practices(language),
+            production_path,
+            also_write,
+            id => requirement.id,
+            title => requirement.title,
+            story => requirement.story,
+            criteria => requirement.acceptance_criteria,
+            failures,
+            attempt => history.len() + 1,
+            omitted,
+            history => history_context,
+            instructions => crate::domain::tdd::STATE_INSTRUCTIONS,
+            states => states_context,
+            files => files_context,
+            mapped,
+        },
+    )
+}
+
+/// The hybrid polish instructions of `steps generate` and `unittest
+/// generate`: improve the deterministic scaffold without touching its
+/// contract. Rendered from the `[polish]` templates.
+pub fn polish_prompt(language: Language, scaffold: &str) -> RenderedPrompt {
+    render(
+        "polish",
+        minijinja::context! {
+            framework => language.bdd_framework(),
+            language => language.display(),
+            practices => best_practices(language),
+            file => scaffold,
+        },
+    )
+}
+
+/// One expression for one step line, asked when the template expression
+/// does not bind that line. Rendered from `[step_expression]`.
+pub fn step_expression_prompt(line: &str, expression: &str) -> RenderedPrompt {
+    render(
+        "step_expression",
+        minijinja::context! {
+            line => line,
+            expression => expression,
+        },
+    )
+}
+
+/// The fragment-scoped polish instructions used when the target file
+/// already exists: the model is shown only the newly generated members,
+/// never the file they will be spliced into. Rendered from the
+/// `[polish_fragment]` templates.
+pub fn polish_fragment_prompt(language: Language, members: &str, count: usize) -> RenderedPrompt {
+    render(
+        "polish_fragment",
+        minijinja::context! {
+            framework => language.bdd_framework(),
+            language => language.display(),
+            practices => best_practices(language),
+            count => count,
+            members => members,
+        },
+    )
+}
+
+/// Parse the model's implementation reply. Elements without a path or
+/// content are dropped; an unparseable reply is an empty list.
+pub fn parse_file_updates(reply: &str) -> Vec<FileUpdate> {
+    let body = strip_code_fences(reply);
+    // Models sometimes reply with one bare object instead of the asked-for
+    // array - accept both shapes rather than discarding a usable attempt.
+    let updates = serde_json::from_str::<Vec<FileUpdate>>(&body)
+        .or_else(|_| serde_json::from_str::<FileUpdate>(&body).map(|update| vec![update]))
+        .unwrap_or_else(|_| complete_file_updates(&body));
+    let updates: Vec<FileUpdate> = updates
+        .into_iter()
+        .filter(|update| !update.path.trim().is_empty() && !update.content.trim().is_empty())
+        .collect();
+    if updates.is_empty() {
+        tracing::debug!(reply_chars = %reply.len(), "LLM reply held no usable file updates");
+    } else {
+        tracing::debug!(count = updates.len(), "parsed file updates from LLM reply");
+    }
+    updates
+}
+
+/// Parse with a reason when the reply held no usable file update.
+pub fn parse_file_updates_checked(reply: &str) -> Result<Vec<FileUpdate>, String> {
+    let updates = parse_file_updates(reply);
+    if !updates.is_empty() {
+        return Ok(updates);
+    }
+    // A reply that opened a JSON update and never closed it is the model
+    // stopping mid-answer (observed live: three in a row, 23 to 288
+    // tokens, each cut inside a `///` doc line, each reported as "not a
+    // JSON array"). Saying which it was tells a developer to look at the
+    // model rather than at the prompt.
+    let body = strip_code_fences(reply);
+    let opened = body.trim_start().starts_with(['[', '{']);
+    if opened && serde_json::from_str::<serde_json::Value>(&body).is_err() {
+        return Err(format!(
+            "the reply began a JSON file update and stopped before it was complete \
+             ({} characters) - the model ended its answer early",
+            body.chars().count()
+        ));
+    }
+    Err("the reply was not a JSON array of {path, content} file updates".into())
+}
+
+/// The complete `{path, content}` objects in a JSON array the model did
+/// not finish. A reply cut off while writing a later file used to parse
+/// as nothing, so the production file that arrived whole was thrown away
+/// with the fragment after it.
+fn complete_file_updates(body: &str) -> Vec<FileUpdate> {
+    let Some(start) = body.find('[') else {
+        return Vec::new();
+    };
+    let mut rest = body[start + 1..].trim_start();
+    let mut updates = Vec::new();
+    while rest.starts_with('{') {
+        let Some(end) = json_object_end(rest) else {
+            break;
+        };
+        let (object, after) = rest.split_at(end);
+        let Ok(update) = serde_json::from_str::<FileUpdate>(object) else {
+            break;
+        };
+        if !update.path.trim().is_empty() && !update.content.trim().is_empty() {
+            updates.push(update);
+        }
+        rest = after.trim_start();
+        let Some(stripped) = rest.strip_prefix(',') else {
+            break;
+        };
+        rest = stripped.trim_start();
+    }
+    updates
+}
+
+/// The byte after the JSON object `input` starts with, when that object
+/// is closed. A string's braces are not structure, and an object the
+/// reply never finished has no end.
+fn json_object_end(input: &str) -> Option<usize> {
+    let mut depth = 0i32;
+    let mut in_string = false;
+    let mut escape = false;
+    for (index, ch) in input.char_indices() {
+        if in_string {
+            if escape {
+                escape = false;
+            } else {
+                match ch {
+                    '\\' => escape = true,
+                    '"' => in_string = false,
+                    _ => {}
+                }
+            }
+            continue;
+        }
+        match ch {
+            '"' => in_string = true,
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(index + ch.len_utf8());
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// The first JSON value in `body` opening with `open`. Models often
+/// emit a complete payload and then commentary (or a second copy);
+/// `from_str` rejects trailing data and would discard a usable reply.
+pub(crate) fn decode_json<T: serde::de::DeserializeOwned>(body: &str, open: char) -> Option<T> {
+    if let Ok(parsed) = serde_json::from_str(body) {
+        return Some(parsed);
+    }
+    let start = body.find(open)?;
+    let mut deserializer = serde_json::Deserializer::from_str(&body[start..]);
+    T::deserialize(&mut deserializer).ok()
+}
+
+/// Strip a surrounding Markdown code fence, which LLMs love to add,
+/// and drop a leading `<think>...</think>` block some models emit
+/// before the payload.
+pub fn strip_code_fences(response: &str) -> String {
+    let trimmed = strip_think_block(response.trim());
+    let Some(rest) = trimmed.strip_prefix("```") else {
+        return fenced_block_after_prose(&trimmed).unwrap_or(trimmed);
+    };
+    let after_language = rest.split_once('\n').map_or("", |(_, body)| body);
+    after_language
+        .rsplit_once("```")
+        .map_or(after_language, |(body, _)| body)
+        .trim()
+        .to_string()
+}
+
+/// The body of the first closed code fence in a reply that talked
+/// before it. Observed live: a polish reply opened with four paragraphs
+/// of reasoning, then the members in a ```rust fence - and the whole
+/// thing, prose first, was written into `tests/cucumber.rs`. A fence
+/// counts only at the start of a line, so a pair of backticks inside the
+/// code itself is not read as one.
+fn fenced_block_after_prose(reply: &str) -> Option<String> {
+    let open = reply.find("\n```")? + 1;
+    let after_language = reply[open + 3..].split_once('\n')?.1;
+    let close = after_language.find("\n```")?;
+    Some(after_language[..close].trim().to_string())
+}
+
+pub fn strip_think_block(text: &str) -> String {
+    let trimmed = text.trim();
+    let Some(rest) = trimmed.strip_prefix("<think>") else {
+        return trimmed.to_string();
+    };
+    match rest.split_once("</think>") {
+        Some((_, after)) => after.trim().to_string(),
+        None => trimmed.to_string(),
+    }
+}
+
+/// Would this code plausibly be a step-definition file for the language?
+/// The gate before LLM output may replace the deterministic template.
+///
+/// `class_name` is the target file's stem, where the ecosystem requires
+/// the public type to match it. A polish pass that renames the class can
+/// never compile (observed live: "class StringCalculatorSteps is public,
+/// should be declared in a file named ..."), so the rename is rejected
+/// and the deterministic template stands.
+pub fn looks_like_step_definitions(
+    language: Language,
+    code: &str,
+    class_name: Option<&str>,
+) -> bool {
+    !code.trim().is_empty()
+        && match language {
+            Language::Java => {
+                (code.contains("@Given") || code.contains("@When") || code.contains("@Then"))
+                    && class_name
+                        .map(|name| code.contains(&format!("public class {name}")))
+                        .unwrap_or(true)
+            }
+            Language::JavaScript | Language::TypeScript => {
+                code.contains("Given(") || code.contains("When(") || code.contains("Then(")
+            }
+            Language::DotNet => {
+                code.contains("[Given(") || code.contains("[When(") || code.contains("[Then(")
+            }
+            Language::Rust => {
+                code.contains("#[given") || code.contains("#[when") || code.contains("#[then")
+            }
+        }
+}
+
+/// Would this code plausibly be a unit-test file for the language?
+pub fn looks_like_unit_test(language: Language, code: &str) -> bool {
+    !code.trim().is_empty()
+        && match language {
+            Language::Java => code.contains("@Test"),
+            Language::JavaScript | Language::TypeScript => code.contains("test("),
+            Language::DotNet => code.contains("[Fact]") || code.contains("[Theory]"),
+            Language::Rust => code.contains("#[test]"),
+        }
+}
+
+/// Tightened polish gate for a brownfield test class: keep `@Test`, and
+/// refuse a reply that calls a different type than the one the project
+/// already constructs (`Calculator.add` when production is
+/// `StringCalculator`). A `fail(` TODO is always acceptable.
+pub fn looks_like_unit_test_for(
+    language: Language,
+    code: &str,
+    production_type: Option<&str>,
+) -> bool {
+    if !looks_like_unit_test(language, code) {
+        return false;
+    }
+    let Some(ty) = production_type else {
+        return true;
+    };
+    match language {
+        Language::Java => {
+            let wrong_static = code.contains("Calculator.add") && ty != "Calculator";
+            (code.contains(ty) || code.contains("fail(")) && !wrong_static
+        }
+        _ => true,
+    }
+}
+
+/// Does this fragment try to declare the scope it is meant to be spliced
+/// into? A polished fragment is inserted *inside* an existing class, so a
+/// package line, an import, or a type declaration in the reply would
+/// either nest illegally or duplicate what the file already has.
+fn declares_enclosing_scope(language: Language, fragment: &str) -> bool {
+    const MODIFIERS: [&str; 7] = [
+        "public",
+        "private",
+        "protected",
+        "final",
+        "abstract",
+        "static",
+        "sealed",
+    ];
+    const DECLARATIONS: [&str; 5] = ["class", "interface", "enum", "record", "namespace"];
+    fragment.lines().any(|line| {
+        let mut rest = line.trim();
+        if rest.starts_with("package ") || rest.starts_with("import ") || rest.starts_with("using ")
+        {
+            return true;
+        }
+        if matches!(language, Language::Rust) && rest.starts_with("mod ") {
+            return true;
+        }
+        // Peel modifiers so `public final class Foo` is caught as readily
+        // as a bare `class Foo`.
+        while let Some(tail) = MODIFIERS
+            .iter()
+            .find_map(|word| rest.strip_prefix(word)?.strip_prefix(' '))
+        {
+            rest = tail.trim_start();
+        }
+        DECLARATIONS
+            .iter()
+            .any(|word| rest.strip_prefix(word).is_some_and(|t| t.starts_with(' ')))
+    })
+}
+
+/// Polish gate for a step-definition *fragment*: the reply must declare
+/// exactly the cucumber expressions it was given - no additions, no
+/// losses, no edits - and must not wrap them in a class of its own.
+pub fn looks_like_step_fragment(language: Language, fragment: &str, expected: &[String]) -> bool {
+    if fragment.trim().is_empty() || declares_enclosing_scope(language, fragment) {
+        return false;
+    }
+    let kept = extract_patterns(language, fragment);
+    kept.len() == expected.len()
+        && expected.iter().all(|pattern| kept.contains(pattern))
+        && nothing_but_definitions(language, fragment)
+}
+
+/// Whether every non-blank line of `fragment` outside its step
+/// definitions is a comment. The fragment is spliced into a source file
+/// as it is, so a reply that kept the definitions it was asked for and
+/// explained itself around them (observed live: four paragraphs of
+/// reasoning before the code) would be written in as code.
+fn nothing_but_definitions(language: Language, fragment: &str) -> bool {
+    let spans = crate::domain::step_fill::definition_spans(language, fragment);
+    let mut cursor = 0;
+    let mut outside = String::new();
+    for span in &spans {
+        if span.start > cursor {
+            outside.push_str(&fragment[cursor..span.start]);
+            outside.push('\n');
+        }
+        cursor = cursor.max(span.end);
+    }
+    outside.push_str(&fragment[cursor..]);
+    outside.lines().map(str::trim).all(|line| {
+        line.is_empty()
+            || line.starts_with("//")
+            || line.starts_with("/*")
+            || line.starts_with('*')
+            || line.starts_with('#')
+    })
+}
+
+/// The text every generated TODO placeholder carries, whatever quote
+/// its ecosystem wrapped it in - Java and Rust use `"`, the JS family
+/// `'`. Named once so the readers below cannot disagree about it.
+const TODO_ASSERT: &str = "TODO: assert";
+
+/// Every `fail("TODO: assert ...")` placeholder a generated unit test
+/// fragment carries. These are the assertions the developer is meant to
+/// sharpen by hand, so the polish pass may not quietly resolve them.
+pub fn todo_placeholders(code: &str) -> Vec<String> {
+    let open = format!("\"{TODO_ASSERT}");
+    code.match_indices(open.as_str())
+        .filter_map(|(start, _)| {
+            let tail = &code[start + 1..];
+            tail.find('"').map(|end| tail[..end].to_string())
+        })
+        .collect()
+}
+
+/// Which of `criteria` the file at `path` still carries a generated
+/// placeholder for, once `updates` are applied.
+///
+/// Scoped to this requirement's own criteria rather than to everything
+/// in the file, because the file is usually shared: the kata's single
+/// test class holds every requirement's tests, and the *next*
+/// requirement's untouched placeholder is not this attempt's to answer
+/// for. Asking "is there a placeholder here" would block REQ-001 over
+/// REQ-002's stub, which no reply to this prompt could ever clear.
+///
+/// A file the reply left out is read from `files` as it stands.
+/// Declining to answer about the test is not the same as filling it in,
+/// and that is the attempt worth catching - it is what six measured
+/// attempts actually did.
+///
+/// Matching on the criterion text rather than on the failing call keeps
+/// this free of both the language and the quote it was wrapped in:
+/// [`unit_test_case`] writes the same `TODO: assert - <criterion>` into
+/// `fail("...")`, `assert.fail('...')`, `Assert.Fail("...")` and
+/// `unimplemented!("...")` alike.
+pub fn unasserted_criteria(
+    files: &[(String, String)],
+    updates: &[FileUpdate],
+    path: &str,
+    criteria: &[String],
+) -> Vec<String> {
+    let after = updates
+        .iter()
+        .find(|update| update.path == path)
+        .map(|update| update.content.as_str())
+        .or_else(|| {
+            files
+                .iter()
+                .find(|(known, _)| known == path)
+                .map(|(_, content)| content.as_str())
+        });
+    // A path nothing has written yet carries nothing.
+    let Some(after) = after else {
+        return Vec::new();
+    };
+    let written = unescaped(after);
+    criteria
+        .iter()
+        .filter(|criterion| written.contains(&unescaped(&format!("{TODO_ASSERT} - {criterion}"))))
+        .cloned()
+        .collect()
+}
+
+/// A criterion as it reads with every escape taken back out.
+///
+/// The generator writes criteria through `escape_literal`, so a
+/// criterion holding `"` reaches the file as `\"` and one holding `\n`
+/// as `\\n`. Dropping backslashes from both sides compares the two
+/// without needing to know which ecosystem's quote did the escaping.
+fn unescaped(text: &str) -> String {
+    text.replace('\\', "")
+}
+
+/// How many test cases a fragment declares.
+fn count_test_cases(language: Language, code: &str) -> usize {
+    let marker = match language {
+        Language::Java => "@Test",
+        Language::JavaScript | Language::TypeScript => "test(",
+        Language::DotNet => "[Fact]",
+        Language::Rust => "#[test]",
+    };
+    code.matches(marker).count()
+}
+
+/// Polish gate for a unit-test *fragment*: same number of test cases,
+/// every TODO placeholder intact, and no class of its own. The
+/// placeholders are the contract here - a reply that "helpfully" writes
+/// the assertion has taken the exercise away from the developer.
+pub fn looks_like_unit_test_fragment(
+    language: Language,
+    fragment: &str,
+    expected_placeholders: &[String],
+    expected_cases: usize,
+) -> bool {
+    if fragment.trim().is_empty() || declares_enclosing_scope(language, fragment) {
+        return false;
+    }
+    if count_test_cases(language, fragment) != expected_cases {
+        return false;
+    }
+    let kept = todo_placeholders(fragment);
+    kept.len() == expected_placeholders.len()
+        && expected_placeholders.iter().all(|todo| kept.contains(todo))
+}
+
+/// Append failing tests for `requirement` onto an existing test class
+/// (the workshop `StringCalculatorTest` shape). Greenfield still uses
+/// [`unit_test_template`].
+pub fn append_unit_tests(existing: &str, language: Language, requirement: &Requirement) -> String {
+    splice_unit_tests(
+        existing,
+        language,
+        &unit_test_fragment(existing, language, requirement),
+    )
+}
+
+/// The new test methods on their own, with no surrounding file.
+///
+/// Split out of [`append_unit_tests`] so the polish pass can be handed
+/// the generated members alone: a model that never sees the rest of the
+/// file cannot rename or reflow the tests already in it. `existing` is
+/// still read - for the member names it spends, so the fragment cannot
+/// redeclare a method the class already has.
+pub fn unit_test_fragment(existing: &str, language: Language, requirement: &Requirement) -> String {
+    let mut names = MemberNames::in_file(existing);
+    requirement
+        .acceptance_criteria
+        .iter()
+        .map(|criterion| unit_test_case_for(language, requirement, criterion, &mut names))
+        .collect()
+}
+
+/// Insert `fragment` - freshly generated or polished - into an existing
+/// test class. Bytes outside the splice point are carried over untouched.
+pub fn splice_unit_tests(existing: &str, language: Language, fragment: &str) -> String {
+    match language {
+        Language::Java => append_java_methods(existing, fragment),
+        _ => format!("{}\n{fragment}", existing.trim_end()),
+    }
+}
+
+fn unit_test_case_for(
+    language: Language,
+    requirement: &Requirement,
+    criterion: &str,
+    names: &mut MemberNames,
+) -> String {
+    match language {
+        Language::Java => format!(
+            "    @Test\n    @DisplayName(\"{id}: {title}\")\n    void {name}() {{\n        // {commented}\n        fail(\"TODO: assert - {escaped}\");\n    }}\n",
+            id = requirement.id,
+            title = escape_literal(criterion, '"'),
+            name = names.claim(snake_case(criterion)),
+            commented = escape_controls(criterion),
+            escaped = escape_literal(criterion, '"'),
+        ),
+        _ => unit_test_case(language, criterion, names),
+    }
+}
+
+fn append_java_methods(existing: &str, methods: &str) -> String {
+    let with_imports = ensure_java_import(
+        &ensure_java_import(existing, "import org.junit.jupiter.api.DisplayName;"),
+        "import static org.junit.jupiter.api.Assertions.fail;",
+    );
+    insert_into_class(&with_imports, methods)
+}
+
+/// Add members to the last class in a brace-delimited source, one blank
+/// line below whatever the class already declares.
+fn insert_into_class(source: &str, members: &str) -> String {
+    match source.rfind('}') {
+        Some(i) => format!("{}\n\n{members}\n{}", source[..i].trim_end(), &source[i..]),
+        None => format!("{source}\n{members}"),
+    }
+}
+
+/// Add definitions for `missing` to a file that already holds step
+/// definitions, skipping every cucumber expression the file declares.
+///
+/// Generated steps have to join the existing file rather than start a
+/// new one: two files declaring the same pattern is what Cucumber
+/// refuses as a duplicate step definition.
+pub fn append_step_definitions(
+    existing: &str,
+    language: Language,
+    missing: &[MissingStep],
+) -> String {
+    match step_definitions_fragment(existing, language, missing) {
+        Some(fragment) => splice_step_definitions(existing, language, &fragment),
+        None => existing.to_string(),
+    }
+}
+
+/// The new step definitions on their own, with no surrounding file, or
+/// `None` when `existing` already declares every missing expression.
+///
+/// Split out of [`append_step_definitions`] so the polish pass can be
+/// handed the generated definitions alone: a model that never sees the
+/// rest of the file cannot rename the definitions already binding
+/// scenarios that pass today.
+pub fn step_definitions_fragment(
+    existing: &str,
+    language: Language,
+    missing: &[MissingStep],
+) -> Option<String> {
+    let definitions = step_definitions(
+        language,
+        missing,
+        extract_patterns(language, existing),
+        &mut MemberNames::in_file(existing),
+        &world_type(existing).unwrap_or_else(|| GENERATED_WORLD.to_string()),
+    );
+    if definitions.is_empty() {
+        return None;
+    }
+    Some(definitions.join("\n"))
+}
+
+/// Insert `fragment` - freshly generated or polished - into a file that
+/// already holds step definitions, adding whatever imports it needs.
+/// Bytes outside the splice point are carried over untouched.
+pub fn splice_step_definitions(existing: &str, language: Language, fragment: &str) -> String {
+    match language {
+        Language::Java | Language::DotNet => {
+            insert_into_class(&ensure_cucumber_imports(existing, language), fragment)
+        }
+        _ => format!(
+            "{}\n\n{fragment}",
+            ensure_cucumber_imports(existing, language).trim_end()
+        ),
+    }
+}
+
+/// The imports a step definition needs, added only when absent.
+fn ensure_cucumber_imports(source: &str, language: Language) -> String {
+    match language {
+        Language::Java => [
+            "import io.cucumber.java.PendingException;",
+            "import io.cucumber.java.en.Given;",
+            "import io.cucumber.java.en.Then;",
+            "import io.cucumber.java.en.When;",
+        ]
+        .iter()
+        .fold(source.to_string(), |text, import| {
+            ensure_java_import(&text, import)
+        }),
+        Language::DotNet => ensure_leading_line(source, "using Reqnroll;"),
+        Language::JavaScript => ensure_leading_line(
+            source,
+            "const { Given, When, Then } = require('@cucumber/cucumber');",
+        ),
+        Language::TypeScript => ensure_leading_line(
+            source,
+            "import { Given, When, Then } from '@cucumber/cucumber';",
+        ),
+        Language::Rust => ensure_rust_cucumber_import(source),
+    }
+}
+
+fn ensure_leading_line(source: &str, line: &str) -> String {
+    if source.contains(line) {
+        return source.to_string();
+    }
+    format!("{line}\n{source}")
+}
+
+/// Every `use cucumber::...;` in the file, so what it already brings
+/// into scope can be read rather than string-matched as a whole line.
+static CUCUMBER_USE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?m)^\s*use\s+cucumber::([^;]*);").expect("valid regex"));
+
+/// The attribute macros a generated Rust step definition needs.
+const CUCUMBER_MACROS: [&str; 3] = ["given", "then", "when"];
+
+/// Bring in only the cucumber macros the file is missing, below its
+/// module header.
+///
+/// Two separate faults made the old whole-line approach emit code that
+/// would not compile. A file importing `cucumber::{World, given, then,
+/// when}` does not contain the literal line being looked for, so the
+/// same three macros were imported a second time (E0252); and
+/// prepending at byte 0 pushed the file's `//!` module docs below an
+/// item, which is E0753.
+fn ensure_rust_cucumber_import(source: &str) -> String {
+    let in_scope: Vec<&str> = CUCUMBER_USE
+        .captures_iter(source)
+        .flat_map(|caps| {
+            let body = caps.get(1).map_or("", |m| m.as_str());
+            identifiers_in(body)
+        })
+        .collect();
+    let glob = CUCUMBER_USE
+        .captures_iter(source)
+        .any(|caps| caps.get(1).is_some_and(|m| m.as_str().contains('*')));
+    let wanted: Vec<&str> = CUCUMBER_MACROS
+        .into_iter()
+        .filter(|name| !glob && !in_scope.contains(name))
+        .collect();
+    if wanted.is_empty() {
+        return source.to_string();
+    }
+    let import = format!("use cucumber::{{{}}};", wanted.join(", "));
+    let at = module_header_end(source);
+    let (header, rest) = source.split_at(at);
+    format!("{header}{import}\n\n{rest}")
+}
+
+/// The names a `use` path's braces list, ignoring punctuation.
+fn identifiers_in(body: &str) -> Vec<&str> {
+    body.split(|c: char| !c.is_alphanumeric() && c != '_')
+        .filter(|name| !name.is_empty())
+        .collect()
+}
+
+/// The byte offset past the module header - the first position an item
+/// may legally occupy.
+///
+/// `//!` doc comments and `#![...]` attributes describe the module they
+/// open and have to precede every item in it, so anything inserted
+/// above them stops the file compiling. A plain `//` comment is left
+/// alone: it usually introduces whatever follows it.
+fn module_header_end(source: &str) -> usize {
+    let mut at = 0;
+    for line in source.split_inclusive('\n') {
+        let trimmed = line.trim_start();
+        if trimmed.is_empty() || trimmed.starts_with("//!") || trimmed.starts_with("#![") {
+            at += line.len();
+        } else {
+            break;
+        }
+    }
+    at
+}
+
+fn ensure_java_import(source: &str, import: &str) -> String {
+    if source.contains(import.trim_end_matches(';')) {
+        return source.to_string();
+    }
+    if source.starts_with("package ")
+        && let Some(end) = source.find(';')
+    {
+        return format!(
+            "{}\n\n{}\n{}",
+            &source[..=end],
+            import,
+            source[end + 1..].trim_start()
+        );
+    }
+    format!("{import}\n{source}")
+}
+
+fn count_placeholders(expression: &str) -> usize {
+    let mut count = 0;
+    let mut rest = expression;
+    while let Some(open) = unescaped_index(rest, '{') {
+        count += 1;
+        rest = &rest[open + '{'.len_utf8()..];
+    }
+    count
+}
+
+/// Index of `needle` in `text`, ignoring a character escaped with `\`.
+/// `{string}` counts; `\{` does not, because that brace is literal text
+/// from the step line.
+fn unescaped_index(text: &str, needle: char) -> Option<usize> {
+    let mut escaped = false;
+    for (index, character) in text.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if character == '\\' {
+            escaped = true;
+            continue;
+        }
+        if character == needle {
+            return Some(index);
+        }
+    }
+    None
+}
+
+/// Build a parameter list from the expression's placeholders, one entry
+/// per placeholder, formatted by `format_param(index, kind)`.
+fn parameter_list(expression: &str, format_param: impl Fn(usize, &str) -> String) -> String {
+    let mut params = Vec::new();
+    let mut rest = expression;
+    while let Some(open) = unescaped_index(rest, '{') {
+        let tail = &rest[open..];
+        let Some(close) = unescaped_index(tail, '}') else {
+            break;
+        };
+        params.push(format_param(params.len(), &tail[..=close]));
+        rest = &tail[close + '}'.len_utf8()..];
+    }
+    params.join(", ")
+}
+
+/// Spec text as the body of a generated string literal delimited by
+/// `quote` - the one place criteria, step texts, and cucumber
+/// expressions cross into source code.
+///
+/// The spec writes an input newline as the two characters `\n` (REQ-005's
+/// `"1\n2,3"`), so a literal that escapes only the quote hands the
+/// compiler a real newline escape: the assertion message arrives broken
+/// across two lines at runtime. A criterion holding a real control
+/// character instead - which a model reword introduces, see
+/// [`crate::domain::proposal::escape_controls`] - ends the literal
+/// mid-string and stops the file compiling at all.
+///
+/// Escaping in one pass over the characters is what makes the order
+/// safe: a backslash written here is never re-read as the opening of the
+/// next escape, which is the double-escaping that chained `replace`
+/// calls invite.
+pub(crate) fn escape_literal(text: &str, quote: char) -> String {
+    let mut escaped = String::with_capacity(text.len());
+    for character in text.chars() {
+        match character {
+            '\\' => escaped.push_str("\\\\"),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            c if c == quote => {
+                escaped.push('\\');
+                escaped.push(c);
+            }
+            c => escaped.push(c),
+        }
+    }
+    escaped
+}
+
+/// The text an identifier is derived from: quoted arguments carry data,
+/// not meaning, so they are dropped before casing.
+fn name_source(text: &str) -> String {
+    let mut out = String::new();
+    let mut in_quotes = false;
+    for c in text.chars() {
+        if c == '"' {
+            in_quotes = !in_quotes;
+        } else if !in_quotes {
+            out.push(c);
+        }
+    }
+    out
+}
+
+fn words(text: &str) -> Vec<String> {
+    text.split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .map(str::to_lowercase)
+        .collect()
+}
+
+pub(crate) fn snake_case(text: &str) -> String {
+    let name = words(text).join("_");
+    if name.is_empty() {
+        "step".to_string()
+    } else if name.starts_with(|c: char| c.is_ascii_digit()) {
+        format!("_{name}")
+    } else {
+        name
+    }
+}
+
+fn pascal_case(text: &str) -> String {
+    let name: String = words(text)
+        .iter()
+        .map(|w| {
+            let mut chars = w.chars();
+            chars
+                .next()
+                .map(|c| c.to_uppercase().collect::<String>() + chars.as_str())
+                .expect("words are non-empty")
+        })
+        .collect();
+    if name.is_empty() {
+        "Step".to_string()
+    } else if name.starts_with(|c: char| c.is_ascii_digit()) {
+        format!("N{name}")
+    } else {
+        name
+    }
+}
+
+fn camel_case(text: &str) -> String {
+    let pascal = pascal_case(text);
+    let mut chars = pascal.chars();
+    chars
+        .next()
+        .map(|c| c.to_lowercase().collect::<String>() + chars.as_str())
+        .expect("pascal_case never returns an empty string")
+}
+
+/// The member names one generated file may still spend.
+///
+/// Java, C#, and Rust names are slugged out of free text by dropping
+/// everything that is not alphanumeric, so two texts that differ only in
+/// punctuation collapse to one identifier. REQ-007 walks straight into
+/// it: `//*` and `//;` are different delimiters and the same slug, and
+/// the class stops compiling on "method ... is already defined". The
+/// first claimant keeps the slug; every later one takes `_2`, `_3`, ...
+/// in order, which is legal in all three languages and reads the same
+/// way in each.
+///
+/// The suffix says nothing about what distinguishes the members, on
+/// purpose. Folding the punctuation into the slug instead would rename
+/// every generated member rather than only the colliding ones, and the
+/// text is already carried verbatim beside the member - in Java's
+/// `@DisplayName`, in the comment above the body, and in the TODO the
+/// placeholder fails with.
+struct MemberNames {
+    taken: Vec<String>,
+}
+
+impl MemberNames {
+    /// The names `source` already spends, so members appended to it join
+    /// without redeclaring one of them. A fresh file is `in_file("")`.
+    ///
+    /// An identifier followed by `(` is claimed whether it declares a
+    /// member or merely calls one: over-claiming costs a suffix nobody
+    /// reads, under-claiming costs the build.
+    fn in_file(source: &str) -> Self {
+        let mut taken = Vec::new();
+        let mut word = String::new();
+        let mut candidate: Option<String> = None;
+        for character in source.chars() {
+            if character.is_alphanumeric() || character == '_' {
+                word.push(character);
+                continue;
+            }
+            if !word.is_empty() {
+                candidate = Some(std::mem::take(&mut word));
+            }
+            match character {
+                '(' => taken.extend(candidate.take()),
+                c if c.is_whitespace() => {}
+                _ => candidate = None,
+            }
+        }
+        Self { taken }
+    }
+
+    /// `name`, or the first free `name_2`, `name_3`, ... after it.
+    fn claim(&mut self, name: String) -> String {
+        let mut claimed = name.clone();
+        let mut ordinal = 1u32;
+        while self.taken.contains(&claimed) {
+            ordinal += 1;
+            claimed = format!("{name}_{ordinal}");
+        }
+        self.taken.push(claimed.clone());
+        claimed
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Observed live: the polish pass put the cucumber expression into
+    /// the stub's message, and `{int}` made it a format string naming a
+    /// variable that does not exist. The file stopped compiling before
+    /// a test ran.
+    #[test]
+    fn braces_in_a_pending_message_are_doubled_so_it_is_not_a_format_string() {
+        let code = "fn a() {\n    todo!(\"implement step: a requirement with {int} criteria and {string}\");\n}\nfn b() {\n    unimplemented!(\"already {{ok}}\");\n}\nfn c() { let s = \"{int} elsewhere\"; }\n";
+        let out = escape_pending_messages(Language::Rust, code);
+        assert!(
+            out.contains(
+                "todo!(\"implement step: a requirement with {{int}} criteria and {{string}}\");"
+            ),
+            "{out}"
+        );
+        assert!(out.contains("unimplemented!(\"already {{ok}}\");"), "{out}");
+        assert!(
+            out.contains("let s = \"{int} elsewhere\";"),
+            "other strings are not touched: {out}"
+        );
+        assert_eq!(
+            escape_pending_messages(Language::Java, "throw new PendingException(); // {int}"),
+            "throw new PendingException(); // {int}"
+        );
+    }
+
+    fn missing(keyword: &str, text: &str) -> MissingStep {
+        MissingStep {
+            feature: "features/calc.feature".into(),
+            scenario: "Adds".into(),
+            keyword: keyword.into(),
+            text: text.into(),
+        }
+    }
+
+    fn requirement() -> Requirement {
+        Requirement {
+            id: "REQ-001".into(),
+            title: "Empty string returns zero".into(),
+            status: "pending".into(),
+            story: "As a user, I want zero so that sums start clean.".into(),
+            acceptance_criteria: vec![
+                "Given an empty string \"\", when add is called, then the result is 0".into(),
+            ],
+            feature_file: None,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn every_language_has_a_steps_target_path_in_its_convention() {
+        assert_eq!(
+            steps_target_path(Language::Java),
+            "src/test/java/GeneratedSteps.java"
+        );
+        assert_eq!(
+            steps_target_path(Language::JavaScript),
+            "features/step_definitions/generated.steps.js"
+        );
+        assert_eq!(
+            steps_target_path(Language::TypeScript),
+            "features/step_definitions/generated.steps.ts"
+        );
+        assert_eq!(
+            steps_target_path(Language::DotNet),
+            "StepDefinitions/GeneratedSteps.cs"
+        );
+        assert_eq!(
+            steps_target_path(Language::Rust),
+            "tests/steps/generated.rs"
+        );
+    }
+
+    #[test]
+    fn unit_test_paths_carry_the_requirement_id() {
+        assert_eq!(
+            unit_test_target_path(Language::Java, "REQ-001"),
+            "src/test/java/Req001Test.java"
+        );
+        assert_eq!(
+            unit_test_target_path(Language::JavaScript, "REQ-001"),
+            "test/req_001.test.js"
+        );
+        assert_eq!(
+            unit_test_target_path(Language::TypeScript, "REQ-001"),
+            "test/req_001.test.ts"
+        );
+        assert_eq!(
+            unit_test_target_path(Language::DotNet, "REQ-001"),
+            "Tests/Req001Test.cs"
+        );
+        assert_eq!(
+            unit_test_target_path(Language::Rust, "REQ-001"),
+            "tests/req_001_test.rs"
+        );
+    }
+
+    /// The name every ecosystem builds from an id has to read back as
+    /// generated, whatever the id's prefix - the guard this replaced only
+    /// recognised ids spelled `REQ`, so `HARNESS-019`'s generated test
+    /// passed for a project's own and got appended to.
+    #[test]
+    fn a_name_built_from_any_requirement_id_reads_back_as_generated() {
+        for language in Language::ALL {
+            for req_id in ["REQ-001", "HARNESS-019", "CLI-009"] {
+                let name = unit_test_file_name(language, req_id);
+                assert!(
+                    is_generated_unit_test_name(language, &name),
+                    "{language:?} {req_id} -> {name}"
+                );
+            }
+        }
+    }
+
+    /// The test a project wrote for itself is named for the thing under
+    /// test, and stays eligible as the append target.
+    #[test]
+    fn a_projects_own_test_does_not_read_back_as_generated() {
+        assert!(!is_generated_unit_test_name(
+            Language::Java,
+            "StringCalculatorTest.java"
+        ));
+        assert!(!is_generated_unit_test_name(
+            Language::Rust,
+            "calculator_test.rs"
+        ));
+        assert!(!is_generated_unit_test_name(
+            Language::TypeScript,
+            "calculator.test.ts"
+        ));
+    }
+
+    /// A name carrying another ecosystem's suffix is not this one's
+    /// generated test, so each language only skips its own.
+    #[test]
+    fn a_suffix_from_another_ecosystem_does_not_match() {
+        assert!(!is_generated_unit_test_name(
+            Language::Rust,
+            "Harness019Test.java"
+        ));
+        assert!(!is_generated_unit_test_name(
+            Language::Java,
+            "harness_019_test.rs"
+        ));
+    }
+
+    #[test]
+    fn every_language_carries_its_own_best_practices() {
+        assert!(best_practices(Language::Java).contains("Package names are lowercase"));
+        assert!(best_practices(Language::JavaScript).contains("const/let (never var)"));
+        assert!(best_practices(Language::TypeScript).contains("avoid any"));
+        assert!(best_practices(Language::DotNet).contains("Namespaces mirror the folder"));
+        assert!(best_practices(Language::Rust).contains("snake_case"));
+    }
+
+    #[test]
+    fn a_java_step_definition_is_a_pending_annotated_method() {
+        let code = step_definitions_template(
+            Language::Java,
+            &[missing("When", "add is called with \"1,2\"")],
+        );
+        assert!(code.contains("import io.cucumber.java.en.When;"));
+        assert!(code.contains("@When(\"add is called with {string}\")"));
+        assert!(code.contains("public void addIsCalledWith(String arg0)"));
+        assert!(code.contains("throw new PendingException();"));
+    }
+
+    #[test]
+    fn a_java_int_placeholder_becomes_an_int_parameter() {
+        let code = step_definitions_template(Language::Java, &[missing("Then", "the result is 3")]);
+        assert!(code.contains("@Then(\"the result is {int}\")"));
+        assert!(code.contains("public void theResultIs3(int arg0)"));
+    }
+
+    #[test]
+    fn steps_that_share_an_expression_share_one_definition() {
+        let code = step_definitions_template(
+            Language::Java,
+            &[
+                missing("Then", "the result is 3"),
+                missing("Then", "the result is 5"),
+                missing("When", "add is called with \"1,2\""),
+            ],
+        );
+        assert_eq!(
+            code.matches("@Then(\"the result is {int}\")").count(),
+            1,
+            "duplicate expressions make cucumber refuse every scenario:\n{code}"
+        );
+        assert!(code.contains("@When(\"add is called with {string}\")"));
+    }
+
+    #[test]
+    fn javascript_and_typescript_definitions_return_pending() {
+        for (language, first_line) in [
+            (
+                Language::JavaScript,
+                "const { Given, When, Then } = require('@cucumber/cucumber');",
+            ),
+            (
+                Language::TypeScript,
+                "import { Given, When, Then } from '@cucumber/cucumber';",
+            ),
+        ] {
+            let code = step_definitions_template(language, &[missing("Given", "a calculator")]);
+            assert!(code.starts_with(first_line), "got: {code}");
+            assert!(code.contains("Given('a calculator', function () {"));
+            assert!(code.contains("return 'pending';"));
+        }
+    }
+
+    #[test]
+    fn a_dotnet_definition_is_a_reqnroll_binding() {
+        let code = step_definitions_template(
+            Language::DotNet,
+            &[
+                missing("Then", "the result is 3"),
+                missing("When", "add is called with \"1,2\""),
+            ],
+        );
+        assert!(code.contains("using Reqnroll;"));
+        assert!(code.contains("[Binding]"));
+        assert!(code.contains("[Then(\"the result is {int}\")]"));
+        assert!(code.contains("public void TheResultIs3(int arg0)"));
+        assert!(code.contains("[When(\"add is called with {string}\")]"));
+        assert!(code.contains("public void AddIsCalledWith(string arg0)"));
+        assert!(code.contains("throw new PendingStepException();"));
+    }
+
+    #[test]
+    fn a_rust_definition_is_a_cucumber_rs_attribute_fn() {
+        let code = step_definitions_template(
+            Language::Rust,
+            &[missing("When", "add is called with \"1,2\"")],
+        );
+        assert!(code.contains("use cucumber::{World, given, then, when};"));
+        assert!(code.contains("#[when(expr = \"add is called with {string}\")]"));
+        assert!(code.contains("fn add_is_called_with(_world: &mut GeneratedWorld, arg0: String)"));
+        assert!(code.contains("todo!"));
+    }
+
+    /// `World` is a trait. A greenfield file that binds it does not
+    /// compile, and there is no project type to borrow instead, so the
+    /// file has to bring its own.
+    #[test]
+    fn a_greenfield_rust_file_declares_the_world_it_binds() {
+        let code = step_definitions_template(Language::Rust, &[missing("Then", "it works")]);
+        assert!(code.contains("#[derive(Debug, Default, World)]"));
+        assert!(code.contains("pub struct GeneratedWorld;"));
+        assert!(!code.contains("_world: &mut World,"));
+        assert!(!code.contains("use crate::World;"));
+    }
+
+    /// The project names its own world, and the definitions already in
+    /// the file are the proof of what that name is.
+    #[test]
+    fn appended_definitions_bind_the_world_the_file_already_uses() {
+        let existing = "//! Glue.\n\n\
+             use cucumber::{World, given, then, when};\n\n\
+             #[derive(Debug, Default, World)]\n\
+             struct SpecWorld { seen: bool }\n\n\
+             #[given(expr = \"a spec\")]\n\
+             fn a_spec(_world: &mut SpecWorld) {}\n";
+        let fragment =
+            step_definitions_fragment(existing, Language::Rust, &[missing("Then", "it works")])
+                .expect("a new step to add");
+        assert!(fragment.contains("_world: &mut SpecWorld"));
+        assert!(!fragment.contains("_world: &mut World"));
+    }
+
+    /// `//!` describes the module it opens, so it has to come before
+    /// every item. An import put above it is E0753.
+    #[test]
+    fn a_module_doc_comment_keeps_its_place_when_an_import_is_added() {
+        let existing = "//! Glue for the suite.\n//! Second line.\n\n\
+             use std::collections::HashMap;\n\n\
+             fn helper(_m: HashMap<u8, u8>) {}\n";
+        let spliced = splice_step_definitions(existing, Language::Rust, "// fragment\n");
+        assert!(spliced.starts_with("//! Glue for the suite.\n//! Second line.\n"));
+        let import = spliced
+            .find("use cucumber::")
+            .expect("the macros are not in scope yet");
+        assert!(import > spliced.find("//! Second line.").expect("the docs"));
+    }
+
+    /// The file imports the same three macros alongside `World`, so a
+    /// whole-line search misses them and imports them twice (E0252).
+    #[test]
+    fn macros_already_in_scope_are_not_imported_a_second_time() {
+        let existing = "//! Glue.\n\n\
+             use cucumber::{World, given, then, when};\n\n\
+             #[derive(Debug, Default, World)]\n\
+             struct SpecWorld;\n";
+        let spliced = splice_step_definitions(existing, Language::Rust, "// fragment\n");
+        assert_eq!(spliced.matches("use cucumber::").count(), 1);
+    }
+
+    /// Only what is missing is added - a file holding two of the three
+    /// gets the third, not all three again.
+    #[test]
+    fn only_the_missing_macros_are_imported() {
+        let existing = "use cucumber::{given, when};\n\nstruct SpecWorld;\n";
+        let spliced = splice_step_definitions(existing, Language::Rust, "// fragment\n");
+        assert!(spliced.contains("use cucumber::{then};"));
+        assert_eq!(spliced.matches("given").count(), 1);
+    }
+
+    /// A glob already brings every macro in; adding named imports on top
+    /// of it is the same duplicate error by another route.
+    #[test]
+    fn a_glob_import_counts_as_every_macro_being_in_scope() {
+        let existing = "use cucumber::*;\n\nstruct SpecWorld;\n";
+        let spliced = splice_step_definitions(existing, Language::Rust, "// fragment\n");
+        assert_eq!(spliced.matches("use cucumber::").count(), 1);
+    }
+
+    /// A file that derives `World` but has no definition yet still says
+    /// which struct it is; the derive is the fallback witness.
+    #[test]
+    fn the_world_derive_names_the_type_when_no_definition_does() {
+        let existing = "//! Glue.\n\n\
+             use cucumber::World;\n\n\
+             #[derive(Debug, Default, World)]\n\
+             #[world(init = Self::new)]\n\
+             pub struct HarnessWorld { root: String }\n";
+        let fragment =
+            step_definitions_fragment(existing, Language::Rust, &[missing("When", "it runs")])
+                .expect("a new step to add");
+        assert!(fragment.contains("_world: &mut HarnessWorld"));
+    }
+
+    #[test]
+    fn rust_int_placeholders_become_i64_parameters() {
+        let code = step_definitions_template(Language::Rust, &[missing("Then", "the result is 3")]);
+        assert!(code.contains("fn the_result_is_3(_world: &mut GeneratedWorld, arg0: i64)"));
+    }
+
+    /// Observed live: two `{string}` placeholders produced
+    /// `arg0: String, , arg1: String`, which does not parse.
+    #[test]
+    fn rust_steps_with_two_placeholders_separate_them_with_one_comma() {
+        let code = step_definitions_template(
+            Language::Rust,
+            &[missing(
+                "Then",
+                "the output contains \"proven\" for the first and \"proven\" for the second",
+            )],
+        );
+        assert!(
+            code.contains("(_world: &mut GeneratedWorld, arg0: String, arg1: String)"),
+            "{code}"
+        );
+        assert!(!code.contains(", ,"), "{code}");
+    }
+
+    /// What this module writes as a placeholder is what it has to
+    /// recognise later. A marker changed on one side and not the other
+    /// quietly turns generated boilerplate back into evidence.
+    #[test]
+    fn every_generated_placeholder_is_recognised_as_pending() {
+        for language in [
+            Language::Rust,
+            Language::Java,
+            Language::DotNet,
+            Language::JavaScript,
+            Language::TypeScript,
+        ] {
+            let code = step_definitions_template(language, &[missing("When", "it runs")]);
+            assert!(
+                is_pending_step_body(language, &code),
+                "{language:?} writes a placeholder it cannot recognise"
+            );
+        }
+    }
+
+    #[test]
+    fn a_step_someone_has_written_is_not_pending() {
+        assert!(!is_pending_step_body(
+            Language::Rust,
+            "fn adds(world: &mut SpecWorld) { world.calculator.add(\"1,2\"); }"
+        ));
+        assert!(!is_pending_step_body(
+            Language::Java,
+            "public void adds() { calculator.add(\"1,2\"); }"
+        ));
+        assert!(!is_pending_step_body(
+            Language::JavaScript,
+            "When('it runs', function () { return calculator.add('1,2'); });"
+        ));
+    }
+
+    #[test]
+    fn unit_tests_fail_red_in_every_language() {
+        let requirement = requirement();
+        let expectations = [
+            (Language::Java, "fail(\"TODO: assert -"),
+            (Language::JavaScript, "assert.fail('TODO: assert -"),
+            (Language::TypeScript, "assert.fail('TODO: assert -"),
+            (Language::DotNet, "Assert.Fail(\"TODO: assert -"),
+            (Language::Rust, "unimplemented!(\"TODO: assert -"),
+        ];
+        for (language, marker) in expectations {
+            let code = unit_test_template(language, &requirement);
+            assert!(
+                code.contains(marker),
+                "{language:?} missing {marker}: {code}"
+            );
+            assert!(
+                code.contains("Generated from REQ-001: Empty string returns zero"),
+                "{language:?} missing header"
+            );
+            assert!(
+                looks_like_unit_test(language, &code),
+                "{language:?} fails own gate"
+            );
+        }
+    }
+
+    #[test]
+    fn every_template_passes_its_own_validation_gate() {
+        let steps = [missing("Given", "a calculator")];
+        for language in Language::ALL {
+            let code = step_definitions_template(language, &steps);
+            assert!(
+                looks_like_step_definitions(language, &code, Some("GeneratedSteps")),
+                "{language:?} template fails its own gate: {code}"
+            );
+        }
+    }
+
+    #[test]
+    fn appended_steps_join_the_existing_class_and_skip_what_it_declares() {
+        let existing = "package com.example.kata;\n\n\
+             import io.cucumber.java.en.Given;\n\n\
+             public class CalculatorSteps {\n\
+             \x20   @Given(\"a calculator\")\n\
+             \x20   public void aCalculator() {}\n\
+             }\n";
+        let appended = append_step_definitions(
+            existing,
+            Language::Java,
+            &[
+                missing("Given", "a calculator"),
+                missing("Then", "the result is 3"),
+            ],
+        );
+        // The package and class survive, so the module still compiles.
+        assert!(appended.starts_with("package com.example.kata;"));
+        assert_eq!(appended.matches("public class CalculatorSteps").count(), 1);
+        // A pattern the file already declares is not repeated - two
+        // definitions of one expression is what Cucumber refuses.
+        assert_eq!(appended.matches("@Given(\"a calculator\")").count(), 1);
+        assert!(appended.contains("@Then(\"the result is {int}\")"));
+        // The imports the new definition needs are added, once.
+        assert_eq!(
+            appended
+                .matches("import io.cucumber.java.en.Given;")
+                .count(),
+            1
+        );
+        assert!(appended.contains("import io.cucumber.java.en.Then;"));
+        assert!(appended.contains("import io.cucumber.java.PendingException;"));
+    }
+
+    #[test]
+    fn the_step_fragment_holds_the_new_definitions_and_nothing_around_them() {
+        let existing = "package com.example.kata;\n\n\
+             public class CalculatorSteps {\n\
+             \x20   @Given(\"a calculator\")\n\
+             \x20   public void aCalculator() {}\n\
+             }\n";
+        let fragment = step_definitions_fragment(
+            existing,
+            Language::Java,
+            &[
+                missing("Given", "a calculator"),
+                missing("Then", "the result is 3"),
+            ],
+        )
+        .expect("one definition is missing");
+        // Only the missing step, and none of the scaffolding that would
+        // let a polish pass reach the rest of the file.
+        assert!(fragment.contains("@Then(\"the result is {int}\")"));
+        assert!(!fragment.contains("a calculator"), "{fragment}");
+        assert!(!fragment.contains("package"), "{fragment}");
+        assert!(!fragment.contains("class"), "{fragment}");
+
+        // Splicing it back is exactly what appending does.
+        assert_eq!(
+            splice_step_definitions(existing, Language::Java, &fragment),
+            append_step_definitions(
+                existing,
+                Language::Java,
+                &[
+                    missing("Given", "a calculator"),
+                    missing("Then", "the result is 3"),
+                ],
+            )
+        );
+    }
+
+    #[test]
+    fn appended_members_are_separated_from_the_member_above_by_a_blank_line() {
+        let existing = "public class CalculatorSteps {\n\n\
+             \x20   @Given(\"a calculator\")\n\
+             \x20   public void aCalculator() {\n\
+             \x20   }\n\
+             }\n";
+        let once = append_step_definitions(
+            existing,
+            Language::Java,
+            &[missing("Then", "the result is 3")],
+        );
+        assert!(
+            once.contains("    }\n\n    @Then(\"the result is {int}\")"),
+            "{once}"
+        );
+
+        // Appending again separates by one blank line, not two.
+        let twice = append_step_definitions(
+            &once,
+            Language::Java,
+            &[missing("When", "the numbers are added")],
+        );
+        assert!(!twice.contains("\n\n\n"), "{twice}");
+        assert!(
+            twice.contains("    }\n\n    @When(\"the numbers are added\")"),
+            "{twice}"
+        );
+    }
+
+    #[test]
+    fn a_file_declaring_every_missing_step_yields_no_fragment() {
+        let existing = "public class Steps {\n\
+             \x20   @Given(\"a calculator\")\n    public void a() {}\n}\n";
+        assert!(
+            step_definitions_fragment(
+                existing,
+                Language::Java,
+                &[missing("Given", "a calculator")]
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn the_step_fragment_gate_holds_the_expression_set_exactly() {
+        let expected = vec!["the result is {int}".to_string()];
+        let good = "    @Then(\"the result is {int}\")\n    public void resultIs(int n) {}\n";
+        assert!(looks_like_step_fragment(Language::Java, good, &expected));
+
+        // Renaming the method is the point; editing the expression is not.
+        let altered =
+            "    @Then(\"the result is {word}\")\n    public void resultIs(String n) {}\n";
+        assert!(!looks_like_step_fragment(
+            Language::Java,
+            altered,
+            &expected
+        ));
+
+        // Nor is inventing a definition that was not asked for.
+        let extra = "    @Then(\"the result is {int}\")\n    public void a(int n) {}\n\
+             \x20   @Given(\"a calculator\")\n    public void b() {}\n";
+        assert!(!looks_like_step_fragment(Language::Java, extra, &expected));
+
+        // A fragment is spliced inside a class, so it may not bring one.
+        for wrapped in [
+            "package com.example;\n    @Then(\"the result is {int}\")\n    public void a(int n) {}\n",
+            "public class Steps {\n    @Then(\"the result is {int}\")\n    public void a(int n) {}\n}\n",
+            "import io.cucumber.java.en.Then;\n    @Then(\"the result is {int}\")\n    public void a(int n) {}\n",
+        ] {
+            assert!(
+                !looks_like_step_fragment(Language::Java, wrapped, &expected),
+                "should be refused: {wrapped}"
+            );
+        }
+        assert!(!looks_like_step_fragment(Language::Java, "  \n", &expected));
+    }
+
+    /// Observed live: the reply kept every expression and wrapped them in
+    /// an explanation, which the splice wrote into the file as code.
+    #[test]
+    fn the_step_fragment_gate_refuses_prose_around_the_definitions() {
+        let expected = vec!["it works".to_string(), "the count is {int}".to_string()];
+        let definitions = "#[then(expr = \"it works\")]\nfn it_works(_w: &mut W) {\n    todo!(\"x\");\n}\n\n\
+                           #[then(expr = \"the count is {int}\")]\nfn the_count_is(_w: &mut W, n: i64) {\n    todo!(\"y\");\n}\n";
+        assert!(looks_like_step_fragment(
+            Language::Rust,
+            definitions,
+            &expected
+        ));
+        let commented = format!("// the two steps\n{definitions}");
+        assert!(looks_like_step_fragment(
+            Language::Rust,
+            &commented,
+            &expected
+        ));
+        let explained = format!(
+            "The input holds 2 functions, which contradicts the count of 1.\n\n{definitions}\nI kept the `todo!` placeholders as written."
+        );
+        assert!(!looks_like_step_fragment(
+            Language::Rust,
+            &explained,
+            &expected
+        ));
+    }
+
+    #[test]
+    fn the_unit_test_fragment_gate_keeps_the_todo_placeholders() {
+        let todos = vec!["TODO: assert - sums two numbers".to_string()];
+        let good = "    @Test\n    void sums() {\n        fail(\"TODO: assert - sums two numbers\");\n    }\n";
+        assert!(looks_like_unit_test_fragment(
+            Language::Java,
+            good,
+            &todos,
+            1
+        ));
+
+        // Writing the assertion takes the RED bar away from the developer.
+        let resolved =
+            "    @Test\n    void sums() {\n        assertEquals(3, c.add(\"1,2\"));\n    }\n";
+        assert!(!looks_like_unit_test_fragment(
+            Language::Java,
+            resolved,
+            &todos,
+            1
+        ));
+
+        // Dropping or inventing a case is refused on the count alone.
+        let two = format!("{good}{good}");
+        assert!(!looks_like_unit_test_fragment(
+            Language::Java,
+            &two,
+            &todos,
+            1
+        ));
+
+        let wrapped = format!("class Test {{\n{good}}}\n");
+        assert!(!looks_like_unit_test_fragment(
+            Language::Java,
+            &wrapped,
+            &todos,
+            1
+        ));
+    }
+
+    #[test]
+    fn todo_placeholders_are_read_back_out_of_generated_tests() {
+        let code = "fail(\"TODO: assert - one\");\n  fail(\"TODO: assert - two\");\n";
+        assert_eq!(
+            todo_placeholders(code),
+            vec!["TODO: assert - one", "TODO: assert - two"]
+        );
+        assert!(todo_placeholders("assertEquals(1, 1);").is_empty());
+    }
+
+    /// What the generator actually writes is what this has to recognise,
+    /// so the template supplies the input rather than an imitation of
+    /// it. The criterion here carries the `""` that `escape_literal`
+    /// rewrites on the way in, and every ecosystem quotes the call its
+    /// own way - the JS family with `'`, which is the case
+    /// [`todo_placeholders`] cannot see at all.
+    #[test]
+    fn a_generated_unit_test_leaves_its_criterion_unasserted_in_every_ecosystem() {
+        let requirement = requirement();
+        for language in Language::ALL {
+            let files = vec![(
+                "test".to_string(),
+                unit_test_template(language, &requirement),
+            )];
+            assert_eq!(
+                unasserted_criteria(&files, &[], "test", &requirement.acceptance_criteria),
+                requirement.acceptance_criteria,
+                "{} hid its placeholder from the reader",
+                language.display()
+            );
+        }
+    }
+
+    #[test]
+    fn a_body_with_the_assertion_written_reads_as_asserted() {
+        let criteria = requirement().acceptance_criteria;
+        let filled = "void a() { assertEquals(0, calc.add(\"\")); }".to_string();
+        let files = vec![("test".to_string(), filled)];
+        assert!(unasserted_criteria(&files, &[], "test", &criteria).is_empty());
+    }
+
+    /// The test class is shared in the kata layout, so the question has
+    /// to be about *this* requirement's criteria. Asking "does the file
+    /// hold a placeholder" would block REQ-001 over REQ-002's stub,
+    /// which no reply to REQ-001's prompt could ever clear.
+    #[test]
+    fn another_requirements_placeholder_in_the_same_file_is_not_this_ones_problem() {
+        let mine = "Given a, when b, then 3".to_string();
+        let theirs = "Given c, when d, then 7".to_string();
+        let shared = format!(
+            "class KataTest {{\n  void a() {{ assertEquals(3, add()); }}\n\
+             \x20 void b() {{ fail(\"TODO: assert - {theirs}\"); }}\n}}\n"
+        );
+        let files = vec![("KataTest.java".to_string(), shared)];
+        let only_mine = std::slice::from_ref(&mine);
+        assert!(unasserted_criteria(&files, &[], "KataTest.java", only_mine).is_empty());
+        assert_eq!(
+            unasserted_criteria(&files, &[], "KataTest.java", &[mine, theirs.clone()]),
+            vec![theirs]
+        );
+    }
+
+    /// The reply decides for a file it answered about; the working tree
+    /// decides for one it passed over. An attempt that simply ignores
+    /// the test has not filled it in, and that is the attempt worth
+    /// catching - it is what six measured attempts actually did.
+    #[test]
+    fn an_update_asserts_a_criterion_and_a_file_left_out_still_counts() {
+        let criteria = vec!["Given a, when b, then 3".to_string()];
+        let files = vec![(
+            "tests/a_test.rs".to_string(),
+            format!("unimplemented!(\"TODO: assert - {}\");", criteria[0]),
+        )];
+        assert_eq!(
+            unasserted_criteria(&files, &[], "tests/a_test.rs", &criteria),
+            criteria,
+            "a reply that passed the file over has not filled it in"
+        );
+        let updates = vec![FileUpdate {
+            path: "tests/a_test.rs".into(),
+            content: "assert_eq!(3, add(\"1,2\"));".into(),
+        }];
+        assert!(unasserted_criteria(&files, &updates, "tests/a_test.rs", &criteria).is_empty());
+        // A path nothing has written yet carries nothing.
+        assert!(unasserted_criteria(&[], &[], "tests/gone.rs", &criteria).is_empty());
+    }
+
+    #[test]
+    fn appending_nothing_new_leaves_the_file_untouched() {
+        let existing = "import io.cucumber.java.en.Given;\n\
+             public class Steps {\n\
+             \x20   @Given(\"a calculator\")\n\
+             \x20   public void aCalculator() {}\n\
+             }\n";
+        assert_eq!(
+            append_step_definitions(
+                existing,
+                Language::Java,
+                &[missing("Given", "a calculator")]
+            ),
+            existing
+        );
+    }
+
+    #[test]
+    fn appended_steps_keep_each_ecosystem_compiling() {
+        for language in Language::ALL {
+            let first = step_definitions_template(language, &[missing("Given", "a calculator")]);
+            let appended =
+                append_step_definitions(&first, language, &[missing("Then", "the result is 3")]);
+            assert!(
+                appended.contains("a calculator"),
+                "{language:?} lost the existing step: {appended}"
+            );
+            assert!(
+                looks_like_step_definitions(language, &appended, Some("GeneratedSteps")),
+                "{language:?} append fails the gate: {appended}"
+            );
+        }
+    }
+
+    #[test]
+    fn java_steps_validation_rejects_a_class_renamed_away_from_its_file() {
+        // Seen live: the polish pass renamed the class while the file
+        // kept its name, which can never compile.
+        let renamed = "import io.cucumber.java.en.Given;\n\
+             public class StringCalculatorSteps {\n\
+                 @Given(\"a calculator\") public void polished() {}\n\
+             }\n";
+        assert!(!looks_like_step_definitions(
+            Language::Java,
+            renamed,
+            Some("GeneratedSteps")
+        ));
+        // The same code is fine when that *is* the target file's name,
+        // which is what appending to a discovered step file needs.
+        assert!(looks_like_step_definitions(
+            Language::Java,
+            renamed,
+            Some("StringCalculatorSteps")
+        ));
+        let kept = renamed.replace("StringCalculatorSteps", "GeneratedSteps");
+        assert!(looks_like_step_definitions(
+            Language::Java,
+            &kept,
+            Some("GeneratedSteps")
+        ));
+    }
+
+    #[test]
+    fn validation_rejects_empty_and_unrecognizable_output() {
+        for language in Language::ALL {
+            assert!(!looks_like_step_definitions(language, "   ", None));
+            assert!(!looks_like_step_definitions(
+                language,
+                "I cannot help with that.",
+                None
+            ));
+            assert!(!looks_like_unit_test(language, ""));
+            assert!(!looks_like_unit_test(language, "Sure! Here is an essay."));
+        }
+    }
+
+    #[test]
+    fn java_polish_rejects_a_wrong_production_type() {
+        let polished = "@Test void two() { Calculator.add(\"1,2\"); }";
+        assert!(looks_like_unit_test(Language::Java, polished));
+        assert!(!looks_like_unit_test_for(
+            Language::Java,
+            polished,
+            Some("StringCalculator")
+        ));
+        let todo = "@Test void two() { fail(\"TODO\"); }";
+        assert!(looks_like_unit_test_for(
+            Language::Java,
+            todo,
+            Some("StringCalculator")
+        ));
+    }
+
+    #[test]
+    fn appending_java_tests_keeps_the_class_and_names_the_requirement() {
+        let existing = "package com.example;\n\n\
+             import org.junit.jupiter.api.Test;\n\n\
+             class StringCalculatorTest {\n    private final StringCalculator calculator = new StringCalculator();\n}\n";
+        let requirement = Requirement {
+            id: "REQ-003".into(),
+            title: "Two comma-separated numbers".into(),
+            status: "pending".into(),
+            story: "As a user, I want sums so that I can add.".into(),
+            acceptance_criteria: vec!["Given a, when b, then 3".into()],
+            feature_file: None,
+            ..Default::default()
+        };
+        let code = append_unit_tests(existing, Language::Java, &requirement);
+        assert!(code.contains("package com.example;"));
+        assert!(code.contains("class StringCalculatorTest"));
+        assert!(code.contains("@DisplayName(\"REQ-003: Given a, when b, then 3\")"));
+        assert!(code.contains("fail(\"TODO: assert -"));
+        assert!(code.contains("import org.junit.jupiter.api.DisplayName"));
+        assert!(code.contains("Assertions.fail"));
+        assert!(
+            code.matches('}').count() >= 2,
+            "class brace is preserved: {code}"
+        );
+    }
+
+    // ---- member-name uniqueness ---------------------------------------
+
+    /// The two REQ-007 custom-delimiter criteria, which differ only in
+    /// the delimiter character, and the slug they both reduce to.
+    const DELIMITER_CRITERIA: [&str; 2] = [
+        r#"Given "//*\n1*2*3", when add is called, then the result is 6"#,
+        r#"Given "//;\n1;2;3", when add is called, then the result is 6"#,
+    ];
+    const DELIMITER_SLUG: &str = "given_n1_2_3_when_add_is_called_then_the_result_is_6";
+
+    /// The Java methods a generated file or fragment declares.
+    fn declared_members(code: &str) -> Vec<String> {
+        code.lines()
+            .filter_map(|line| line.trim().strip_prefix("void "))
+            .filter_map(|rest| rest.split_once('('))
+            .map(|(name, _)| name.to_string())
+            .collect()
+    }
+
+    #[test]
+    fn two_criteria_differing_only_in_punctuation_get_distinct_member_names() {
+        // Observed live on REQ-007: both criteria slugged to one name,
+        // `run_tests` came back tests=0 errors=1, and javac said the
+        // method was already defined in StringCalculatorTest.
+        let code = unit_test_fragment("", Language::Java, &requirement_with(&DELIMITER_CRITERIA));
+        assert_eq!(
+            declared_members(&code),
+            vec![DELIMITER_SLUG.to_string(), format!("{DELIMITER_SLUG}_2")],
+            "{code}"
+        );
+        // The suffix disambiguates the identifier and nothing else: each
+        // criterion still reaches the reader whole.
+        assert!(code.contains(r#"//*\n1*2*3"#), "{code}");
+        assert!(code.contains(r#"//;\n1;2;3"#), "{code}");
+        assert_eq!(code.matches("@DisplayName").count(), 2, "{code}");
+    }
+
+    #[test]
+    fn a_criterion_never_redeclares_a_method_the_class_already_has() {
+        let existing = "import org.junit.jupiter.api.Test;\n\n\
+             class StringCalculatorTest {\n\n\
+             \x20   @Test\n\
+             \x20   void given_1_2_when_add_is_called_then_the_result_is_3() {\n\
+             \x20   }\n\
+             }\n";
+        let appended = append_unit_tests(
+            existing,
+            Language::Java,
+            &requirement_with(&[r#"Given "1,2", when add is called, then the result is 3"#]),
+        );
+        assert_eq!(
+            declared_members(&appended),
+            vec![
+                "given_1_2_when_add_is_called_then_the_result_is_3",
+                "given_1_2_when_add_is_called_then_the_result_is_3_2",
+            ],
+            "{appended}"
+        );
+    }
+
+    #[test]
+    fn a_three_way_collision_numbers_the_second_and_the_third() {
+        let mut criteria = DELIMITER_CRITERIA.to_vec();
+        criteria.push(r#"Given "//|\n1|2|3", when add is called, then the result is 6"#);
+        let code = unit_test_fragment("", Language::Java, &requirement_with(&criteria));
+        assert_eq!(
+            declared_members(&code),
+            vec![
+                DELIMITER_SLUG.to_string(),
+                format!("{DELIMITER_SLUG}_2"),
+                format!("{DELIMITER_SLUG}_3"),
+            ],
+            "{code}"
+        );
+    }
+
+    #[test]
+    fn generating_the_same_criteria_twice_names_them_the_same_way() {
+        let requirement = requirement_with(&DELIMITER_CRITERIA);
+        // Greenfield, and again onto a class that already holds the
+        // members of a previous run: the same inputs must give the same
+        // names, or a regenerate churns the diff for no reason.
+        let class = "class StringCalculatorTest {\n}\n";
+        let once = append_unit_tests(class, Language::Java, &requirement);
+        assert_eq!(once, append_unit_tests(class, Language::Java, &requirement));
+        assert_eq!(
+            unit_test_fragment(&once, Language::Java, &requirement),
+            unit_test_fragment(&once, Language::Java, &requirement)
+        );
+        // Appending the same criteria to the file they already produced
+        // still keeps every member apart.
+        let twice = append_unit_tests(&once, Language::Java, &requirement);
+        let members = declared_members(&twice);
+        let mut unique = members.clone();
+        unique.sort();
+        unique.dedup();
+        assert_eq!(members.len(), 4, "{twice}");
+        assert_eq!(unique.len(), members.len(), "{twice}");
+    }
+
+    #[test]
+    fn every_language_that_slugs_a_criterion_keeps_the_members_apart() {
+        let requirement = requirement_with(&DELIMITER_CRITERIA);
+        for (language, first, second) in [
+            (
+                Language::Java,
+                format!("void {DELIMITER_SLUG}()"),
+                format!("void {DELIMITER_SLUG}_2()"),
+            ),
+            (
+                Language::DotNet,
+                "public void GivenN123WhenAddIsCalledThenTheResultIs6()".to_string(),
+                "public void GivenN123WhenAddIsCalledThenTheResultIs6_2()".to_string(),
+            ),
+            (
+                Language::Rust,
+                format!("fn {DELIMITER_SLUG}()"),
+                format!("fn {DELIMITER_SLUG}_2()"),
+            ),
+        ] {
+            let code = unit_test_template(language, &requirement);
+            assert!(
+                code.contains(&first),
+                "{language:?} missing {first}:\n{code}"
+            );
+            assert!(
+                code.contains(&second),
+                "{language:?} missing {second}:\n{code}"
+            );
+        }
+        // JavaScript and TypeScript name a case with a string, not an
+        // identifier, so there is no slug to collide and both criteria
+        // keep their own words.
+        for language in [Language::JavaScript, Language::TypeScript] {
+            let code = unit_test_template(language, &requirement);
+            assert_eq!(code.matches("test('").count(), 2, "{language:?}: {code}");
+            assert!(code.contains(r#"//*\n1*2*3"#), "{language:?}: {code}");
+            assert!(code.contains(r#"//;\n1;2;3"#), "{language:?}: {code}");
+        }
+    }
+
+    #[test]
+    fn two_step_texts_that_slug_alike_get_distinct_definition_names() {
+        // Two different cucumber expressions - so both definitions are
+        // generated - that reduce to one identifier: the quoted argument
+        // and the bare asterisk are both dropped before casing.
+        let steps = [
+            missing("Then", "the delimiter is \";\""),
+            missing("Then", "the delimiter is *"),
+        ];
+        let code = step_definitions_template(Language::Java, &steps);
+        assert!(
+            code.contains("public void theDelimiterIs(String arg0)"),
+            "{code}"
+        );
+        assert!(code.contains("public void theDelimiterIs_2()"), "{code}");
+    }
+
+    #[test]
+    fn an_appended_step_definition_never_redeclares_a_method_the_file_has() {
+        let existing = "import io.cucumber.java.en.Then;\n\n\
+             public class GeneratedSteps {\n\n\
+             \x20   @Then(\"the delimiter is {string}\")\n\
+             \x20   public void theDelimiterIs(String arg0) {}\n\
+             }\n";
+        let appended = append_step_definitions(
+            existing,
+            Language::Java,
+            &[missing("Then", "the delimiter is *")],
+        );
+        assert_eq!(
+            appended.matches("public void theDelimiterIs(").count(),
+            1,
+            "{appended}"
+        );
+        assert!(
+            appended.contains("public void theDelimiterIs_2()"),
+            "{appended}"
+        );
+    }
+
+    /// What `javac` makes of the body of a string literal: the value the
+    /// generated test prints at runtime. Asserting on this is what pins
+    /// the property the workshop actually reads off the projector.
+    fn java_string_value(body: &str) -> String {
+        let mut value = String::new();
+        let mut characters = body.chars();
+        while let Some(character) = characters.next() {
+            if character != '\\' {
+                value.push(character);
+                continue;
+            }
+            match characters.next() {
+                Some('n') => value.push('\n'),
+                Some('r') => value.push('\r'),
+                Some('t') => value.push('\t'),
+                Some(other) => value.push(other),
+                None => panic!("literal ends on a dangling backslash: {body}"),
+            }
+        }
+        value
+    }
+
+    /// The body of the literal `open` introduces, ending where javac ends
+    /// it: at the first quote no backslash escapes.
+    fn literal_body<'a>(code: &'a str, open: &str) -> &'a str {
+        let start = code
+            .find(open)
+            .unwrap_or_else(|| panic!("no {open} in:\n{code}"))
+            + open.len();
+        let rest = &code[start..];
+        let mut escaped = false;
+        for (index, character) in rest.char_indices() {
+            match character {
+                _ if escaped => escaped = false,
+                '\\' => escaped = true,
+                '"' => return &rest[..index],
+                '\n' => panic!("literal ran off the end of its line:\n{code}"),
+                _ => {}
+            }
+        }
+        panic!("unterminated literal in:\n{code}")
+    }
+
+    fn requirement_with(criteria: &[&str]) -> Requirement {
+        Requirement {
+            acceptance_criteria: criteria.iter().map(|c| (*c).into()).collect(),
+            ..requirement()
+        }
+    }
+
+    #[test]
+    fn the_escape_in_a_criterion_reaches_java_as_the_two_characters_the_spec_wrote() {
+        // REQ-005 verbatim: the spec writes the input newline as the two
+        // characters `\n`. Escaping only the quote left javac reading a
+        // real newline, and the RED bar the room is watching broke across
+        // two lines mid-message.
+        let criterion = r#"Given "4\n5\n6", when add is called, then the result is 15"#;
+        let code = unit_test_fragment("", Language::Java, &requirement_with(&[criterion]));
+        assert!(
+            code.contains(r#"fail("TODO: assert - Given \"4\\n5\\n6\", when add is called, then the result is 15");"#),
+            "{code}"
+        );
+        assert_eq!(
+            java_string_value(literal_body(&code, "fail(\"")),
+            format!("TODO: assert - {criterion}"),
+            "what Java prints must be the criterion as the JSON writes it"
+        );
+        // One line each, or the assertion message wraps on the projector.
+        for line in code.lines() {
+            assert!(line.len() < 200 || !line.contains("TODO"), "{code}");
+        }
+        assert_eq!(code.matches("TODO: assert").count(), 1, "{code}");
+    }
+
+    #[test]
+    fn a_quote_a_backslash_before_a_quote_and_both_together_round_trip() {
+        for criterion in [
+            r#"Given "1,2", when add is called, then the result is 3"#,
+            r#"Given a trailing escape "1,2\", when add is called, then an error is raised"#,
+            r#"Given "1\n2", when add is called, then the message is "ok""#,
+        ] {
+            let code = unit_test_fragment("", Language::Java, &requirement_with(&[criterion]));
+            assert_eq!(
+                java_string_value(literal_body(&code, "fail(\"")),
+                format!("TODO: assert - {criterion}"),
+                "round trip failed for {criterion:?}:\n{code}"
+            );
+            assert_eq!(
+                java_string_value(literal_body(&code, "@DisplayName(\"")),
+                format!("REQ-001: {criterion}"),
+                "the display name must carry the criterion too:\n{code}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_real_control_character_in_a_criterion_never_escapes_its_literal_or_its_comment() {
+        // Not hypothetical: REQ-007 in the workshop spec holds real
+        // newlines, put there by a model reword that ProposedRequirement
+        // ::normalized did not get to. Interpolated raw, the comment
+        // above the placeholder ends mid-criterion and the rest of the
+        // line is stray Java - a compile error, not a cosmetic one.
+        let criterion = "Given the input \"//+\n1+2\", when add is called, then the result is 3";
+        let code = unit_test_fragment("", Language::Java, &requirement_with(&[criterion]));
+        assert!(
+            code.contains(
+                r#"        // Given the input "//+\n1+2", when add is called, then the result is 3"#
+            ),
+            "{code}"
+        );
+        for line in code.lines() {
+            let trimmed = line.trim();
+            assert!(
+                trimmed.is_empty()
+                    || trimmed.starts_with("//")
+                    || trimmed.starts_with('@')
+                    || trimmed.starts_with("void ")
+                    || trimmed.starts_with("fail(")
+                    || trimmed == "}",
+                "a criterion's newline split the file open:\n{code}"
+            );
+        }
+        assert_eq!(
+            java_string_value(literal_body(&code, "fail(\"")),
+            format!("TODO: assert - {criterion}"),
+            "a real newline still round trips - it is simply written as an escape"
+        );
+    }
+
+    #[test]
+    fn every_language_escapes_the_backslash_a_criterion_carries() {
+        let requirement =
+            requirement_with(&[r#"Given "1\n2,3", when add is called, then the result is 6"#]);
+        for language in Language::ALL {
+            let code = unit_test_template(language, &requirement);
+            assert!(
+                code.contains(r"1\\n2,3"),
+                "{language:?} left the backslash unescaped:\n{code}"
+            );
+            assert!(
+                !code.lines().any(|line| line.ends_with(r"1\n2,3")),
+                "{language:?} still writes a bare escape into a literal:\n{code}"
+            );
+            assert!(
+                looks_like_unit_test(language, &code),
+                "{language:?} fails its own gate:\n{code}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_step_definition_escapes_the_expression_and_the_text_it_quotes() {
+        // The Rust template interpolates the whole step text into a
+        // todo!, quotes and all - unescaped it never compiled.
+        let code = step_definitions_template(
+            Language::Rust,
+            &[missing("When", r#"add is called with "1\n2""#)],
+        );
+        assert!(
+            code.contains(r#"todo!("implement step: add is called with \"1\\n2\"");"#),
+            "{code}"
+        );
+
+        // An expression only keeps a backslash when it falls outside the
+        // quoted span step_to_expression collapses to {string}.
+        // A backslash in the step is a literal backslash, so the
+        // expression escapes it (`\\`) and the source literal escapes
+        // that again.
+        for (language, expected) in [
+            (Language::Java, r#"@Then("the delimiter is \\\\n")"#),
+            (Language::DotNet, r#"[Then("the delimiter is \\\\n")]"#),
+            (
+                Language::Rust,
+                r#"#[then(expr = "the delimiter is \\\\n")]"#,
+            ),
+            (Language::JavaScript, r"Then('the delimiter is \\\\n'"),
+            (Language::TypeScript, r"Then('the delimiter is \\\\n'"),
+        ] {
+            let code =
+                step_definitions_template(language, &[missing("Then", r"the delimiter is \n")]);
+            assert!(
+                code.contains(expected),
+                "{language:?} wants {expected}:\n{code}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_escaped_expression_is_read_back_as_the_expression_it_was_generated_from() {
+        // Emitting `\\n` is only half of it: the next steps generate
+        // reads the file back to see what it already declares. If the
+        // escape did not collapse again the pattern would look missing
+        // and a second, ambiguous definition would be appended.
+        let step = missing("Then", r"the delimiter is \n");
+        let generated = step_definitions_template(Language::Java, std::slice::from_ref(&step));
+        assert_eq!(
+            extract_patterns(Language::Java, &generated),
+            vec![r"the delimiter is \\n".to_string()]
+        );
+        assert!(
+            step_definitions_fragment(&generated, Language::Java, &[step]).is_none(),
+            "a step the file already declares must not be generated twice:\n{generated}"
+        );
+    }
+
+    #[test]
+    fn escape_literal_escapes_the_delimiter_in_use_and_nothing_else() {
+        assert_eq!(escape_literal(r#"a "b" c"#, '"'), r#"a \"b\" c"#);
+        assert_eq!(escape_literal(r#"a "b" c"#, '\''), r#"a "b" c"#);
+        assert_eq!(escape_literal(r"a 'b' c", '\''), r"a \'b\' c");
+        // Backslash first: a doubled backslash must not swallow the
+        // quote that follows it.
+        assert_eq!(escape_literal(r#"trailing\"#, '"'), r"trailing\\");
+        assert_eq!(escape_literal(r#"\"#, '"'), r"\\");
+        assert_eq!(escape_literal("tab\there", '"'), r"tab\there");
+        assert_eq!(escape_literal("cr\r\nlf", '"'), r"cr\r\nlf");
+        assert_eq!(escape_literal("plain", '"'), "plain");
+        assert_eq!(escape_literal("", '"'), "");
+    }
+
+    #[test]
+    fn implementation_paths_follow_each_ecosystem_and_carry_the_project_name() {
+        assert_eq!(
+            implementation_target_path(Language::Java, "String Calculator"),
+            "src/main/java/StringCalculator.java"
+        );
+        assert_eq!(
+            implementation_target_path(Language::JavaScript, "String Calculator"),
+            "src/string_calculator.js"
+        );
+        assert_eq!(
+            implementation_target_path(Language::TypeScript, "String Calculator"),
+            "src/string_calculator.ts"
+        );
+        assert_eq!(
+            implementation_target_path(Language::DotNet, "String Calculator"),
+            "StringCalculator.cs"
+        );
+        assert_eq!(
+            implementation_target_path(Language::Rust, "String Calculator"),
+            "src/lib.rs"
+        );
+    }
+
+    #[test]
+    fn the_implementation_prompt_carries_the_context_and_the_strict_rules() {
+        let prompt = implementation_prompt(
+            Language::Java,
+            &requirement(),
+            &["Req001Test.case: TODO: assert".into()],
+            &[],
+            &[],
+            &[(
+                "src/test/java/Req001Test.java".into(),
+                "class Req001Test {}".into(),
+            )],
+            &["src/main/java/Kata.java".to_string()],
+            "src/test/java/Req001Test.java",
+        );
+        assert!(prompt.user.contains("REQ-001: Empty string returns zero"));
+        assert!(prompt.user.contains("Req001Test.case: TODO: assert"));
+        assert!(
+            prompt
+                .user
+                .contains("--- src/test/java/Req001Test.java ---")
+        );
+        assert!(
+            prompt
+                .system
+                .contains("Write the production code at src/main/java/Kata.java")
+        );
+        assert!(prompt.system.contains("ONLY a JSON array"));
+        assert!(prompt.system.contains("never delete or weaken one"));
+        assert!(
+            prompt.system.contains("Java best practices to follow:")
+                && prompt.system.contains("Package names are lowercase"),
+            "the system prompt pins the language's best practices"
+        );
+        assert!(
+            !prompt.user.contains("prior attempt"),
+            "a first attempt has no history section"
+        );
+        assert!(
+            !prompt.user.contains("How to interpret the TDD state"),
+            "no dated states means no state section"
+        );
+        assert!(
+            !prompt.system.contains("also this requirement's production"),
+            "one target means the prompt reads exactly as it always did"
+        );
+    }
+
+    /// Five rules name the primary and every one of them reads correctly
+    /// about a single file, so the rest of a requirement's production
+    /// code arrives as one added line rather than by rewording them.
+    #[test]
+    fn a_requirement_with_more_than_one_production_file_names_the_others() {
+        let prompt = implementation_prompt(
+            Language::Java,
+            &requirement(),
+            &[],
+            &[],
+            &[],
+            &[],
+            &[
+                "src/main/java/Port.java".to_string(),
+                "src/main/java/Adapter.java".to_string(),
+            ],
+            "",
+        );
+        assert!(
+            prompt
+                .system
+                .contains("Write the production code at src/main/java/Port.java"),
+            "the first target is still the primary every rule names"
+        );
+        assert!(
+            prompt.system.contains(
+                "may appear in the reply, whether or not they exist yet: \
+                           src/main/java/Adapter.java."
+            ),
+            "{}",
+            prompt.system
+        );
+    }
+
+    #[test]
+    fn the_implementation_prompt_points_at_the_files_the_failures_name() {
+        // Seen live: every stack trace pointed at GeneratedSteps.java
+        // while 147 attempts rewrote only the production file.
+        let prompt = implementation_prompt(
+            Language::Java,
+            &requirement(),
+            &[
+                "expected: <1> but was: <0>\n\tat GeneratedSteps.itReturns(GeneratedSteps.java:34)"
+                    .into(),
+            ],
+            &[],
+            &[],
+            &[
+                (
+                    "src/test/java/GeneratedSteps.java".into(),
+                    "public class GeneratedSteps {}".into(),
+                ),
+                (
+                    "src/test/java/Req001Test.java".into(),
+                    "class Req001Test {}".into(),
+                ),
+            ],
+            &["src/main/java/Kata.java".to_string()],
+            "src/test/java/Req001Test.java",
+        );
+        assert!(
+            prompt
+                .user
+                .contains("The failure output names these project files")
+        );
+        assert!(
+            prompt
+                .user
+                .contains("\n- src/test/java/GeneratedSteps.java\n")
+        );
+        assert!(
+            !prompt.user.contains("\n- src/test/java/Req001Test.java\n"),
+            "files the failures never name are not listed as implicated"
+        );
+        assert!(
+            prompt
+                .user
+                .contains("rewriting src/main/java/Kata.java alone cannot fix a wiring bug")
+        );
+    }
+
+    #[test]
+    fn a_prompt_with_failures_naming_no_project_file_has_no_implicated_section() {
+        let prompt = implementation_prompt(
+            Language::Java,
+            &requirement(),
+            &["Build failed before tests could run".into()],
+            &[],
+            &[],
+            &[(
+                "src/test/java/Req001Test.java".into(),
+                "class Req001Test {}".into(),
+            )],
+            &["src/main/java/Kata.java".to_string()],
+            "src/test/java/Req001Test.java",
+        );
+        assert!(
+            !prompt
+                .user
+                .contains("The failure output names these project files")
+        );
+    }
+
+    #[test]
+    fn an_undefined_cucumber_step_implicates_the_step_definition_file() {
+        // Seen live: 57 attempts rewrote only StringCalculator.java while
+        // Cucumber reported 'the result is 0.' undefined. The stack never
+        // names GeneratedSteps.java because the engine never entered it.
+        let prompt = implementation_prompt(
+            Language::Java,
+            &requirement(),
+            &[
+                "RunCucumberTest.case 1: The step 'the result is 0.' is undefined.\n\
+You can implement this step using the snippet(s) below:\n\
+@Then(\"the result is {int}.\")\n\
+io.cucumber.junit.platform.engine.UndefinedStepException: The step 'the result is 0.' is undefined."
+                    .into(),
+            ],
+            &[],
+            &[],
+            &[
+                (
+                    "src/main/java/StringCalculator.java".into(),
+                    "public class StringCalculator {}".into(),
+                ),
+                (
+                    "src/test/java/GeneratedSteps.java".into(),
+                    "@Then(\"the result is {int}\") void theResultIs(int n) {}".into(),
+                ),
+                (
+                    "src/test/java/Req001Test.java".into(),
+                    "class Req001Test {}".into(),
+                ),
+            ],
+            &["src/main/java/StringCalculator.java".to_string()],
+            "src/test/java/Req001Test.java",
+        );
+        assert!(
+            prompt
+                .user
+                .contains("The failure output names these project files")
+        );
+        assert!(
+            prompt
+                .user
+                .contains("\n- src/test/java/GeneratedSteps.java\n")
+        );
+        assert!(
+            !prompt.user.contains("\n- src/test/java/Req001Test.java\n"),
+            "unit tests are not implicated by an undefined Gherkin step"
+        );
+        assert!(
+            prompt.system.contains("step is undefined"),
+            "the system prompt must tell the model glue cannot be fixed in production code"
+        );
+    }
+
+    #[test]
+    fn an_html_encoded_undefined_step_still_implicates_the_glue_file() {
+        let prompt = implementation_prompt(
+            Language::Java,
+            &requirement(),
+            &["The step &apos;the result is 0.&apos; is undefined.&#10;You can implement this step using the snippet(s) below:"
+                .into()],
+            &[],
+            &[],
+            &[(
+                "src/test/java/GeneratedSteps.java".into(),
+                "public class GeneratedSteps {}".into(),
+            )],
+            &["src/main/java/Kata.java".to_string()],
+            "src/test/java/Req001Test.java",
+        );
+        assert!(
+            prompt
+                .user
+                .contains("\n- src/test/java/GeneratedSteps.java\n")
+        );
+    }
+
+    #[test]
+    fn a_project_too_large_for_one_prompt_sends_the_neighborhood_and_maps_the_rest() {
+        // The bug this closes: every source file went into the prompt,
+        // so on a real crate the request was 463k tokens against a 262k
+        // window and the attempt died with a 400 instead of a patch.
+        let bulk = "// filler\n".repeat(20_000); // 200 KB each
+        let files = vec![
+            (
+                "src/noise_a.rs".into(),
+                format!("pub struct NoiseA;\n{bulk}"),
+            ),
+            (
+                "src/noise_b.rs".into(),
+                format!("pub struct NoiseB;\n{bulk}"),
+            ),
+            ("src/lib.rs".into(), "pub fn add() {}".to_string()),
+            ("tests/req_001_test.rs".into(), "#[test] fn t() {}".into()),
+        ];
+        let prompt = implementation_prompt(
+            Language::Rust,
+            &requirement(),
+            &["tests/req_001_test.rs: FAILED".into()],
+            &[],
+            &[],
+            &files,
+            &["src/lib.rs".to_string()],
+            "tests/req_001_test.rs",
+        );
+        assert!(
+            prompt.user.contains("--- src/lib.rs ---"),
+            "production is always sent"
+        );
+        assert!(
+            prompt.user.contains("--- tests/req_001_test.rs ---"),
+            "the implicated failing test is sent"
+        );
+        assert!(
+            !prompt.user.contains("--- src/noise_b.rs ---"),
+            "bulk past the budget is not sent"
+        );
+        assert!(
+            prompt.user.contains("- src/noise_b.rs: NoiseB"),
+            "but it is still named in the map"
+        );
+        assert!(
+            prompt.user.len() < PROMPT_SOURCE_BUDGET * 2,
+            "prompt was {} bytes",
+            prompt.user.len()
+        );
+    }
+
+    #[test]
+    fn a_step_file_the_failures_name_that_overruns_the_budget_is_shown_as_an_excerpt() {
+        // Measured: a 5,600-line step file named by one compiler error
+        // was seeded whole - 216 KB, 58k tokens, eleven minutes of
+        // prefill. The attempt needs the failing lines, not the file.
+        let mut steps = String::from(
+            "use cucumber::World;\n#[derive(Debug, Default, World)]\nstruct SpecWorld;\n",
+        );
+        for n in 0..5_000 {
+            steps.push_str(&format!("fn step_{n}() {{ let _ = {n}; }}\n"));
+        }
+        assert!(steps.len() > PROMPT_SOURCE_BUDGET);
+        let files = vec![
+            ("src/report.rs".into(), "pub fn report() {}".to_string()),
+            ("tests/cucumber.rs".into(), steps),
+            ("tests/req_001_test.rs".into(), "#[test] fn t() {}".into()),
+        ];
+        let failure = "thread 'main' panicked at tests/cucumber.rs:4203:5:\nnot yet implemented";
+        let prompt = implementation_prompt(
+            Language::Rust,
+            &requirement(),
+            &[failure.into()],
+            &[],
+            &[],
+            &files,
+            &["src/report.rs".to_string()],
+            "tests/req_001_test.rs",
+        );
+        assert!(
+            prompt.user.contains("--- tests/cucumber.rs ---"),
+            "the named file is still shown"
+        );
+        assert!(
+            prompt
+                .user
+                .contains("// EXCERPT of tests/cucumber.rs: 5003 lines"),
+            "as an excerpt: {}",
+            &prompt.user[..2_000]
+        );
+        assert!(
+            prompt.user.contains(" 4203| fn step_4199()"),
+            "the named line"
+        );
+        assert!(
+            prompt.user.contains(" 4163| fn step_4159()"),
+            "and context before it"
+        );
+        assert!(prompt.user.contains(" 4243| fn step_4239()"), "and after");
+        assert!(!prompt.user.contains("fn step_100()"), "but not the rest");
+        assert!(prompt.user.contains("// ... lines 1-4162 omitted ..."));
+        assert!(prompt.user.contains("// ... lines 4244-5003 omitted ..."));
+        assert!(
+            prompt.user.len() < PROMPT_SOURCE_BUDGET * 2,
+            "prompt was {} bytes",
+            prompt.user.len()
+        );
+    }
+
+    #[test]
+    fn failure_lines_reads_compiler_panic_and_java_frames_and_the_excerpt_merges_neighbours() {
+        let failures = vec![
+            "  --> tests/cucumber.rs:5610:1".to_string(),
+            "panicked at tests/cucumber.rs:5612:9".to_string(),
+            "at steps.Steps.given(Steps.java:42)".to_string(),
+            "tests/cucumber.rs:5610 again, and tests/cucumber.rs:abc".to_string(),
+        ];
+        assert_eq!(
+            failure_lines("tests/cucumber.rs", &failures),
+            vec![5610, 5612]
+        );
+        assert_eq!(
+            failure_lines("src/test/java/steps/Steps.java", &failures),
+            vec![42]
+        );
+        assert!(failure_lines("src/lib.rs", &failures).is_empty());
+
+        let content: String = (1..=100).map(|n| format!("line {n}\n")).collect();
+        let excerpt = excerpt_for_prompt(
+            "tests/cucumber.rs",
+            &content,
+            &[
+                "tests/cucumber.rs:10:1".into(),
+                "tests/cucumber.rs:30:1".into(),
+            ],
+        );
+        assert!(excerpt.contains("    1| line 1\n"), "{excerpt}");
+        assert!(excerpt.contains("   70| line 70\n"), "{excerpt}");
+        assert!(!excerpt.contains("line 71\n"), "{excerpt}");
+        assert_eq!(
+            excerpt.matches("omitted").count(),
+            1,
+            "one tail, no gap: {excerpt}"
+        );
+
+        let head = excerpt_for_prompt("tests/cucumber.rs", &content, &["no line named".into()]);
+        assert!(head.contains("    1| line 1\n") && head.contains("   40| line 40\n"));
+        assert!(head.contains("// ... lines 41-100 omitted ..."), "{head}");
+    }
+
+    #[test]
+    fn the_unit_test_is_shown_whole_even_when_bulk_crowds_the_budget() {
+        // The budget no longer fits a project, so the walk maps
+        // everything past it - except the seeds. The assertions live in
+        // the unit test, and an attempt that cannot see its placeholders
+        // cannot replace them.
+        let bulk = "// filler\n".repeat(4_000); // ~40 KB each
+        let files = vec![
+            (
+                "src/noise_a.rs".into(),
+                format!("pub struct NoiseA;\n{bulk}"),
+            ),
+            (
+                "src/noise_b.rs".into(),
+                format!("pub struct NoiseB;\n{bulk}"),
+            ),
+            ("src/report.rs".into(), "pub fn report() {}".into()),
+            (
+                "tests/harness_019_test.rs".into(),
+                "#[test] fn t() { unimplemented!(\"TODO: assert - covers 3\") }".to_string(),
+            ),
+        ];
+        let prompt = implementation_prompt(
+            Language::Rust,
+            &requirement(),
+            &["the new tests failed".into()],
+            &[],
+            &[],
+            &files,
+            &["src/report.rs".to_string()],
+            "tests/harness_019_test.rs",
+        );
+        assert!(
+            prompt.user.contains("--- tests/harness_019_test.rs ---")
+                && prompt.user.contains("TODO: assert - covers 3"),
+            "the unit test is shown whole, not mapped"
+        );
+        assert!(
+            prompt.user.contains("--- src/report.rs ---"),
+            "the production target is shown too"
+        );
+        assert!(
+            !prompt.user.contains("--- src/noise_a.rs ---"),
+            "bulk past the budget is still only mapped"
+        );
+    }
+
+    #[test]
+    fn the_implementation_prompt_recounts_every_prior_attempt() {
+        let history = vec![
+            ImplementAttempt {
+                requirement: "REQ-001".into(),
+                targets: vec!["src/main/java/Kata.java".into()],
+                failures: vec!["Req001Test.case: TODO: assert\nat Req001Test.java:12".into()],
+                outcome: vec!["Req001Test.case: expected 0 but was 1\nat Req001Test.java:9".into()],
+            },
+            ImplementAttempt {
+                requirement: "REQ-001".into(),
+                targets: vec![
+                    "src/main/java/Kata.java".into(),
+                    "src/test/java/Req001Test.java".into(),
+                ],
+                failures: vec!["Req001Test.case: expected 0 but was 1".into()],
+                outcome: Vec::new(),
+            },
+        ];
+        let prompt = implementation_prompt(
+            Language::Java,
+            &requirement(),
+            &["Req001Test.case: cannot find symbol Kata".into()],
+            &history,
+            &[],
+            &[],
+            &["src/main/java/Kata.java".to_string()],
+            "src/test/java/Req001Test.java",
+        );
+        assert!(
+            prompt
+                .user
+                .contains("This is attempt 3 on this requirement")
+        );
+        assert!(
+            prompt
+                .user
+                .contains("Attempt 1 wrote: src/main/java/Kata.java\n")
+        );
+        assert!(
+            prompt.user.contains("- Req001Test.case: TODO: assert\n"),
+            "the prior failure's first line is recounted"
+        );
+        assert!(
+            !prompt.user.contains("at Req001Test.java:12"),
+            "prior stack traces are briefed away"
+        );
+        assert!(
+            prompt.user.contains(
+                "The run after attempt 1 reported:\n- Req001Test.case: expected 0 but was 1\n"
+            ),
+            "each attempt's actual result guides the next try: {}",
+            prompt.user
+        );
+        assert!(
+            !prompt.user.contains("at Req001Test.java:9"),
+            "outcome stack traces are briefed away too"
+        );
+        assert!(
+            prompt.user.contains(
+                "Attempt 2 wrote: src/main/java/Kata.java, src/test/java/Req001Test.java"
+            )
+        );
+        assert!(
+            prompt
+                .user
+                .contains("No test run followed attempt 2 - its changes were never verified."),
+            "an unverified attempt is called out: {}",
+            prompt.user
+        );
+        assert!(prompt.user.contains("what remains AFTER the last attempt"));
+    }
+
+    #[test]
+    fn a_long_history_is_capped_to_the_most_recent_attempts() {
+        let history: Vec<ImplementAttempt> = (1..=5)
+            .map(|i| ImplementAttempt {
+                requirement: "REQ-001".into(),
+                targets: vec![format!("src/main/java/Kata{i}.java")],
+                failures: vec![format!("failure of attempt {i}")],
+                ..Default::default()
+            })
+            .collect();
+        let prompt = implementation_prompt(
+            Language::Java,
+            &requirement(),
+            &["current failure".into()],
+            &history,
+            &[],
+            &[],
+            &["src/main/java/Kata.java".to_string()],
+            "src/test/java/Req001Test.java",
+        );
+        assert!(
+            prompt
+                .user
+                .contains("This is attempt 6 on this requirement")
+        );
+        assert!(prompt.user.contains("(2 earlier attempts omitted.)"));
+        assert!(!prompt.user.contains("Attempt 1 wrote"));
+        assert!(!prompt.user.contains("Attempt 2 wrote"));
+        assert!(
+            prompt
+                .user
+                .contains("Attempt 3 wrote: src/main/java/Kata3.java"),
+            "the kept attempts keep their true numbering"
+        );
+        assert!(
+            prompt
+                .user
+                .contains("Attempt 5 wrote: src/main/java/Kata5.java")
+        );
+    }
+
+    #[test]
+    fn the_implementation_prompt_briefs_only_the_three_latest_states() {
+        use crate::domain::tdd::{STATE_INSTRUCTIONS, TddPhase};
+        let states: Vec<StateEntry> = (1..=5)
+            .map(|i| StateEntry {
+                timestamp: format!("2026-08-0{i}T12:00:00Z"),
+                phase: TddPhase::Red,
+                last_run: crate::domain::model::TestRunSummary {
+                    tests: i,
+                    failures: 1,
+                    failure_details: vec!["stack from day {i}".replace("{i}", &i.to_string())],
+                    ..Default::default()
+                },
+                ..Default::default()
+            })
+            .collect();
+        let prompt = implementation_prompt(
+            Language::Java,
+            &requirement(),
+            &["current failure".into()],
+            &[],
+            &states,
+            &[],
+            &["src/main/java/Kata.java".to_string()],
+            "src/test/java/Req001Test.java",
+        );
+        assert!(
+            prompt
+                .user
+                .contains("How to interpret the TDD state below:")
+        );
+        assert!(prompt.user.contains(STATE_INSTRUCTIONS));
+        assert!(
+            prompt
+                .user
+                .contains("The 3 most recent TDD state(s), oldest first:")
+        );
+        assert!(!prompt.user.contains("2026-08-01T12:00:00Z"));
+        assert!(!prompt.user.contains("2026-08-02T12:00:00Z"));
+        assert!(
+            prompt
+                .user
+                .contains("2026-08-03T12:00:00Z RED tests=3 failures=1")
+        );
+        assert!(
+            prompt
+                .user
+                .contains("2026-08-05T12:00:00Z RED tests=5 failures=1")
+        );
+        assert!(
+            !prompt.user.contains("stack from day"),
+            "historical stack traces stay out of the state brief"
+        );
+        assert!(
+            !prompt.user.contains("prior attempt"),
+            "a first attempt still has no history section"
+        );
+    }
+
+    #[test]
+    fn a_long_prior_failure_is_briefed_to_its_capped_first_line() {
+        let long_line = "x".repeat(400);
+        assert_eq!(
+            brief_failure(&long_line),
+            format!("{} ...", "x".repeat(300))
+        );
+        assert_eq!(
+            brief_failure("expected 0 but was 1\nat Kata.java:9\nat Runner.java:3"),
+            "expected 0 but was 1"
+        );
+    }
+
+    #[test]
+    fn the_polish_prompt_carries_the_framework_practices_and_the_scaffold() {
+        let prompt = polish_prompt(Language::Java, "@Given(\"a calculator\") void a() {}");
+        assert!(prompt.system.contains("Cucumber-JVM"));
+        assert!(prompt.system.contains("Java best practices to follow:"));
+        assert!(prompt.system.contains("Package names are lowercase"));
+        assert!(
+            prompt
+                .system
+                .contains("only the complete file content, no explanation")
+        );
+        assert_eq!(prompt.user, "@Given(\"a calculator\") void a() {}");
+    }
+
+    #[test]
+    fn the_advice_prompt_surveys_assets_findings_failures_and_the_rules() {
+        let assets = vec![
+            ImplementAsset {
+                role: "tagged scenario".into(),
+                path: "features/calc.feature".into(),
+                present: true,
+            },
+            ImplementAsset {
+                role: "unit test".into(),
+                path: "src/test/java/Req001Test.java".into(),
+                present: false,
+            },
+        ];
+        let prompt = advice_prompt(
+            Language::Java,
+            &requirement(),
+            &["The unit test does not exist - run spec unittest generate REQ-001.".into()],
+            &assets,
+            &["Req001Test.case: TODO: assert".into()],
+        );
+        assert!(prompt.user.contains("REQ-001: Empty string returns zero"));
+        assert!(
+            prompt
+                .user
+                .contains("- tagged scenario: features/calc.feature (present)")
+        );
+        assert!(
+            prompt
+                .user
+                .contains("- unit test: src/test/java/Req001Test.java (missing)")
+        );
+        assert!(
+            prompt
+                .user
+                .contains("Workflow findings blocking an implementation attempt:")
+        );
+        assert!(prompt.user.contains("- Req001Test.case: TODO: assert"));
+        assert!(prompt.system.contains("at most four short sentences"));
+        assert!(prompt.system.contains("spec unittest generate <REQ-ID>"));
+        assert!(
+            prompt.system.contains("THE LOOP FOR ONE REQUIREMENT"),
+            "the workflow process briefs the advice call"
+        );
+    }
+
+    #[test]
+    fn an_advice_prompt_without_findings_or_failures_omits_those_sections() {
+        let prompt = advice_prompt(Language::Java, &requirement(), &[], &[], &[]);
+        assert!(!prompt.user.contains("Workflow findings"));
+        assert!(!prompt.user.contains("The last test run's failures"));
+    }
+
+    #[test]
+    fn file_updates_parse_from_json_with_or_without_fences() {
+        let reply = r#"[{"path": "src/lib.rs", "content": "pub fn add() {}"}]"#;
+        assert_eq!(parse_file_updates(reply).len(), 1);
+        let fenced = format!("```json\n{reply}\n```");
+        assert_eq!(parse_file_updates(&fenced)[0].path, "src/lib.rs");
+    }
+
+    #[test]
+    fn a_single_object_reply_parses_as_one_update() {
+        let reply =
+            r#"{"path": "src/main/java/BddTest.java", "content": "public class BddTest {}"}"#;
+        let updates = parse_file_updates(reply);
+        assert_eq!(updates.len(), 1);
+        assert_eq!(updates[0].path, "src/main/java/BddTest.java");
+        let fenced = format!("```json\n{reply}\n```");
+        assert_eq!(parse_file_updates(&fenced).len(), 1);
+    }
+
+    #[test]
+    fn unusable_file_update_replies_are_an_empty_list() {
+        assert!(parse_file_updates("Sure! Here is the code:").is_empty());
+        assert!(parse_file_updates(r#"[{"path": "", "content": "x"}]"#).is_empty());
+        assert!(parse_file_updates(r#"[{"path": "src/lib.rs", "content": "  "}]"#).is_empty());
+    }
+
+    /// Observed live: three replies in a row ended inside the first
+    /// file's content, and each was refused as "not a JSON array".
+    #[test]
+    fn a_reply_that_stopped_mid_update_says_so() {
+        let cut = r#"{"path":"src/report.rs","content":"/// Status of a"#;
+        let reason = parse_file_updates_checked(cut).unwrap_err();
+        assert!(
+            reason.contains("stopped before it was complete"),
+            "{reason}"
+        );
+        assert!(reason.contains("ended its answer early"), "{reason}");
+        let prose = parse_file_updates_checked("Sure! Here is the code:").unwrap_err();
+        assert!(prose.contains("not a JSON array"), "{prose}");
+    }
+
+    #[test]
+    fn a_reply_cut_off_after_a_complete_file_keeps_that_file() {
+        let reply = concat!(
+            r#"[{"path": "src/report.rs", "content": "pub fn report() { println!(\"hi\"); }"}, "#,
+            r#"{"path": "tests/cucumber.rs", "content": "fn todo("#
+        );
+        let updates = parse_file_updates(reply);
+        assert_eq!(updates.len(), 1, "{updates:?}");
+        assert_eq!(updates[0].path, "src/report.rs");
+        assert!(updates[0].content.contains("println!(\"hi\")"));
+    }
+
+    #[test]
+    fn a_production_file_that_does_not_exist_yet_is_shown_empty() {
+        let prompt = implementation_prompt(
+            Language::Rust,
+            &requirement(),
+            &["the new tests failed".into()],
+            &[],
+            &[],
+            &[(
+                "tests/harness_019_test.rs".into(),
+                "#[test] fn t() { unimplemented!() }".into(),
+            )],
+            &["src/report_acceptance_criterion_status_for_a_requirement.rs".into()],
+            "tests/harness_019_test.rs",
+        );
+        assert!(
+            prompt
+                .user
+                .contains("--- src/report_acceptance_criterion_status_for_a_requirement.rs ---\n"),
+            "the file the attempt will create has to be in the prompt"
+        );
+        assert!(
+            prompt.system.contains("does not exist yet"),
+            "the prompt tells the model an empty file is one to create"
+        );
+    }
+
+    #[test]
+    fn code_fences_are_stripped_with_and_without_a_language_tag() {
+        assert_eq!(strip_code_fences("```java\nclass A {}\n```"), "class A {}");
+        assert_eq!(strip_code_fences("```\ncode\n```"), "code");
+        assert_eq!(strip_code_fences("plain code"), "plain code");
+        assert_eq!(strip_code_fences("```rust\nunclosed"), "unclosed");
+        assert_eq!(
+            strip_code_fences("<think>scratch</think>\n[{\"title\":\"T\"}]"),
+            "[{\"title\":\"T\"}]"
+        );
+    }
+
+    /// Observed live: the reasoning before the fence was written into the
+    /// step file as code.
+    #[test]
+    fn a_reply_that_talks_before_its_fence_yields_only_the_fenced_code() {
+        let reply = "Let's look at the input. There is a `, ,` in the parameters.\n\n\
+                     Here is the corrected block.\n\n\
+                     ```rust\n#[then(expr = \"it works\")]\nfn it_works(_w: &mut W) {}\n```\n\n\
+                     That keeps the `todo!` as written.";
+        assert_eq!(
+            strip_code_fences(reply),
+            "#[then(expr = \"it works\")]\nfn it_works(_w: &mut W) {}"
+        );
+        // Prose with no closed fence is returned as it is - the gates after
+        // this one are what refuse it.
+        assert_eq!(
+            strip_code_fences("just words\nmore words"),
+            "just words\nmore words"
+        );
+        assert_eq!(
+            strip_code_fences("words\n```rust\nunclosed"),
+            "words\n```rust\nunclosed"
+        );
+    }
+
+    #[test]
+    fn identifier_casing_handles_leading_digits_and_empty_text() {
+        assert_eq!(snake_case("the result is 3"), "the_result_is_3");
+        assert_eq!(snake_case("3 numbers"), "_3_numbers");
+        assert_eq!(snake_case("!!!"), "step");
+        assert_eq!(pascal_case("3 numbers"), "N3Numbers");
+        assert_eq!(pascal_case("!!!"), "Step");
+        assert_eq!(camel_case("the result"), "theResult");
+    }
+
+    #[test]
+    fn an_unclosed_think_block_is_kept() {
+        assert_eq!(
+            strip_think_block("<think>still going"),
+            "<think>still going"
+        );
+        assert_eq!(strip_think_block("plain"), "plain");
+    }
+
+    #[test]
+    fn looks_like_unit_test_rejects_empty_and_unrecognizable_code() {
+        assert!(!looks_like_unit_test(Language::Java, "   "));
+        assert!(!looks_like_unit_test(Language::Java, "class X {}"));
+        assert!(looks_like_unit_test(Language::Java, "@Test void t() {}"));
+    }
+
+    #[test]
+    fn looks_like_unit_test_for_accepts_missing_type_and_non_java() {
+        assert!(looks_like_unit_test_for(
+            Language::Java,
+            "@Test void t() {}",
+            None
+        ));
+        assert!(looks_like_unit_test_for(
+            Language::Rust,
+            "#[test] fn t() {}",
+            Some("Foo")
+        ));
+        assert!(!looks_like_unit_test_for(
+            Language::Java,
+            "class X {}",
+            Some("Kata")
+        ));
+    }
+}

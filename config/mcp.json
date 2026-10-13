@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "spec-driven-server": {
+      "command": "spec",
+      "args": ["mcp", "serve", "--root", "${workspaceFolder}"]
+    }
+  }
+}

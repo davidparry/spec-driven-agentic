@@ -1,0 +1,250 @@
+# The interactive shell
+
+Running `spec` with no subcommand in a terminal opens a REPL. It prints
+the help once, shows the banner, opens the session and lists the ones
+on record, shows the session's model status, and then reads commands
+until you leave.
+
+```text
+Session 20bd0242-eae5-4edc-8b25-0c954a5c3b3f (new).
+Sessions on record (2):
+* 20bd0242-eae5-4edc-8b25-0c954a5c3b3f  started 2026-10-11T20:31:24Z  active 2026-10-11T20:31:24Z  START
+  ffca332f-4258-4c98-a8a7-ce1c180c03e3  started 2026-10-11T20:31:14Z  active 2026-10-11T20:31:14Z  GREEN  Rust
+Resume one with: spec --session <id>
+Inference model set: qwen3.8-flash-next:125b-mlx (from configuration).
+Decision model set: nimble (from configuration).
+spec> list
+[
+  { "id": "REQ-001", "title": "Empty string returns zero", "status": "implemented" }
+]
+spec> test --feature features/calculator.feature
+...
+spec> exit
+```
+
+## Behavior
+
+- **No prefix needed.** Type `list`, not `spec list`. A leading `spec`
+  is forgiven if you type it anyway.
+- **Inherited flags.** Commands inherit the shell's `--root`,
+  `--model`, and `--retry` unless the line supplies its own:
+
+```bash
+spec --root ~/code/calculator --model qwen3.8-flash-next:125b-mlx --retry 5
+# every command in this shell now targets that root and model,
+# and retries invalid model replies up to 5 times
+```
+
+- **Inherited session.** Every command typed into the shell acts on
+  the session the shell opened (see [Sessions](#sessions) below). A
+  line carrying `--session <guid>` switches the shell to that session
+  first and prints the session line again.
+
+- **Quoting works.** Lines are tokenized with shell rules, so
+  `scenario add --step "Given a calculator"` behaves as expected.
+  Unbalanced quotes report `unreadable input` and the shell continues.
+- **Errors don't kill the shell.** A failing command prints its error
+  and returns to the prompt.
+- **Blank lines** are ignored.
+- **After `greenfield`.** A one-shot `spec greenfield` that finishes on
+  a real terminal stays in this shell (the `spec>` prompt) so you can
+  run `list`, `greenfield`, or anything else without relaunching.
+
+## Leaving
+
+- `exit` or `quit`
+- <kbd>Ctrl</kbd>+<kbd>C</kbd> (interrupt)
+- <kbd>Ctrl</kbd>+<kbd>D</kbd> (end of input)
+
+On exit the shell prints a summary of how many commands ran.
+
+## Sessions
+
+Every shell runs in a **session** named by a GUID. The TDD phase log in
+`.spec/state.json` and the project memory in `.spec/memory.json` are
+kept per session, under `sessions` keyed by that GUID, and each file's
+`currentSession` names the one commands act on.
+
+Bare `spec` begins a new session once the current one has recorded
+work. Its phase log starts empty at START; its memory is seeded from
+the previous current session, so a language, module root, or layout
+already settled is not asked for again. The first line after the
+banner names it:
+
+```text
+Session 20bd0242-eae5-4edc-8b25-0c954a5c3b3f (new).
+```
+
+If the current session recorded nothing - no `spec test`, no
+`spec refactor`, nothing in its phase log - bare `spec` continues that
+session rather than minting another. Launching the shell to read the
+list, closing it, and launching it again leaves one session on record,
+not three, and the line says `resumed` with START as the phase. A
+session is only left behind once there is something in it to come back
+to.
+
+`spec --session <guid>` resumes a recorded session instead, and the
+line says what you are picking up:
+
+```text
+Session ffca332f-4258-4c98-a8a7-ce1c180c03e3 (resumed - GREEN, last active 2026-10-11T20:31:14Z).
+```
+
+Either way, the lines after it list every session the project has on
+record, newest activity first, the current one marked `*`, each with
+when it started, when it was last active, its phase, and the language
+its memory holds. It is a list to read, not a menu: nothing is asked,
+and the resume command is printed under it so an id can be copied into
+the next launch.
+
+A `--session` value that is not a GUID, or a GUID neither file knows,
+is refused before anything is written:
+
+```text
+error: "not-a-guid" is not a GUID - a session id looks like 6f1c2d3e-4b5a-4c6d-8e9f-0a1b2c3d4e5f.
+error: No session 6f1c2d3e-... is on record in .spec/state.json or .spec/memory.json. Known sessions: 20bd0242-..., ffca332f-.... Start without --session to begin a new one.
+```
+
+One-shot commands (`spec state`, `spec test`, `spec mcp serve`, …)
+continue the current session without the flag - a shell and a hook
+running beside it see the same phase - and `spec --session <guid> state`
+switches to another one quietly. That switch sticks: the flag moves
+`currentSession` in both files, so later invocations without the flag
+follow the session it named. A `state.json` or `memory.json` written
+before sessions existed is adopted as one session, the current one, on
+the first read; nothing is lost.
+
+## Session diagnostics
+
+Each session's diagnostics are kept apart too, in
+`.spec/log/<session-guid>/spec.log.YYYY-MM-DD` - one directory per
+session, rolling daily inside it, so a run can be read back without
+every other session's lines interleaved. The shell files everything
+typed into it under the session it opened, and a one-shot command
+files its run under the session it follows. A project that has never
+opened a session writes to `.spec/log/` itself. See
+[`--debug`](global-flags.md#--debug).
+
+One exception: a `--session` line typed *inside* a running shell moves
+the pointer for later commands, but that shell's log file is already
+open, so the rest of the session keeps writing where it started.
+Relaunch with `spec --session <guid>` to have the diagnostics follow
+too.
+
+## Session history
+
+Line history is kept across sessions in `.spec/history`. Use
+<kbd>↑</kbd>/<kbd>↓</kbd> to recall previous
+commands and <kbd>Ctrl</kbd>+<kbd>R</kbd> for reverse search. If the
+history cannot be saved, the shell says so and exits normally.
+
+## Model announcement at startup
+
+The first prompt is preceded by one line per model role: the
+**inference** model that writes scenarios, tests, and code, and the
+**decision** model that answers judgments. They are two different models
+doing different work — see [`spec model`](commands/model.md) and
+[`spec judge`](commands/judge.md) — so a session names both before you
+type anything, and names which is which.
+
+```text
+Inference model set: qwen3.8-flash-next:125b-mlx (from configuration).
+Decision model set: nimble (from configuration).
+```
+
+### The inference line
+
+This harness is developed and run against `qwen3.8-flash-next:125b-mlx`;
+your mileage will vary with a different model, especially one trained
+for work other than development. See
+[Getting started](getting-started.md#local-llm-ollama).
+
+| Situation | Announcement |
+| --- | --- |
+| Configured in `.spec/config.toml` | `Inference model set: qwen3.8-flash-next:125b-mlx (from configuration).` |
+| `--model` passed | `Inference model set: qwen3.8-flash-next:125b-mlx (from the --model flag).` |
+| No config, models installed | `Inference model set for this session: qwen3.8-flash-next:125b-mlx (not saved - keep it with: spec model use qwen3.8-flash-next:125b-mlx).` |
+| Ollama up, no models | `Ollama is running but has no models - generation will use deterministic templates. For optimal results pull a coding model, e.g.: ollama pull qwen3.8-flash-next:125b-mlx (mileage varies with models not trained for development)` |
+| Ollama unreachable | `Ollama is not reachable - generation will use deterministic templates. Install it from https://ollama.com, start it, and pull a coding model, e.g.: ollama pull qwen3.8-flash-next:125b-mlx (mileage varies with models not trained for development)` |
+
+### The decision line
+
+Resolving the decision model at startup is what turns a model named in
+`.spec/config.toml` but never pulled into something you find out about
+at the prompt rather than at the first judgment.
+
+With nothing configured, the line reports the model discovery borrowed
+— judgments are on wherever a decision-capable model is installed. The
+borrow is for the session only; `spec judge use` is what writes it down.
+Nothing is gated on the answer either way: a judgment is advice about
+wording, so a session with nothing to ask still returns every
+deterministic answer it always did.
+
+| Situation | Announcement |
+| --- | --- |
+| Configured in `.spec/config.toml` | `Decision model set: nimble (from configuration).` |
+| `--decision-model` passed | `Decision model set: nimble (from the --decision-model flag).` |
+| None configured, one installed | `Decision model set for this session: nimble (not saved - keep it with: spec judge use nimble).` |
+| None configured, several installed | The same line, naming the first the provider lists |
+| Configured, never pulled | `Decision model 'nimble' cannot answer decisions here - install it to turn judgments on:` then `ollama pull nimble`, and the decision models that are installed |
+| None installed | `No decision model is installed - install one to turn judgments on:` then `ollama pull nimble` and `spec judge use nimble` |
+| Ollama unreachable, none configured | `No decision model configured and none could be discovered - judgments are off this session.` |
+
+When Ollama cannot be reached, a *configured* decision model is still
+announced as configured. A capability probe that could not run is not
+evidence the model is missing, and the first judgment reports the real
+failure against the endpoint rather than blaming the model.
+
+## The greenfield nudge
+
+When all three signs of a brand-new project line up —
+
+1. this is the first shell session in the root (no `.spec/history` yet),
+2. a model is ready, and
+3. there is no `requirements/requirements.json`
+
+— the shell offers to start the loop before the first prompt. The same
+start refreshes `.spec/memory.json` (language, libraries, layout) so
+later model calls in the session carry that brief.
+
+## The layout question
+
+That refresh resolves the project's layout: the module whose build file
+the test runner is pointed at, its test and production roots, its
+features directory, the step-definition file generated steps join, and
+the package existing tests declare. Everything the harness writes follows
+from it.
+
+It is answered deterministically — build manifests, observed source
+files, and the feature files your requirements name. A model is asked
+only when a tree holds several buildable modules and none of that
+separates them, and then only to pick one of the discovered module
+roots; anything else it replies with is refused. You confirm, and the
+answer is recorded, so the question is asked once per project:
+
+```text
+Several modules could be the one to work in: kata, smoke-test.
+Asking qwen3.8-flash-next:125b-mlx which module - working ...
+Work in kata - the module Maven compiles and runs tests in? [y/N] y
+Recorded kata as this project's module - asked once; spec inspect re-scans if that changes.
+```
+
+With no model resolved, or on a decline, the scan's own pick stands and
+the shell says which one it used.
+
+```text
+It appears you are in a greenfield - this project has no requirements/requirements.json yet.
+Start with the greenfield command now? [y/N]
+```
+
+`y` runs [`spec greenfield`](commands/greenfield.md) immediately;
+anything else declines and the shell carries on:
+
+```text
+No problem - type greenfield any time, or draft to begin with the spec.
+```
+
+## When there is no terminal
+
+If stdin is not a terminal (piped input, CI), bare `spec` prints the
+help and exits instead of opening the shell.

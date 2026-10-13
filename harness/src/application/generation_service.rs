@@ -1,0 +1,1815 @@
+//! Step and unit-test generation: discovery of undefined steps, and the
+//! hybrid template + LLM generation flow. The deterministic template from
+//! the domain always works; when a model is resolved its output is
+//! preferred after validation, otherwise the template is used silently.
+//! Everything generated is written straight to the project's files.
+
+use serde::Serialize;
+
+use crate::application::agent_service::{Agent, AgentConfig, DEFAULT_MAX_ROUNDS, NullBroker};
+use crate::application::assets::{
+    find_missing_steps, find_requirement, load_spec, production_path, production_type_name,
+    steps_path, unit_test_path,
+};
+use crate::application::decision_service::{Brief, TaskJudge};
+use crate::application::incremental::{Exam, expression_exam, settle};
+use crate::application::scenario_service::ScenarioService;
+use crate::application::spec_service::ServiceError;
+use crate::application::{DEFAULT_LLM_ATTEMPTS, LlmReplyError};
+use crate::domain::decision::{
+    Judgment, Policies, SCENARIO_EXERCISES_CRITERION, STEPS_BIND_SCENARIO, scenario_state,
+};
+use crate::domain::feature;
+use crate::domain::generation::{
+    append_step_definitions, escape_literal, escape_pending_messages, implementation_target_path,
+    looks_like_step_definitions, looks_like_step_fragment, looks_like_unit_test,
+    looks_like_unit_test_for, looks_like_unit_test_fragment, polish_fragment_prompt, polish_prompt,
+    splice_step_definitions, splice_unit_tests, step_definitions_fragment,
+    step_definitions_template, step_expression_prompt, strip_code_fences, todo_placeholders,
+    unit_test_fragment, unit_test_target_path, unit_test_template,
+};
+use crate::domain::language::Language;
+use crate::domain::memory::ProjectStructure;
+use crate::domain::scenario::{
+    ProposedScenario, as_gherkin, parse_scenarios_checked, scenario_prompt, scenario_template,
+    scenarios_criteria, tagged, taken_names,
+};
+use crate::domain::steps::{MissingStep, extract_patterns, source_extension, step_to_expression};
+use crate::ports::{
+    FeatureCatalog, LlmConversation, Prompter, SourceFiles, SpecRepository, ToolBroker, WorkTree,
+};
+
+/// Reply of `spec steps missing`.
+#[derive(Debug, Serialize, PartialEq, Eq)]
+pub struct MissingStepsReport {
+    pub language: String,
+    pub framework: String,
+    pub missing: Vec<MissingStep>,
+    #[serde(rename = "nextStep")]
+    pub next_step: String,
+}
+
+/// Reply of `spec steps generate` and `spec unittest generate`.
+#[derive(Debug, Serialize, PartialEq)]
+pub struct GenerationReport {
+    pub target: String,
+    pub written: bool,
+    /// "template" for the deterministic output, "llm" when a model's
+    /// polished version passed validation.
+    pub source: String,
+    pub summary: String,
+    #[serde(rename = "nextStep")]
+    pub next_step: String,
+    /// Every judgment the decision model made about this reply, in the
+    /// order they were made. Empty when no decision model was attached.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub judgments: Vec<Judgment>,
+}
+
+/// Reply of `spec scenario generate`.
+#[derive(Debug, Serialize, PartialEq)]
+pub struct ScenarioGenerationReport {
+    pub feature: String,
+    /// The scenario names written, in the order the criteria gave them.
+    pub scenarios: Vec<String>,
+    /// The requirement's criteria count, so a reader can see at a glance
+    /// that every one of them got a scenario.
+    pub criteria: usize,
+    pub written: bool,
+    /// "template" for the literal reading of the criteria, "llm" when a
+    /// model's version passed validation.
+    pub source: String,
+    #[serde(rename = "nextStep")]
+    pub next_step: String,
+    /// Every judgment the decision model made about the scenarios.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub judgments: Vec<Judgment>,
+}
+
+/// The resolved LLM, when one is available: an [`Agent`] already scoped
+/// to this caller's tools.
+pub struct ResolvedLlm<L: LlmConversation, B: ToolBroker = NullBroker> {
+    agent: Agent<L, B>,
+}
+
+impl<L: LlmConversation> ResolvedLlm<L, NullBroker> {
+    pub fn new(model: impl Into<String>, chat: L) -> Self {
+        Self::with_attempts(model, chat, DEFAULT_LLM_ATTEMPTS)
+    }
+
+    pub fn with_attempts(model: impl Into<String>, chat: L, attempts: u32) -> Self {
+        Self {
+            agent: Agent::new(
+                model,
+                chat,
+                NullBroker,
+                Vec::new(),
+                AgentConfig::new("llm", attempts, DEFAULT_MAX_ROUNDS, Vec::new()),
+            ),
+        }
+    }
+}
+
+impl<L: LlmConversation, B: ToolBroker> ResolvedLlm<L, B> {
+    pub fn connected(
+        model: impl Into<String>,
+        chat: L,
+        broker: B,
+        tools: Vec<crate::domain::tools::ToolDefinition>,
+        config: crate::application::agent_service::AgentConfig,
+    ) -> Self {
+        Self {
+            agent: Agent::new(model, chat, broker, tools, config),
+        }
+    }
+
+    pub fn ask<T>(
+        &self,
+        prompter: &mut dyn Prompter,
+        prompt: &crate::domain::prompts::RenderedPrompt,
+        parse: impl FnMut(&str) -> Result<T, String>,
+        on_retry: impl FnMut(&mut dyn Prompter, u32, u32, &str),
+    ) -> Result<T, LlmReplyError> {
+        self.agent.ask(prompter, prompt, parse, on_retry)
+    }
+
+    /// Who is being asked, for the "working" line while they think.
+    pub fn model(&self) -> &str {
+        self.agent.model()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn chat(&self) -> &L {
+        self.agent.chat()
+    }
+}
+
+pub struct GenerationService<F, S, C, R, L, B = NullBroker>
+where
+    F: FeatureCatalog,
+    S: SourceFiles,
+    C: WorkTree,
+    R: SpecRepository,
+    L: LlmConversation,
+    B: ToolBroker,
+{
+    features: F,
+    sources: S,
+    store: C,
+    spec: R,
+    language: Language,
+    layout: ProjectStructure,
+    llm: Option<ResolvedLlm<L, B>>,
+    /// Asked about generated work before it is accepted, when the caller
+    /// has a decision model. `None` means ask nothing - the composition
+    /// root decides that, so no service consults a mode.
+    judge: Option<Box<dyn TaskJudge>>,
+    /// How strictly each gate's answers are read. Inert without a judge.
+    policies: Policies,
+    /// Every judgment this service has made, in order. Interior
+    /// mutability because the generation methods take `&self` and a
+    /// judgment is a record, not a decision - see [`Self::judgments`].
+    judgments: std::cell::RefCell<Vec<Judgment>>,
+}
+
+impl<F, S, C, R, L, B> GenerationService<F, S, C, R, L, B>
+where
+    F: FeatureCatalog,
+    S: SourceFiles,
+    C: WorkTree,
+    R: SpecRepository,
+    L: LlmConversation,
+    B: ToolBroker,
+{
+    pub fn new(
+        features: F,
+        sources: S,
+        store: C,
+        spec: R,
+        language: Language,
+        layout: ProjectStructure,
+        llm: Option<ResolvedLlm<L, B>>,
+    ) -> Self {
+        Self {
+            features,
+            sources,
+            store,
+            spec,
+            language,
+            layout,
+            llm,
+            judge: None,
+            policies: Policies::default(),
+            judgments: std::cell::RefCell::new(Vec::new()),
+        }
+    }
+
+    /// The decision model this service puts its gates' questions to, and
+    /// the policies their answers are read against.
+    ///
+    /// Attached by the caller rather than read from config, because
+    /// whether to ask at all is the policy's call and
+    /// [`crate::application::decision_service::DecisionService::when_asking`]
+    /// has already made it by the time there is anything to pass here.
+    pub fn with_judge(mut self, judge: Box<dyn TaskJudge>, policies: Policies) -> Self {
+        self.judge = Some(judge);
+        self.policies = policies;
+        self
+    }
+
+    /// Whether a decision model gates this service's attempts. The
+    /// composition root decides that; this only reports it.
+    pub fn judges(&self) -> bool {
+        self.judge.is_some()
+    }
+
+    /// Every judgment made so far, for a caller reporting what the
+    /// decision plane said about work it just took.
+    pub fn judgments(&self) -> Vec<Judgment> {
+        self.judgments.borrow().clone()
+    }
+
+    /// The judgments made so far, handed over and cleared, so a caller
+    /// that runs several steps on one service can say which step earned
+    /// which - and so a step that failed still gets its judgments read.
+    pub fn take_judgments(&self) -> Vec<Judgment> {
+        std::mem::take(&mut *self.judgments.borrow_mut())
+    }
+
+    /// Every feature step with no matching definition (step_definitions_find).
+    pub fn steps_missing(&self) -> Result<MissingStepsReport, ServiceError> {
+        let missing = find_missing_steps(&self.features, &self.sources, self.language)?;
+        let next_step = if missing.is_empty() {
+            "Every step has a definition. Run spec test to execute the suite.".to_string()
+        } else {
+            format!(
+                "{} step(s) have no definition. Run spec steps generate to stage pending definitions for them.",
+                missing.len()
+            )
+        };
+        Ok(MissingStepsReport {
+            language: self.language.display().to_string(),
+            framework: self.language.bdd_framework().to_string(),
+            missing,
+            next_step,
+        })
+    }
+
+    /// Stage pending step definitions for every undefined step
+    /// (step_definition_create). When the module already has a
+    /// step-definition file, the new definitions are appended to it
+    /// rather than written to a parallel file whose patterns Cucumber
+    /// would reject as duplicates.
+    pub fn steps_generate(
+        &self,
+        prompter: &mut dyn Prompter,
+    ) -> Result<GenerationReport, ServiceError> {
+        let missing = find_missing_steps(&self.features, &self.sources, self.language)?;
+        if missing.is_empty() {
+            return Err(ServiceError(
+                "Every step already has a definition - nothing to generate.".into(),
+            ));
+        }
+        let sources = self.sources.sources(source_extension(self.language))?;
+        let target = steps_path(&sources, self.language, &self.layout);
+        let existing = sources.iter().find(|file| file.path == target);
+        let package_line = existing.and_then(|file| {
+            file.content
+                .lines()
+                .find(|line| line.starts_with("package "))
+                .map(str::to_string)
+        });
+        // Appending used to hand the polish pass the whole file, working
+        // step definitions and all, and ask for the whole file back. The
+        // model obliged - renaming and reflowing definitions that bind
+        // scenarios passing today. Now it only ever sees the definitions
+        // being added; everything else is spliced around its reply.
+        //
+        // The whole-file gate still runs on the assembled result: every
+        // pattern the file declared has to come back, as must its package
+        // and the class the file is named for, or the module stops
+        // compiling.
+        let declared = existing
+            .map(|file| extract_patterns(self.language, &file.content))
+            .unwrap_or_default();
+        let class_name = production_type_name(&target);
+        let valid_file = |code: &str| {
+            looks_like_step_definitions(self.language, code, class_name.as_deref())
+                && package_line
+                    .as_deref()
+                    .map(|package| code.contains(package.trim_end_matches(';')))
+                    .unwrap_or(true)
+                && {
+                    let kept = extract_patterns(self.language, code);
+                    declared.iter().all(|pattern| kept.contains(pattern))
+                }
+        };
+        let fragment = existing
+            .and_then(|file| step_definitions_fragment(&file.content, self.language, &missing))
+            .map(|fragment| self.bind_expressions(prompter, &fragment, &missing));
+        let (content, source) = match (existing, &fragment) {
+            (Some(file), Some(fragment)) => {
+                let expected = extract_patterns(self.language, fragment);
+                // Names and formatting only. Binding was settled per step
+                // in `bind_expressions`; this pass is forbidden from
+                // changing an expression, and a mismatch here is the
+                // fragment validator, not another question.
+                self.polish_fragment(
+                    prompter,
+                    "the step definitions",
+                    fragment,
+                    |code| looks_like_step_fragment(self.language, code, &expected),
+                    |members| splice_step_definitions(&file.content, self.language, members),
+                    valid_file,
+                )
+            }
+            // Nothing new to add, or a greenfield file: there is no
+            // pre-existing content to protect, so the whole-file polish
+            // pass this prompt was written for still applies.
+            _ => {
+                let template = match existing {
+                    Some(file) => append_step_definitions(&file.content, self.language, &missing),
+                    None => step_definitions_template(self.language, &missing),
+                };
+                let template = self.bind_expressions(prompter, &template, &missing);
+                self.polish(prompter, "the step definitions", &template, valid_file)
+            }
+        };
+        let verb = if existing.is_some() {
+            "append"
+        } else {
+            "generate"
+        };
+        let summary = format!(
+            "{verb} pending step definitions for {} missing step(s) ({source})",
+            missing.len()
+        );
+        let content = escape_pending_messages(self.language, &content);
+        self.store.write(&target, &content, &summary)?;
+        Ok(GenerationReport {
+            target,
+            written: true,
+            source,
+            summary,
+            next_step: "Read it against the acceptance criteria, then run spec test (expect RED)."
+                .into(),
+            judgments: self.take_judgments(),
+        })
+    }
+
+    /// Stage a failing unit test derived from one requirement's acceptance
+    /// criteria (unit_test_create). When a brownfield test class already
+    /// exists, the new methods are appended to it instead of writing a
+    /// parallel `Req00NTest`.
+    pub fn unittest_generate(
+        &self,
+        prompter: &mut dyn Prompter,
+        req_id: &str,
+    ) -> Result<GenerationReport, ServiceError> {
+        let spec = load_spec(&self.spec)?;
+        let requirement = find_requirement(&spec, req_id)?;
+        let sources = self
+            .sources
+            .sources(crate::domain::steps::source_extension(self.language))?;
+        let target = unit_test_path(&sources, self.language, req_id, &self.layout);
+        let conventional = unit_test_target_path(self.language, req_id);
+        let existing = sources.iter().find(|file| file.path == target);
+        let append = existing.is_some() && target != conventional;
+        // Only the name of the type under test, for the generated test
+        // class to refer to. Convention is good enough for a name.
+        let production = production_path(
+            &sources,
+            self.language,
+            &spec.project,
+            &self.layout,
+            "",
+            None,
+            &requirement.production_files,
+        )
+        .unwrap_or_else(|| implementation_target_path(self.language, &spec.project));
+        let production_type = production_type_name(&production);
+        let package_line = existing.filter(|_| append).and_then(|file| {
+            file.content
+                .lines()
+                .find(|line| line.starts_with("package "))
+                .map(str::to_string)
+        });
+        let valid_file = |code: &str| {
+            if append {
+                looks_like_unit_test_for(self.language, code, production_type.as_deref())
+                    && package_line
+                        .as_deref()
+                        .map(|pkg| code.contains(pkg.trim_end_matches(';')))
+                        .unwrap_or(true)
+            } else {
+                looks_like_unit_test(self.language, code)
+            }
+        };
+        let (content, source) = match existing.filter(|_| append) {
+            // Brownfield: the model sees only the test methods being
+            // added, never the class they join.
+            Some(file) => {
+                let fragment = unit_test_fragment(&file.content, self.language, requirement);
+                let placeholders = todo_placeholders(&fragment);
+                let cases = requirement.acceptance_criteria.len();
+                self.polish_fragment(
+                    prompter,
+                    // Deliberately ungated: at generation time the
+                    // placeholders are supposed to be there. The test is
+                    // judged after an implement attempt, where filling
+                    // them in is the job.
+                    "the unit test",
+                    &fragment,
+                    |code| looks_like_unit_test_fragment(self.language, code, &placeholders, cases),
+                    |members| splice_unit_tests(&file.content, self.language, members),
+                    valid_file,
+                )
+            }
+            // Greenfield: no pre-existing content to protect, so the
+            // whole-file polish pass still applies.
+            None => {
+                let template = unit_test_template(self.language, requirement);
+                self.polish(prompter, "the unit test", &template, valid_file)
+            }
+        };
+        let summary = format!(
+            "generate failing unit test for {req_id} ({} criteria, {source})",
+            requirement.acceptance_criteria.len()
+        );
+        self.store.write(&target, &content, &summary)?;
+        Ok(GenerationReport {
+            target,
+            written: true,
+            source,
+            summary,
+            next_step: "Sharpen the assertions (they are yours), then run spec test (expect RED)."
+                .into(),
+            judgments: self.take_judgments(),
+        })
+    }
+
+    /// One requirement's acceptance criteria, as tagged scenarios in its
+    /// feature file.
+    ///
+    /// The deterministic template reads each criterion literally and is
+    /// always available. A model, when one is resolved, is asked for one
+    /// scenario per criterion, in the vocabulary the feature file already
+    /// uses. A criterion it cannot cover keeps that criterion's template
+    /// scenario, and the scenarios already accepted stay written.
+    pub fn scenario_generate<SC, SF>(
+        &self,
+        prompter: &mut dyn Prompter,
+        scenarios: &ScenarioService<SC, SF>,
+        req_id: &str,
+        feature_override: Option<&str>,
+    ) -> Result<ScenarioGenerationReport, ServiceError>
+    where
+        SC: WorkTree,
+        SF: FeatureCatalog,
+    {
+        let spec = load_spec(&self.spec)?;
+        let requirement = find_requirement(&spec, req_id)?;
+        let feature_path = feature_override
+            .map(str::to_string)
+            .or_else(|| requirement.feature_file.clone())
+            .ok_or_else(|| {
+                ServiceError(format!(
+                    "{req_id} has no feature file. Point it at one with spec set-feature {req_id} --file <path>, or pass --feature."
+                ))
+            })?;
+        let doc = self.features.read(&feature_path).ok();
+        if let Some(doc) = &doc {
+            let already = tagged(doc, req_id);
+            if !already.is_empty() {
+                return Err(ServiceError(format!(
+                    "{feature_path} already has {} scenario(s) tagged @{req_id}: {}. Change them with spec scenario update, or delete them first.",
+                    already.len(),
+                    already.join(", ")
+                )));
+            }
+        }
+        let template = scenario_template(requirement);
+        if template.is_empty() {
+            return Err(ServiceError(format!(
+                "None of {req_id}'s acceptance criteria are Given/When/Then shaped, so there is nothing to turn into scenarios. Reword it with spec reword {req_id}, or write the scenarios with spec scenario add."
+            )));
+        }
+        let taken = taken_names(doc.as_ref());
+        let (proposed, source) = self.author_scenarios(
+            prompter,
+            requirement,
+            &feature_path,
+            &doc,
+            &template,
+            &taken,
+        );
+        let mut added = Vec::new();
+        for scenario in &proposed {
+            scenarios.add_scenario(
+                &feature_path,
+                req_id,
+                &scenario.name,
+                scenario.steps.clone(),
+            )?;
+            added.push(scenario.name.clone());
+        }
+        Ok(ScenarioGenerationReport {
+            feature: feature_path,
+            scenarios: added,
+            criteria: requirement.acceptance_criteria.len(),
+            written: true,
+            source,
+            next_step:
+                "Read the steps against the acceptance criteria, then run spec steps missing."
+                    .into(),
+            judgments: self.take_judgments(),
+        })
+    }
+
+    /// Each missing step's template expression is the first candidate.
+    /// One that already matches the line is kept and the model is not
+    /// asked. One that does not is repaired on its own; a repair that
+    /// never binds falls back to the template expression, and the other
+    /// steps are left as they were.
+    fn bind_expressions(
+        &self,
+        prompter: &mut dyn Prompter,
+        fragment: &str,
+        missing: &[MissingStep],
+    ) -> String {
+        let quote = match self.language {
+            Language::JavaScript | Language::TypeScript => '\'',
+            _ => '"',
+        };
+        let mut fragment = fragment.to_string();
+        for step in missing {
+            let expression = step_to_expression(&step.text);
+            let line = format!("{} {}", step.keyword, step.text);
+            if matches!(
+                expression_exam(&step.text, &expression, &line),
+                Exam::Accept
+            ) {
+                continue;
+            }
+            let repaired = self.pursue_expression(prompter, &step.text, &line, &expression);
+            let from = escape_literal(&expression, quote);
+            let to = escape_literal(&repaired, quote);
+            if from != to {
+                fragment = fragment.replacen(&from, &to, 1);
+            }
+        }
+        fragment
+    }
+
+    /// One expression, retried until it binds or the attempt budget is
+    /// spent. The template expression comes back when it never does.
+    fn pursue_expression(
+        &self,
+        prompter: &mut dyn Prompter,
+        step_text: &str,
+        line: &str,
+        template: &str,
+    ) -> String {
+        let Some(llm) = &self.llm else {
+            return template.to_string();
+        };
+        let prompt = step_expression_prompt(line, template);
+        let outcome = llm.ask(
+            prompter,
+            &prompt,
+            |response| {
+                let expression = response
+                    .trim()
+                    .lines()
+                    .next()
+                    .unwrap_or("")
+                    .trim()
+                    .trim_matches('`')
+                    .to_string();
+                let expression = expression
+                    .strip_prefix("Given ")
+                    .or_else(|| expression.strip_prefix("When "))
+                    .or_else(|| expression.strip_prefix("Then "))
+                    .unwrap_or(&expression)
+                    .to_string();
+                match expression_exam(step_text, &expression, line) {
+                    Exam::Accept => Ok(expression),
+                    Exam::Retry(reason) => Err(reason),
+                    exam @ Exam::Ask(_) => {
+                        settle(
+                            exam,
+                            &mut self.judgments.borrow_mut(),
+                            self.judge.as_deref(),
+                            self.policies.policy_for(&STEPS_BIND_SCENARIO),
+                            &STEPS_BIND_SCENARIO,
+                        )?;
+                        Ok(expression)
+                    }
+                }
+            },
+            |prompter, attempt, of, reason| {
+                prompter.warn(&retry_note(attempt, of, reason, "the step expression"));
+            },
+        );
+        outcome.unwrap_or_else(|_| template.to_string())
+    }
+
+    /// The model's scenarios when they cover every criterion, the literal
+    /// template otherwise. Never fails: the template is always usable.
+    ///
+    /// One criterion per ask. A criterion the model cannot cover keeps
+    /// its template scenario, and the criteria already accepted stay
+    /// written. Each accepted scenario is appended to the feature text
+    /// the next criterion sees, which is the vocabulary that prompt
+    /// reuses.
+    fn author_scenarios(
+        &self,
+        prompter: &mut dyn Prompter,
+        requirement: &crate::domain::model::Requirement,
+        feature_path: &str,
+        doc: &Option<crate::domain::feature::FeatureDoc>,
+        template: &[ProposedScenario],
+        taken: &[String],
+    ) -> (Vec<ProposedScenario>, String) {
+        let Some(llm) = &self.llm else {
+            return (template.to_vec(), "template".into());
+        };
+        let known_steps = self.defined_step_patterns();
+        let mut feature_text = doc.as_ref().map(feature::render).unwrap_or_default();
+        let mut taken = taken.to_vec();
+        let criteria = scenarios_criteria(requirement);
+        let work = prompter.working(&format!(
+            "Asking {} to write the scenarios - working",
+            llm.model()
+        ));
+        let mut accepted = Vec::with_capacity(template.len());
+        let mut from_model = false;
+        for (index, fallback) in template.iter().enumerate() {
+            let criterion = criteria.get(index).map(|text| text.as_str()).unwrap_or("");
+            let mut one = requirement.clone();
+            if !criterion.is_empty() {
+                one.acceptance_criteria = vec![criterion.to_string()];
+            }
+            match self.author_one_scenario(
+                prompter,
+                llm,
+                &one,
+                feature_path,
+                &feature_text,
+                &known_steps,
+                std::slice::from_ref(fallback),
+                &taken,
+                criterion,
+            ) {
+                Some(scenario) => {
+                    from_model = true;
+                    feature_text.push_str(&as_gherkin(std::slice::from_ref(&scenario)));
+                    taken.push(scenario.name.clone());
+                    accepted.push(scenario);
+                }
+                None => {
+                    feature_text.push_str(&as_gherkin(std::slice::from_ref(fallback)));
+                    taken.push(fallback.name.clone());
+                    accepted.push(fallback.clone());
+                }
+            }
+        }
+        drop(work);
+        let source = if from_model { "llm" } else { "template" };
+        (accepted, source.into())
+    }
+
+    /// One scenario for one criterion. `None` is the template: the model
+    /// never produced a scenario the examiner would keep.
+    #[allow(clippy::too_many_arguments)]
+    fn author_one_scenario(
+        &self,
+        prompter: &mut dyn Prompter,
+        llm: &ResolvedLlm<L, B>,
+        requirement: &crate::domain::model::Requirement,
+        feature_path: &str,
+        feature_text: &str,
+        known_steps: &[String],
+        template: &[ProposedScenario],
+        taken: &[String],
+        criterion: &str,
+    ) -> Option<ProposedScenario> {
+        let prompt = scenario_prompt(
+            requirement,
+            feature_path,
+            feature_text,
+            known_steps,
+            template,
+        );
+        let id = requirement.id.as_str();
+        let outcome = llm.ask(
+            prompter,
+            &prompt,
+            |response| {
+                let scenarios = parse_scenarios_checked(response, 1, taken)?;
+                let owned = criterion.to_string();
+                let scenario = scenarios
+                    .into_iter()
+                    .next()
+                    .ok_or_else(|| "the reply held no scenario".to_string())?;
+                let briefs = scenario_briefs(id, &[&owned], std::slice::from_ref(&scenario));
+                if let Some(brief) = briefs.into_iter().next() {
+                    settle(
+                        Exam::Ask(brief),
+                        &mut self.judgments.borrow_mut(),
+                        self.judge.as_deref(),
+                        self.policies.policy_for(&SCENARIO_EXERCISES_CRITERION),
+                        &SCENARIO_EXERCISES_CRITERION,
+                    )?;
+                }
+                Ok(scenario)
+            },
+            |prompter, attempt, of, reason| {
+                prompter.warn(&retry_note(attempt, of, reason, "the scenario"));
+            },
+        );
+        outcome.ok()
+    }
+
+    /// Every step expression the project already has a definition for.
+    /// Advisory context for the prompt, so an empty result is not an error.
+    fn defined_step_patterns(&self) -> Vec<String> {
+        self.sources
+            .sources(source_extension(self.language))
+            .map(|sources| {
+                let mut patterns: Vec<String> = sources
+                    .iter()
+                    .flat_map(|file| extract_patterns(self.language, &file.content))
+                    .collect();
+                patterns.sort();
+                patterns.dedup();
+                patterns
+            })
+            .unwrap_or_default()
+    }
+
+    /// The hybrid pass: prefer validated LLM output, fall back to the
+    /// template silently on any failure. Binding and coverage are
+    /// settled before this pass, one unit at a time; this one is names
+    /// and formatting.
+    fn polish(
+        &self,
+        prompter: &mut dyn Prompter,
+        what: &str,
+        template: &str,
+        valid: impl Fn(&str) -> bool,
+    ) -> (String, String) {
+        let Some(llm) = &self.llm else {
+            return (template.to_string(), "template".into());
+        };
+        let prompt = polish_prompt(self.language, template);
+        let work = prompter.working(&format!("Asking {} to write {what} - working", llm.model()));
+        let outcome = llm.ask(
+            prompter,
+            &prompt,
+            |response| {
+                let code = strip_code_fences(response);
+                if valid(&code) {
+                    Ok(code)
+                } else {
+                    Err("the reply was not a valid file for this language".into())
+                }
+            },
+            |prompter, attempt, of, reason| {
+                prompter.warn(&retry_note(attempt, of, reason, what));
+            },
+        );
+        drop(work);
+        match outcome {
+            // `strip_code_fences` leaves whatever the model ended on, and it
+            // often ends on the closing brace. These are source files; give
+            // them the final newline every tool expects.
+            Ok(code) => (ending_in_newline(code), "llm".into()),
+            Err(_) => (template.to_string(), "template".into()),
+        }
+    }
+
+    /// The append-path polish pass: show the model only the members it
+    /// just generated, then splice its reply back in deterministically.
+    ///
+    /// The file being appended to never enters the context, so the code
+    /// already in it cannot be renamed, reflowed, or dropped - the bytes
+    /// outside the splice point are carried over by `splice`, not
+    /// retyped by a model. `assemble` re-checks the whole file anyway:
+    /// the fragment gate makes that redundant, which is exactly what you
+    /// want from a second line of defence.
+    fn polish_fragment(
+        &self,
+        prompter: &mut dyn Prompter,
+        what: &str,
+        fragment: &str,
+        valid_fragment: impl Fn(&str) -> bool,
+        splice: impl Fn(&str) -> String,
+        valid_file: impl Fn(&str) -> bool,
+    ) -> (String, String) {
+        let template = splice(fragment);
+        let Some(llm) = &self.llm else {
+            return (ending_in_newline(template), "template".into());
+        };
+        let prompt = polish_fragment_prompt(
+            self.language,
+            fragment,
+            count_members(self.language, fragment),
+        );
+        let work = prompter.working(&format!("Asking {} to write {what} - working", llm.model()));
+        let outcome = llm.ask(
+            prompter,
+            &prompt,
+            |response| {
+                let code = strip_code_fences(response);
+                if valid_fragment(&code) {
+                    Ok(code)
+                } else {
+                    Err("the reply was not the set of members that were asked for".into())
+                }
+            },
+            |prompter, attempt, of, reason| {
+                prompter.warn(&retry_note(attempt, of, reason, what));
+            },
+        );
+        drop(work);
+        match outcome {
+            Ok(polished) => {
+                let assembled = splice(&shaped_like(fragment, &polished));
+                if valid_file(&assembled) {
+                    (ending_in_newline(assembled), "llm".into())
+                } else {
+                    (ending_in_newline(template), "template".into())
+                }
+            }
+            Err(_) => (ending_in_newline(template), "template".into()),
+        }
+    }
+}
+
+/// What [`SCENARIO_EXERCISES_CRITERION`] is asked about: one question
+/// per scenario, against the criterion it was written for.
+///
+/// Paired by position against [`scenarios_criteria`] rather than the
+/// requirement's whole list, because a criterion the template could not
+/// read yields no scenario and no question about one.
+///
+/// A reply carrying a different number of scenarios than there are
+/// criteria is asked nothing: the deterministic check refuses it first,
+/// and pairing a short list by position would read each scenario against
+/// somebody else's criterion.
+fn scenario_briefs(id: &str, criteria: &[&String], scenarios: &[ProposedScenario]) -> Vec<Brief> {
+    if scenarios.len() != criteria.len() {
+        return Vec::new();
+    }
+    criteria
+        .iter()
+        .zip(scenarios)
+        .enumerate()
+        .map(|(index, (criterion, scenario))| {
+            Brief::new(
+                match criteria.len() {
+                    1 => id.to_string(),
+                    _ => format!("{id} acceptance criterion {}", index + 1),
+                },
+                scenario_state(criterion, &as_gherkin(std::slice::from_ref(scenario))),
+            )
+        })
+        .collect()
+}
+
+/// A rejected reply costs another full model call. Saying so is the
+/// difference between a command that is working and one that looks
+/// stuck: three silent attempts at six seconds each is where most of
+/// the wait in `spec unittest generate` goes.
+pub(crate) fn retry_note(attempt: u32, of: u32, reason: &str, what: &str) -> String {
+    format!("The reply was not usable as {what} ({reason}) - asking again ({attempt} of {of})")
+}
+
+/// How many members a generated fragment holds, for the prompt's count.
+/// Definitions are joined with a blank line, so counting the language's
+/// annotation markers is close enough to keep the model honest. The
+/// markers are the language's own: a Rust fragment of eight `#[then]`
+/// definitions counted against Java's `@Then` read as "1 member", and
+/// the model spent its reply arguing with the number (observed live).
+fn count_members(language: Language, fragment: &str) -> usize {
+    let markers: &[&str] = match language {
+        Language::Java => &["@Given", "@When", "@Then", "@Test"],
+        Language::DotNet => &["[Given(", "[When(", "[Then(", "[Fact]"],
+        Language::Rust => &["#[given", "#[when", "#[then", "#[test]"],
+        Language::JavaScript | Language::TypeScript => {
+            &["Given(", "When(", "Then(", "test(", "it("]
+        }
+    };
+    let counted: usize = markers
+        .iter()
+        .map(|marker| fragment.matches(marker).count())
+        .sum();
+    counted.max(1)
+}
+
+/// Give a polished fragment the whitespace shape the splice expects.
+///
+/// `strip_code_fences` trims the reply, which costs the first member its
+/// indentation and the last one its newline - both of which the
+/// deterministic template carries and the splice point relies on.
+fn shaped_like(template: &str, polished: &str) -> String {
+    let indent: String = template
+        .chars()
+        .take_while(|c| *c == ' ' || *c == '\t')
+        .collect();
+    let mut shaped = String::new();
+    if !polished.starts_with([' ', '\t']) {
+        shaped.push_str(&indent);
+    }
+    shaped.push_str(polished);
+    ending_in_newline(shaped)
+}
+
+fn ending_in_newline(mut code: String) -> String {
+    if !code.ends_with('\n') {
+        code.push('\n');
+    }
+    code
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::model::Spec;
+    use crate::ports::FileChange;
+    use crate::test_support::{
+        FailingSources, FakeLlm, FakeSources, InMemoryFeatureCatalog, InMemorySpecRepository,
+        InMemoryWorkTree, calculator_catalog, calculator_spec, flat_layout,
+    };
+
+    #[test]
+    fn members_are_counted_by_the_language_s_own_markers() {
+        let rust = "#[given(expr = \"a\")]\nfn a() {}\n\n#[then(expr = \"b\")]\nfn b() {}\n";
+        assert_eq!(count_members(Language::Rust, rust), 2);
+        assert_eq!(count_members(Language::Java, rust), 1);
+        let java =
+            "    @Given(\"a\")\n    public void a() {}\n    @Then(\"b\")\n    public void b() {}\n";
+        assert_eq!(count_members(Language::Java, java), 2);
+        let js = "Given('a', function () {});\nThen('b', function () {});\n";
+        assert_eq!(count_members(Language::JavaScript, js), 2);
+        let dotnet = "    [Given(\"a\")]\n    public void A() {}\n";
+        assert_eq!(count_members(Language::DotNet, dotnet), 1);
+    }
+
+    fn service(
+        sources: Vec<crate::ports::SourceFile>,
+        llm: Option<ResolvedLlm<FakeLlm>>,
+    ) -> GenerationService<
+        InMemoryFeatureCatalog,
+        FakeSources,
+        InMemoryWorkTree,
+        InMemorySpecRepository,
+        FakeLlm,
+    > {
+        GenerationService::new(
+            calculator_catalog(),
+            FakeSources(sources),
+            InMemoryWorkTree::default(),
+            InMemorySpecRepository(Ok(calculator_spec())),
+            Language::Java,
+            flat_layout(Language::Java),
+            llm,
+        )
+    }
+
+    fn defined(patterns: &[&str]) -> Vec<crate::ports::SourceFile> {
+        let body: String = patterns
+            .iter()
+            .map(|p| format!("@Given(\"{p}\")\npublic void step() {{}}\n"))
+            .collect();
+        vec![crate::ports::SourceFile {
+            path: "src/test/java/Steps.java".into(),
+            content: body,
+        }]
+    }
+
+    #[test]
+    fn undefined_steps_are_reported_with_the_framework() {
+        let report = service(vec![], None).steps_missing().unwrap();
+        assert_eq!(report.language, "Java");
+        assert_eq!(report.framework, "Cucumber-JVM");
+        assert_eq!(report.missing.len(), 3);
+        assert_eq!(
+            report.next_step,
+            "3 step(s) have no definition. Run spec steps generate to stage pending definitions for them."
+        );
+    }
+
+    #[test]
+    fn fully_defined_features_report_nothing_missing() {
+        let sources = defined(&[
+            "a calculator",
+            "add is called with {string}",
+            "the result is {int}",
+        ]);
+        let report = service(sources, None).steps_missing().unwrap();
+        assert_eq!(report.missing, vec![]);
+        assert_eq!(
+            report.next_step,
+            "Every step has a definition. Run spec test to execute the suite."
+        );
+    }
+
+    #[test]
+    fn generate_without_a_model_stages_the_template() {
+        let service = service(vec![], None);
+        let report = service
+            .steps_generate(&mut crate::application::agent_service::NullPrompter)
+            .unwrap();
+        assert_eq!(report.source, "template");
+        assert_eq!(report.target, "src/test/java/GeneratedSteps.java");
+        assert!(report.written);
+        assert_eq!(service.store.paths(), ["src/test/java/GeneratedSteps.java"]);
+        let content = service.store.read(&report.target).unwrap().unwrap();
+        assert!(content.contains("@Given(\"a calculator\")"));
+        assert!(content.contains("PendingException"));
+    }
+
+    #[test]
+    fn generate_with_nothing_missing_is_refused() {
+        let sources = defined(&[
+            "a calculator",
+            "add is called with {string}",
+            "the result is {int}",
+        ]);
+        let error = service(sources, None)
+            .steps_generate(&mut crate::application::agent_service::NullPrompter)
+            .unwrap_err();
+        assert_eq!(
+            error.0,
+            "Every step already has a definition - nothing to generate."
+        );
+    }
+
+    #[test]
+    fn validated_llm_output_replaces_the_template() {
+        let reply = "public class GeneratedSteps {\n    @Given(\"a calculator\") public void polished() {}\n}";
+        let llm = FakeLlm::replying(&format!("```java\n{reply}\n```"));
+        let service = service(vec![], Some(llm));
+        let report = service
+            .steps_generate(&mut crate::application::agent_service::NullPrompter)
+            .unwrap();
+        assert_eq!(report.source, "llm");
+        let content = service.store.read(&report.target).unwrap().unwrap();
+        // The model's reply, given the final newline a source file needs.
+        assert_eq!(content, format!("{reply}\n"));
+        let prompts = service.llm.as_ref().unwrap().chat().prompts.borrow();
+        assert!(
+            prompts[0].contains("Cucumber-JVM"),
+            "prompt names the framework"
+        );
+        assert!(
+            prompts[0].contains("@Given(\"a calculator\")"),
+            "prompt carries the template"
+        );
+        assert!(
+            prompts[0].contains("Java best practices to follow:")
+                && prompts[0].contains("Package names are lowercase"),
+            "prompt pins the language's best practices"
+        );
+        assert!(
+            prompts
+                .iter()
+                .all(|prompt| !prompt.contains("You write one Cucumber expression")),
+            "a template expression that already binds is not sent back for repair: {prompts:?}"
+        );
+    }
+
+    /// A prompter that keeps what it was told, so a test can see what
+    /// a student would.
+    #[derive(Default)]
+    struct Watching(Vec<String>);
+
+    impl Prompter for Watching {
+        fn tell(&mut self, message: &str) {
+            self.0.push(message.to_string());
+        }
+
+        fn working(&mut self, message: &str) -> Box<dyn crate::ports::Working> {
+            self.0.push(format!("working: {message}"));
+            Box::new(crate::ports::ToldOnce)
+        }
+
+        fn ask(&mut self, _question: &str) -> Result<String, crate::ports::PromptError> {
+            Err(crate::ports::PromptError("nobody to ask".into()))
+        }
+
+        fn confirm(&mut self, _question: &str) -> Result<bool, crate::ports::PromptError> {
+            Ok(false)
+        }
+    }
+
+    /// A local model takes tens of seconds to answer, and this was the
+    /// only model-backed command that said nothing at all while it
+    /// waited - the command read as hung.
+    #[test]
+    fn the_wait_for_the_model_is_narrated() {
+        let llm = FakeLlm::replying(
+            "public class GeneratedSteps {\n    @Given(\"a calculator\") public void p() {}\n}",
+        );
+        let mut prompter = Watching::default();
+        service(vec![], Some(llm))
+            .steps_generate(&mut prompter)
+            .unwrap();
+        assert!(
+            prompter
+                .0
+                .iter()
+                .any(|line| line.starts_with("working: Asking ")
+                    && line.contains("the step definitions")),
+            "{:?}",
+            prompter.0
+        );
+    }
+
+    /// Without a model there is no wait, so there is nothing to say.
+    #[test]
+    fn the_template_path_has_no_wait_to_narrate() {
+        let mut prompter = Watching::default();
+        service(vec![], None).steps_generate(&mut prompter).unwrap();
+        assert!(prompter.0.is_empty(), "{:?}", prompter.0);
+    }
+
+    /// Each rejected reply costs another full model call. Three silent
+    /// retries is most of the wait.
+    #[test]
+    fn a_rejected_reply_says_that_it_is_asking_again() {
+        let mut prompter = Watching::default();
+        service(vec![], Some(FakeLlm::replying("not code at all")))
+            .steps_generate(&mut prompter)
+            .unwrap();
+        assert!(
+            prompter.0.iter().any(|line| line.contains("asking again")),
+            "{:?}",
+            prompter.0
+        );
+    }
+
+    /// A file that already binds one scenario, as the append path finds it.
+    const BROWNFIELD_STEPS: &str = "package com.example;\n\n\
+         public class Steps {\n\
+         \x20   @Given(\"a calculator\")\n\
+         \x20   public void aCalculator() {}\n\
+         }\n";
+
+    fn brownfield_sources() -> Vec<crate::ports::SourceFile> {
+        vec![crate::ports::SourceFile {
+            path: "src/test/java/Steps.java".into(),
+            content: BROWNFIELD_STEPS.into(),
+        }]
+    }
+
+    /// The two definitions `calculator_catalog` leaves missing, renamed
+    /// the way a polish pass legitimately may.
+    const POLISHED_FRAGMENT: &str = "    @When(\"add is called with {string}\")\n\
+         \x20   public void addIsCalledWith(String numbers) {\n\
+         \x20       throw new PendingException();\n\
+         \x20   }\n\n\
+         \x20   @Then(\"the result is {int}\")\n\
+         \x20   public void theResultIs(int expected) {\n\
+         \x20       throw new PendingException();\n\
+         \x20   }\n";
+
+    #[test]
+    fn appending_polishes_only_the_new_definitions_and_never_sends_the_file() {
+        // The whole point of the fragment pass: the file being appended
+        // to is not in the context, so the definition already binding a
+        // passing scenario cannot be renamed however the model replies.
+        let service = service(
+            brownfield_sources(),
+            Some(FakeLlm::replying(POLISHED_FRAGMENT)),
+        );
+        let report = service
+            .steps_generate(&mut crate::application::agent_service::NullPrompter)
+            .unwrap();
+        assert_eq!(report.source, "llm");
+        let content = service.store.read(&report.target).unwrap().unwrap();
+
+        // The result is the untouched file with the reply spliced in -
+        // byte for byte, not a model's retyping of it.
+        assert_eq!(
+            content,
+            splice_step_definitions(BROWNFIELD_STEPS, Language::Java, POLISHED_FRAGMENT)
+        );
+        assert!(
+            content.contains("public void aCalculator() {}"),
+            "{content}"
+        );
+        assert!(content.contains("addIsCalledWith"), "{content}");
+        assert!(content.ends_with('\n'), "trailing newline: {content:?}");
+
+        // And the file's own body was never shown to the model.
+        let prompts = service.llm.as_ref().unwrap().chat().prompts.borrow();
+        let prompt = prompts.first().expect("one polish call");
+        assert!(
+            !prompt.contains("aCalculator"),
+            "the existing method leaked into the prompt: {prompt}"
+        );
+        assert!(
+            !prompt.contains("package com.example"),
+            "the existing package leaked into the prompt: {prompt}"
+        );
+        assert!(
+            prompt.contains("add is called with {string}"),
+            "the generated members are missing: {prompt}"
+        );
+    }
+
+    #[test]
+    fn a_fragment_reply_that_alters_a_step_expression_falls_back_to_the_template() {
+        // Renaming methods is the job; editing the cucumber expression
+        // un-binds the scenario the definition was generated for.
+        let altered = "    @When(\"add is called with {word}\")\n\
+             \x20   public void addIsCalledWith(String numbers) {}\n\n\
+             \x20   @Then(\"the result is {int}\")\n\
+             \x20   public void theResultIs(int expected) {}\n";
+        let service = service(brownfield_sources(), Some(FakeLlm::replying(altered)));
+        let report = service
+            .steps_generate(&mut crate::application::agent_service::NullPrompter)
+            .unwrap();
+        assert_eq!(report.source, "template");
+        let content = service.store.read(&report.target).unwrap().unwrap();
+        assert!(
+            content.contains("@When(\"add is called with {string}\")"),
+            "{content}"
+        );
+        assert!(!content.contains("{word}"), "{content}");
+        assert!(
+            content.contains("public void aCalculator() {}"),
+            "{content}"
+        );
+    }
+
+    #[test]
+    fn a_fragment_reply_that_drops_a_generated_definition_falls_back_to_the_template() {
+        let dropped = "    @When(\"add is called with {string}\")\n\
+             \x20   public void addIsCalledWith(String numbers) {}\n";
+        let service = service(brownfield_sources(), Some(FakeLlm::replying(dropped)));
+        let report = service
+            .steps_generate(&mut crate::application::agent_service::NullPrompter)
+            .unwrap();
+        assert_eq!(report.source, "template");
+        let content = service.store.read(&report.target).unwrap().unwrap();
+        assert!(
+            content.contains("@Then(\"the result is {int}\")"),
+            "the dropped definition is back from the template: {content}"
+        );
+    }
+
+    #[test]
+    fn a_fragment_reply_that_rewrites_the_whole_file_is_refused() {
+        // This is the pre-fix behaviour, now a rejection: asked for
+        // members, the model returns the file with its own class and a
+        // renamed `aCalculator`. Splicing that would nest a class inside
+        // a class, so the template stands instead.
+        let whole_file = "package com.example;\n\npublic class Steps {\n\
+             \x20   @Given(\"a calculator\")\n    public void calculatorIsReady() {}\n\
+             \x20   @When(\"add is called with {string}\")\n    public void when(String s) {}\n\
+             \x20   @Then(\"the result is {int}\")\n    public void then(int n) {}\n}\n";
+        let service = service(brownfield_sources(), Some(FakeLlm::replying(whole_file)));
+        let report = service
+            .steps_generate(&mut crate::application::agent_service::NullPrompter)
+            .unwrap();
+        assert_eq!(report.source, "template");
+        let content = service.store.read(&report.target).unwrap().unwrap();
+        assert!(
+            content.contains("public void aCalculator() {}"),
+            "the original method name survived the rewrite attempt: {content}"
+        );
+        assert!(
+            !content.contains("calculatorIsReady"),
+            "the model's rename leaked in: {content}"
+        );
+        assert_eq!(
+            content.matches("public class Steps").count(),
+            1,
+            "{content}"
+        );
+    }
+
+    #[test]
+    fn a_greenfield_file_still_goes_through_the_whole_file_polish() {
+        // Nothing exists to protect, so the model is still handed - and
+        // still owes - a complete file. A bare fragment is refused here
+        // precisely because the class declaration is required.
+        let fragment = service(vec![], Some(FakeLlm::replying(POLISHED_FRAGMENT)));
+        let report = fragment
+            .steps_generate(&mut crate::application::agent_service::NullPrompter)
+            .unwrap();
+        assert_eq!(report.source, "template");
+
+        let prompts = fragment.llm.as_ref().unwrap().chat().prompts.borrow();
+        let prompt = prompts.first().expect("one polish call");
+        assert!(
+            prompt.contains("complete file content"),
+            "greenfield should use the whole-file prompt: {prompt}"
+        );
+    }
+
+    #[test]
+    fn invalid_llm_output_falls_back_to_the_template_silently() {
+        let service = service(vec![], Some(FakeLlm::replying("I cannot help with that.")));
+        let report = service
+            .steps_generate(&mut crate::application::agent_service::NullPrompter)
+            .unwrap();
+        assert_eq!(report.source, "template");
+        let content = service.store.read(&report.target).unwrap().unwrap();
+        assert!(content.contains("PendingException"));
+    }
+
+    #[test]
+    fn an_llm_failure_falls_back_to_the_template_silently() {
+        let service = service(vec![], Some(FakeLlm::failing()));
+        let report = service
+            .steps_generate(&mut crate::application::agent_service::NullPrompter)
+            .unwrap();
+        assert_eq!(report.source, "template");
+    }
+
+    #[test]
+    fn a_unit_test_is_written_from_the_requirements_criteria() {
+        let service = service(vec![], None);
+        let report = service
+            .unittest_generate(
+                &mut crate::application::agent_service::NullPrompter,
+                "REQ-001",
+            )
+            .unwrap();
+        assert_eq!(report.target, "src/test/java/Req001Test.java");
+        assert_eq!(report.source, "template");
+        assert!(report.summary.contains("1 criteria"));
+        let content = service.store.read(&report.target).unwrap().unwrap();
+        assert!(content.contains("Generated from REQ-001: Adds two numbers"));
+        assert!(content.contains("fail(\"TODO: assert -"));
+    }
+
+    #[test]
+    fn a_unit_test_for_an_unknown_requirement_is_refused() {
+        let error = service(vec![], None)
+            .unittest_generate(
+                &mut crate::application::agent_service::NullPrompter,
+                "REQ-999",
+            )
+            .unwrap_err();
+        assert_eq!(
+            error.0,
+            "No requirement with id REQ-999. Call spec list to see valid ids."
+        );
+    }
+
+    #[test]
+    fn validated_llm_output_replaces_the_unit_test_template() {
+        let llm = FakeLlm::replying("@Test void polished() {}");
+        let service = service(vec![], Some(llm));
+        let report = service
+            .unittest_generate(
+                &mut crate::application::agent_service::NullPrompter,
+                "REQ-001",
+            )
+            .unwrap();
+        assert_eq!(report.source, "llm");
+        let content = service.store.read(&report.target).unwrap().unwrap();
+        assert_eq!(content, "@Test void polished() {}\n");
+    }
+
+    #[test]
+    fn a_brownfield_unit_test_is_appended_not_written_in_parallel() {
+        let sources = vec![crate::ports::SourceFile {
+            path: "src/test/java/com/example/StringCalculatorTest.java".into(),
+            content: "package com.example;\n\nclass StringCalculatorTest {\n}\n".into(),
+        }];
+        let service = service(sources, None);
+        let report = service
+            .unittest_generate(
+                &mut crate::application::agent_service::NullPrompter,
+                "REQ-001",
+            )
+            .unwrap();
+        assert_eq!(
+            report.target,
+            "src/test/java/com/example/StringCalculatorTest.java"
+        );
+        let content = service.store.read(&report.target).unwrap().unwrap();
+        assert!(content.contains("package com.example;"));
+        assert!(content.contains("class StringCalculatorTest"));
+        assert!(content.contains("REQ-001"));
+        assert!(content.contains("fail(\"TODO: assert -"));
+        assert!(!content.contains("class Req001Test"));
+    }
+
+    #[test]
+    fn llm_polish_that_renames_the_package_falls_back_to_the_template() {
+        let sources = vec![crate::ports::SourceFile {
+            path: "src/test/java/com/example/StringCalculatorTest.java".into(),
+            content: "package com.example;\n\nclass StringCalculatorTest {\n    private final StringCalculator calculator = new StringCalculator();\n}\n".into(),
+        }];
+        let llm = FakeLlm::replying(
+            "package com.wrong;\n@Test void two() { fail(\"TODO\"); new StringCalculator(); }",
+        );
+        let service = service(sources, Some(llm));
+        let report = service
+            .unittest_generate(
+                &mut crate::application::agent_service::NullPrompter,
+                "REQ-001",
+            )
+            .unwrap();
+        assert_eq!(report.source, "template");
+        let content = service.store.read(&report.target).unwrap().unwrap();
+        assert!(content.contains("package com.example;"));
+        assert!(!content.contains("package com.wrong;"));
+    }
+
+    /// A brownfield test class with a field the polish pass must not lose.
+    const BROWNFIELD_TEST: &str = "package com.example;\n\n\
+         class StringCalculatorTest {\n\
+         \x20   private final StringCalculator calculator = new StringCalculator();\n\
+         }\n";
+
+    fn brownfield_test_sources() -> Vec<crate::ports::SourceFile> {
+        vec![crate::ports::SourceFile {
+            path: "src/test/java/com/example/StringCalculatorTest.java".into(),
+            content: BROWNFIELD_TEST.into(),
+        }]
+    }
+
+    #[test]
+    fn appending_a_unit_test_polishes_only_the_new_methods() {
+        // REQ-001 has one criterion, so one test case with one TODO.
+        let polished = "    @Test\n    @DisplayName(\"REQ-001: Given \\\"1,2\\\", when add is called, then the result is 3\")\n\
+             \x20   void addsOneAndTwo() {\n\
+             \x20       fail(\"TODO: assert - Given \\\"1,2\\\", when add is called, then the result is 3\");\n\
+             \x20   }\n";
+        let service = service(brownfield_test_sources(), Some(FakeLlm::replying(polished)));
+        let report = service
+            .unittest_generate(
+                &mut crate::application::agent_service::NullPrompter,
+                "REQ-001",
+            )
+            .unwrap();
+        assert_eq!(report.source, "llm");
+        let content = service.store.read(&report.target).unwrap().unwrap();
+        assert!(content.contains("addsOneAndTwo"), "{content}");
+        assert!(
+            content.contains("private final StringCalculator calculator"),
+            "the existing field survived: {content}"
+        );
+        assert!(content.ends_with('\n'), "trailing newline: {content:?}");
+
+        let prompts = service.llm.as_ref().unwrap().chat().prompts.borrow();
+        let prompt = prompts.first().expect("one polish call");
+        assert!(
+            !prompt.contains("private final StringCalculator calculator"),
+            "the existing class body leaked into the prompt: {prompt}"
+        );
+    }
+
+    #[test]
+    fn a_unit_test_reply_that_resolves_the_todo_falls_back_to_the_template() {
+        // Sharpening the assertion is the developer's exercise. A reply
+        // that writes it has taken the RED bar away.
+        let resolved = "    @Test\n    void addsOneAndTwo() {\n\
+             \x20       assertEquals(3, calculator.add(\"1,2\"));\n    }\n";
+        let service = service(brownfield_test_sources(), Some(FakeLlm::replying(resolved)));
+        let report = service
+            .unittest_generate(
+                &mut crate::application::agent_service::NullPrompter,
+                "REQ-001",
+            )
+            .unwrap();
+        assert_eq!(report.source, "template");
+        let content = service.store.read(&report.target).unwrap().unwrap();
+        assert!(content.contains("fail(\"TODO: assert -"), "{content}");
+        assert!(!content.contains("assertEquals(3"), "{content}");
+    }
+
+    #[test]
+    fn a_unit_test_reply_carrying_its_own_class_is_refused() {
+        let whole_file = "package com.example;\n\nclass StringCalculatorTest {\n\
+             \x20   @Test void addsOneAndTwo() { fail(\"TODO: assert - x\"); }\n}\n";
+        let service = service(
+            brownfield_test_sources(),
+            Some(FakeLlm::replying(whole_file)),
+        );
+        let report = service
+            .unittest_generate(
+                &mut crate::application::agent_service::NullPrompter,
+                "REQ-001",
+            )
+            .unwrap();
+        assert_eq!(report.source, "template");
+        let content = service.store.read(&report.target).unwrap().unwrap();
+        assert_eq!(
+            content.matches("class StringCalculatorTest").count(),
+            1,
+            "{content}"
+        );
+        assert!(
+            content.contains("private final StringCalculator calculator"),
+            "{content}"
+        );
+    }
+
+    #[test]
+    fn source_scan_failures_become_service_errors() {
+        let service: GenerationService<_, _, InMemoryWorkTree, InMemorySpecRepository, FakeLlm> =
+            GenerationService::new(
+                calculator_catalog(),
+                FailingSources,
+                InMemoryWorkTree::default(),
+                InMemorySpecRepository(Ok(Spec::default())),
+                Language::Java,
+                flat_layout(Language::Java),
+                None,
+            );
+        assert_eq!(service.steps_missing().unwrap_err().0, "disk on fire");
+    }
+
+    // --- scenario generate -------------------------------------------------
+
+    /// A second handle onto one work tree, so a test can read what the
+    /// service wrote while the service still owns the tree.
+    #[derive(Clone, Default)]
+    struct SharedStore(std::rc::Rc<InMemoryWorkTree>);
+
+    impl WorkTree for SharedStore {
+        fn write(
+            &self,
+            path: &str,
+            content: &str,
+            summary: &str,
+        ) -> Result<FileChange, crate::ports::WriteError> {
+            self.0.write(path, content, summary)
+        }
+        fn read(&self, path: &str) -> Result<Option<String>, crate::ports::WriteError> {
+            self.0.read(path)
+        }
+    }
+
+    type Scenarios = ScenarioService<SharedStore, InMemoryFeatureCatalog>;
+
+    fn scenarios() -> (Scenarios, SharedStore) {
+        let store = SharedStore::default();
+        (
+            ScenarioService::new(store.clone(), calculator_catalog()),
+            store,
+        )
+    }
+
+    fn written_feature(store: &SharedStore) -> String {
+        store
+            .read("features/calc.feature")
+            .unwrap()
+            .expect("the feature file was written")
+    }
+
+    /// REQ-001's one criterion, read literally: the criterion's own words
+    /// become the steps, because without a model nothing knows the file
+    /// already says "Given a calculator".
+    #[test]
+    fn without_a_model_the_scenarios_are_the_literal_reading_of_the_criteria() {
+        let service = service(vec![], None);
+        let (scenarios, store) = scenarios();
+        let report = service
+            .scenario_generate(&mut Watching::default(), &scenarios, "REQ-001", None)
+            .unwrap();
+        assert_eq!(report.source, "template");
+        assert_eq!(report.criteria, 1);
+        assert_eq!(report.scenarios, vec!["Adds two numbers case 1"]);
+        assert!(report.written);
+        let written = written_feature(&store);
+        assert!(written.contains("@REQ-001"), "{written}");
+        assert!(
+            written.contains("Scenario: Adds two numbers case 1"),
+            "{written}"
+        );
+        assert!(written.contains("When add is called"), "{written}");
+        // The scenario already in the file is carried over, not replaced.
+        assert!(written.contains("Scenario: Adds\n"), "{written}");
+    }
+
+    #[test]
+    fn a_model_reply_in_the_files_vocabulary_is_preferred_over_the_template() {
+        let reply = r#"[{"name": "Two numbers are summed",
+                         "steps": ["Given a calculator", "When add is called with \"1,2\"", "Then the result is 3"]}]"#;
+        let service = service(vec![], Some(FakeLlm::replying(reply)));
+        let (scenarios, store) = scenarios();
+        let report = service
+            .scenario_generate(&mut Watching::default(), &scenarios, "REQ-001", None)
+            .unwrap();
+        assert_eq!(report.source, "llm");
+        assert_eq!(report.scenarios, vec!["Two numbers are summed"]);
+        let written = written_feature(&store);
+        assert!(
+            written.contains("When add is called with \"1,2\""),
+            "{written}"
+        );
+        assert!(
+            !written.contains("Adds two numbers case 1"),
+            "the template should not also be written: {written}"
+        );
+    }
+
+    /// The contract is one scenario per criterion. A reply covering
+    /// fewer is refused after its retries and the template stands in, so
+    /// coverage is never quietly lost to a chatty model.
+    #[test]
+    fn a_reply_that_does_not_cover_every_criterion_falls_back_to_the_template() {
+        let service = service(vec![], Some(FakeLlm::replying("[]")));
+        let (scenarios, _store) = scenarios();
+        let report = service
+            .scenario_generate(&mut Watching::default(), &scenarios, "REQ-001", None)
+            .unwrap();
+        assert_eq!(report.source, "template");
+        assert_eq!(report.scenarios, vec!["Adds two numbers case 1"]);
+    }
+
+    /// Two criteria, one reply reused for both asks. The first scenario
+    /// is kept. The second ask sees that name as taken, so that unit
+    /// falls back to its template and the first one stays.
+    #[test]
+    fn one_rejected_scenario_keeps_the_scenario_already_accepted() {
+        let reply = r#"{"name": "Two numbers are summed",
+                        "steps": ["Given a calculator", "When add is called with \"1,2\"", "Then the result is 3"]}"#;
+        let mut spec = calculator_spec();
+        spec.requirements[0]
+            .acceptance_criteria
+            .push("Given \"4,5\", when add is called, then the result is 9".into());
+        let service = GenerationService::new(
+            calculator_catalog(),
+            FakeSources(vec![]),
+            InMemoryWorkTree::default(),
+            InMemorySpecRepository(Ok(spec)),
+            Language::Java,
+            flat_layout(Language::Java),
+            Some(FakeLlm::replying(reply)),
+        );
+        let (scenarios, _store) = scenarios();
+        let report = service
+            .scenario_generate(&mut Watching::default(), &scenarios, "REQ-001", None)
+            .unwrap();
+        assert_eq!(report.source, "llm");
+        assert_eq!(
+            report.scenarios,
+            vec![
+                "Two numbers are summed".to_string(),
+                "Adds two numbers case 2".to_string(),
+            ]
+        );
+        let prompts = service.llm.as_ref().unwrap().chat().prompts.borrow();
+        assert!(
+            prompts.len() > 1,
+            "each criterion is its own ask: {prompts:?}"
+        );
+        assert!(
+            prompts[1].contains("Two numbers are summed"),
+            "the next criterion sees the scenario already accepted: {}",
+            prompts[1]
+        );
+    }
+
+    #[test]
+    fn a_reply_reusing_a_name_already_in_the_file_falls_back_to_the_template() {
+        let reply = r#"[{"name": "Adds", "steps": ["Given a calculator", "When x", "Then the result is 3"]}]"#;
+        let service = service(vec![], Some(FakeLlm::replying(reply)));
+        let (scenarios, _store) = scenarios();
+        let report = service
+            .scenario_generate(&mut Watching::default(), &scenarios, "REQ-001", None)
+            .unwrap();
+        assert_eq!(report.source, "template");
+    }
+
+    #[test]
+    fn the_model_is_shown_the_feature_file_the_defined_steps_and_the_template() {
+        let reply = r#"[{"name": "N", "steps": ["Given a calculator", "When x", "Then y"]}]"#;
+        let service = service(
+            vec![crate::test_support::covered_steps_source()],
+            Some(FakeLlm::replying(reply)),
+        );
+        let (scenarios, _store) = scenarios();
+        service
+            .scenario_generate(&mut Watching::default(), &scenarios, "REQ-001", None)
+            .unwrap();
+        let sent = service.llm.as_ref().unwrap().chat().prompts.borrow()[0].clone();
+        assert!(
+            sent.contains("Scenario: Adds"),
+            "the file is context: {sent}"
+        );
+        assert!(
+            sent.contains("add is called with {string}"),
+            "the defined steps are context: {sent}"
+        );
+        assert!(
+            sent.contains(r#"Given "1,2""#),
+            "the literal template is context: {sent}"
+        );
+    }
+
+    /// Re-running would stack a second copy of every scenario, so the
+    /// second run is refused and names the two ways out.
+    #[test]
+    fn a_requirement_that_already_has_tagged_scenarios_is_refused() {
+        let mut catalog = InMemoryFeatureCatalog::default();
+        catalog.files.insert(
+            "features/calc.feature".into(),
+            "Feature: Calc\n\n  @REQ-001\n  Scenario: Adds\n    Given a calculator\n    When add is called with \"1,2\"\n    Then the result is 3\n".into(),
+        );
+        let service = GenerationService::new(
+            catalog,
+            FakeSources(vec![]),
+            InMemoryWorkTree::default(),
+            InMemorySpecRepository(Ok(calculator_spec())),
+            Language::Java,
+            flat_layout(Language::Java),
+            None::<ResolvedLlm<FakeLlm>>,
+        );
+        let (scenarios, _store) = scenarios();
+        let error = service
+            .scenario_generate(&mut Watching::default(), &scenarios, "REQ-001", None)
+            .unwrap_err();
+        assert!(
+            error
+                .0
+                .contains("already has 1 scenario(s) tagged @REQ-001"),
+            "{}",
+            error.0
+        );
+        assert!(error.0.contains("spec scenario update"), "{}", error.0);
+    }
+
+    /// REQ-002 has no `featureFile`, and guessing one would scatter the
+    /// suite across files nobody asked for.
+    #[test]
+    fn a_requirement_with_no_feature_file_says_how_to_give_it_one() {
+        let service = service(vec![], None);
+        let (scenarios, _store) = scenarios();
+        let error = service
+            .scenario_generate(&mut Watching::default(), &scenarios, "REQ-002", None)
+            .unwrap_err();
+        assert!(error.0.contains("spec set-feature REQ-002"), "{}", error.0);
+        assert!(error.0.contains("--feature"), "{}", error.0);
+    }
+
+    #[test]
+    fn the_feature_flag_stands_in_for_a_requirement_without_one() {
+        let service = service(vec![], None);
+        let (scenarios, _store) = scenarios();
+        let report = service
+            .scenario_generate(
+                &mut Watching::default(),
+                &scenarios,
+                "REQ-002",
+                Some("features/calc.feature"),
+            )
+            .unwrap();
+        assert_eq!(report.feature, "features/calc.feature");
+        assert_eq!(report.scenarios, vec!["Subtracts two numbers case 1"]);
+    }
+
+    /// Nothing to read literally means nothing to hand a model either -
+    /// its reply would have no criteria to be checked against.
+    #[test]
+    fn criteria_that_are_not_given_when_then_shaped_are_refused_with_the_remedy() {
+        let mut spec = calculator_spec();
+        spec.requirements[0].acceptance_criteria = vec!["the calculator is fast".into()];
+        let service = GenerationService::new(
+            calculator_catalog(),
+            FakeSources(vec![]),
+            InMemoryWorkTree::default(),
+            InMemorySpecRepository(Ok(spec)),
+            Language::Java,
+            flat_layout(Language::Java),
+            None::<ResolvedLlm<FakeLlm>>,
+        );
+        let (scenarios, _store) = scenarios();
+        let error = service
+            .scenario_generate(&mut Watching::default(), &scenarios, "REQ-001", None)
+            .unwrap_err();
+        assert!(error.0.contains("Given/When/Then shaped"), "{}", error.0);
+        assert!(error.0.contains("spec reword REQ-001"), "{}", error.0);
+    }
+
+    #[test]
+    fn the_wait_for_the_scenarios_is_narrated() {
+        let reply = r#"[{"name": "N", "steps": ["Given a", "When b", "Then c"]}]"#;
+        let service = service(vec![], Some(FakeLlm::replying(reply)));
+        let (scenarios, _store) = scenarios();
+        let mut prompter = Watching::default();
+        service
+            .scenario_generate(&mut prompter, &scenarios, "REQ-001", None)
+            .unwrap();
+        assert!(
+            prompter
+                .0
+                .iter()
+                .any(|line| line.contains("Asking fake-model to write the scenarios")),
+            "{:?}",
+            prompter.0
+        );
+    }
+}

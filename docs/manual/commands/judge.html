@@ -1,0 +1,883 @@
+<!DOCTYPE HTML>
+<html lang="en" class="ayu sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>spec judge - spec Harness Manual</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="The complete, searchable reference for the spec harness: every command, subcommand, and flag, with in-depth examples.">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../favicon-de23e50b.svg">
+        <link rel="shortcut icon" href="../favicon-8114d1fc.png">
+        <link rel="stylesheet" href="../css/variables-8adf115d.css">
+        <link rel="stylesheet" href="../css/general-e96d0476.css">
+        <link rel="stylesheet" href="../css/chrome-d279d366.css">
+        <link rel="stylesheet" href="../css/print-9e4910d8.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../fonts/fonts-9644e21d.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="mdbook-highlight-css" href="../highlight-493f70e1.css">
+        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="../tomorrow-night-4c0ae647.css">
+        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "../";
+            const default_light_theme = "ayu";
+            const default_dark_theme = "ayu";
+            window.path_to_searchindex_js = "../searchindex-c81802e8.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../toc-8557ae39.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="mdbook-body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('ayu')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="mdbook-sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("mdbook-sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="mdbook-sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
+            </noscript>
+            <div id="mdbook-sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="mdbook-page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="mdbook-menu-bar-hover-placeholder"></div>
+                <div id="mdbook-menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="mdbook-sidebar-toggle" class="icon-button" for="mdbook-sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="mdbook-sidebar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M0 96C0 78.3 14.3 64 32 64H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32C14.3 128 0 113.7 0 96zM0 256c0-17.7 14.3-32 32-32H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32c-17.7 0-32-14.3-32-32zM448 416c0 17.7-14.3 32-32 32H32c-17.7 0-32-14.3-32-32s14.3-32 32-32H416c17.7 0 32 14.3 32 32z"/></svg></span>
+                        </label>
+                        <button id="mdbook-theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="mdbook-theme-list">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M371.3 367.1c27.3-3.9 51.9-19.4 67.2-42.9L600.2 74.1c12.6-19.5 9.4-45.3-7.6-61.2S549.7-4.4 531.1 9.6L294.4 187.2c-24 18-38.2 46.1-38.4 76.1L371.3 367.1zm-19.6 25.4l-116-104.4C175.9 290.3 128 339.6 128 400c0 3.9 .2 7.8 .6 11.6c1.8 17.5-10.2 36.4-27.8 36.4H96c-17.7 0-32 14.3-32 32s14.3 32 32 32H240c61.9 0 112-50.1 112-112c0-2.5-.1-5-.2-7.5z"/></svg></span>
+                        </button>
+                        <ul id="mdbook-theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-ayu">Ayu</button></li>
+                        </ul>
+                        <button id="mdbook-search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="mdbook-searchbar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM208 352c79.5 0 144-64.5 144-144s-64.5-144-144-144S64 128.5 64 208s64.5 144 144 144z"/></svg></span>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">spec Harness Manual</h1>
+
+                    <div class="right-buttons">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                            <span class=fa-svg id="print-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M128 0C92.7 0 64 28.7 64 64v96h64V64H354.7L384 93.3V160h64V93.3c0-17-6.7-33.3-18.7-45.3L400 18.7C388 6.7 371.7 0 354.7 0H128zM384 352v32 64H128V384 368 352H384zm64 32h32c17.7 0 32-14.3 32-32V256c0-35.3-28.7-64-64-64H64c-35.3 0-64 28.7-64 64v96c0 17.7 14.3 32 32 32H64v64c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V384zm-16-88c-13.3 0-24-10.7-24-24s10.7-24 24-24s24 10.7 24 24s-10.7 24-24 24z"/></svg></span>
+                        </a>
+                        <a href="https://github.com/davidparry/spec-driven-agentic" title="Git repository" aria-label="Git repository">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6zm-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3zm44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9zM244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8zM97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1zm-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7zm32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1zm-11.4-14.7c-1.6 1-1.6 3.6 0 5.9 1.6 2.3 4.3 3.3 5.6 2.3 1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2z"/></svg></span>
+                        </a>
+                        <a href="https://github.com/davidparry/spec-driven-agentic/edit/trunk/manual/src/commands/judge.md" title="Suggest an edit" aria-label="Suggest an edit" rel="edit">
+                            <span class=fa-svg id="git-edit-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M421.7 220.3l-11.3 11.3-22.6 22.6-205 205c-6.6 6.6-14.8 11.5-23.8 14.1L30.8 511c-8.4 2.5-17.5 .2-23.7-6.1S-1.5 489.7 1 481.2L38.7 353.1c2.6-9 7.5-17.2 14.1-23.8l205-205 22.6-22.6 11.3-11.3 33.9 33.9 62.1 62.1 33.9 33.9zM96 353.9l-9.3 9.3c-.9 .9-1.6 2.1-2 3.4l-25.3 86 86-25.3c1.3-.4 2.5-1.1 3.4-2l9.3-9.3H112c-8.8 0-16-7.2-16-16V353.9zM453.3 19.3l39.4 39.4c25 25 25 65.5 0 90.5l-14.5 14.5-22.6 22.6-11.3 11.3-33.9-33.9-62.1-62.1L314.3 67.7l11.3-11.3 22.6-22.6 14.5-14.5c25-25 65.5-25 90.5 0z"/></svg></span>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="mdbook-search-wrapper" class="hidden">
+                    <form id="mdbook-searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="mdbook-searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="mdbook-searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <span class=fa-svg id="fa-spin"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M304 48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zm0 416c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM48 304c26.5 0 48-21.5 48-48s-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48zm464-48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM142.9 437c18.7-18.7 18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zm0-294.2c18.7-18.7 18.7-49.1 0-67.9S93.7 56.2 75 75s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zM369.1 437c18.7 18.7 49.1 18.7 67.9 0s18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9z"/></svg></span>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="mdbook-searchresults-outer" class="searchresults-outer hidden">
+                        <div id="mdbook-searchresults-header" class="searchresults-header"></div>
+                        <ul id="mdbook-searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('mdbook-sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('mdbook-sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#mdbook-sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="mdbook-content" class="content">
+                    <main>
+                        <h1 id="spec-judge"><a class="header" href="#spec-judge">spec judge</a></h1>
+<p>Decision model selection, and bounded judgments you can inspect.</p>
+<p>A <strong>decision model</strong> is a second local model with a different job from
+the one <a href="model.html"><code>spec model</code></a> configures. The generative model writes
+prose and code. A decision model does not write at all: it is asked one
+bounded question about evidence you supply and answers with a typed
+value and a probability. Ollama serves these at <code>/v1/systemone</code> from
+version 0.35.</p>
+<p>The harness uses it for exactly one question today: <strong>can this
+acceptance criterion be checked by a test with a single unambiguous
+result?</strong> That is a gap the deterministic
+<a href="spec.html#spec-refine">requirement refiner</a> cannot close.</p>
+<p>The refiner’s rules ask whether the outcome clause <em>looks</em> concrete —
+does it contain a number, a quoted literal, a named error type, a known
+sentinel? That is satisfied by a number appearing anywhere in the
+clause, so</p>
+<blockquote>
+<p>Given the refactored module, when the suite runs, then code quality is
+improved by at least 20%</p>
+</blockquote>
+<p>earns no finding at all, while being unmeasurable: nobody measured code
+quality. The rule asks whether a number is <em>present</em>. The judgment asks
+whether the number <em>is</em> the assertion. Against <code>nimble:latest</code> that
+criterion comes back at p = 0.038 — not measurable.</p>
+<pre><code class="language-text">Usage: spec judge [OPTIONS] &lt;COMMAND&gt;
+
+Commands: models, current, use, criterion
+</code></pre>
+<h2 id="on-wherever-a-decision-model-is-installed"><a class="header" href="#on-wherever-a-decision-model-is-installed">On wherever a decision model is installed</a></h2>
+<p>Pull a decision model and judgments work. There is nothing else to
+configure: with <code>[decision] model</code> unset, Ollama is asked which of its
+models can answer, and the first is used for the session.</p>
+<p>Nothing is <em>assumed</em>, though. No model name is compiled in, none is
+pulled for you, and the borrowed choice is never written to your
+configuration — <code>spec judge use</code> is still the only thing that makes one
+stick. On a machine with no decision-capable model, every command
+behaves exactly as it did before this feature existed.</p>
+<p>Two ways to turn it off: <code>mode = "off"</code> stops the automatic judgments
+while leaving <code>spec judge</code> answering, and a machine with no decision
+model pulled asks nothing because there is nothing to ask.</p>
+<p>The <a href="../interactive-shell.html#the-decision-line">interactive shell</a> says
+which state you are in before its first prompt, on a line beside the
+inference model’s:</p>
+<pre><code class="language-text">Inference model set: qwen3.8-flash-next:125b-mlx (from configuration).
+Decision model set for this session: nimble (not saved - keep it with: spec judge use nimble).
+</code></pre>
+<p>Resolving it at startup is what turns a model named in <code>[decision]</code> but
+never pulled into something you find out about at the prompt rather than
+at the first judgment. A session with nothing to ask still returns every
+deterministic answer it always did.</p>
+<h2 id="what-a-judgment-is-allowed-to-do"><a class="header" href="#what-a-judgment-is-allowed-to-do">What a judgment is allowed to do</a></h2>
+<p>A judgment is <strong>a gate on wording, and nothing else</strong>. It can refuse
+work; it can never approve any. Specifically, a decision model in this
+harness can never:</p>
+<ul>
+<li>turn a red test bar green, or change a test result in any way</li>
+<li>mark a requirement implemented, or certify any implementation</li>
+<li>bypass the <a href="../branch-gate.html">branch gate</a> or a human confirmation</li>
+<li>waive a human checkpoint</li>
+<li>make a wording review <code>clean</code> that the deterministic rules did not</li>
+<li>edit or drop a deterministic finding</li>
+</ul>
+<p>Those are all decided by deterministic code or by you.</p>
+<p>What it <em>can</em> do, in the default <code>mode = "enforce"</code>, is stop a
+requirement moving on. A verdict against a criterion appends its line to
+<code>findings</code>, makes <code>clean</code> false, and exits nonzero — the same three
+signals a deterministic finding produces, so the loop you already run
+iterates on it without being taught anything new. The lines are prefixed
+<code>judgment (measurable/v2):</code> so you can always tell which rules found
+what, and the deterministic findings keep their place above them.</p>
+<p>That is the default because of what the question is for. It is aimed at
+wording the regex rules cannot reach — “then code quality is improved by
+at least 20%” earns no deterministic finding at all, because a number is
+present. If the judgment cannot refuse, nothing enforces that gap. Set
+<code>mode = "advisory"</code> to report without gating while you measure the
+question against your own criteria; see
+<a href="#how-well-does-it-work">How well does it work?</a> for what that costs.</p>
+<p>A request that failed is not an answer and is never read as approval. An
+unreachable model in advisory mode leaves a note saying no judgment was
+taken; in enforcing mode it is an error.</p>
+<hr>
+<h2 id="spec-judge-models"><a class="header" href="#spec-judge-models">spec judge models</a></h2>
+<p>List the installed models that can answer decisions.</p>
+<pre><code class="language-bash">spec judge models
+</code></pre>
+<pre><code class="language-text">nimble:latest
+</code></pre>
+<p>The list comes from asking Ollama which of its models report the
+<code>decision</code> capability. No model name is hardcoded, and nothing is
+inferred from a name: a model is offered for this role only because the
+provider says it can do the job.</p>
+<p>With none installed, the command is an error rather than an empty list,
+and gives the two commands that fix it:</p>
+<pre><code class="language-text">No decision model is installed - install one to continue:
+    ollama pull nimble
+    spec judge use nimble
+</code></pre>
+<hr>
+<h2 id="spec-judge-current"><a class="header" href="#spec-judge-current">spec judge current</a></h2>
+<p>Show the resolved decision model, where it came from, and the policy its
+answers are read against.</p>
+<pre><code class="language-bash">spec judge current
+</code></pre>
+<pre><code class="language-text">nimble:latest (from configuration)
+endpoint	http://localhost:11434
+timeout_seconds	60
+mode	enforce
+min_confidence	0.8
+</code></pre>
+<p>The model shown is the one that will actually answer, so with nothing
+configured it is the one discovery borrowed, and the source says so
+rather than claiming the file named it:</p>
+<pre><code class="language-text">nimble:latest (from the only installed decision model)
+</code></pre>
+<p>With nothing configured and nothing installed that can decide:</p>
+<pre><code class="language-text">No decision model is installed - install one to turn judgments on:
+    ollama pull nimble
+    spec judge use nimble
+</code></pre>
+<p><code>--json</code> prints the same values as a stable object, including the
+question version:</p>
+<pre><code class="language-bash">spec judge current --json
+</code></pre>
+<pre><code class="language-json">{
+  "endpoint": "http://localhost:11434",
+  "minConfidence": 0.8,
+  "mode": "enforce",
+  "model": "nimble:latest",
+  "question": "measurable/v2",
+  "source": "configuration",
+  "timeoutSeconds": 60
+}
+</code></pre>
+<p><code>mode</code> reads back in lower case because that is what you write in
+<code>.spec/config.toml</code>. <code>verdict</code> and <code>action</code> are upper case because they
+name states in the workflow rather than settings.</p>
+<p><a href="config.html"><code>spec config</code></a> reports the same five keys alongside every
+other setting, with the source of each.</p>
+<hr>
+<h2 id="spec-judge-use"><a class="header" href="#spec-judge-use">spec judge use</a></h2>
+<p>Persist the decision model choice.</p>
+<pre><code class="language-bash">spec judge use nimble:latest
+</code></pre>
+<pre><code class="language-text">Configured decision model: nimble:latest
+Written to: /Users/you/code/calculator/.spec/config.toml ([decision] model)
+The generative model is unchanged - see llm.model in spec config.
+</code></pre>
+<p>This writes <code>[decision] model</code> and touches nothing else. It is a
+separate key from <code>llm.model</code> on purpose: the two roles are two models,
+and configuring one must never replace the other. The name is checked
+against the models that report the <code>decision</code> capability, so a chat
+model is refused here rather than failing later.</p>
+<p>The reverse is also refused. <code>spec model use nimble:latest</code> reports:</p>
+<pre><code class="language-text">'nimble:latest' is a decision model and cannot do generative work - set it as the decision model instead: spec judge use nimble:latest
+</code></pre>
+<p>Model discovery has the same separation. With only a decision model
+installed, the session default does not silently become it:</p>
+<pre><code class="language-text">Ollama has nimble:latest installed, which answers decisions rather than chat - generation will use deterministic templates. Pull a coding model too, e.g.: ollama pull qwen3.8-flash-next:125b-mlx (the decision model stays available to spec judge)
+</code></pre>
+<hr>
+<h2 id="spec-judge-criterion"><a class="header" href="#spec-judge-criterion">spec judge criterion</a></h2>
+<p>Run a real judgment and show the whole typed result. This is the command
+to use to check that the setup works and to see what a judgment actually
+is.</p>
+<pre><code class="language-text">Usage: spec judge criterion [OPTIONS] [REQ_ID]
+
+Arguments: [REQ_ID]   a requirement whose criteria are judged
+Options:   --text &lt;TEXT&gt;   judge this wording instead
+           --json
+</code></pre>
+<p>Before it asks anything, this command checks that a model which can
+answer is both installed and chosen, and stops with the command to run
+if not. The check is on this command only. <code>spec refine</code> still judges
+nothing unless a model is configured, and says so in a note rather than
+failing — a wording review that worked before you had a decision model
+goes on working.</p>
+<pre><code class="language-text">No decision model configured - choose one to continue:
+    spec judge use nimble:latest
+installed: nimble:latest
+</code></pre>
+<p>Judge a piece of wording directly:</p>
+<pre><code class="language-bash">spec judge criterion --text "Given the refactored module, when the suite runs, then code quality is improved by at least 20%"
+</code></pre>
+<pre><code class="language-text">model	nimble:latest
+question	measurable/v2
+mode	enforce
+min_confidence	0.8
+
+criterion	Given the refactored module, when the suite runs, then code quality is improved by at least 20%
+answer	probability of true 0.038
+verdict	FAILS
+action	REWORK
+input	--text
+state	sha256:048965344f62409e5399403357ce83c4e7b3cce836b14673c0745b6f7ff7237d
+tokens	in 385 out 1
+
+judgment (measurable/v2): criterion "Given the refactored module, when the suite runs, then code quality is improved by at least 20%": the outcome may not be measurable - nimble:latest says probability of true 0.038
+
+A judgment gates on wording only. It becomes a finding and exits nonzero, the same as a deterministic one, and it does not change the test bar or whether a requirement is implemented.
+</code></pre>
+<p>This command exits nonzero on any action other than <code>CONTINUE</code>, so it
+works as a gate in a script on the same terms as <code>spec refine</code>. Under
+<code>mode = "off"</code> the action is always <code>CONTINUE</code> and it always exits
+zero — a judgment you typed still answers, it just does not gate.</p>
+<p>Or every criterion of a requirement:</p>
+<pre><code class="language-bash">spec judge criterion REQ-003
+</code></pre>
+<p><code>--json</code> gives the machine-readable form, which is the same shape the
+<a href="mcp.html"><code>refine_requirement</code> MCP tool</a> attaches:</p>
+<pre><code class="language-json">{
+  "judgments": [
+    {
+      "gate": "CRITERION_MEASURABLE",
+      "question": "measurable/v2",
+      "model": "nimble:latest",
+      "verdict": "HOLDS",
+      "action": "CONTINUE",
+      "mode": "enforce",
+      "threshold": 0.8,
+      "answer": { "type": "noul", "noul": 0.99804933586542 },
+      "provenance": {
+        "input": "REQ-003",
+        "state": "sha256:0506f1b9d220bf6b7a2f2192534480abad3d25e297a324ff954a0ea9fdda6994",
+        "state_bytes": 92
+      },
+      "usage": { "input_tokens": 382, "output_tokens": 1 }
+    }
+  ],
+  "action": "CONTINUE",
+  "advisories": []
+}
+</code></pre>
+<h3 id="reading-the-record"><a class="header" href="#reading-the-record">Reading the record</a></h3>
+<p>Every judgment records enough to be argued with later:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>What it is</th></tr>
+</thead>
+<tbody>
+<tr><td><code>gate</code></td><td>Which question was being decided</td></tr>
+<tr><td><code>question</code></td><td>The question’s version — <code>measurable/v2</code>. A threshold calibrated against one phrasing is not evidence about another, so a change to the wording is a new version</td></tr>
+<tr><td><code>model</code></td><td>The model that answered</td></tr>
+<tr><td><code>answer</code></td><td>The typed answer exactly as returned</td></tr>
+<tr><td><code>verdict</code></td><td><code>HOLDS</code>, <code>FAILS</code>, or <code>INCONCLUSIVE</code> after the threshold is applied</td></tr>
+<tr><td><code>action</code></td><td>What the harness did: <code>CONTINUE</code>, <code>REWORK</code>, <code>ESCALATE</code>, or <code>STOP</code>. The model never picks this</td></tr>
+<tr><td><code>mode</code></td><td>The policy in force</td></tr>
+<tr><td><code>provenance.input</code></td><td>What was summarized into the question</td></tr>
+<tr><td><code>provenance.state</code></td><td>A SHA-256 of the exact brief sent, so a judgment can be tied to the evidence it saw</td></tr>
+<tr><td><code>usage</code></td><td>Tokens in and out</td></tr>
+</tbody>
+</table>
+</div>
+<p>The brief is deliberately minimal: the criterion and nothing else. The
+question is about that sentence’s own wording, so the story, the
+project, and the rest of the spec are not evidence for it. The state
+field is data, never instructions.</p>
+<hr>
+<h2 id="judgments-on-a-wording-review"><a class="header" href="#judgments-on-a-wording-review">Judgments on a wording review</a></h2>
+<p>With a decision model configured, <a href="spec.html#spec-refine"><code>spec refine</code></a>
+and the <code>refine_requirement</code> MCP tool attach judgments to their reply.
+In the default <code>enforce</code> mode a verdict against a criterion lands in
+<code>findings</code> and <code>clean</code>:</p>
+<pre><code class="language-json">{
+  "id": "REQ-007",
+  "clean": false,
+  "findings": [
+    "judgment (measurable/v2): criterion \"...\": the outcome may not be measurable - nimble:latest says probability of true 0.014"
+  ],
+  "nextStep": "Call requirement_reword to address each finding ... Iterate until there are no findings.",
+  "judgments": [ { "...": "as above" } ],
+  "judgmentAdvisories": [
+    "judgment (measurable/v2): criterion \"...\": the outcome may not be measurable - nimble:latest says probability of true 0.014"
+  ],
+  "judgmentAction": "REWORK"
+}
+</code></pre>
+<p>The line appears twice on purpose. In <code>findings</code> it reaches the loop,
+which is already told to iterate until that list is empty, so no caller
+needs teaching about a new field. In <code>judgmentAdvisories</code> it stays
+available on its own, for a reader who wants the probabilistic findings
+apart from the deterministic ones. Deterministic findings keep their
+place at the front of <code>findings</code> and are never edited or dropped.</p>
+<p>Under <code>mode = "advisory"</code> nothing is merged: <code>clean</code> stays <code>true</code>,
+<code>findings</code> stays empty, <code>judgmentAction</code> is <code>CONTINUE</code>, and the
+advisories are reported on their own.</p>
+<p>With no decision model that can answer, none of those four keys appears
+at all, so a tool or script reading this reply sees no change.</p>
+<p>The MCP tool gates on the same terms as the CLI. It used to weaken an
+enforcing project to advisory, on the grounds that an exit code is a
+thing a human watches — but a tool reply an agent reads is exactly
+where the loop lives, so that put the gate out of reach precisely where
+it was needed. There is no exit code over MCP; the gate is <code>clean</code> and
+<code>findings</code>, which is what the agent iterates on anyway.</p>
+<p>A judgment that was wanted and never arrived is the one case that
+replaces the reply with a tool error. That is not wording an agent can
+reword, so turning it into a finding would only make the loop retry it
+forever.</p>
+<p><code>mode = "off"</code> reaches this tool too. It judges on its own initiative
+rather than because anyone typed a command, so it is one of the
+surfaces that goes quiet — the reply carries the deterministic findings
+and no judgment keys, exactly as if no model could answer.</p>
+<hr>
+<h2 id="the-decision-configuration-block"><a class="header" href="#the-decision-configuration-block">The [decision] configuration block</a></h2>
+<pre><code class="language-toml">[decision]
+model = "nimble:latest"               # persisted by spec judge use
+endpoint = "http://localhost:11434"   # defaults to the [llm] endpoint
+timeout_seconds = 60
+mode = "enforce"                      # off | advisory | enforce
+min_confidence = 0.8
+</code></pre>
+<p><code>endpoint</code> defaults to whatever <code>[llm] endpoint</code> is set to, so one
+Ollama host is stated once. Set it only when the decision model lives
+somewhere else.</p>
+<h3 id="decisionmode"><a class="header" href="#decisionmode"><code>decision.mode</code></a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Mode</th><th>What a judgment does</th></tr>
+</thead>
+<tbody>
+<tr><td><code>off</code></td><td>Nothing is asked automatically — not by <code>spec refine</code>, and not by the <code>refine_requirement</code> MCP tool. <code>spec judge</code> still answers, because a human typed it, but it gates nothing</td></tr>
+<tr><td><code>advisory</code></td><td>The answer is reported beside the deterministic result and changes nothing</td></tr>
+<tr><td><code>enforce</code></td><td><strong>The default.</strong> A <code>FAILS</code> verdict asks for <code>REWORK</code>; an <code>INCONCLUSIVE</code> one asks to <code>ESCALATE</code>. Either appends its line to <code>findings</code>, makes <code>clean</code> false, and exits nonzero. A failed request is an error, never an approval</td></tr>
+</tbody>
+</table>
+</div>
+<p>A misspelled mode is no mode, so it takes the default — which means a
+typo keeps gating rather than silently stopping. That is the direction
+a typo in a gate should fail in.</p>
+<h3 id="decisiongatesgate"><a class="header" href="#decisiongatesgate"><code>[decision.gates.&lt;GATE&gt;]</code></a></h3>
+<p><code>mode</code> and <code>min_confidence</code> apply to the whole plane. One gate can be
+read differently:</p>
+<pre><code class="language-toml">[decision]
+mode = "enforce"
+
+[decision.gates.UNIT_TEST_ASSERTS]
+mode = "advisory"
+
+[decision.gates.CRITERION_MEASURABLE]
+min_confidence = 0.9
+</code></pre>
+<p>Each half of an override falls back to the plane’s setting rather than
+to a built-in, so a gate that names only a mode keeps the threshold set
+once above it. The gate names are the ones printed in every judgment
+and <code>second review</code> block:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Gate</th><th>Asked by</th><th>Ships at</th></tr>
+</thead>
+<tbody>
+<tr><td><code>CRITERION_MEASURABLE</code></td><td><code>spec refine</code>, <code>refine_requirement</code>, <code>--judge-draft</code></td><td><code>enforce</code></td></tr>
+<tr><td><code>SCENARIO_EXERCISES_CRITERION</code></td><td><code>spec scenario generate</code></td><td><code>advisory</code></td></tr>
+<tr><td><code>STEPS_BIND_SCENARIO</code></td><td><code>spec steps generate</code>, <code>deliver</code></td><td><code>advisory</code></td></tr>
+<tr><td><code>UNIT_TEST_ASSERTS</code></td><td><code>spec implement</code>, <code>deliver</code></td><td><code>advisory</code></td></tr>
+<tr><td><code>IMPLEMENTATION_COMPLETE</code></td><td><code>spec implement</code>, <code>deliver</code></td><td><code>advisory</code></td></tr>
+<tr><td><code>REFACTOR_PRESERVES_BEHAVIOUR</code></td><td><code>spec refactor</code>, <code>deliver</code></td><td><code>advisory</code></td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Ships at</strong> is a ceiling, not a default. A gate with no entry of its
+own is read at the weaker of the plane’s mode and that ceiling, so
+<code>mode = "enforce"</code> turns up the one calibrated question and leaves the
+other five advisory. An explicit <code>[decision.gates.&lt;GATE&gt;]</code> entry is
+taken at its word, which is how a project that has measured a gate on
+its own work turns it up. The labelled sets behind each ceiling run
+with <code>cargo test --test decision_live -- --ignored --nocapture</code>.</p>
+<h3 id="decisionmin_confidence"><a class="header" href="#decisionmin_confidence"><code>decision.min_confidence</code></a></h3>
+<p>A dead band, not a quality bar. For the boolean question the harness
+asks, a probability at or above this reads as <code>HOLDS</code>, at or below
+<code>1 - threshold</code> reads as <code>FAILS</code>, and anything between is
+<code>INCONCLUSIVE</code>.</p>
+<p>Widening the band moves answers out of <code>FAILS</code> and into <code>INCONCLUSIVE</code>,
+which does not quiet them: both gate under <code>enforce</code>. What changes is
+the finding they carry — <code>INCONCLUSIVE</code> asks you to reword the clause
+after <code>then</code> so a test could assert it, rather than asserting the
+outcome is unmeasurable.</p>
+<p>Ollama’s own <code>confidence</code> figure — returned for the <code>choice</code> and <code>score</code>
+question types, though not for the boolean one — is defined as how
+concentrated the probability distribution is, which its documentation is
+explicit is <em>not</em> calibrated correctness. Treat the threshold as a width
+of “do not act on this”, and nothing more.</p>
+<hr>
+<h2 id="how-well-does-it-work"><a class="header" href="#how-well-does-it-work">How well does it work?</a></h2>
+<p>Not a question to answer from a vendor benchmark. Ollama publishes
+aggregate scores for its decision models on its own evaluation suite;
+those say nothing about whether this harness’s question works on
+acceptance criteria written by workshop students.</p>
+<p>So there is a labeled evaluation in the repository:
+<code>harness/tests/decision_live.rs</code> holds 32 acceptance criteria in five
+groups — clearly measurable, clearly not, genuinely ambiguous, a group
+written to <em>look</em> finished, and four lifted from this repository’s own
+spec — each labeled with a note saying why. Run it against your own
+model:</p>
+<pre><code class="language-bash">cd harness
+cargo test --test decision_live -- --ignored --nocapture
+</code></pre>
+<p>It prints the answer for every criterion, a confusion matrix, and a
+threshold sweep, so you can see where the model and the labels disagree
+and judge for yourself.</p>
+<h3 id="what-it-scores"><a class="header" href="#what-it-scores">What it scores</a></h3>
+<p>Two numbers get quoted about this question, and they are not the same
+kind of thing. Keeping them apart is the whole point of the table:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th></th><th>Value</th><th>What it is</th></tr>
+</thead>
+<tbody>
+<tr><td>Decision band</td><td><strong>0.80</strong></td><td>A policy input. The probability needed before an answer counts as a verdict at all; <code>1 - 0.80 = 0.20</code> is its mirror. Not a correctness figure — Ollama’s own documentation says its confidence is not calibrated correctness</td></tr>
+<tr><td>Measured accuracy</td><td><strong>0 misses, 1 false alarm, 3 unsure</strong></td><td>The evaluation result over the 32 labelled criteria, at that band</td></tr>
+</tbody>
+</table>
+</div>
+<p>“Misses” are the direction that matters: vague wording waved through as
+measurable. There are none.</p>
+<p>Against <code>nimble:latest</code> at the shipped threshold, nothing vague is
+judged measurable — including all eight criteria written to look
+finished, one of which is a direct prompt-injection attempt.</p>
+<p>It produces one false alarm, on an ordinary shape:</p>
+<blockquote>
+<p>Given a requirement, when coverage is requested, then the verdict is <code>"covered"</code></p>
+</blockquote>
+<p>That assertion is an exact quoted string, so it is measurable, and the
+question scores it 0.08.</p>
+<h3 id="what-is-actually-wrong-with-it"><a class="header" href="#what-is-actually-wrong-with-it">What is actually wrong with it</a></h3>
+<p>This was recorded for two releases as the model reading the quoted word
+as a judgement. It is not, and the real answer matters more than the
+one wrong case, because it bounds what this question can be trusted to
+do. There are two defects, and both are reproducible with
+<code>spec judge criterion</code>.</p>
+<p><strong>Defect one: hedge words leak in from the setup.</strong> Hold
+<code>then there are 5 findings</code> byte-identical and grow the Given:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Setup in front of the same assertion</th><th></th></tr>
+</thead>
+<tbody>
+<tr><td><em>(nothing)</em></td><td>0.991</td></tr>
+<tr><td><code>Given a story, …</code></td><td>0.972</td></tr>
+<tr><td><code>Given a story naming no actor, …</code></td><td>0.962</td></tr>
+<tr><td><code>Given a story naming no actor, no benefit and three ambiguous words, …</code></td><td>0.115</td></tr>
+</tbody>
+</table>
+</div>
+<p>It looks like sentence length until you change the one word:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>…three <strong><em>X</em></strong> words, when the requirement is refined, …</th><th></th></tr>
+</thead>
+<tbody>
+<tr><td><code>ambiguous</code></td><td>0.115</td></tr>
+<tr><td><code>unusual</code></td><td>0.884</td></tr>
+<tr><td><code>red</code></td><td>0.973</td></tr>
+<tr><td><code>"ambiguous"</code>, in quotation marks</td><td>0.975</td></tr>
+</tbody>
+</table>
+</div>
+<p><code>when_false</code> lists the hedge words that make a clause vague. The model
+scans the whole criterion for them rather than only the clause after
+<code>then</code> — the one thing the question’s first sentence tells it not to
+do. Quoting the word neutralises it, because <code>when_true</code> says quoted
+text is a literal.</p>
+<p><strong>Defect two: the assertion shape.</strong> In one fixed short frame:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th><code>Given a requirement, when it is checked, …</code></th><th></th></tr>
+</thead>
+<tbody>
+<tr><td><code>then the reply is an error naming "covered"</code></td><td>0.912</td></tr>
+<tr><td><code>then the reply names "covered"</code></td><td>0.785</td></tr>
+<tr><td><code>then the "verdict" field is "covered"</code></td><td>0.085</td></tr>
+<tr><td><code>then the verdict is "covered"</code></td><td>0.058</td></tr>
+<tr><td><code>then there are 5 findings</code></td><td>0.915</td></tr>
+<tr><td><code>then the reply lists 5 findings</code></td><td>0.032</td></tr>
+</tbody>
+</table>
+</div>
+<p>A copula with a literal on the right reads to this model as describing
+a state rather than asserting one. Swap <code>is</code> for <code>names</code> and the same
+literal scores fifteen times higher.</p>
+<p>That second defect is the expensive one, because <code>then the X is "Y"</code> is
+the most common assertion shape in this repository’s own spec.</p>
+<h3 id="the-set-is-the-thing-to-fix-first"><a class="header" href="#the-set-is-the-thing-to-fix-first">The set is the thing to fix first</a></h3>
+<p>32 cases from one author, and most of the measurable half is
+<code>then the result is N</code> — a shape the question happens to answer well.
+Run the harness’s own spec through it instead:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th><code>harness/requirements/requirements.json</code>, 73 criteria</th><th></th></tr>
+</thead>
+<tbody>
+<tr><td><code>HOLDS</code></td><td>51</td></tr>
+<tr><td><code>INCONCLUSIVE</code></td><td>8</td></tr>
+<tr><td><code>FAILS</code></td><td>14</td></tr>
+</tbody>
+</table>
+</div>
+<p>Every one of those 14 is a quoted literal or a count:
+<code>then the verdict is "valid"</code> 0.649, <code>then the phase is "GREEN"</code> 0.598,
+<code>then there are 5 findings</code> 0.115, <code>then 0 steps are missing</code> 0.135,
+<code>then an issue reads "REQ-006: …"</code> 0.271.</p>
+<h3 id="two-fixes-that-were-measured-and-do-not-work"><a class="header" href="#two-fixes-that-were-measured-and-do-not-work">Two fixes that were measured and do not work</a></h3>
+<p><strong>Name quoted status words in <code>when_true</code>.</strong> Adding <code>"covered"</code>,
+<code>"uncovered"</code> and <code>"NaN"</code> as examples of literals takes the labelled
+set to 0 false alarms and 2 unsure. It also fits the prompt to the
+test: those are that set’s own words, and removing them returns the
+score exactly to the published figures. A question that scores well
+only on the words it was shown has not been improved.</p>
+<p><strong>Send only the clause after <code>then</code>.</strong> This is the structural version
+of what <code>instructions</code> already asks for, and it does exactly what
+defect one predicts — <code>then there are 5 findings</code> goes from 0.115 to
+0.994. It is still worse on both sets:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th></th><th>labelled set (32)</th><th>harness spec (73)</th></tr>
+</thead>
+<tbody>
+<tr><td>as shipped</td><td>0 miss, 1 false alarm, 3 unsure</td><td>22 flagged</td></tr>
+<tr><td>clause only</td><td><strong>1 miss</strong>, 3 false alarms, 1 unsure</td><td>31 flagged</td></tr>
+</tbody>
+</table>
+</div>
+<p>The miss is the reason to stop looking for a wording that fixes defect
+one. <code>then the system achieves 99.9% correctness across all code paths</code>
+scores <strong>0.933 alone</strong>, and fails correctly inside its frame. The model
+is not reading the then-clause and leaking context into it — it is
+judging the vagueness of the whole sentence, which is one mechanism
+working in both directions. Strip the setup and you lose the false
+alarm on <code>three ambiguous words</code> and the true catch on <code>a production-grade request payload</code> together.</p>
+<p>Defect one is not a bug sitting beside the behaviour that works. It is
+that behaviour, seen from the other side. A real fix has to separate
+them, and nothing in the prompt’s wording can.</p>
+<p>Until something does, this repository runs the question in <code>advisory</code>
+and not <code>enforce</code>. The judgments are worth reading; they are not yet
+worth blocking on.</p>
+<h3 id="what-the-default-costs-you"><a class="header" href="#what-the-default-costs-you">What the default costs you</a></h3>
+<p>Be clear about the trade the default makes. Over those 32 labelled
+criteria, enforcing blocks on 4 of them that the labels call fine: the
+1 false alarm above, plus the 3 the dead band leaves <code>INCONCLUSIVE</code>,
+which gate as <code>ESCALATE</code>. That is roughly one criterion in eight
+stopping a loop that should have carried on — and on a spec whose
+criteria do not look like this set’s, much worse than that.</p>
+<p>The default is <code>enforce</code> anyway, because the alternative is worse in a
+way that does not show up in that count. The question is aimed at
+exactly the wording no deterministic rule reaches — “then code quality
+is improved by at least 20%” earns no finding from the regex rules,
+because a number is present. A judgment that cannot refuse leaves that
+gap unenforced entirely, and the 0 misses above stop meaning anything
+the moment nobody is required to read them. A false alarm costs a
+reword; a miss ships vague wording into a test suite.</p>
+<p><strong>Measure it against your own criteria before you leave it on.</strong> That
+is not boilerplate caution: this repository did exactly that and turned
+its own gate down to <code>advisory</code> on the result.</p>
+<p>Your options, in the order worth trying:</p>
+<ul>
+<li>Reword the criterion. The reword that satisfies the model usually
+reads better anyway, and a criterion that survives a long Given is
+usually one whose assertion names its own subject.</li>
+<li>Widen <code>min_confidence</code>, which moves confident wrong answers into
+<code>INCONCLUSIVE</code>. They still gate, but with a finding that asks for
+clarity rather than asserting unmeasurability.</li>
+<li>Set <code>mode = "advisory"</code>, which is what this repository runs. The
+judgments are still reported on every <code>refine</code>, under <code>judgments</code> and
+<code>judgmentAdvisories</code>; they simply do not enter <code>findings</code> or clear
+<code>clean</code>.</li>
+<li>Set <code>mode = "off"</code> if the question does not fit your project at all.</li>
+</ul>
+<p>Rewording the <em>question</em> is the one option not on that list, and the
+section above is why: it is the right instinct, and both attempts at it
+failed in ways that only showed up against criteria the question had
+not been tuned on.</p>
+<h3 id="why-the-question-is-worded-the-way-it-is"><a class="header" href="#why-the-question-is-worded-the-way-it-is">Why the question is worded the way it is</a></h3>
+<p>An earlier phrasing asked the open question — “could a test check this
+criterion?” — and scored well on plain vagueness while reading <strong>every</strong>
+adversarial criterion as measurable at p &gt; 0.9, including “the system
+achieves 99.9% correctness across all code paths” and a criterion that
+simply asserted it was measurable. Pointing the question at the clause
+after <code>then</code>, and naming the specific dodges that clause uses, took that
+from 8 misses to none.</p>
+<p>The lesson is about the question, not the model: an open question
+invites a judgment of the sentence’s <em>style</em>, and style is exactly what
+convincing-looking wording gets right.</p>
+<p><code>measurable/v2</code> sharpens that wording — it says a quoted value is a
+literal whatever the word would mean as prose, and that a count is one
+too — without moving the measured figures. The version is bumped
+because the strings changed, which is the rule for this table, not
+because the question got better. What the attempt to make it better
+produced is in <a href="#what-is-actually-wrong-with-it">What is actually wrong with
+it</a> above, and the short version is
+that the lesson repeats one level up: an evaluation set invites a
+judgment of the <em>shapes it contains</em>, and those are exactly what a
+question tuned on it gets right.</p>
+<p>The wording itself lives in <code>harness/prompts/prompts.toml</code>, under
+<code>[decision.measurable]</code>, beside the generative templates. It is built
+into the binary rather than read from your project, so a judgment means
+the same thing on every machine. <code>version</code> sits in that same table, next
+to the three strings it names, so the two cannot drift: any edit to the
+wording is a new version, because the numbers below were measured
+against one phrasing and are not evidence about another.</p>
+<p>The threshold came out of the same loop. At 0.70 the run produces two
+confident false alarms rather than one and leaves one of the six
+ambiguous criteria unsure. The two directions do not cost the same: a
+confident false alarm asserts the wording is unmeasurable when it is
+not, while an inconclusive one asks for clarity and is right to ask.
+So the wider band ships, and 0.70 is still a reasonable choice for a
+project that would rather be told plainly which criteria the model
+dislikes.</p>
+<hr>
+<h2 id="troubleshooting"><a class="header" href="#troubleshooting">Troubleshooting</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Message</th><th>What to do</th></tr>
+</thead>
+<tbody>
+<tr><td><code>No decision model is installed</code></td><td><code>ollama pull nimble</code> — judgments start working as soon as one is pulled, with or without <code>spec judge use</code></td></tr>
+<tr><td><code>No decision model configured and none could be discovered</code></td><td>Ollama could not be reached to ask what is installed. Start it, or name a model with <code>spec judge use &lt;name&gt;</code></td></tr>
+<tr><td><code>decision model 'X' is not installed</code></td><td><code>ollama pull X</code></td></tr>
+<tr><td><code>'X' cannot answer decisions here</code></td><td>The model has no <code>decision</code> capability. The message lists the ones that do</td></tr>
+<tr><td><code>... has no /v1/systemone route</code></td><td>Ollama is older than 0.35. Upgrade it</td></tr>
+<tr><td><code>no decision within 60s</code></td><td>Raise <code>timeout_seconds</code> under <code>[decision]</code></td></tr>
+<tr><td><code>the decision brief is too large</code></td><td>The question’s brief is capped at 64 KiB by the server, which does not truncate</td></tr>
+<tr><td><code>the decision reply did not match the questions asked</code></td><td>The model answered something that was not asked. Reported rather than read as a verdict</td></tr>
+<tr><td><code>decision gate refused to pass without an answer</code></td><td>A judgment was wanted and never arrived while enforcing. Fix the cause above, or set <code>mode = "advisory"</code> to carry on with the deterministic verdict</td></tr>
+<tr><td>A criterion you believe is fine keeps failing</td><td>See <a href="#what-the-default-costs-you">What the default costs you</a></td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="see-also"><a class="header" href="#see-also">See also</a></h2>
+<ul>
+<li><a href="model.html"><code>spec model</code></a> — the <strong>generative</strong> model, a separate choice.</li>
+<li><a href="config.html"><code>spec config</code></a> — every key and where it came from.</li>
+<li><a href="spec.html#spec-refine"><code>spec refine</code></a> — the deterministic wording review
+a judgment sits beside.</li>
+<li><a href="../global-flags.html">Global flags</a> — the <code>--decision-model</code> override.</li>
+</ul>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../commands/model.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                            </a>
+
+                            <a rel="next prefetch" href="../commands/config.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../commands/model.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                    </a>
+
+                    <a rel="next prefetch" href="../commands/config.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                    </a>
+            </nav>
+
+        </div>
+
+        <template id=fa-eye><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M288 32c-80.8 0-145.5 36.8-192.6 80.6C48.6 156 17.3 208 2.5 243.7c-3.3 7.9-3.3 16.7 0 24.6C17.3 304 48.6 356 95.4 399.4C142.5 443.2 207.2 480 288 480s145.5-36.8 192.6-80.6c46.8-43.5 78.1-95.4 93-131.1c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C433.5 68.8 368.8 32 288 32zM432 256c0 79.5-64.5 144-144 144s-144-64.5-144-144s64.5-144 144-144s144 64.5 144 144zM288 192c0 35.3-28.7 64-64 64c-11.5 0-22.3-3-31.6-8.4c-.2 2.8-.4 5.5-.4 8.4c0 53 43 96 96 96s96-43 96-96s-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6z"/></svg></span></template>
+        <template id=fa-eye-slash><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M38.8 5.1C28.4-3.1 13.3-1.2 5.1 9.2S-1.2 34.7 9.2 42.9l592 464c10.4 8.2 25.5 6.3 33.7-4.1s6.3-25.5-4.1-33.7L525.6 386.7c39.6-40.6 66.4-86.1 79.9-118.4c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C465.5 68.8 400.8 32 320 32c-68.2 0-125 26.3-169.3 60.8L38.8 5.1zM223.1 149.5C248.6 126.2 282.7 112 320 112c79.5 0 144 64.5 144 144c0 24.9-6.3 48.3-17.4 68.7L408 294.5c5.2-11.8 8-24.8 8-38.5c0-53-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6c0 10.2-2.4 19.8-6.6 28.3l-90.3-70.8zm223.1 298L373 389.9c-16.4 6.5-34.3 10.1-53 10.1c-79.5 0-144-64.5-144-144c0-6.9 .5-13.6 1.4-20.2L83.1 161.5C60.3 191.2 44 220.8 34.5 243.7c-3.3 7.9-3.3 16.7 0 24.6c14.9 35.7 46.2 87.7 93 131.1C174.5 443.2 239.2 480 320 480c47.8 0 89.9-12.9 126.2-32.5z"/></svg></span></template>
+        <template id=fa-copy><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M502.6 70.63l-61.25-61.25C435.4 3.371 427.2 0 418.7 0H255.1c-35.35 0-64 28.66-64 64l.0195 256C192 355.4 220.7 384 256 384h192c35.2 0 64-28.8 64-64V93.25C512 84.77 508.6 76.63 502.6 70.63zM464 320c0 8.836-7.164 16-16 16H255.1c-8.838 0-16-7.164-16-16L239.1 64.13c0-8.836 7.164-16 16-16h128L384 96c0 17.67 14.33 32 32 32h47.1V320zM272 448c0 8.836-7.164 16-16 16H63.1c-8.838 0-16-7.164-16-16L47.98 192.1c0-8.836 7.164-16 16-16H160V128H63.99c-35.35 0-64 28.65-64 64l.0098 256C.002 483.3 28.66 512 64 512h192c35.2 0 64-28.8 64-64v-32h-47.1L272 448z"/></svg></span></template>
+        <template id=fa-play><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"/></svg></span></template>
+        <template id=fa-clock-rotate-left><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M75 75L41 41C25.9 25.9 0 36.6 0 57.9V168c0 13.3 10.7 24 24 24H134.1c21.4 0 32.1-25.9 17-41l-30.8-30.8C155 85.5 203 64 256 64c106 0 192 86 192 192s-86 192-192 192c-40.8 0-78.6-12.7-109.7-34.4c-14.5-10.1-34.4-6.6-44.6 7.9s-6.6 34.4 7.9 44.6C151.2 495 201.7 512 256 512c141.4 0 256-114.6 256-256S397.4 0 256 0C185.3 0 121.3 28.7 75 75zm181 53c-13.3 0-24 10.7-24 24V256c0 6.4 2.5 12.5 7 17l72 72c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-65-65V152c0-13.3-10.7-24-24-24z"/></svg></span></template>
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../elasticlunr-ef4e11c1.min.js"></script>
+        <script src="../mark-09e88c2c.min.js"></script>
+        <script src="../searcher-09f2665d.js"></script>
+
+        <script src="../clipboard-1626706a.min.js"></script>
+        <script src="../highlight-abc7f01d.js"></script>
+        <script src="../book-609e4cb8.js"></script>
+
+        <!-- Custom JS scripts -->
+
+
+
+    </div>
+    </body>
+</html>

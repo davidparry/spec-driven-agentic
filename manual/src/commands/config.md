@@ -1,0 +1,122 @@
+# spec config
+
+Print every configuration key the harness uses and whether the value is a
+code **default** or was read from the project file (`.spec/config.toml`).
+
+```text
+Usage: spec config [OPTIONS]
+```
+
+## Flags
+
+| Flag | Description |
+| --- | --- |
+| `--json` | Machine-readable object: `file` plus `settings` (`key`, `value`, `source`). |
+| `--root <ROOT>` | Project root that owns the config file. Defaults to `.`. |
+
+## Output
+
+Tab-separated columns: `key`, effective `value`, then the source:
+`(default)`, `(discovered)`, or the absolute path of the file that
+supplied it. The first line is `file` and the path that was opened,
+`(none)` when no file exists, or the path plus `(invalid TOML)` /
+`(unreadable)` when the file could not be used.
+
+When the file names no `llm.model`, Ollama is asked which model a run
+would actually use — the same order [`spec model current`](model.md)
+follows — and that name is shown as `(discovered)`. Nothing is
+written; persist it with `spec model use <name>`. A configured model
+skips the provider call, and an unreachable or empty Ollama leaves the
+key `(unset)`.
+
+The file is read from `--root` only; there is no search of parent
+directories. Run `spec config` from the project root, or point
+`--root` at it, or `file` reads `(none)` and every key is a default.
+
+```bash
+spec config
+```
+
+```text
+file	/Users/you/code/calculator/.spec/config.toml
+llm.model	qwen3.8-flash-next:125b-mlx	/Users/you/code/calculator/.spec/config.toml
+llm.endpoint	http://localhost:11434	(default)
+llm.timeout_seconds	900	/Users/you/code/calculator/.spec/config.toml
+llm.cache_ttl_seconds	600	/Users/you/code/calculator/.spec/config.toml
+llm.retry	3	(default)
+tools.max_rounds	12	(default)
+tools.confirm	command_run	(default)
+tools.discovery_timeout_seconds	10	(default)
+tools.call_timeout_seconds	300	(default)
+tools.cache_ttl_seconds	86400	(default)
+tools.mcp_config	(unset)	(default)
+refactor.attempts	10	(default)
+deliver.attempts	3	(default)
+decision.model	(unset)	(default)
+decision.endpoint	http://localhost:11434	/Users/you/code/calculator/.spec/config.toml
+decision.timeout_seconds	60	(default)
+decision.mode	enforce	(default)
+decision.min_confidence	0.8	(default)
+tools.profiles.spec-draft	list_requirements, get_requirement, validate_spec, refine_requirement	(default)
+tools.profiles.implement	get_requirement, feature_read, …	(default)
+```
+
+The five `decision.*` rows describe the
+[decision model](judge.md) — a second, separate model from `llm.model`
+above. `decision.model` is `(unset)` until `spec judge use` names one.
+Unset does not mean judgments are off: this command reports what the
+file says, and with no model named the first decision-capable model
+installed is used for the run. [`spec judge current`](judge.md) is the
+one that resolves it and names the model that will actually answer.
+`decision.endpoint` is
+attributed to the file when either it or `[llm] endpoint` supplied the
+host, since the decision plane defaults to wherever Ollama already is.
+
+`refactor.attempts` is how many write-then-test rounds
+[`spec refactor`](refactor.md) may spend before it restores the code it
+started from. Each round costs a model call and a full test run, so it is
+that command's whole cost ceiling. Zero or a non-number falls back to the
+default rather than to a budget of nothing, which would revert without
+ever having tried.
+
+`deliver.attempts` is the same kind of budget for
+[`spec deliver`](deliver.md): how many RED-to-GREEN rounds one
+requirement gets before the run reports it fallen short and moves on.
+Each round is a full `spec implement`, which spends `llm.retry` model
+attempts of its own inside it. `--attempts` wins for one run; zero or
+junk in the file falls back to the default.
+
+Every budget and timeout follows the same order: the flag for one run,
+then the key in `.spec/config.toml`, then the compiled-in default. A
+project that wants to see what it is running on can write each key with
+its value, as this repository's own config files do; `spec config` then
+attributes every row to the file.
+
+In a project that has never run `spec model use`, the first row is the
+name Ollama supplied:
+
+```text
+llm.model	qwen3:8b	(discovered)
+```
+
+A `[tools.profiles]` list for a caller is **merged** with that
+command's built-in tools - defaults first, then whatever the file adds,
+each tool once - and the row shows the merged set attributed to the
+file. `spec init` writes every caller's default list so those rows show
+as from the file with the same tools the code would have offered.
+Callers not listed keep the code default. `[tools.enabled]` /
+`[tools.disabled]` rows appear only when those tables are set.
+
+Optional keys with nothing to show print `(unset)` with source
+`(default)`: `tools.mcp_config`, and `llm.model` when Ollama is down
+or has no models pulled.
+
+## See also
+
+- [`spec model`](model.md) — persist `llm.model`.
+- [`spec judge`](judge.md) — persist `decision.model`, and what the
+  other four `decision.*` keys do.
+- [`spec tools`](tools.md) — per-command profiles and `mcp.json` tools.
+- [Global flags](../global-flags.md) — `--model`, `--decision-model`,
+  `--retry`, `--tools` override a value for one run and are not written
+  to the file.

@@ -1,0 +1,361 @@
+# Executable spec for controlled spec authoring — the behavior of
+# `spec draft`, `spec mark-implemented`, `spec feature create`,
+# and `spec scenario add|update|delete`. Every mutation lands on disk.
+Feature: Spec mutations
+  As a developer who owns the spec wording
+  I want drafting, status flips, and scenario edits reviewed as they land
+  So that the spec stays the reviewed source of truth
+
+  Background:
+    Given a working spec with the pending requirement "REQ-001"
+
+  Scenario: A clean draft is written under the next free id
+    Given the developer will answer:
+      """
+      Comma sums
+      As a user, I want comma sums so that totals come from one input.
+      Given the input "1,2", when add is called, then the result is 3
+      Given an empty string "", when add is called, then the result is 0
+      <empty>
+      y
+      """
+    When a requirement is drafted
+    Then the draft is written as "REQ-002"
+    And the written spec has 2 requirements
+
+  Scenario: Findings drive rewording until the draft is clean
+    Given the developer will answer:
+      """
+      Comma sums
+      the calculator should handle commas quickly
+      the result is 3
+      <empty>
+      Comma sums
+      As a user, I want comma sums so that totals come from one input.
+      Given the input "1,2", when add is called, then the result is 3
+      Given an empty string "", when add is called, then the result is 0
+      <empty>
+      y
+      """
+    When a requirement is drafted
+    Then the draft is written as "REQ-002"
+    And the developer was told a finding containing "must be phrased Given/When/Then"
+    And the developer was told a finding containing "'should' is ambiguous"
+    And the developer was told a finding containing "try: rephrase as: Given <starting state>, when <action>, then <exact result>"
+    And the developer was told a finding containing "try: replace the vague word with the exact observable behavior"
+
+  Scenario: Rewording prompts show the id with prior answers that Enter keeps
+    Given the developer will answer:
+      """
+      Comma sums
+      the calculator should handle commas quickly
+      Given the input "1,2", when add is called, then the result is 3
+      Given an empty string "", when add is called, then the result is 0
+      <empty>
+      <empty>
+      As a user, I want comma sums so that totals come from one input.
+      <empty>
+      <empty>
+      <empty>
+      y
+      """
+    When a requirement is drafted
+    Then the draft is written as "REQ-002"
+    And the developer was asked "REQ-002 title [Comma sums] (Enter keeps it):"
+    And the developer was asked "REQ-002 criterion 1 [Given the input "1,2", when add is called, then the result is 3] (Enter keeps it, '-' drops it):"
+    And the developer was asked "REQ-002 criterion 3 (leave blank to finish the criteria):"
+    And the written spec has 2 requirements
+
+  @HARNESS-022
+  Scenario: A described feature is split into proposals the wizard walks through
+    Given the model will reply:
+      """
+      [{"title": "Comma separated numbers are summed",
+        "story": "As a user, I want comma sums so that totals come from one input.",
+        "acceptanceCriteria": ["Given the input \"1,2\", when add is called, then the result is 3"]},
+       {"title": "Empty string returns zero",
+        "story": "As a user, I want empty input to be 0 so that no input is a safe default.",
+        "acceptanceCriteria": ["Given an empty string \"\", when add is called, then the result is 0"]}]
+      """
+    And the developer will answer:
+      """
+      sum numbers from a comma separated string, empty input means zero
+      a
+      a
+      y
+      """
+    When a requirement is drafted with the model's help
+    Then the draft is written as "REQ-003"
+    And the developer was told a finding containing "ASK-001 preserves the request: sum numbers from a comma separated string, empty input means zero"
+    And the developer was told a finding containing "The request holds 2 requirement(s) and 0 question(s)."
+    And the developer was told a finding containing "Proposal 1: Comma separated numbers are summed"
+    And the developer was asked "Proposal 1 - [a]pprove, [r]eject, re[v]ise, or e[x]clude from scope [a/r/v/x]:"
+    And the developer was told a finding containing "REQ-002 accepted by you."
+    And the developer was told a finding containing "Proposal 2: Empty string returns zero"
+    And the developer was told a finding containing "REQ-003 accepted by you."
+    And the developer was asked "Do the accepted requirements cover the whole request ASK-001?"
+    And the ask "ASK-001" preserves the request "sum numbers from a comma separated string, empty input means zero"
+    And the ask "ASK-001" derives "REQ-002, REQ-003"
+    And "REQ-002" is accepted under "ASK-001" by the user
+    And the ask "ASK-001" is complete and confirmed
+    And the ask "ASK-001" is ready
+    And the written spec has 4 requirements
+
+  # A rejection is a decision of record, not a deletion: the proposal
+  # stays on the ask with its reason, nothing is written for it, and the
+  # ask is not ready while a proposal stands rejected without a revision.
+  @HARNESS-022
+  Scenario: Rejecting a proposal keeps it on record and holds the ask back
+    Given the model will reply:
+      """
+      [{"title": "Comma separated numbers are summed",
+        "story": "As a user, I want comma sums so that totals come from one input.",
+        "acceptanceCriteria": ["Given the input \"1,2\", when add is called, then the result is 3"]},
+       {"title": "Empty string returns zero",
+        "story": "As a user, I want empty input to be 0 so that no input is a safe default.",
+        "acceptanceCriteria": ["Given an empty string \"\", when add is called, then the result is 0"]}]
+      """
+    And the developer will answer:
+      """
+      sum numbers from a comma separated string, empty input means zero
+      a
+      r
+      empty input is an error in this kata
+      y
+      """
+    When a requirement is drafted with the model's help
+    Then the written spec has 3 requirements
+    And the ask "ASK-001" derives "REQ-002"
+    And the ask reports proposal "2" as rejected
+    And the ask "ASK-001" is not ready
+    And an ask reason contains "proposal 2 "Empty string returns zero" was rejected"
+
+  Scenario: An unusable model reply falls back to manual drafting
+    Given the model will reply:
+      """
+      Sure! Here are the requirements you asked for.
+      """
+    And the developer will answer:
+      """
+      sum numbers from a comma separated string
+      Comma sums
+      As a user, I want comma sums so that totals come from one input.
+      Given the input "1,2", when add is called, then the result is 3
+      Given an empty string "", when add is called, then the result is 0
+      <empty>
+      y
+      y
+      """
+    When a requirement is drafted with the model's help
+    Then the draft is written as "REQ-002"
+    And the developer was told a finding containing "asking again (2 of 3)"
+    And the developer was told a finding containing "The request gave no complete requirement - drafting manually."
+    And the developer was asked "REQ-002 title:"
+    And the ask "ASK-001" preserves the request "sum numbers from a comma separated string"
+    And "REQ-002" is accepted under "ASK-001" by the user
+
+  Scenario: Findings send the draft to the model whose rewording seeds the prompts
+    Given the model will reply:
+      """
+      {"title": "Comma separated numbers are summed",
+       "story": "As a user, I want comma sums so that totals come from one input.",
+       "acceptanceCriteria": ["Given the input \"1,2\", when add is called, then the result is 3",
+                              "Given an empty string \"\", when add is called, then the result is 0"]}
+      """
+    And the developer will answer:
+      """
+      <empty>
+      Comma sums
+      As a user, I want comma sums so that totals come from one input.
+      Given the input "1,2", when add is called, then the result is 3
+      <empty>
+      <empty>
+      <empty>
+      <empty>
+      <empty>
+      <empty>
+      y
+      """
+    When a requirement is drafted with the model's help
+    Then the draft is written as "REQ-002"
+    And the developer was told a finding containing "only happy paths"
+    And the developer was told a finding containing "Asking scripted-model to address finding 1 of 1 - working ..."
+    And the developer was told a finding containing "The model reworded the draft"
+    And the developer was asked "REQ-002 title [Comma separated numbers are summed] (Enter keeps it):"
+    And the developer was asked "REQ-002 criterion 2 [Given an empty string "", when add is called, then the result is 0] (Enter keeps it, '-' drops it):"
+    And the written spec has 2 requirements
+
+  Scenario: Each finding is its own model call, chained on the previous fix
+    Given the model will reply:
+      """
+      {"title": "Comma separated numbers are summed",
+       "story": "As a user, I want comma sums so that totals come from one input.",
+       "acceptanceCriteria": ["Given the input \"1,2\", when add is called, then the result is 3",
+                              "Given an empty string \"\", when add is called, then the result is 0"]}
+      """
+    And the developer will answer:
+      """
+      <empty>
+      Comma sums
+      The user gets comma sums so that totals come from one input
+      Given the input "1,2", when add is called, then the result is 3
+      <empty>
+      <empty>
+      <empty>
+      <empty>
+      <empty>
+      <empty>
+      y
+      """
+    When a requirement is drafted with the model's help
+    Then the draft is written as "REQ-002"
+    And the developer was told a finding containing "Asking scripted-model to address finding 1 of 2 - working ..."
+    And the developer was told a finding containing "Asking scripted-model to address finding 2 of 2 - working ..."
+
+  Scenario: A second rewording pass carries the wording the review already rejected
+    Given the model will reply:
+      """
+      {"title": "Comma separated numbers are summed",
+       "story": "As a user, I want comma sums so that totals come from one input.",
+       "acceptanceCriteria": ["Given the input \"1,2\", when add is called, then the result is 3"]}
+      """
+    And the developer will answer:
+      """
+      <empty>
+      Comma sums
+      As a user, I want comma sums so that totals come from one input.
+      Given the input "1,2", when add is called, then the result is 3
+      <empty>
+      <empty>
+      <empty>
+      <empty>
+      <empty>
+      <empty>
+      <empty>
+      <empty>
+      Given an empty string "", when add is called, then the result is 0
+      <empty>
+      y
+      """
+    When a requirement is drafted with the model's help
+    Then the draft is written as "REQ-002"
+    And the developer was told a finding containing "Asking scripted-model to address finding 1 of 1 - working ..." 2 times
+
+  Scenario: An unusable rewording still lets the developer fix the draft by hand
+    Given the model will reply:
+      """
+      Sure! A better wording would be hard to say.
+      """
+    And the developer will answer:
+      """
+      <empty>
+      Comma sums
+      As a user, I want comma sums so that totals come from one input.
+      Given the input "1,2", when add is called, then the result is 3
+      <empty>
+      <empty>
+      <empty>
+      <empty>
+      Given an empty string "", when add is called, then the result is 0
+      <empty>
+      y
+      """
+    When a requirement is drafted with the model's help
+    Then the draft is written as "REQ-002"
+    And the developer was told a finding containing "The model's rewording for finding 1 was unusable"
+    And the developer was told a finding containing "Reword the requirement to address each finding."
+
+  Scenario: A declined draft writes nothing
+    Given the developer will answer:
+      """
+      Comma sums
+      As a user, I want comma sums so that totals come from one input.
+      Given the input "1,2", when add is called, then the result is 3
+      Given an empty string "", when add is called, then the result is 0
+      <empty>
+      n
+      """
+    When a requirement is drafted
+    Then the draft is not written
+    And the spec file is unchanged
+
+  Scenario: Marking implemented on GREEN writes the flip and records the feature file
+    Given the persisted TDD phase is "GREEN"
+    And a project feature file "features/calc.feature" containing:
+      """
+      Feature: Calc
+
+        @REQ-001
+        Scenario: Adds
+          Given a calculator
+      """
+    When requirement "REQ-001" is marked implemented
+    Then the written spec shows "REQ-001" as "implemented"
+    And the written spec names "features/calc.feature" as the feature file of "REQ-001"
+
+  @HARNESS-008
+  Scenario: Marking implemented is refused off GREEN
+    Given the persisted TDD phase is "RED"
+    When marking requirement "REQ-001" implemented fails
+    Then the mutation error is "Requirements are only marked implemented on GREEN (current phase: RED). Run the tests and make them pass first."
+
+  Scenario: Marking implemented without a tagged scenario names the recovery commands
+    Given the persisted TDD phase is "GREEN"
+    When marking requirement "REQ-001" implemented fails
+    Then the mutation error is "No scenario is tagged @REQ-001 - implemented requirements need an executable scenario. Add one with spec scenario add, then mark REQ-001 implemented."
+
+  Scenario: Creating a feature writes a bare feature file
+    When the feature "features/calc.feature" named "Calc" is created
+    Then written content at "features/calc.feature" equals:
+      """
+      Feature: Calc
+      """
+
+  Scenario: Adding a scenario writes it tagged with the requirement
+    Given the feature file "features/calc.feature" is created named "Calc"
+    When scenario "Empty string" for "REQ-001" is added to "features/calc.feature" with steps:
+      """
+      Given a calculator
+      When add is called with ""
+      Then the result is 0
+      """
+    Then the written feature "features/calc.feature" has scenario "Empty string" tagged "@REQ-001"
+
+  Scenario: A step without a Gherkin keyword is refused
+    Given the feature file "features/calc.feature" is created named "Calc"
+    When adding scenario "Bad" for "REQ-001" to "features/calc.feature" fails with steps:
+      """
+      the result is 0
+      """
+    Then the mutation error is "step \"the result is 0\" must start with Given, When, Then, And, or But"
+
+  Scenario: Updating a scenario replaces its steps in the file
+    Given the feature file "features/calc.feature" is created named "Calc"
+    And scenario "Empty string" for "REQ-001" is added to "features/calc.feature" with steps:
+      """
+      Given a calculator
+      Then the result is 0
+      """
+    When scenario "Empty string" in "features/calc.feature" is updated with steps:
+      """
+      Given a calculator
+      When add is called with ""
+      Then the result is 0
+      """
+    Then the written feature "features/calc.feature" scenario "Empty string" has 3 steps
+
+  Scenario: Deleting a scenario removes it from the file
+    Given the feature file "features/calc.feature" is created named "Calc"
+    And scenario "Empty string" for "REQ-001" is added to "features/calc.feature" with steps:
+      """
+      Given a calculator
+      """
+    When scenario "Empty string" is deleted from "features/calc.feature"
+    Then the written feature "features/calc.feature" has 0 scenarios
+
+  Scenario: Adding to a missing feature names the recovery command
+    When adding scenario "S" for "REQ-001" to "features/nope.feature" fails with steps:
+      """
+      Given a calculator
+      """
+    Then the mutation error is "features/nope.feature: no such feature file. Create it first with feature create."

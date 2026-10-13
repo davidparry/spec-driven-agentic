@@ -1,0 +1,326 @@
+# Executable spec for the decision plane: bounded questions put to a
+# local decision model, and the policy the harness applies to the typed
+# answer. The model supplies a verdict; the harness owns the consequence.
+Feature: Local decision model judgments
+  As a developer agreeing a spec with an agent
+  I want a bounded judgment on wording the regex rules cannot measure
+  So that vagueness is caught and fed back into the loop without a model
+  deciding what happens next
+
+  Scenario: A criterion naming an exact value is judged measurable
+    Given a decision model "nimble:test" is configured
+    And the decision model answers "measurable" with the probability 0.97
+    When the criterion "Given the input "1,2", when add is called, then the result is 3" is judged
+    Then the judgment verdict is "measurable"
+    And the judgment records the model "nimble:test"
+    And the judgment records the question "measurable/v2"
+
+  # The deterministic rules ask whether the outcome clause looks
+  # concrete - a number, a quoted literal, a named error. A number
+  # anywhere satisfies that, so this criterion earns no finding at all
+  # while being unmeasurable: nobody measured code quality. That is the
+  # whole reason the decision plane earns its place beside the rules.
+  Scenario: Vagueness the deterministic rules cannot reach is still judged unmeasurable
+    Given a decision model "nimble:test" is configured
+    And the decision model answers "measurable" with the probability 0.038
+    When the criterion "Given the refactored module, when the suite runs, then code quality is improved by at least 20%" is judged
+    Then the judgment verdict is "not measurable"
+    And the regex refiner reported no finding at all for "Given the refactored module, when the suite runs, then code quality is improved by at least 20%"
+
+  Scenario: A probability inside the dead band is inconclusive rather than a verdict
+    Given a decision model "nimble:test" is configured
+    And the decision mode is "advisory"
+    And the decision model answers "measurable" with the probability 0.55
+    When the criterion "Given a calculator, when I add, then the result is valid" is judged
+    Then the judgment verdict is "inconclusive"
+    And the judgment action is "CONTINUE"
+
+  # The point of the gate. The deterministic rules pass this criterion -
+  # see the scenario above about code quality - so a judgment reported
+  # only beside them is one the loop never acts on. It has to land in
+  # `findings`, which is the list the loop is already told to empty.
+  Scenario: An enforced judgment becomes a finding the loop iterates on
+    Given a decision model "nimble:test" is configured
+    And the decision mode is "enforce"
+    And the decision model answers "measurable" with the probability 0.04
+    And a requirement "REQ-007" with story "As a user, I want fast replies so that the page feels alive."
+    And the requirement has criterion "Given a request, when it is served, then the response completes before the user notices"
+    When the requirement "REQ-007" is refined with judgment
+    Then the judgment action is "REWORK"
+    And the refinement is not clean
+    And the deterministic findings are kept and the judgment is appended
+    And the refinement next step names the reword
+
+  # An answer in the dead band gates too, so it cannot arrive saying only
+  # that the model was unsure: the loop would have nothing to change.
+  Scenario: An enforced inconclusive answer escalates with a finding naming the reword
+    Given a decision model "nimble:test" is configured
+    And the decision mode is "enforce"
+    And the decision model answers "measurable" with the probability 0.55
+    And a requirement "REQ-007" with story "As a user, I want totals so that sums come from one input."
+    And the requirement has criterion "Given a calculator, when I add, then the result is valid"
+    When the requirement "REQ-007" is refined with judgment
+    Then the judgment action is "ESCALATE"
+    And the refinement is not clean
+    And the refinement finding names the reword for an unclear outcome
+
+  # A judgment that holds gates nothing, so an enforcing project still
+  # gets the reply it would have had with no decision model at all.
+  Scenario: An enforced judgment that holds leaves the deterministic reply alone
+    Given a decision model "nimble:test" is configured
+    And the decision mode is "enforce"
+    And the decision model answers "measurable" with the probability 0.97
+    And a requirement "REQ-007" with story "As a user, I want sums so that totals come from one input."
+    And the requirement has criterion "Given the input "1,2", when add is called, then the result is 3"
+    When the requirement "REQ-007" is refined with judgment
+    Then the judgment action is "CONTINUE"
+    And the refinement findings are unchanged by the judgment
+    And the refinement carries a judgment for 1 criterion
+
+  # `advisory` is the opt-out, and this is what opting out buys. Kept as
+  # a scenario of its own so the gating above is the mode talking rather
+  # than something that now happens unconditionally.
+  Scenario: An advisory judgment is reported beside the deterministic finding and changes nothing
+    Given a decision model "nimble:test" is configured
+    And the decision mode is "advisory"
+    And the decision model answers "measurable" with the probability 0.04
+    And a requirement "REQ-007" with story "As a user, I want fast replies so that the page feels alive."
+    And the requirement has criterion "Given a request, when it is served, then the response completes before the user notices"
+    When the requirement "REQ-007" is refined with judgment
+    Then the refinement findings are unchanged by the judgment
+    And the refinement carries a judgment for 1 criterion
+    And the judgment action is "CONTINUE"
+
+  # `off` means the workflow asks nothing of its own accord, and that has
+  # to hold on every surface that judges automatically rather than only
+  # the one that happened to check it first. The endpoint here is a
+  # closed port: a judgment that was asked for would fail against it, so
+  # a clean refinement is proof the question was never put.
+  Scenario: The MCP refinement tool asks nothing when judgment is off
+    Given the decision model is unreachable
+    And a decision model "nimble:test" is configured
+    And the decision mode is "off"
+    And a requirement "REQ-007" with story "As a user, I want sums so that totals come from one input."
+    And the requirement has criterion "Given a request, when it is served, then the response completes before the user notices"
+    When the requirement "REQ-007" is refined by the MCP tool
+    Then the refinement findings are unchanged by the judgment
+    And the refinement carries no judgment
+    And the refinement notes nothing about the decision model
+
+  # The same tool with judgment left on, to show the scenario above is
+  # the mode talking and not a step that quietly does nothing.
+  Scenario: The MCP refinement tool judges when the mode allows it
+    Given a decision model "nimble:test" is configured
+    And the decision mode is "advisory"
+    And the decision model answers "measurable" with the probability 0.04
+    And a requirement "REQ-007" with story "As a user, I want fast replies so that the page feels alive."
+    And the requirement has criterion "Given a request, when it is served, then the response completes before the user notices"
+    When the requirement "REQ-007" is refined by the MCP tool
+    Then the refinement findings are unchanged by the judgment
+    And the refinement carries a judgment for 1 criterion
+    And the judgment action is "CONTINUE"
+
+  # The MCP tool used to weaken an enforcing project to advisory, on the
+  # grounds that an exit code is what a human watches. But this is the
+  # surface the agent loop actually drives, so that made the gate
+  # unreachable exactly where it was needed.
+  Scenario: The MCP refinement tool gates when the project enforces
+    Given a decision model "nimble:test" is configured
+    And the decision mode is "enforce"
+    And the decision model answers "measurable" with the probability 0.04
+    And a requirement "REQ-007" with story "As a user, I want fast replies so that the page feels alive."
+    And the requirement has criterion "Given a request, when it is served, then the response completes before the user notices"
+    When the requirement "REQ-007" is refined by the MCP tool
+    Then the judgment action is "REWORK"
+    And the refinement is not clean
+    And the deterministic findings are kept and the judgment is appended
+    And the refinement next step names the reword
+
+  Scenario: An unreachable decision model leaves the refiner's verdict exactly as it was
+    Given the decision model is unreachable
+    And the decision mode is "advisory"
+    And a requirement "REQ-007" with story "As a user, I want sums so that totals come from one input."
+    And the requirement has criterion "Given the input "1,2", when add is called, then the result is 3"
+    When the requirement "REQ-007" is refined with judgment
+    Then the refinement findings are unchanged by the judgment
+    And the refinement carries no judgment
+    And the refinement notes the decision model was unavailable
+
+  # The one rule a judgment plane cannot be allowed to break: a request
+  # that never produced an answer is not an answer, and never an approval.
+  Scenario: An unreachable decision model in enforce mode refuses instead of approving
+    Given the decision model is unreachable
+    And the decision mode is "enforce"
+    When the criterion "Given the input "1,2", when add is called, then the result is 3" is judged
+    Then judging fails because the decision model was unavailable
+    And no verdict is reported
+
+  Scenario: A malformed answer is reported rather than read as a verdict
+    Given a decision model "nimble:test" is configured
+    And the decision model replies with the body "{"model":"nimble:test","answers":{"measurable":{"type":"noul"}},"usage":{"input_tokens":1,"output_tokens":1}}"
+    When the criterion "Given the input "1,2", when add is called, then the result is 3" is judged
+    Then judging fails because the reply was malformed
+    And no verdict is reported
+
+  Scenario: An answer to a question that was never asked is refused
+    Given a decision model "nimble:test" is configured
+    And the decision model replies with the body "{"model":"nimble:test","answers":{"urgency":{"type":"noul","noul":0.9}},"usage":{"input_tokens":1,"output_tokens":1}}"
+    When the criterion "Given the input "1,2", when add is called, then the result is 3" is judged
+    Then judging fails because the answers did not match the questions
+    And no verdict is reported
+
+  Scenario: A model that is not pulled names the pull command
+    Given a decision model "absent:test" is configured
+    And the decision endpoint reports the model is not found
+    When the criterion "Given the input "1,2", when add is called, then the result is 3" is judged
+    Then judging fails naming "ollama pull absent:test"
+
+  Scenario: A generative model asked for a decision is refused with its capability named
+    Given a decision model "chatter:test" is configured
+    And the decision endpoint reports the model does not support decision
+    When the criterion "Given the input "1,2", when add is called, then the result is 3" is judged
+    Then judging fails because the model cannot make decisions
+    And the failure names the decision capability
+
+  # Ollama lists a decision model alongside the coding models, and the
+  # session default used to be whichever one came back first.
+  Scenario: Discovery never hands a decision-only model to generative work
+    Given Ollama reports the model "nimble:test" with the capability "decision"
+    And Ollama reports the model "coder:test" with the capability "completion"
+    When the session model is resolved with nothing configured
+    Then the resolved generative model is "coder:test"
+
+  Scenario: A model whose capabilities cannot be read keeps the behaviour it always had
+    Given Ollama reports the model "mystery:test" with no readable capabilities
+    When the session model is resolved with nothing configured
+    Then the resolved generative model is "mystery:test"
+
+  Scenario: Only decision-capable models are offered for the decision role
+    Given Ollama reports the model "nimble:test" with the capability "decision"
+    And Ollama reports the model "coder:test" with the capability "completion"
+    When the decision models are listed
+    Then the decision model list is "nimble:test"
+
+  # `spec judge` is the one place a human asked for a judgment, so it
+  # checks a model can answer before paying for a round trip. The
+  # automatic judgments inside `refine` deliberately do not: a project
+  # with no decision model keeps behaving as it did before the decision
+  # plane existed.
+  Scenario: A machine with no decision model is told what to install
+    Given Ollama reports the model "coder:test" with the capability "completion"
+    When the decision readiness is checked with nothing configured
+    Then the decision readiness refuses naming "ollama pull nimble"
+    And the remedy names the command "spec judge use nimble"
+
+  Scenario: Installed decision models with none chosen name the ones to choose from
+    Given Ollama reports the model "nimble:test" with the capability "decision"
+    And Ollama reports the model "other:test" with the capability "decision"
+    When the decision readiness is checked with nothing configured
+    Then the decision readiness refuses naming "spec judge use nimble:test"
+    And the remedy names the command "installed: nimble:test, other:test"
+
+  Scenario: A chosen model that cannot decide names itself and the alternatives
+    Given Ollama reports the model "nimble:test" with the capability "decision"
+    And Ollama reports the model "coder:test" with the capability "completion"
+    When the decision readiness is checked with "coder:test" configured
+    Then the decision readiness refuses naming "ollama pull coder:test"
+    And the remedy names the command "spec judge use nimble:test"
+
+  # The provider lists a tag; a person types a name. Comparing the two
+  # as strings would report a model missing while it sat in the list
+  # printed directly below the error.
+  Scenario: An untagged name matches the tag the provider lists
+    Given Ollama reports the model "nimble:latest" with the capability "decision"
+    When the decision readiness is checked with "nimble" configured
+    Then the decision readiness is ready
+
+  # A capability probe that fails is not evidence a model is absent, so
+  # an unreachable provider refuses nothing here - the decision call
+  # reports the real failure against the endpoint instead.
+  Scenario: An unreachable provider refuses nothing before the call
+    Given Ollama is unreachable
+    When the decision readiness is checked with "nimble:test" configured
+    Then the decision readiness is unknown and refuses nothing
+
+  # A session announces both model roles before its first prompt, and
+  # names which is which: the inference model writes, the decision model
+  # judges, and a line saying only "model" would leave the pair
+  # ambiguous.
+  Scenario: Session startup announces the configured decision model
+    Given Ollama reports the model "nimble:test" with the capability "decision"
+    And Ollama reports the model "coder:test" with the capability "completion"
+    When the session decision status is checked with "nimble:test" configured
+    Then the session announces the decision model "nimble:test"
+
+  # The gap the announcement closes: a model named in configuration but
+  # never pulled used to go unnoticed until the first judgment.
+  Scenario: Session startup catches a decision model that was never pulled
+    Given Ollama reports the model "nimble:test" with the capability "decision"
+    When the session decision status is checked with "absent:test" configured
+    Then the session announces judgments are off naming "ollama pull absent:test"
+
+  # Judgments are on by default. A machine that pulled a decision model
+  # gets one without a second configuration step - borrowed for the
+  # session, never written down, and no model name compiled in.
+  Scenario: Session startup borrows a decision model when the project names none
+    Given Ollama reports the model "nimble:test" with the capability "decision"
+    And Ollama reports the model "coder:test" with the capability "completion"
+    When the session decision status is checked with nothing configured
+    Then the session borrows the decision model "nimble:test" without saving it
+
+  # The one state discovery cannot rescue: nothing installed can answer.
+  Scenario: Session startup with nothing that can decide says what to pull
+    Given Ollama reports the model "coder:test" with the capability "completion"
+    When the session decision status is checked with nothing configured
+    Then the session announces judgments are off naming "ollama pull nimble"
+
+  # An unreachable provider is not evidence the configured model is
+  # missing, so the session announces it and the first judgment reports
+  # the real failure against the endpoint.
+  Scenario: Session startup announces the configured decision model even when Ollama is down
+    Given Ollama is unreachable
+    When the session decision status is checked with "nimble:test" configured
+    Then the session announces the decision model "nimble:test"
+
+  # The wording sent to the decision model lives in the prompt catalog
+  # with every other prompt, and its version lives in the same table -
+  # a threshold calibrated against one phrasing is not evidence about
+  # another, so the two must not be editable apart.
+  Scenario: The question wording and the version it is named by come from the prompt catalog
+    When the decision question "measurable" is read from the prompt catalog
+    Then the question version is "measurable/v2"
+    And the question instructions name the clause after "then"
+    And the question states both outcomes
+
+  Scenario: The decision model is configured without touching the generative model
+    Given the config file contains:
+      """
+      [llm]
+      model = "coder:test"
+      """
+    When the decision model "nimble:test" is persisted
+    And the configuration is listed
+    Then the config value "decision.model" is "nimble:test" from the config file
+    And the config value "llm.model" is "coder:test" from the config file
+
+  Scenario: Configuration reports the decision model and where it came from
+    Given the config file contains:
+      """
+      [decision]
+      model = "nimble:test"
+      """
+    When the configuration is listed
+    Then the config value "decision.model" is "nimble:test" from the config file
+    And the config value "decision.mode" is "enforce" from default
+    And the config value "decision.min_confidence" is "0.8" from default
+
+  # The decision endpoint defaults to wherever Ollama already is, rather
+  # than making every project state the same host twice.
+  Scenario: The decision endpoint follows the configured Ollama endpoint
+    Given the config file contains:
+      """
+      [llm]
+      endpoint = "http://ollama.internal:11434"
+      """
+    When the configuration is listed
+    Then the config value "decision.endpoint" is "http://ollama.internal:11434" from the config file

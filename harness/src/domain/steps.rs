@@ -1,0 +1,770 @@
+//! Step-definition discovery: extract the patterns a project's step
+//! definition sources declare (per framework), match them against the
+//! steps its feature files use, and report what is missing. Pure logic —
+//! file access stays behind ports.
+
+use std::sync::LazyLock;
+
+use regex::Regex;
+use serde::Serialize;
+
+use crate::domain::feature::FeatureDoc;
+use crate::domain::language::Language;
+
+/// One feature step with no matching step definition.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct MissingStep {
+    pub feature: String,
+    pub scenario: String,
+    /// The Gherkin keyword the definition needs (And/But resolved to the
+    /// preceding real keyword).
+    pub keyword: String,
+    /// The step text without its keyword.
+    pub text: String,
+}
+
+static JAVA_DEF: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"@(?:Given|When|Then|And|But)\s*\(\s*"((?:[^"\\]|\\.)*)""#).expect("valid regex")
+});
+static JS_DEF: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"\b(?:Given|When|Then)\s*\(\s*(?:'((?:[^'\\]|\\.)*)'|"((?:[^"\\]|\\.)*)")"#)
+        .expect("valid regex")
+});
+static CSHARP_DEF: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"\[(?:Given|When|Then|StepDefinition)\s*\(\s*@?"((?:[^"\\]|\\.)*)"\s*\)\]"#)
+        .expect("valid regex")
+});
+/// Rust has two string forms and step definitions use both. A hashed raw
+/// string is the idiomatic way to write a regex containing quotes —
+/// `r#"^the agent may use "([^"]+)"$"#` — so its body has to be read to
+/// the closing `"#` rather than to the first quote inside it. Matching
+/// that alternative first keeps the plain branch from claiming the `r#`
+/// opener and truncating the pattern at the first embedded quote.
+static RUST_DEF: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r##"#\[(?:given|when|then)\s*\(\s*(?:(?:regex|expr)\s*=\s*)?(?:r#+"(.*?)"#+|r?"((?:[^"\\]|\\.)*)")\s*\)\]"##,
+    )
+    .expect("valid regex")
+});
+
+/// The file extension a language's step definitions live in.
+pub fn source_extension(language: Language) -> &'static str {
+    match language {
+        Language::Java => "java",
+        Language::JavaScript => "js",
+        Language::TypeScript => "ts",
+        Language::DotNet => "cs",
+        Language::Rust => "rs",
+    }
+}
+
+/// How much of the code after a step definition to keep as its body. A
+/// step binds a line of Gherkin to a few calls; this is generous enough
+/// to catch them without parsing the language.
+const BODY_WINDOW: usize = 800;
+
+pub(crate) fn definition_regex(language: Language) -> &'static Regex {
+    match language {
+        Language::Java => &JAVA_DEF,
+        Language::JavaScript | Language::TypeScript => &JS_DEF,
+        Language::DotNet => &CSHARP_DEF,
+        Language::Rust => &RUST_DEF,
+    }
+}
+
+/// Extract every step-definition pattern declared in one source file.
+pub fn extract_patterns(language: Language, source: &str) -> Vec<String> {
+    extract_definitions(language, source)
+        .into_iter()
+        .map(|(pattern, _)| pattern)
+        .collect()
+}
+
+/// Every step definition with the code that follows it.
+///
+/// The body is what tells you which part of the project a step reaches:
+/// a scenario saying `mcp call "coverage"` names no file, but the step
+/// that binds it constructs the server, and the server is the thing the
+/// behavior is missing from.
+pub fn extract_definitions(language: Language, source: &str) -> Vec<(String, &str)> {
+    definition_regex(language)
+        .captures_iter(source)
+        .map(|captures| {
+            let pattern = unescape_literal(
+                captures
+                    .iter()
+                    .skip(1)
+                    .flatten()
+                    .next()
+                    .expect("one capture group matches")
+                    .as_str(),
+            );
+            let after = &source[captures.get(0).expect("whole match").end()..];
+            let body = match after.char_indices().nth(BODY_WINDOW) {
+                Some((end, _)) => &after[..end],
+                None => after,
+            };
+            (pattern, body)
+        })
+        .collect()
+}
+
+/// The pattern a declared step-definition literal stands for - the
+/// inverse of [`crate::domain::generation::escape_literal`], so an
+/// expression this crate generated reads back as the expression it was
+/// generated from. Without the backslash case a generated `{string}`
+/// pattern carrying a `\n` would never match the one already in the
+/// file, and the next `steps generate` would append a second definition
+/// of it - the duplicate Cucumber refuses every scenario over.
+///
+/// Only the three escapes this crate emits are collapsed. An unknown
+/// escape keeps its backslash: the `\d` of a hand-written `#[then(regex
+/// = r"^the result is (\d+)$")]` is a regex atom, not an escaped `d`.
+pub(crate) fn unescape_literal(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut characters = text.chars();
+    while let Some(character) = characters.next() {
+        if character != '\\' {
+            out.push(character);
+            continue;
+        }
+        match characters.next() {
+            Some(escaped @ ('\\' | '"' | '\'')) => out.push(escaped),
+            Some(other) => {
+                out.push('\\');
+                out.push(other);
+            }
+            None => out.push('\\'),
+        }
+    }
+    out
+}
+
+/// The regex a pattern denotes: an anchored regex as written, or a
+/// Cucumber expression translated into one. `None` for a pattern that
+/// does not compile, which matches nothing rather than failing the run.
+///
+/// Public because compiling is far more expensive than matching, so a
+/// caller holding a pattern against many strings must build it once
+/// rather than reach for [`pattern_matches`] in a loop.
+pub fn compile_pattern(pattern: &str) -> Option<Regex> {
+    let regex_source = if pattern.starts_with('^') {
+        pattern.to_string()
+    } else {
+        cucumber_expression_to_regex(pattern)
+    };
+    Regex::new(&regex_source).ok()
+}
+
+/// Does `text` match `pattern`? Patterns are either anchored regexes
+/// (starting with `^`) or Cucumber expressions (`{int}`, `{string}`, ...).
+///
+/// Compiles on every call. For one question that is the clearest thing
+/// to write; against a list, use [`compile_pattern`] once instead.
+pub fn pattern_matches(pattern: &str, text: &str) -> bool {
+    compile_pattern(pattern).is_some_and(|r| r.is_match(text))
+}
+
+/// Translate a Cucumber expression into an anchored regex.
+///
+/// `\(` and `\)` are literal parentheses. An unescaped `(...)` is
+/// optional text, the way cucumber-expressions reads it, so a pattern
+/// that copied parentheses through unescaped does not match a step
+/// line that contains those characters.
+fn cucumber_expression_to_regex(expression: &str) -> String {
+    let mut out = String::from("^");
+    out.push_str(&translate_cucumber(expression));
+    out.push('$');
+    out
+}
+
+/// The body of [`cucumber_expression_to_regex`], so an optional group
+/// can translate its own interior with the same rules.
+fn translate_cucumber(expression: &str) -> String {
+    let mut out = String::new();
+    let mut chars = expression.chars().peekable();
+    while let Some(character) = chars.next() {
+        if character == '\\' {
+            match chars.next() {
+                Some(escaped) => out.push_str(&regex::escape(&escaped.to_string())),
+                None => out.push_str(r"\\"),
+            }
+            continue;
+        }
+        if character == '(' {
+            let mut inner = String::new();
+            let mut closed = false;
+            let mut escaped = false;
+            for next in chars.by_ref() {
+                if escaped {
+                    inner.push('\\');
+                    inner.push(next);
+                    escaped = false;
+                    continue;
+                }
+                if next == '\\' {
+                    escaped = true;
+                    continue;
+                }
+                if next == ')' {
+                    closed = true;
+                    break;
+                }
+                inner.push(next);
+            }
+            if !closed {
+                out.push_str(&regex::escape("("));
+                out.push_str(&regex::escape(&inner));
+                continue;
+            }
+            out.push_str("(?:");
+            out.push_str(&translate_cucumber(&inner));
+            out.push_str(")?");
+            continue;
+        }
+        if character == '{' {
+            let mut inner = String::new();
+            let mut closed = false;
+            for next in chars.by_ref() {
+                if next == '}' {
+                    closed = true;
+                    break;
+                }
+                inner.push(next);
+            }
+            if !closed {
+                out.push_str(&regex::escape("{"));
+                out.push_str(&regex::escape(&inner));
+                continue;
+            }
+            out.push_str(match inner.as_str() {
+                "int" => r"-?\d+",
+                "float" => r"-?\d+(?:\.\d+)?",
+                "word" => r"\S+",
+                // Grouped, or the `|` splits the whole expression in
+                // two and the `'...'$` half matches any step that ends
+                // in a single-quoted value - which is how `steps
+                // missing` once reported a feature fully defined while
+                // its Then lines had no definition at all.
+                "string" => r#"(?:"[^"]*"|'[^']*')"#,
+                _ => ".*",
+            });
+            continue;
+        }
+        out.push_str(&regex::escape(&character.to_string()));
+    }
+    out
+}
+
+/// Every step in the given features that no pattern matches, deduplicated
+/// by resolved keyword + text (the definition would be shared anyway).
+pub fn find_missing(features: &[FeatureDoc], patterns: &[String]) -> Vec<MissingStep> {
+    // Compiled once up front, not once per question. A step that no
+    // definition covers is asked about every pattern before it is
+    // declared missing, so compiling inside the loop costs steps x
+    // patterns builds - 1770 x 460 against this crate's own spec, which
+    // is minutes of `spec status` on a requirement that was just
+    // drafted and so matches nothing yet.
+    let compiled: Vec<Regex> = patterns.iter().filter_map(|p| compile_pattern(p)).collect();
+    let mut missing: Vec<MissingStep> = Vec::new();
+    for feature in features {
+        for scenario in &feature.scenarios {
+            let mut last_keyword = "Given".to_string();
+            for step in &scenario.steps {
+                let (keyword, text) = split_step(step);
+                let keyword = if keyword == "And" || keyword == "But" {
+                    last_keyword.clone()
+                } else {
+                    last_keyword = keyword.to_string();
+                    last_keyword.clone()
+                };
+                if compiled.iter().any(|r| r.is_match(text)) {
+                    continue;
+                }
+                if missing
+                    .iter()
+                    .any(|m| m.keyword == keyword && m.text == text)
+                {
+                    continue;
+                }
+                missing.push(MissingStep {
+                    feature: feature.path.clone(),
+                    scenario: scenario.name.clone(),
+                    keyword,
+                    text: text.to_string(),
+                });
+            }
+        }
+    }
+    missing
+}
+
+pub fn split_step(step: &str) -> (&str, &str) {
+    match step.split_once(' ') {
+        Some((keyword, text)) => (keyword, text),
+        None => (step, ""),
+    }
+}
+
+/// Turn one well-formed acceptance criterion ("Given X, when Y, then Z")
+/// into the three Gherkin steps of a scenario. Returns `None` when the
+/// criterion does not follow the Given/when/then shape the spec
+/// validator enforces.
+pub fn criterion_to_steps(criterion: &str) -> Option<Vec<String>> {
+    static SHAPE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?i)^given\s+(.+?),\s*when\s+(.+?),\s*then\s+(.+)$").expect("valid regex")
+    });
+    let captures = SHAPE.captures(criterion.trim())?;
+    Some(vec![
+        format!("Given {}", &captures[1]),
+        format!("When {}", &captures[2]),
+        format!("Then {}", &captures[3]),
+    ])
+}
+
+/// Characters cucumber-expressions treats as syntax. A step line that
+/// contains one of them means the character itself, so the expression
+/// escapes it. `{string}` and `{int}` are written after this pass and
+/// stay unescaped: they are the parameters, not text from the line.
+const CUCUMBER_RESERVED: &[char] = &['(', ')', '{', '}', '/', '\\'];
+
+/// Turn a concrete step text into a Cucumber expression: numbers become
+/// `{int}`, quoted strings become `{string}`, and reserved characters
+/// in the remaining text are escaped so they match literally.
+pub fn step_to_expression(text: &str) -> String {
+    let mut out = String::new();
+    let chars: Vec<char> = text.chars().collect();
+    let mut index = 0;
+    while index < chars.len() {
+        if chars[index] == '"' {
+            let mut end = index + 1;
+            while end < chars.len() && chars[end] != '"' {
+                end += 1;
+            }
+            if end < chars.len() {
+                out.push_str("{string}");
+                index = end + 1;
+                continue;
+            }
+        }
+        if chars[index].is_ascii_digit() && word_boundary_before(&chars, index) {
+            let mut end = index;
+            while end < chars.len() && chars[end].is_ascii_digit() {
+                end += 1;
+            }
+            if word_boundary_after(&chars, end) {
+                out.push_str("{int}");
+                index = end;
+                continue;
+            }
+        }
+        if CUCUMBER_RESERVED.contains(&chars[index]) {
+            out.push('\\');
+        }
+        out.push(chars[index]);
+        index += 1;
+    }
+    out
+}
+
+fn is_word_char(character: char) -> bool {
+    character.is_ascii_alphanumeric() || character == '_'
+}
+
+fn word_boundary_before(chars: &[char], index: usize) -> bool {
+    index == 0 || !is_word_char(chars[index - 1])
+}
+
+fn word_boundary_after(chars: &[char], index: usize) -> bool {
+    index == chars.len() || !is_word_char(chars[index])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::feature::{FeatureDoc, ScenarioDoc};
+
+    #[test]
+    fn java_annotations_are_extracted() {
+        let source = r#"
+            @Given("a calculator")
+            public void aCalculator() {}
+            @When("add is called with {string}")
+            public void add(String input) {}
+            @And("the \"quoted\" case")
+            public void quoted() {}
+        "#;
+        assert_eq!(
+            extract_patterns(Language::Java, source),
+            vec![
+                "a calculator",
+                "add is called with {string}",
+                "the \"quoted\" case",
+            ]
+        );
+    }
+
+    #[test]
+    fn javascript_and_typescript_calls_are_extracted() {
+        let source = r#"
+            Given('a calculator', function () {});
+            When("add is called with {string}", (input) => {});
+        "#;
+        for language in [Language::JavaScript, Language::TypeScript] {
+            assert_eq!(
+                extract_patterns(language, source),
+                vec!["a calculator", "add is called with {string}"]
+            );
+        }
+    }
+
+    #[test]
+    fn csharp_attributes_are_extracted() {
+        let source = r#"
+            [Given(@"a calculator")]
+            public void GivenACalculator() {}
+            [Then("the result is {int}")]
+            public void TheResultIs(int value) {}
+        "#;
+        assert_eq!(
+            extract_patterns(Language::DotNet, source),
+            vec!["a calculator", "the result is {int}"]
+        );
+    }
+
+    #[test]
+    fn rust_attribute_macros_are_extracted() {
+        let source = r##"
+            #[given("a calculator")]
+            fn a_calculator(w: &mut W) {}
+            #[then(regex = r"^the result is (\d+)$")]
+            fn result(w: &mut W, n: u32) {}
+        "##;
+        assert_eq!(
+            extract_patterns(Language::Rust, source),
+            vec!["a calculator", "^the result is (\\d+)$"]
+        );
+    }
+
+    #[test]
+    fn a_hashed_raw_string_keeps_the_quotes_inside_its_pattern() {
+        // The bug this closes: the body was read to the first quote
+        // inside the raw string, so `^the agent may use ` was all that
+        // came back and every step it defines was reported missing.
+        let source = r######"
+            #[given(regex = r#"^the agent may use "([^"]+)"$"#)]
+            fn may_use(w: &mut W, names: String) {}
+            #[then(regex = r##"^the reply is "(.+)" exactly"##)]
+            fn reply(w: &mut W, text: String) {}
+        "######;
+        assert_eq!(
+            extract_patterns(Language::Rust, source),
+            vec![
+                r#"^the agent may use "([^"]+)"$"#,
+                r#"^the reply is "(.+)" exactly"#
+            ]
+        );
+    }
+
+    #[test]
+    fn an_escaped_backslash_collapses_but_a_regex_atom_keeps_its_own() {
+        let source = r#"
+            @Given("the delimiter is \\n")
+            public void delimiter() {}
+            @Then("^the result is (\d+)$")
+            public void result(int n) {}
+            @When("the \"quoted\" case")
+            public void quoted() {}
+        "#;
+        assert_eq!(
+            extract_patterns(Language::Java, source),
+            vec![
+                r"the delimiter is \n",
+                r"^the result is (\d+)$",
+                "the \"quoted\" case",
+            ]
+        );
+    }
+
+    #[test]
+    fn cucumber_expressions_match_their_placeholders() {
+        assert!(pattern_matches("the result is {int}", "the result is 42"));
+        assert!(pattern_matches("the result is {int}", "the result is -1"));
+        assert!(!pattern_matches(
+            "the result is {int}",
+            "the result is many"
+        ));
+        assert!(pattern_matches(
+            "add is called with {string}",
+            "add is called with \"1,2\""
+        ));
+        assert!(pattern_matches(
+            "a {word} calculator",
+            "a scientific calculator"
+        ));
+        assert!(pattern_matches("the rate is {float}", "the rate is 1.25"));
+        assert!(pattern_matches("anything {} goes", "anything at all goes"));
+        assert!(pattern_matches("a calculator", "a calculator"));
+        assert!(!pattern_matches(
+            "a calculator",
+            "a calculator with history"
+        ));
+    }
+
+    #[test]
+    fn an_unclosed_placeholder_is_treated_literally() {
+        assert!(pattern_matches("a {broken", "a {broken"));
+    }
+
+    #[test]
+    fn anchored_regex_patterns_are_used_directly() {
+        assert!(pattern_matches(r"^the result is (\d+)$", "the result is 7"));
+        assert!(!pattern_matches(
+            r"^the result is (\d+)$",
+            "the result is x"
+        ));
+        assert!(!pattern_matches(r"^bro][ken$", "anything"));
+    }
+
+    /// A pattern that will not compile matches nothing, so a broken
+    /// definition leaves its steps missing rather than failing the run.
+    #[test]
+    fn a_pattern_that_does_not_compile_yields_no_matcher() {
+        assert!(compile_pattern(r"^bro][ken$").is_none());
+        assert!(compile_pattern("the result is {int}").is_some());
+    }
+
+    /// The cost of a pattern is in compiling it, not in asking it a
+    /// question, and a step that nothing covers is asked of every
+    /// pattern there is. Compiling inside that loop made `spec status`
+    /// take 130 seconds on this crate's own spec the moment a freshly
+    /// drafted requirement gave it steps that matched nothing.
+    ///
+    /// The bound is deliberately far looser than the fix needs - this
+    /// is a guard against the quadratic coming back, not a benchmark.
+    /// Compiling per question costs this case 80,000 builds, which is
+    /// tens of seconds; compiling once costs 200.
+    #[test]
+    fn an_unmatched_step_does_not_pay_to_compile_every_pattern_again() {
+        let patterns: Vec<String> = (0..200).map(|n| format!("a pattern {n} {{int}}")).collect();
+        let steps: Vec<String> = (0..400)
+            .map(|n| format!("Given nothing covers {n}"))
+            .collect();
+        let features = vec![feature_with_steps(
+            steps.iter().map(String::as_str).collect(),
+        )];
+
+        let started = std::time::Instant::now();
+        let missing = find_missing(&features, &patterns);
+        let elapsed = started.elapsed();
+
+        assert_eq!(missing.len(), 400, "every step is missing");
+        assert!(
+            elapsed < std::time::Duration::from_secs(3),
+            "find_missing took {elapsed:?} for 400 steps against 200 patterns, \
+             which is the shape of a regex compiled per question"
+        );
+    }
+
+    fn feature_with_steps(steps: Vec<&str>) -> FeatureDoc {
+        FeatureDoc {
+            path: "features/calc.feature".into(),
+            name: "Calc".into(),
+            tags: vec![],
+            comments: Vec::new(),
+            description: Vec::new(),
+            trailing: Vec::new(),
+            scenarios: vec![ScenarioDoc {
+                name: "Adds".into(),
+                tags: vec![],
+                steps: steps.into_iter().map(String::from).collect(),
+            }],
+        }
+    }
+
+    #[test]
+    fn missing_steps_resolve_and_but_to_the_preceding_keyword() {
+        let feature = feature_with_steps(vec![
+            "Given a calculator",
+            "And a memory bank",
+            "When add is called",
+            "But subtract is not",
+            "Then the result is 3",
+        ]);
+        let patterns = vec!["a calculator".to_string()];
+        let missing = find_missing(&[feature], &patterns);
+        let resolved: Vec<(&str, &str)> = missing
+            .iter()
+            .map(|m| (m.keyword.as_str(), m.text.as_str()))
+            .collect();
+        assert_eq!(
+            resolved,
+            vec![
+                ("Given", "a memory bank"),
+                ("When", "add is called"),
+                ("When", "subtract is not"),
+                ("Then", "the result is 3"),
+            ]
+        );
+    }
+
+    #[test]
+    fn duplicate_missing_steps_are_reported_once() {
+        let one = feature_with_steps(vec!["Given a calculator"]);
+        let two = FeatureDoc {
+            path: "features/other.feature".into(),
+            ..feature_with_steps(vec!["Given a calculator"])
+        };
+        assert_eq!(find_missing(&[one, two], &[]).len(), 1);
+    }
+
+    #[test]
+    fn a_fully_defined_feature_has_no_missing_steps() {
+        let feature = feature_with_steps(vec!["Given a calculator", "Then the result is 3"]);
+        let patterns = vec!["a calculator".into(), "the result is {int}".into()];
+        assert_eq!(find_missing(&[feature], &patterns), vec![]);
+    }
+
+    /// `{string}` accepts either quote style, and the alternation has
+    /// to stay inside the placeholder. Ungrouped, every `... {string}`
+    /// pattern matched any step ending in a single-quoted value, and
+    /// the prefix alone matched a double-quoted value with text after
+    /// it, so a feature with no definition for its Then lines was
+    /// reported fully defined.
+    #[test]
+    fn a_string_placeholder_does_not_match_beyond_its_own_pattern() {
+        let pattern = "the refusal hint is {string}";
+        assert!(pattern_matches(
+            pattern,
+            r#"the refusal hint is "install it""#
+        ));
+        assert!(pattern_matches(pattern, "the refusal hint is 'install it'"));
+        assert!(!pattern_matches(
+            pattern,
+            "the output includes 'Display error message -> unproven'"
+        ));
+        assert!(!pattern_matches(
+            pattern,
+            r#"the refusal hint is "install it" and then some"#
+        ));
+
+        let feature = feature_with_steps(vec![
+            "Given a requirement 'Empty cart checkout' exists in the catalog",
+            "Then the output includes 'Display error message -> unproven'",
+        ]);
+        let patterns = vec![
+            "a requirement 'Empty cart checkout' exists in the catalog".into(),
+            "the refusal hint is {string}".into(),
+        ];
+        let missing = find_missing(&[feature], &patterns);
+        assert_eq!(missing.len(), 1, "{missing:?}");
+        assert_eq!(
+            missing[0].text,
+            "the output includes 'Display error message -> unproven'"
+        );
+    }
+
+    #[test]
+    fn a_bare_keyword_step_is_handled() {
+        let feature = feature_with_steps(vec!["Given"]);
+        let missing = find_missing(&[feature], &[]);
+        assert_eq!(missing[0].text, "");
+    }
+
+    #[test]
+    fn a_well_formed_criterion_becomes_three_steps() {
+        let steps = criterion_to_steps(
+            "Given an empty string \"\", when add is called, then the result is 0",
+        )
+        .unwrap();
+        assert_eq!(
+            steps,
+            vec![
+                "Given an empty string \"\"",
+                "When add is called",
+                "Then the result is 0",
+            ]
+        );
+    }
+
+    #[test]
+    fn criterion_parsing_is_case_insensitive_and_trims() {
+        let steps = criterion_to_steps("  given a, WHEN b, Then 3  ").unwrap();
+        assert_eq!(steps, vec!["Given a", "When b", "Then 3"]);
+    }
+
+    #[test]
+    fn a_malformed_criterion_is_none() {
+        assert_eq!(criterion_to_steps("the result should be 6"), None);
+        assert_eq!(criterion_to_steps("Given a, then 3"), None);
+    }
+
+    #[test]
+    fn concrete_steps_become_cucumber_expressions() {
+        assert_eq!(
+            step_to_expression("add is called with \"1,2\""),
+            "add is called with {string}"
+        );
+        assert_eq!(
+            step_to_expression("the result is 42"),
+            "the result is {int}"
+        );
+        assert_eq!(
+            step_to_expression("the result is 0."),
+            "the result is {int}.",
+            "a trailing period on the Gherkin line must stay on the expression or Cucumber treats the step as undefined"
+        );
+        assert_eq!(step_to_expression("a calculator"), "a calculator");
+    }
+
+    /// cucumber-rs reads `(an empty list)` as optional text. The
+    /// expression has to escape the parentheses or the step is undefined
+    /// at runtime while this matcher, treating them as literal, reports
+    /// it defined.
+    #[test]
+    fn parentheses_in_a_step_are_escaped_and_only_the_escaped_form_matches() {
+        let text = "a requirement with zero acceptance criteria (an empty list)";
+        let expression = step_to_expression(text);
+        assert_eq!(
+            expression,
+            r"a requirement with zero acceptance criteria \(an empty list\)"
+        );
+        assert!(
+            pattern_matches(&expression, text),
+            "the escaped expression has to match the step line"
+        );
+        assert!(
+            !pattern_matches(
+                "a requirement with zero acceptance criteria (an empty list)",
+                text
+            ),
+            "an unescaped optional group is not a definition of the parenthesized line"
+        );
+    }
+
+    #[test]
+    fn a_slash_and_a_backslash_in_a_step_are_escaped() {
+        assert_eq!(
+            step_to_expression(r"the delimiter is \n"),
+            r"the delimiter is \\n"
+        );
+        assert_eq!(step_to_expression("read/write"), r"read\/write");
+        assert!(pattern_matches(
+            &step_to_expression(r"the delimiter is \n"),
+            r"the delimiter is \n"
+        ));
+        assert!(pattern_matches(
+            &step_to_expression("read/write"),
+            "read/write"
+        ));
+    }
+
+    #[test]
+    fn every_language_names_its_source_extension() {
+        assert_eq!(source_extension(Language::Java), "java");
+        assert_eq!(source_extension(Language::JavaScript), "js");
+        assert_eq!(source_extension(Language::TypeScript), "ts");
+        assert_eq!(source_extension(Language::DotNet), "cs");
+        assert_eq!(source_extension(Language::Rust), "rs");
+    }
+}

@@ -1,0 +1,129 @@
+# spec harness configuration.
+#
+# Every budget, timeout, and tool list a command reads is written here
+# with the value in use, so what each command does is on the page: the
+# model attempts, tool rounds, and RED-to-GREEN rounds are read from
+# this file first and the compiled-in defaults only when a key is
+# absent. The keys left commented are the ones whose unset state means
+# something: `mcp_config` (search the usual places), `decision.model`
+# (whichever decision model is installed), `decision.endpoint` (follow
+# [llm]).
+
+[llm]
+# Persisted by `spec model use`. Flag `--model` wins for one run.
+model = "qwen3.8-flash-next:125b-mlx"
+endpoint = "http://localhost:11434"
+# Generation timeout; large prompts on local models can need more.
+timeout_seconds = 900
+# Identical requests reuse the cached response in .spec/cache/
+# for this many seconds; 0 disables the cache.
+cache_ttl_seconds = 600
+# How many times to try a model call when the reply fails
+# validation; each retry includes the invalid reply. `--retry` wins.
+retry = 3
+
+[tools]
+# Tool-call rounds Agent::ask may take before it must return a reply.
+# `--max-rounds` wins for one run.
+max_rounds = 12
+# Names that must be confirmed by the human before the call runs.
+confirm = ["command_run"]
+# How long connecting to an mcp.json server may take.
+discovery_timeout_seconds = 10
+# How long one tool invocation may take.
+call_timeout_seconds = 300
+# How long discovered mcp.json tool lists stay cached under .spec/cache/tools/.
+cache_ttl_seconds = 86400
+# Optional path to an mcp.json (otherwise the usual candidates are tried).
+# mcp_config = "mcp.json"
+
+# Tools offered to the model on each LLM-backed command. These are the
+# built-in defaults, written so you can see and add to them. A listed
+# command's array is read in addition to its defaults: repeating a
+# default changes nothing, naming one more tool adds it, and leaving a
+# default out does not remove it (use [tools.disabled] for that).
+# `--tools a,b` on the command line is the one way to set the whole
+# list for a run. Name a tool as:
+#   validate_spec                 — built-in (exact catalog name)
+#   builtin:validate_spec         — the same built-in, pinned when an
+#                                   mcp.json tool shares the short name
+#   playwright:browser_navigate   — mcp.json server "playwright"
+#   playwright__browser_navigate  — same MCP tool (catalog name)
+#
+# Add an MCP server in mcp.json, then `spec tools refresh`, then put
+# `server:tool` (or `server__tool`) on the command that should use it.
+
+[tools.profiles]
+# spec draft
+spec-draft = ["list_requirements", "get_requirement", "validate_spec", "refine_requirement"]
+# spec reword
+spec-reword = ["get_requirement", "validate_spec", "refine_requirement"]
+# spec scenario generate
+scenario-generate = ["get_requirement", "feature_read", "step_definitions_find"]
+# spec steps generate
+steps-generate = ["project_inspect", "feature_list", "feature_read", "step_definitions_find"]
+# spec unittest generate
+unittest-generate = ["project_inspect", "get_requirement", "feature_read", "step_definitions_find"]
+# spec implement (preflight advice)
+implement-advice = ["get_tdd_state", "validate_spec", "feature_list"]
+# spec implement
+implement = ["get_requirement", "feature_read", "step_definitions_find", "get_tdd_state", "run_tests", "command_run"]
+# spec refactor - read-and-inspect only. The loop runs the suite itself,
+# once per round, and judges the result; a model that could run the tests
+# could also report on a run the loop never saw.
+refactor = ["get_requirement", "feature_read", "step_definitions_find", "project_inspect", "get_tdd_state"]
+# spec status
+status = ["project_root", "list_requirements", "get_requirement", "get_tdd_state", "validate_spec"]
+# spec ask
+ask = ["project_root", "list_requirements", "get_requirement", "validate_spec", "refine_requirement", "get_tdd_state", "project_inspect", "feature_list", "feature_read", "step_definitions_find"]
+# spec diff
+diff = ["git_diff", "project_root", "list_requirements", "get_requirement", "feature_read"]
+
+# Extra tools attached on top of the default or profiles list.
+# [tools.enabled]
+# implement = ["playwright:browser_navigate"]
+#
+# Tools removed from the default or profiles list.
+# [tools.disabled]
+# implement = ["command_run"]
+
+# How many write-then-test rounds `spec refactor` may spend before it
+# restores the code it started from. Every round is a model call plus a
+# full test run, so this is the command's whole cost ceiling.
+[refactor]
+attempts = 10
+
+# How many RED-to-GREEN rounds `spec deliver` gives one requirement
+# before it reports the requirement as fallen short and moves on. Each
+# round is a full `spec implement` with `[llm] retry` model attempts
+# inside it. `--attempts` wins for one run.
+[deliver]
+attempts = 3
+
+# A local decision model, used only to judge bounded questions about
+# evidence the deterministic rules cannot measure. It is a second,
+# separate model from [llm] above: that one writes, this one answers.
+# Nothing here is on until `model` names an installed decision model
+# (`spec judge models` lists them, `spec judge use <name>` writes it).
+[decision]
+# Persisted by `spec judge use`. Flag `--decision-model` wins for one run.
+# model = "nimble"
+# Defaults to the [llm] endpoint above; set it only if the decision
+# model lives somewhere else.
+# endpoint = "http://localhost:11434"
+timeout_seconds = 60
+# What a judgment is allowed to do:
+#   off      - do not ask
+#   advisory - report the answer beside the deterministic result and
+#              change nothing
+#   enforce  - a failing or unsure answer becomes a finding, makes the
+#              reply unclean, and exits nonzero asking for rework or a
+#              human (the default)
+# The default gates because the question reaches wording no regex does;
+# a judgment that cannot refuse leaves that gap unenforced. Set this to
+# "advisory" while you measure the question against your own criteria.
+mode = "enforce"
+# Answers less concentrated than this are reported "unsure" rather than
+# used. Ollama's confidence is distribution concentration, not
+# calibrated correctness, so treat it as a dead band and nothing more.
+min_confidence = 0.8
