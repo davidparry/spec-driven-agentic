@@ -402,7 +402,7 @@ requirements/
     <!-- ============ 21-25 min: THE PLUMBING (pre-built) ============ -->
     <section data-track="both">
       <h2>The server — already built</h2>
-      <p class="small">One binary: <code>spec mcp serve</code>. 27 tools in three groups, and <strong>every one is deterministic</strong> — not one of them calls a model:</p>
+      <p class="small">One binary: <code>spec mcp serve</code>. 27 tools in three groups, and <strong>26 are deterministic</strong> — same input, same answer, no model. The exception is <code>refine_requirement</code>, which runs its rules first and then, if you configure a decision model, attaches a bounded second opinion beside them:</p>
       <ul class="small">
         <li><strong>Frozen seven</strong> — <code>list_requirements</code>, <code>get_requirement</code>, <code>validate_spec</code>, <code>refine_requirement</code>, <code>run_tests</code>, <code>get_tdd_state</code>, <code>start_refactor</code></li>
         <li><strong>Authoring</strong> — features, scenarios, <code>requirement_reword</code>, <code>requirement_mark_implemented</code>, template-only <code>step_definition_create</code> / <code>unit_test_create</code></li>
@@ -431,7 +431,7 @@ requirements/
 Use the spec-driven-deliver skill to deliver:
 "explain one spec command by name - what it does"
       </code></pre>
-      <p class="small"><strong>No <code>spec</code> command runs.</strong> The agent sequences the 27 tools itself.</p>
+      <p class="small"><strong>No <code>spec</code> command runs.</strong> The agent sequences the 27 tools itself — and the branch it hands back to you, because creating one needs a shell it was never given.</p>
       <div class="two-col">
         <div>
           <h3>What the skill does</h3>
@@ -461,7 +461,7 @@ Use the spec-driven-deliver skill to deliver:
 spec deliver "explain one spec command by name - what it does"
 # ← Enter for the generated branch name, and then it goes quiet
       </code></pre>
-      <p class="small">Draft, wording review, scenario, steps, unit test, RED, then <code>implement</code>. The sequence is compiled in — nothing asks the model whether to run it. Three measured attempts against this crate: <strong>20, 36 and 57 minutes</strong>.</p>
+      <p class="small">Split into requirements and reviewed, then per requirement: scenario, steps, unit test, RED, <code>implement</code>. The sequence is compiled in — nothing asks the model whether to run it. Three measured attempts against this crate: <strong>20, 36 and 57 minutes</strong>.</p>
       <div class="two-col">
         <div>
           <h3>Three judges</h3>
@@ -479,6 +479,7 @@ spec deliver "explain one spec command by name - what it does"
             <li><code>IMPLEMENTATION_COMPLETE</code></li>
             <li><code>REFACTOR_PRESERVES_BEHAVIOUR</code></li>
           </ul>
+          <p class="small muted">Only this path generates code. Demo 1 reached one judgment — is this criterion measurable — and never these four. All four are <strong>advisory</strong>: recorded, reported, and not blocking.</p>
         </div>
       </div>
       <blockquote class="small">Strictness is bought with build effort; speed with tokens and trust. If it falls short it reports what landed and exits nonzero — which is the thing a prompt cannot do.</blockquote>
@@ -593,15 +594,15 @@ agent  →  tools/call   run_tests   { }
       <pre><code class="language-bash" data-trim>
 spec tools profiles        # spec-draft 4 · spec-reword 3 · scenario-generate 3
                           # steps-generate 4 · unittest-generate 4
-                          # implement-advice 5 · implement 7 · refactor 5
-                          # status 7 · ask 12 (read-only)
+                          # implement-advice 3 · implement 6 · refactor 5
+                          # status 5 · ask 10 · diff 5 (all read-only but implement)
 spec mcp call get_tdd_state  # inspect only — the agent is the normal caller
 spec draft …          # lookup of disk catalog; parse_proposals_checked is the gate
 spec implement REQ-003     # run_tests sees the working tree; command_run asks you first
 spec ask "what is pending?"
       </code></pre>
       <ul class="small">
-        <li>Ten profiles, one per job — narrowed to the work in front of the model</li>
+        <li>Eleven profiles, one per job — narrowed to the work in front of the model</li>
         <li>Drifting local model? <code>[tool_rules]</code> in the prompts file</li>
         <li>Cucumber does the spec half: an executable contract that predates all of this by twenty years</li>
       </ul>

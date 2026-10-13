@@ -56,8 +56,11 @@ _site/
 !.claude/settings.json
 
 /harness/.bdd-log/
-/harness/.cargo
-/harness/.cargo/
+# Cargo's own scratch stays out. config.toml is tracked and shared: it
+# pins RUST_TEST_THREADS, without which the runner adapter tests
+# intermittently fail to spawn on macOS and read as a test failure.
+/harness/.cargo/*
+!/harness/.cargo/config.toml
 /harness/.spec-history
 /notes/
 /harness/.cursor/plans/

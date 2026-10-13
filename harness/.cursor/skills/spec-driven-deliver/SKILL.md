@@ -86,7 +86,14 @@ including requirement shaping.
 Check `project_inspect`'s `git` field. If the project is under git, ask
 for a branch name, offering `spec/<date>-<target>` as the default when
 the target has an id and `spec/<date>-delivery` otherwise. Offer "stay
-here" as an option. Create the chosen branch with git through the shell.
+here" as an option.
+
+**You do not create the branch.** Ask the developer to run
+`git switch -c <name>` and to tell you when they have, then re-read
+`project_inspect` and confirm the branch moved before the first write.
+Every effect you have on this project goes through a tool that can
+refuse you; a shell is not one, so the one step that needs a shell is
+the developer's to take, not yours.
 
 Outside a git repository, say so and carry on.
 

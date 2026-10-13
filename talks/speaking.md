@@ -250,7 +250,9 @@ The session proves it by delivering one requirement twice. The sentence is
 same MCP server, the same gates, and the same acceptance criteria.
 
 **Demo one** is the loose end of the range: a frontier model in an editor,
-sequenced by a skill, reaching the work through 27 typed tools and nothing else.
+sequenced by a skill, reaching the work through 27 typed tools and nothing else —
+the one thing it cannot do for itself is create a git branch, which needs a shell
+it was never given, so it stops and asks.
 It opens by asking the agent what the project *is* — which is worth watching,
 because an agent describing a repository from its prose is guessing, and an agent
 describing it from `list_requirements` is reading. Then it works the loop:
@@ -277,8 +279,9 @@ model asked one bounded question at a time, returning a probability, where
 anything under 0.80 comes back unsure and unsure is never read as a yes. Four of
 those judgments exist only here, because only this path generates code. The
 honest parts get shown too: the measured runs took 20, 36 and 57 minutes, a
-second run is faster only because of a prompt-keyed cache, the step can time out
-and lose its partial work, and an attempt can come back with nothing usable. When
+second run is faster only because of a cache keyed on the whole conversation,
+the step can time out and lose its partial work, and an attempt can come back
+with nothing usable. When
 it falls short it reports what landed and exits nonzero, which is the one thing a
 prompt structurally cannot do: tell you the truth about work nobody watched.
 
@@ -351,9 +354,11 @@ language-specific.
 ## Technical requirements
 
 Stage projector and my laptop. No conference network needed. On stage: the
-`spec` binary, Rust and Cargo, Java 21 and Maven, Ollama running a local model,
-and an editor with an MCP host for the first demo. Presenter script and the
-verified paste-ready wording are in
+`spec` binary, Rust and Cargo, Ollama running two local models — one that
+writes and a smaller one that judges — and an editor with an MCP host for the
+first demo. The two demos run from two git worktrees, one each, because they
+drive the same crate and cannot share a build directory or a test bar.
+Presenter script and the verified paste-ready wording are in
 [`presenter-notes.md`](presenter-notes.md); the attendee companion is
 [`a-day-life.md`](../student-follow-docs/a-day-life.md).
 

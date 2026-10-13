@@ -24,11 +24,41 @@ explain one spec command by name - what it does
 Same MCP server, same gates, same acceptance criteria. What changes is
 who decides the sequence runs.
 
+### Running these yourself
+
+Both demos drive the `harness/` crate, and they need **a checkout
+each** — they cannot share one. Three things in the way, and all three
+are the design working rather than failing:
+
+- `cargo test` holds an exclusive lock on `target/`, so the second run
+  waits instead of running.
+- The RED/GREEN bar is one piece of state per project root. Two runs
+  reading it, testing for a minute, then writing it back, and the later
+  write drops the earlier one.
+- Both would draw the same next requirement id out of the same catalog.
+
+So give each its own worktree, and run them one after the other:
+
+```bash
+git worktree add ../talk-demo1 -b demo1
+git worktree add ../talk-demo2 -b demo2
+```
+
+One thing does not come with a worktree: `target/` starts empty, so run
+`cargo test` once in each before you begin. Warm, the whole suite is 27
+seconds; cold, it is a full build of the crate and everything it
+depends on, and you do not want to discover that on the first RED bar.
+
 ### Demo 1 — Cursor, a skill, and the MCP server
 
 The loose end of the range. A frontier model in an editor, pointed at
 `spec mcp serve`, and sequenced by
-[`.cursor/skills/spec-driven-deliver/SKILL.md`](../.cursor/skills/spec-driven-deliver/SKILL.md).
+[`harness/.cursor/skills/spec-driven-deliver/SKILL.md`](../harness/.cursor/skills/spec-driven-deliver/SKILL.md).
+
+Open the editor on `../talk-demo1/harness`, not on the repository root.
+Both the MCP config and the skill live under `harness/.cursor/`, and
+the server starts with `--root ${workspaceFolder}` — so from the root
+you get no skill and a server pointed at the wrong catalog.
 
 Paste this as one prompt:
 
@@ -42,6 +72,12 @@ workflow: it calls `project_inspect`, `project_root`,
 `list_requirements` and `get_tdd_state`, then briefly explains what it
 found before the branch choice or any write. That explanation comes from
 the catalog and inspected assets rather than from README prose.
+
+Then it stops and hands the branch back to you. It proposes a name and
+asks *you* to run `git switch -c`, because creating a branch needs a
+shell and the agent has not been given one — then it re-reads
+`project_inspect` to confirm the branch moved rather than taking your
+word for it. Small moment, and it is the argument in miniature.
 
 It then works the loop itself:
 
@@ -59,8 +95,17 @@ start_refactor
 requirement_mark_implemented
 ```
 
-No `spec` subcommand runs. Every effect reaches the work through one of
-the 27 tools, and nothing else.
+No `spec` subcommand runs. Every effect the *agent* has reaches the
+work through one of the 27 tools, and nothing else. The one command
+typed during the run is your own `git switch -c`, which is the point
+rather than an exception to it.
+
+One tool on that surface is not purely deterministic, and it is worth
+knowing which. `refine_requirement` runs its deterministic rules first
+and always; then, if the project configures a decision model, it
+attaches a bounded second opinion on whether each criterion is
+measurable. The findings are the rules'. The judgment arrives beside
+them, never instead of them. The other twenty-six call nothing.
 
 What holds, even here:
 
@@ -75,26 +120,39 @@ uses. A frontier model gets the identical refusal you would.
 
 ### Demo 2 — the same requirement, no skill on the wire
 
-The tight end. One command, and the model never sees a skill:
+The tight end. One command, from the other worktree, and the model
+never sees a skill:
 
 ```bash
 spec deliver "explain one spec command by name - what it does"
 # ← Enter for the generated branch name, and then it goes quiet
 ```
 
-Draft, wording review, scenario, step definitions, unit test, RED, then
-`implement` — the slow one. The sequence is compiled in. Nothing asks
-the model whether to run it, in what order, or whether this step can be
-skipped just this once.
+The sentence is split into requirements and reviewed before any of them
+is accepted; then, per requirement, a scenario, step definitions, a
+unit test, a RED bar, and `implement` — the slow one. The sequence is
+compiled in. Nothing asks the model whether to run it, in what order, or
+whether this step can be skipped just this once.
+
+Two details, because being vague here would undercut the point. That
+review is the pipeline's own automatic check on the proposals, not the
+interactive reword loop `spec draft` gives you. And the scenario is
+built from the acceptance criteria by a **template**, not by a model —
+which is why the gate that asks whether a scenario exercises its
+criterion never fires on this path. There is nothing generated for it
+to read.
 
 Three honest things about watching it, measured against this crate:
 
 - `implement` took **20, 36 and 57 minutes** across three attempts. A
   second run is much faster, and that is the **cache** at
-  `.spec/cache/` keyed on the prompt — not the model warming up. Change
+  `.spec/cache/` — not the model warming up. It is keyed on the model,
+  the endpoint, the whole conversation and the tool schemas, so change
   one word and you pay full price.
-- It can **run out of time** rather than finish. `timeout_seconds` is
-  3600 for exactly this step, and the partial generation is gone.
+- It can **run out of time** rather than finish, and the partial
+  generation is gone. This project raises `[llm] timeout_seconds` to
+  3600 for exactly this step; the shipped default is 300, which cuts
+  `implement` off mid-generation on a crate this size.
 - An attempt can return **nothing usable**, having spent its rounds
   looking instead of writing. The bar is untouched and the next attempt
   is briefed with the failure.
@@ -118,6 +176,16 @@ Four of those judgments exist only in `deliver`, because only `deliver`
 generates code: `STEPS_BIND_SCENARIO`, `UNIT_TEST_ASSERTS`,
 `IMPLEMENTATION_COMPLETE` and `REFACTOR_PRESERVES_BEHAVIOUR`. In demo 1
 they are simply not on the wire.
+
+Which is four gates and not all of them. Demo 1 did reach one judgment,
+through `refine_requirement`, on whether a criterion is measurable. The
+difference between the two demos is not that one had no judge. It is
+that demo 1 produced no generated code for a judge to read.
+
+All four are advisory: recorded and reported, and they do not stop the
+run. That is the same advice this page gives below about your own
+gates — a question earns the right to block after you have measured it,
+not before.
 
 ### A Skill is not a Jig
 
@@ -361,11 +429,18 @@ measured rather than hoped for:
   deterministic result stands. Silence is never read as a yes.
 
 And the same warning applies here: measure the question on
-your own criteria before you let it gate anything. The repository's own
-decision question reads 14 of its 73 acceptance criteria as unmeasurable
-when they plainly are not. A gate wired to that blocks a fifth of the
-work it was built to check. Start `advisory`, read what it says for a
-month, and turn it up only when the numbers are yours.
+your own criteria before you let it gate anything. Measured against
+this repository's own spec, the decision question read 14 of 73
+acceptance criteria as unmeasurable when they plainly were not — every
+one of them a quoted literal or a count. A gate wired to that blocks a
+fifth of the work it was built to check.
+
+That measurement was taken when the catalog held 73 criteria. It holds
+111 now and the figure has not been re-measured, which is the warning
+arriving on schedule: a number like this describes a question, a model,
+and a spec on one particular day, and it goes stale without anybody
+touching the gate. Start `advisory`, read what it says for a month, and
+turn it up only when the numbers are yours and current.
 
 ## A walkthrough
 
@@ -508,6 +583,23 @@ anything, and the prompt that trusts without verifying anything.
 
 Build the jig so the business gets the judgment and keeps the
 determinism. That is what we are responsible for.
+
+## Grading your own run
+
+Neither demo has to be taken on trust, which is the whole argument
+applied to itself. From the repository root:
+
+```bash
+scripts/verify-harness-morning.sh check HARNESS-025
+```
+
+It checks the row that matters on the run's own terms rather than
+against a recorded solution: a scenario carrying the tag, no undefined
+steps, a unit test that compiles and has no leftover placeholder,
+production files that actually differ from the base branch, a GREEN
+bar, the status flipped, and the whole suite green. Hand it the JSON
+`spec deliver` printed as a third argument and it also tables every
+judgment the decision plane recorded, gate by gate.
 
 ## See also
 

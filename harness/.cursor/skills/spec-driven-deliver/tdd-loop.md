@@ -140,9 +140,14 @@ against someone else's broken test.
 
 ## 5. Implement
 
-Use the configured deliver-attempt budget, defaulting to 3 when none is
-configured. That is how many write-then-test rounds this requirement
-gets.
+Three write-then-test rounds, and stop to ask before spending a fourth.
+
+The configured deliver-attempt budget is not the number to use here. It
+is sized for `spec deliver`, which runs unattended and can afford to
+grind; you are running in front of someone, every round is a full suite
+run, and a budget of fifteen is a way to spend an hour without anyone
+deciding to. Report what the last round changed and what the bar said,
+and let the developer choose whether to keep going.
 
 Each attempt is **two pieces of work**, and skipping the second is the
 usual reason a bar stays RED:
