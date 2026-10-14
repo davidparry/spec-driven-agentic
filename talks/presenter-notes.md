@@ -373,7 +373,17 @@ was right.
 The skip test again, on the prompt version: every single thing in it is
 a preference.
 
-## Slide 5 — Who judges what (46-54 min)
+## Slide 5 — Past the rules engine: splitting a decision responsibly (46-54 min)
+
+Open on the correction. `if`, `switch`, and a rules engine are the same
+kind of thing: they hold arithmetic over facts that are already
+structured. A dispute note is not one of those facts. What we actually
+did was not stop — we added a flag, and the judgment moved to whoever
+set it, with no record of why. A model can be asked to read the note.
+On this account it reads the contract clause at 0.91, and a validator
+then recomputes tenure. The dispute note comes back at 0.64, under the
+floor, so it is not used. That is the responsible split: the model gets
+the reading, not the numbers and not the tier, and unsure is never a yes.
 
 Three judges, and the design depends on never confusing them. Validators
 hold the arithmetic, the thresholds and the transitions — most of the

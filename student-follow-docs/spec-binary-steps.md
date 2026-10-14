@@ -434,7 +434,7 @@ mvn -f kata/pom.xml test
 
 ## Optional — the decision model (Extra F)
 
-Needs Ollama 0.35 or newer, and `spec` 0.7.20 or newer — `spec judge`
+Needs Ollama 0.35 or newer, and `spec` 0.7.21 or newer — `spec judge`
 is in no earlier release. Nothing above depends on it.
 
 Step 72

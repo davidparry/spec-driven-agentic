@@ -133,6 +133,9 @@ never sees a skill:
 
 ```bash
 spec deliver "explain one spec command by name - what it does"
+```
+
+```text
 # ← Enter for the generated branch name, and then it goes quiet
 ```
 

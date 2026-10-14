@@ -976,29 +976,19 @@ impl Deliver {
         if report.build_broken() {
             return Ok(Bar::stopped(broken_build(req_id), Some(report.phase)));
         }
-        // The other red bar no attempt can turn green: failures that are
-        // not this requirement's. Implementing it leaves them failing,
-        // so the budget would be spent reading the same bar three
-        // times - minutes per read on a local model. Read fresh, so the
-        // feature file the scenario step just recorded is a marker too.
-        let foreign: Vec<String> = self
-            .spec()?
-            .requirements
-            .iter()
-            .find(|r| r.id == req_id)
-            .map(|requirement| {
-                foreign_failures(&report.failure_details, requirement)
-                    .into_iter()
-                    .map(str::to_string)
-                    .collect()
-            })
-            .unwrap_or_default();
+        // Failures that are not this requirement's keep the bar RED
+        // however well it is implemented, and a delivery that stops on
+        // them has delivered nothing: the run that wrote the spec or the
+        // scenario may be the one that broke them. So they are worked,
+        // not stopped on - narrated now, put in every attempt's brief,
+        // and judged after each attempt. The only stop they earn is a
+        // stall (see `FOREIGN_STALL`), where attempts that had them in
+        // hand changed nothing.
+        let mut foreign = self.foreign_of(req_id, &report.failure_details)?;
         if !foreign.is_empty() {
-            return Ok(Bar::stopped(
-                foreign_red_bar(req_id, &foreign),
-                Some(report.phase),
-            ));
+            prompter.warn(&foreign_in_scope(req_id, &foreign));
         }
+        let mut stalled = 0;
         if self.llm.is_none() {
             return Ok(Bar::stopped(
                 format!(
@@ -1024,6 +1014,7 @@ impl Deliver {
             let round = AttemptRound {
                 attempt,
                 last_break: &last_break,
+                foreign: &foreign,
             };
             let mut wrote =
                 match self.attempt_implementation(prompter, &implement, tdd, req_id, &round)? {
@@ -1102,6 +1093,24 @@ impl Deliver {
             }
             // The bar this attempt left is the whole brief for the next.
             last_break.clear();
+            // Foreign failures are re-attributed on what the attempt
+            // left. One that is gone is progress; the same set standing
+            // with none of the requirement's own failures beside it is
+            // an attempt that had them in hand and moved nothing.
+            let left = self.foreign_of(req_id, &judged.failure_details)?;
+            let own_remaining = judged.failure_details.len() > left.len();
+            if !left.is_empty() && left == foreign && !own_remaining {
+                stalled += 1;
+                if stalled >= FOREIGN_STALL {
+                    return Ok(Bar::stopped(
+                        foreign_red_bar(req_id, &left, attempt),
+                        Some(judged.phase),
+                    ));
+                }
+            } else {
+                stalled = 0;
+            }
+            foreign = left;
             report = judged;
         }
         Ok(Bar::stopped(
@@ -1112,6 +1121,24 @@ impl Deliver {
             ),
             Some(report.phase),
         ))
+    }
+
+    /// The failures on a bar that are not `req_id`'s. Read from the spec
+    /// fresh each time, so the feature file the scenario step just
+    /// recorded is a marker too.
+    fn foreign_of(&self, req_id: &str, failures: &[String]) -> Result<Vec<String>, String> {
+        Ok(self
+            .spec()?
+            .requirements
+            .iter()
+            .find(|r| r.id == req_id)
+            .map(|requirement| {
+                foreign_failures(failures, requirement)
+                    .into_iter()
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default())
     }
 
     /// The refactor step, on a green bar. Skipped by `--no-refactor` and
@@ -1756,12 +1783,24 @@ struct AttemptRound<'a> {
     /// The compiler headlines of the previous attempt, when it was
     /// reverted for breaking the build. Empty otherwise.
     last_break: &'a [String],
+    /// The failures on the bar that are not the requirement's own. They
+    /// are already among the recorded failures; naming them says they
+    /// are part of the job.
+    foreign: &'a [String],
 }
 
 impl AttemptRound<'_> {
     /// The recorded failures with the previous break's headlines after
-    /// them, each marked as the attempt before this one's.
+    /// them, each marked as the attempt before this one's, and the
+    /// foreign failures named as the ones to fix as well.
     fn failures(&self, mut recorded: Vec<String>) -> Vec<String> {
+        if !self.foreign.is_empty() {
+            recorded.push(format!(
+                "These failures are not this requirement's own, but they keep the bar RED \
+                 and must be fixed as well: {}",
+                named_failures(self.foreign)
+            ));
+        }
         if self.last_break.is_empty() {
             return recorded;
         }
@@ -1866,11 +1905,14 @@ fn broken_build(req_id: &str) -> String {
 /// rest. Enough to recognize the suite; the whole list is in spec state.
 const FOREIGN_FAILURES_NAMED: usize = 5;
 
-/// Why the loop will not spend attempts on a bar that is red for some
-/// other reason. Each failure is named by its first line, so the
-/// developer can tell a drifted test from a broken fixture without
-/// opening anything.
-fn foreign_red_bar(req_id: &str, foreign: &[String]) -> String {
+/// How many attempts in a row may leave the same foreign failures
+/// standing, with none of the requirement's own beside them, before the
+/// loop stops spending its budget on them.
+const FOREIGN_STALL: u32 = 2;
+
+/// Each failure named by its first line, so the developer can tell a
+/// drifted test from a broken fixture without opening anything.
+fn named_failures(foreign: &[String]) -> String {
     let mut named: Vec<String> = foreign
         .iter()
         .take(FOREIGN_FAILURES_NAMED)
@@ -1882,12 +1924,32 @@ fn foreign_red_bar(req_id: &str, foreign: &[String]) -> String {
             foreign.len() - FOREIGN_FAILURES_NAMED
         ));
     }
+    named.join("; ")
+}
+
+/// Said when the bar is RED on failures that are not the requirement's
+/// and the loop carries on regardless.
+fn foreign_in_scope(req_id: &str, foreign: &[String]) -> String {
     format!(
-        "The bar is RED with {} failure(s) that are not {req_id}'s: {}. Implementing \
-         {req_id} cannot turn that bar green, so no attempt was made. Make the suite pass \
-         on its own (spec test shows every failure), then run spec deliver {req_id} again.",
+        "The bar is RED with {} failure(s) that are not {req_id}'s: {}. They keep the bar \
+         from going green, so the attempts below work on them too.",
         foreign.len(),
-        named.join("; ")
+        named_failures(foreign)
+    )
+}
+
+/// Why the loop gave up on failures that are not the requirement's:
+/// attempts that were briefed on them left them exactly as they were,
+/// which is a failure no source edit reaches (the spec, a fixture, the
+/// environment).
+fn foreign_red_bar(req_id: &str, foreign: &[String], attempt: u32) -> String {
+    format!(
+        "The bar is RED with {} failure(s) that are not {req_id}'s: {}. Attempt {attempt} \
+         and the one before it were briefed on them and changed nothing, so they are not \
+         in reach of a code edit. Fix them by hand (spec test shows every failure), then \
+         run spec deliver {req_id} again.",
+        foreign.len(),
+        named_failures(foreign)
     )
 }
 
@@ -1965,6 +2027,7 @@ mod tests {
         let round = AttemptRound {
             attempt: 3,
             last_break: &headlines,
+            foreign: &[],
         };
         let failures = round.failures(vec!["Given a requirement: FAILED".into()]);
         assert_eq!(failures[0], "Given a requirement: FAILED");
@@ -1977,6 +2040,7 @@ mod tests {
         let clean = AttemptRound {
             attempt: 2,
             last_break: &[],
+            foreign: &[],
         };
         assert_eq!(clean.failures(vec!["x".into()]), vec!["x".to_string()]);
     }
@@ -2838,31 +2902,75 @@ mod tests {
         assert!(reason.contains("spec deliver REQ-001 again"), "{reason}");
     }
 
-    /// A suite that is red for some other reason is not a bar this
-    /// requirement can turn green. The loop stops before the first
-    /// attempt - the model is never asked - and names what is failing.
+    /// The bar is red for a reason that is not this requirement's, and
+    /// the delivery carries on instead of stopping: the failure is
+    /// narrated, the model is briefed on it, and once an attempt clears
+    /// it the loop goes green and closes.
     #[test]
-    fn a_red_bar_with_failures_that_are_not_the_requirements_stops_before_any_attempt() {
+    fn a_red_bar_with_failures_that_are_not_the_requirements_is_worked_not_stopped() {
         let dir = kata(one_criterion());
+        std::fs::create_dir_all(dir.path().join("src/main/java")).unwrap();
+        std::fs::write(
+            dir.path().join("src/main/java/Kata.java"),
+            "public class Kata { int add(String input) { return 0; } }\n",
+        )
+        .unwrap();
         let mut prompter = Script::default();
-        let foreign_red = Ok(crate::domain::model::TestRunSummary {
-            tests: 2,
-            failures: 2,
-            failure_details: vec![
-                "Req001Test.emptyString: TODO: assert".into(),
-                "every_documented_version_floor_is_the_version_this_crate_ships: FAILED\n\
-                 claims floor 0.7.15, but this crate ships 0.7.17"
-                    .into(),
-            ],
-            ..Default::default()
-        });
+        let (recorder, llm) = recording_model(Ok(
+            r#"[{"path":"src/main/java/Kata.java","content":"public class Kata { int add(String i) { return 1; } }\n"}]"#,
+        ));
         let outcome = deliver_one(
             dir.path(),
             &mut prompter,
-            vec![foreign_red],
-            model(Err("the model must not be asked about a bar it cannot fix")),
+            vec![foreign_red(), green()],
+            Some(("scripted-model".into(), llm)),
             DeliverOptions {
                 attempts: 3,
+                ..no_refactor()
+            },
+        );
+        assert!(matches!(outcome, Outcome::Implemented), "{outcome:?}");
+        assert!(
+            prompter.said("1 failure(s) that are not REQ-001's"),
+            "{:?}",
+            prompter.told
+        );
+        assert!(prompter.said("Attempt 1 of 3."), "{:?}", prompter.told);
+        let prompts = recorder.1.lock().unwrap();
+        let first = prompts
+            .iter()
+            .find(|prompt| prompt.contains("The failing tests"))
+            .expect("an implementation prompt");
+        assert!(
+            first.contains("every_documented_version_floor_is_the_version_this_crate_ships"),
+            "the model is told what else keeps the bar red: {first}"
+        );
+        assert!(first.contains("must be fixed as well"), "{first}");
+    }
+
+    /// Attempts that were briefed on foreign failures and left them
+    /// exactly as they were have proven no source edit reaches them. The
+    /// loop stops after `FOREIGN_STALL` of them rather than spending the
+    /// rest of the budget, and says so.
+    #[test]
+    fn foreign_failures_that_attempts_cannot_move_stop_the_loop_as_a_stall() {
+        let dir = kata(one_criterion());
+        std::fs::create_dir_all(dir.path().join("src/main/java")).unwrap();
+        std::fs::write(
+            dir.path().join("src/main/java/Kata.java"),
+            "public class Kata { int add(String input) { return 0; } }\n",
+        )
+        .unwrap();
+        let mut prompter = Script::default();
+        let outcome = deliver_one(
+            dir.path(),
+            &mut prompter,
+            vec![foreign_red(), foreign_only(), foreign_only()],
+            model(Ok(
+                r#"[{"path":"src/main/java/Kata.java","content":"public class Kata { int add(String i) { return 1; } }\n"}]"#,
+            )),
+            DeliverOptions {
+                attempts: 5,
                 ..no_refactor()
             },
         );
@@ -2875,16 +2983,44 @@ mod tests {
             reason.contains("every_documented_version_floor_is_the_version_this_crate_ships"),
             "{reason}"
         );
-        assert!(
-            !reason.contains("claims floor"),
-            "first line only: {reason}"
-        );
+        assert!(!reason.contains("claims floor"), "first line only: {reason}");
+        assert!(reason.contains("Attempt 2"), "{reason}");
         assert!(reason.contains("spec deliver REQ-001 again"), "{reason}");
         assert!(
-            !prompter.said("Attempt 1 of 3."),
-            "no attempt is made: {:?}",
+            !prompter.said("Attempt 3 of 5."),
+            "the budget is not spent past the stall: {:?}",
             prompter.told
         );
+    }
+
+    /// The bar the requirement's own placeholders and one unrelated
+    /// failing test make together.
+    fn foreign_red() -> TestOutcome {
+        Ok(crate::domain::model::TestRunSummary {
+            tests: 2,
+            failures: 2,
+            failure_details: vec![
+                "Req001Test.emptyString: TODO: assert".into(),
+                "every_documented_version_floor_is_the_version_this_crate_ships: FAILED\n\
+                 claims floor 0.7.15, but this crate ships 0.7.17"
+                    .into(),
+            ],
+            ..Default::default()
+        })
+    }
+
+    /// What is left once the requirement's own failure is gone.
+    fn foreign_only() -> TestOutcome {
+        Ok(crate::domain::model::TestRunSummary {
+            tests: 2,
+            failures: 1,
+            failure_details: vec![
+                "every_documented_version_floor_is_the_version_this_crate_ships: FAILED\n\
+                 claims floor 0.7.15, but this crate ships 0.7.17"
+                    .into(),
+            ],
+            ..Default::default()
+        })
     }
 
     /// The stop names a handful and counts the rest, so a suite with
@@ -2892,7 +3028,7 @@ mod tests {
     #[test]
     fn the_foreign_bar_stop_names_a_few_failures_and_counts_the_rest() {
         let foreign: Vec<String> = (1..=7).map(|n| format!("other_test_{n}: FAILED")).collect();
-        let stop = foreign_red_bar("REQ-001", &foreign);
+        let stop = foreign_red_bar("REQ-001", &foreign, 2);
         assert!(stop.contains("7 failure(s)"), "{stop}");
         assert!(stop.contains("other_test_5: FAILED; and 2 more"), "{stop}");
         assert!(!stop.contains("other_test_6"), "{stop}");

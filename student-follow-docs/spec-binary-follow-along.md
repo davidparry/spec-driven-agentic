@@ -75,11 +75,11 @@ list of bare commands, one per step.
 
 You need:
 
-- **`spec` on PATH.** Check with `spec --version`; you want **0.7.20 or
+- **`spec` on PATH.** Check with `spec --version`; you want **0.7.21 or
   newer**. 0.5.5 was the first release that prints its `nextStep` advice as
   commands you can paste rather than as the tool names the MCP server uses
   — which is the dialect every reply on this page is quoted in — but the
-  floor is 0.7.20, because this page reads and writes `.spec/config.toml`
+  floor is 0.7.21, because this page reads and writes `.spec/config.toml`
   and the `.spec/` directory replaced the flat `.spec.toml` in 0.6.0.
   Install with
   `cargo install --path harness` from the repository root, or use a GitHub
@@ -1723,7 +1723,7 @@ git branch -D spec-gates
 About ten minutes, and the only exercise here that needs a second model
 pulled. Skip it freely; nothing else depends on it.
 
-It also needs `spec` 0.7.20 or newer. `spec judge` is in no earlier
+It also needs `spec` 0.7.21 or newer. `spec judge` is in no earlier
 release, so a binary from before it answers with an
 unrecognised-subcommand error.
 

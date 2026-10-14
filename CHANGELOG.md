@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **`spec deliver` works a red bar that is not the requirement's instead
+  of stopping on it.** A suite failing for another reason - a spec the
+  run's own writes left invalid, a drifted test - used to end the
+  requirement before the first attempt ("Implementing X cannot turn
+  that bar green, so no attempt was made"), so a delivery that was
+  asked to run until implemented delivered nothing. The failures are
+  now narrated, named in every attempt's brief as ones to fix as well,
+  and re-attributed after each attempt. The loop stops on them only
+  when two attempts in a row leave the same failures standing with none
+  of the requirement's own beside them - a failure no source edit
+  reaches - and the stop says which attempts proved it.
+
 ## 0.7.20 - 2026-10-13
 
 - **A requirement no step definition points at is connected by asking
