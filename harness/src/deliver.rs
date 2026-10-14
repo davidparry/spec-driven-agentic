@@ -2983,7 +2983,10 @@ mod tests {
             reason.contains("every_documented_version_floor_is_the_version_this_crate_ships"),
             "{reason}"
         );
-        assert!(!reason.contains("claims floor"), "first line only: {reason}");
+        assert!(
+            !reason.contains("claims floor"),
+            "first line only: {reason}"
+        );
         assert!(reason.contains("Attempt 2"), "{reason}");
         assert!(reason.contains("spec deliver REQ-001 again"), "{reason}");
         assert!(

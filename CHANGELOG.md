@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.7.21 - 2026-10-14
+
 - **`spec deliver` works a red bar that is not the requirement's instead
   of stopping on it.** A suite failing for another reason - a spec the
   run's own writes left invalid, a drifted test - used to end the
