@@ -26,6 +26,14 @@ who decides the sequence runs.
 
 ### Running these yourself
 
+Start from a checkout of this repository, and stay in its root — the
+worktree paths below are relative to it:
+
+```bash
+git clone git@github.com:davidparry/spec-driven-agentic.git
+cd spec-driven-agentic
+```
+
 Both demos drive the `harness/` crate, and they need **a checkout
 each** — they cannot share one. Three things in the way, and all three
 are the design working rather than failing:

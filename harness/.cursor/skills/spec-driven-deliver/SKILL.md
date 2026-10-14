@@ -33,10 +33,10 @@ you; the rest are what make a run readable afterwards.
 - **`command_run` is RED-only**, argv-only, and limited to
   `cargo mvn npm npx node dotnet java javac tsc`. No shell, no paths in
   the program name, no `..` or absolute paths in arguments, 300s cap.
-- **Use only the two planned checkpoints.** Choose the branch before the
-  first write. When plain words must be shaped, get approval of the
-  resulting requirements before writing tests or production code. After
-  that approval, run to the end and report.
+- **Never ask for input after preflight.** Work on the branch you are
+  on. Shape plain words without waiting for approval. Loop until every
+  planned id is `implemented` and the bar is GREEN, then report. The
+  only stops are the hard stops listed under [Loop until done](#loop-until-done).
 
 ## Preflight
 
@@ -54,10 +54,10 @@ Run these before anything else and read the answers:
 
 Then refuse, without touching anything, if:
 
-- **No project was detected.** Report it and ask the developer to
-  initialize a spec-driven project. Do not scaffold one yourself.
-- **The catalog is empty and nothing was described.** Ask for a
-  description rather than inventing a backlog.
+- **No project was detected.** Report that a spec-driven project needs
+  to be initialized. Do not scaffold one yourself.
+- **The catalog is empty and nothing was described.** Report that there
+  is nothing to deliver rather than inventing a backlog.
 - **The target is an ask that is not ready.** Report every reason from
   `get_requirement`'s `reasons`, and point at `requirement_decide`.
 - **The target is one word holding a digit, or opening with the
@@ -69,6 +69,7 @@ preflight found:
 
 ```text
 Project: <root and purpose inferred from the inspected assets>
+Branch: <current branch from project_inspect's git field, or "not under git">
 Stack: <language, test framework, and module or package shape>
 Spec: <catalog prefix, implemented count, pending count, validity>
 TDD: <current phase and whether the bar is safe to begin from>
@@ -78,24 +79,13 @@ Ground the explanation in `project_inspect`, the requirement catalog,
 and the test assets—not in README prose. Keep it brief: this is an
 orientation before delivery, not a second project review.
 
-## The branch gate
+## Branch
 
-This is the first checkpoint and happens **before the first write**,
-including requirement shaping.
+Deliver on the branch the project is already on. Read `project_inspect`'s
+`git` field, record the current branch in the preflight summary, and
+carry on. Never create a branch, switch branches, or ask about one.
 
-Check `project_inspect`'s `git` field. If the project is under git, ask
-for a branch name, offering `spec/<date>-<target>` as the default when
-the target has an id and `spec/<date>-delivery` otherwise. Offer "stay
-here" as an option.
-
-**You do not create the branch.** Ask the developer to run
-`git switch -c <name>` and to tell you when they have, then re-read
-`project_inspect` and confirm the branch moved before the first write.
-Every effect you have on this project goes through a tool that can
-refuse you; a shell is not one, so the one step that needs a shell is
-the developer's to take, not yours.
-
-Outside a git repository, say so and carry on.
+Outside a git repository, say so in the summary and carry on.
 
 ## Resolve the target into a plan
 
@@ -111,7 +101,7 @@ pattern you assumed:
   ask implemented and stop.
 - **Plain words** — one or more words that are not an id. Shape them
   into requirements first: follow [shaping.md](shaping.md), then plan the
-  accepted ids.
+  accepted ids and go straight into the loop. There is no approval step.
 - **Nothing** — plan every pending requirement in catalog order. Asks are
   not planned themselves; their derived requirements are.
 
@@ -143,9 +133,11 @@ Two things govern every stage:
 
 **Verify, do not trust.** After a stage writes, re-read the project and
 confirm the gap is actually closed. The four checks are in
-[tool-map.md](tool-map.md). A stage whose gap is still open stops that
-requirement — do not retry it, because these tools are deterministic and
-a second identical call lands in the same place.
+[tool-map.md](tool-map.md). A stage whose gap is still open is worked
+again with a changed input — different wording, a different step
+expression, different code. These tools are deterministic, so an
+identical call lands in the same place; change something based on what
+the check saw. Never abandon the requirement.
 
 **Idempotent, so resumable.** A stage whose work is already in place is
 skipped, not redone. A requirement whose scenario you wrote by hand last
@@ -156,14 +148,27 @@ week is picked up where it was left:
 A scenario tagged @REQ-003 is already in place.
 ```
 
-### Carrying on
+### Loop until done
 
-A requirement that falls short is reported and the run moves to the next
-one, so one bad requirement does not strand the backlog. Record it as
-outstanding with the reason and the phase it stopped in, then continue.
+Work each requirement to GREEN and `implemented` before starting the
+next. A RED bar means another write-then-test round, not a reason to
+move on or to ask.
 
-Stop early only if fail-fast was asked for, and then count the
-requirements after it as outstanding — they were never attempted.
+After the last planned id, re-run `list_requirements` and
+`get_tdd_state`. If any planned id is still pending, or the bar is not
+GREEN, go back and work it again. The run is finished only when every
+planned id shows `status: "implemented"` and the bar is GREEN.
+
+The only hard stops are conditions no amount of looping can fix:
+
+- no project detected;
+- `validate_spec` not `valid` at preflight;
+- a `runtime_missing` error from `run_tests` or `command_run`;
+- an ask that is not ready and cannot be made ready through
+  `requirement_decide`;
+- an empty catalog with nothing described.
+
+Report a hard stop in the closing report. Do not ask about it.
 
 ### Closing asks
 
@@ -179,22 +184,17 @@ Close with this stable machine-readable shape:
 ```json
 {
   "planned": ["REQ-001", "REQ-002"],
-  "delivered": ["REQ-002"],
-  "outstanding": [
-    {
-      "id": "REQ-001",
-      "reason": "The bar is still RED after 3 attempt(s).",
-      "phase": "RED"
-    }
-  ],
-  "completed": false,
-  "nextStep": "1 of 2 delivered. Still pending: REQ-001."
+  "delivered": ["REQ-001", "REQ-002"],
+  "completed": true,
+  "nextStep": "2 of 2 delivered. All planned requirements are implemented and the bar is GREEN."
 }
 ```
 
-`completed` is true only when every planned id was delivered — a run that
-landed one of three is not a success. Omit `outstanding` when it is
-empty, and `implementedAsks` unless an ask closed.
+`completed` is true only when every planned id was delivered, and that
+is the expected outcome of every run. `outstanding` appears only when a
+hard stop ended the run early, with the `id`, `reason`, and `phase` of
+each requirement it left undelivered. Omit `implementedAsks` unless an
+ask closed.
 
 Then say in prose what happened, what you wrote, and what the developer
 should read. Point at `git diff` for the code: you wrote it, so you are
@@ -204,12 +204,13 @@ not the one who should be signing off on it.
 
 The gates are about correctness. Not one of them asks whether this was
 the right thing to build, because that question has no state machine
-behind it. If the wording looks like it will build the wrong thing, say
-so before the scenario rather than after the green bar.
+behind it. If the wording looks like it will build the wrong thing,
+note it as you go and call it out in the final report, so the developer
+reads it alongside the diff. Do not stop to ask.
 
 ## Reference
 
-- [shaping.md](shaping.md) — plain words to approved requirements.
+- [shaping.md](shaping.md) — plain words to accepted requirements.
 - [tdd-loop.md](tdd-loop.md) — the eight stages, with exact tool calls.
 - [tool-map.md](tool-map.md) — stage-to-tool map, the verification
   checks, and the constraints of the MCP surface.

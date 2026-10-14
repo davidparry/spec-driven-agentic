@@ -11,7 +11,8 @@ Each line names a delivery stage and the tools that drive it.
 - **Plan resolution** — `list_requirements` for the catalog and its
   prefix; `get_requirement` for an ask's `derived` and `ready`. Prose
   goes through [shaping.md](shaping.md).
-- **Branch gate** — no MCP tool. Use git once, before the first write.
+- **Branch** — read only, from `project_inspect`'s `git` field. Deliver
+  on the current branch; never create or switch one.
 - **Scenarios** — `feature_create` when a feature does not exist, then
   `scenario_add`.
 - **Step definitions** — `step_definitions_find`, then
@@ -48,9 +49,10 @@ checks establish whether its gap is closed:
 - **Marked** — `get_requirement` shows `status: "implemented"`, then
   `validate_spec` reports `valid: true`.
 
-A gap still open after its stage wrote stops that requirement. Do not
-retry: these tools are deterministic, and a second identical call lands
-in the same place. Report what the check saw.
+A gap still open after its stage wrote means working that stage again
+with a changed input. These tools are deterministic, so an identical
+call lands in the same place: change the wording, step expression, or
+code based on what the check saw, then verify again.
 
 ## The gaps, and what to do about each
 
@@ -92,7 +94,7 @@ that `featureLocation` is empty between stage 1 and stage 8.
 
 The MCP surface does not snapshot or restore source files. Use
 `git_diff` to inspect what an attempt landed and git to undo an attempt
-that breaks the build. This is why the branch gate matters.
+that breaks the build.
 
 ### Code-stage judgments are not on the wire
 

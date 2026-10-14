@@ -132,22 +132,20 @@ Read it carefully, because three different things look like RED:
   picked up by the runner.
 
 A `runtime_missing` error means the language runtime is not installed.
-The state is untouched; report it and stop.
+The state is untouched; it is a hard stop, so report it and end the run.
 
 **Foreign failures.** If the bar was already RED on failures that have
-nothing to do with this requirement, stop and say so. Do not implement
-against someone else's broken test.
+nothing to do with this requirement, fix them first: the goal is an
+all-green bar, and this requirement cannot be marked off without one.
+Name each foreign failure and what you changed to clear it in the final
+report.
 
 ## 5. Implement
 
-Three write-then-test rounds, and stop to ask before spending a fourth.
-
-The configured deliver-attempt budget is not the number to use here. It
-is sized for `spec deliver`, which runs unattended and can afford to
-grind; you are running in front of someone, every round is a full suite
-run, and a budget of fifteen is a way to spend an hour without anyone
-deciding to. Report what the last round changed and what the bar said,
-and let the developer choose whether to keep going.
+Write-then-test rounds until the bar is GREEN. There is no attempt cap
+and no stopping to ask. Every round must change something based on the
+previous round's `failureDetails` or compiler output; a round that
+repeats the last one lands in the same place.
 
 Each attempt is **two pieces of work**, and skipping the second is the
 usual reason a bar stays RED:
@@ -178,9 +176,6 @@ Then `run_tests` again.
   read the compiler output, and start the next attempt knowing what
   failed. Do not leave a non-compiling tree behind for the next attempt
   to work around.
-
-Out of attempts means this requirement falls short. Record it with the
-phase and the reason, and move to the next one.
 
 **Self-check:** is this a stub, a partial, or a complete implementation
 of the criterion? A green bar on a test that asserts nothing is not an
@@ -235,7 +230,10 @@ validate_spec {}
 
 The marking tool does not validate the whole catalog. If `valid` is
 false after the explicit validation call, the requirement is marked but
-the catalog has a problem — report it with the issues.
+the catalog has a problem. Fix each issue through the requirement tools
+(`requirement_reword`, `requirement_decide`, or a missing scenario tag
+via `scenario_add`), then call `validate_spec` again until it is
+`valid`. Never hand-edit the catalog to get there.
 
 **Verify:** `get_requirement { "id": "REQ-001" }` shows
 `status: "implemented"`.
